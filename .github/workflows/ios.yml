@@ -37,7 +37,7 @@ env:
 
 jobs:
   simulator:
-    runs-on: macos-15
+    runs-on: macos-15-intel
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -69,64 +69,93 @@ jobs:
         run: |
           set -euo pipefail
           simctl=$(xcrun --find simctl)
-          # Bound every simulator RPC and print the active command before it starts.
+          # Bound simulator RPCs and print the active command before it starts.
           sim() {
             python3 - "$simctl" "$@" <<'PY'
-          import os, subprocess, sys
+          import subprocess, sys
           command = sys.argv[1:]
-          print('Simulator command:', ' '.join(command[1:]), flush=True)
+          print('Simulator command:', ' '.join(command[1:]), file=sys.stderr, flush=True)
           timeout = 180 if command[1] in ('bootstatus', 'install', 'launch') else 60
           subprocess.run(command, check=True, timeout=timeout)
           PY
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
           device=$(xcrun simctl create TaipeiBus-iPhone17 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
-          trap 'xcrun simctl spawn "$device" log show --style compact --last 3m --predicate '\''process == "TaipeiBus"'\'' > "$RUNNER_TEMP/ios-runtime.log" 2>&1 || true; xcrun simctl shutdown "$device" >/dev/null 2>&1 || true' EXIT
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
-          open -a Simulator --args -CurrentDeviceUDID "$device"
+          python3 - "$DEVELOPER_DIR/Applications/Simulator.app" "$device" <<'PY'
+          import subprocess, sys
+          subprocess.run(['open', '-a', sys.argv[1], '--args', '-CurrentDeviceUDID', sys.argv[2]], check=True, timeout=30)
+          PY
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
           sim status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
-          sim launch "$device" com.example.TaipeiBus
+          container=$(sim get_app_container "$device" com.example.TaipeiBus data)
+          launch_ready() {
+            token="$RANDOM-$RANDOM"
+            sim launch "$device" com.example.TaipeiBus --preview-capture "$token" "$@"
+            python3 - "$container/Documents/transit-preview-ready" "$token" <<'PY'
+          import sys, time
+          from pathlib import Path
+          marker = Path(sys.argv[1])
+          deadline = time.monotonic() + 90
+          while not marker.exists() or marker.read_text() != sys.argv[2]:
+              if time.monotonic() > deadline:
+                  raise RuntimeError('Live-data preview did not reach its requested state.')
+              time.sleep(1)
+          print('Requested live-data preview is ready.', flush=True)
+          PY
+          }
+          launch_ready
           sleep 40
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-station 6922
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-station 6922
           sleep 15
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-vehicle-route 284
           sleep 15
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
+          sim terminate "$device" com.example.TaipeiBus
           # Location is simulated here; vehicle GPS and ETAs still come from the public live feeds.
-          xcrun simctl location "$device" set 25.0377,121.56
-          xcrun simctl privacy "$device" grant location com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus
+          sim location "$device" set 25.0377,121.56
+          sim privacy "$device" grant location com.example.TaipeiBus
+          launch_ready
           sleep 12
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-nearby.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-station 6922 --preview-details
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-nearby.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-station 6922 --preview-details
           sleep 12
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station-details.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284 --preview-details
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station-details.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-vehicle-route 284 --preview-details
           sleep 12
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-details.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-route 284
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-details.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route 284
           sleep 12
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-search EAA207
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-search EAA207
           sleep 12
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
+          sim terminate "$device" com.example.TaipeiBus
           # Finish the functional screenshots before recording so a recorder failure cannot hide them.
-          xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284
+          launch_ready --preview-vehicle-route 284
           sleep 15
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-follow-start.png"
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-follow-start.png"
+          sleep 32
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
+      - name: Record optional native preview
+        # Recording is a preview artifact; it must not gate native checks or signing.
+        continue-on-error: true
+        timeout-minutes: 4
+        run: |
+          set -euo pipefail
+          trap 'if [ "$?" -ne 0 ]; then rm -f "$RUNNER_TEMP/iPhone17-live-follow.mp4"; fi' EXIT
+          device="$BUS_SIM_DEVICE"
           BUS_SIM_DEVICE="$device" python3 - <<'PY'
           import os, signal, subprocess, time
           from pathlib import Path
@@ -172,8 +201,27 @@ jobs:
           print("Native recording verified: \(seconds) seconds")
           SWIFT
           swift "$RUNNER_TEMP/verify-video.swift"
-          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
-          xcrun simctl terminate "$device" com.example.TaipeiBus
+      - name: Collect runtime diagnostics and stop simulator
+        if: always() && env.BUS_SIM_DEVICE != ''
+        timeout-minutes: 3
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          from pathlib import Path
+          simctl = subprocess.check_output(['xcrun', '--find', 'simctl'], text=True).strip()
+          device = os.environ['BUS_SIM_DEVICE']
+          with (Path(os.environ['RUNNER_TEMP']) / 'ios-runtime.log').open('w') as log:
+              try:
+                  subprocess.run([simctl, 'spawn', device, 'log', 'show', '--style', 'compact',
+                      '--last', '8m', '--predicate', 'process == "TaipeiBus"'], stdout=log,
+                      stderr=subprocess.STDOUT, timeout=60)
+              except subprocess.TimeoutExpired:
+                  log.write('\nRuntime log query timed out.\n')
+          try:
+              subprocess.run([simctl, 'shutdown', device], timeout=60)
+          except subprocess.TimeoutExpired:
+              print('Simulator shutdown timed out.', flush=True)
+          PY
       - uses: actions/upload-artifact@v4
         if: always()
         with:

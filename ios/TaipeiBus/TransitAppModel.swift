@@ -76,6 +76,7 @@ final class TransitAppModel: ObservableObject {
                     try await Task.sleep(for: .seconds(15))
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
+                    metadataNotice = await service.metadataNotice
                 }
             } catch {
                 if !Task.isCancelled { loading = false; loadError = "無法取得路線與站牌，請檢查網路後重試" }
@@ -226,6 +227,13 @@ final class TransitAppModel: ObservableObject {
                 .min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
                 selectVehicle(vehicle); previewSelectionApplied = true
             }
+        }
+        let requestedSelection = ["--preview-station", "--preview-route", "--preview-search", "--preview-vehicle-route"]
+            .contains(where: { arguments.contains($0) })
+        // A unique capture token prevents cloud screenshots from racing live-feed preparation.
+        if (!requestedSelection || previewSelectionApplied), let token = value(after: "--preview-capture"),
+           let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
         }
     }
 #endif
