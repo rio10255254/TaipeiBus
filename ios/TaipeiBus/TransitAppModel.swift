@@ -46,8 +46,10 @@ final class TransitAppModel: ObservableObject {
     private let service = TransitService()
     private var updateTask: Task<Void, Never>?
     private let defaults = UserDefaults.standard
+    private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
     private var previewSelectionApplied = false
+    @Published private(set) var previewNotice: String?
 #endif
 
     init() {
@@ -110,6 +112,7 @@ final class TransitAppModel: ObservableObject {
     private func applySnapshot(_ result: TransitSnapshot) {
         guard result.revision >= snapshot.revision else { return }
         snapshot = result
+        arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
         planner.updateSnapshot(result)
         guard let id = selectedVehicleID else { return }
         guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
@@ -166,20 +169,20 @@ final class TransitAppModel: ObservableObject {
     }
 
     func stations(query: String) -> [Station] {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .taipei
-        return metadata.stations.values.filter {
-            text.isEmpty || $0.name.localizedCaseInsensitiveContains(text) || $0.address.localizedCaseInsensitiveContains(text)
-        }.sorted {
-            if text.isEmpty, favorites.contains($0.id) != favorites.contains($1.id) { return favorites.contains($0.id) }
-            if text.isEmpty {
-                let a = recentStationIDs.firstIndex(of: $0.id) ?? Int.max
-                let b = recentStationIDs.firstIndex(of: $1.id) ?? Int.max
-                if a != b { return a < b }
-            }
-            if !text.isEmpty, ($0.name == text) != ($1.name == text) { return $0.name == text }
-            return $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position)
-        }.prefix(40).map { $0 }
+        return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs)
+    }
+
+    func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {
+        arrivalForecast.estimate(approach, ride: ride, metadata: metadata, at: date)
+    }
+
+    /// Keep the boarding card visible while following the specific physical vehicle the user chose.
+    func trackApproachingVehicle(_ vehicle: BusVehicle) {
+        selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
+        selectedStationID = nil; direction = vehicle.direction; following = true
+        focusMap(.vehicle(vehicle.id))
+        UISelectionFeedbackGenerator().selectionChanged()
     }
     func routes(query: String) -> [RouteSearchResult] { metadata.routeCatalog.search(query) }
     var upcomingStops: [StopProgress] {
@@ -218,6 +221,17 @@ final class TransitAppModel: ObservableObject {
             previewSelectionApplied = true
         } else if let text = value(after: "--preview-route-search") {
             mode = .routes; query = text; previewSelectionApplied = true
+        } else if arguments.contains("--preview-place-audit") {
+            previewSelectionApplied = true
+            Task { await auditPlaces(token: value(after: "--preview-capture") ?? "", group: value(after: "--preview-audit-group") ?? "transit") }
+            return
+        } else if arguments.contains("--preview-boarding-fixture") {
+            previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"))
+            if let token = value(after: "--preview-capture"), previewSelectionApplied,
+               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+            }
+            return
         } else if arguments.contains("--preview-journey-search") {
             previewSelectionApplied = true
         } else if let name = value(after: "--preview-destination") {
@@ -287,6 +301,77 @@ final class TransitAppModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("transit-preview-journey.json"), options: .atomic)
         }
         try? Data(arguments[index + 1].utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+    }
+
+    private func auditPlaces(token: String, group: String) async {
+        guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let search = PlaceSearch()
+        var results: [[String: Any]] = []
+        var failure: String?
+        let queries: [String]
+        switch group {
+        case "landmarks": queries = ["臺北車站", "臺北101", "台大", "三總", "小巨蛋"]
+        case "addresses": queries = ["忠孝東路四段100號", "内湖站", "台北 內湖站"]
+        default: queries = ["內湖站", "東湖站", "港墘站", "西門站"]
+        }
+        for query in queries {
+            do {
+                let places = try await search.find(text: query)
+                let stations = metadata.stationSearch.search(query, near: .taipei, limit: 4)
+                results.append(["query": query, "places": places.map { ["name": $0.name, "address": $0.address, "transit": $0.isTransitPlace ?? false, "latitude": $0.coordinate.latitude,
+                    "longitude": $0.coordinate.longitude] as [String: Any] }, "stations": stations.map(\.name)])
+                if places.isEmpty { failure = "Missing Apple results for \(query)" }
+            } catch { failure = error.localizedDescription; break }
+        }
+        let result: [String: Any] = ["token": token, "group": group, "results": results, "error": failure ?? ""]
+        if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: directory.appendingPathComponent("place-search-audit.json"), options: .atomic)
+        }
+        try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+    }
+
+    private func prepareBoardingFixture(track: Bool) -> Bool {
+        let network = TripPlanner(metadata: metadata)
+        var chosen: TransitTrip?
+        for route in metadata.variants(routeID: metadata.routeCatalog.search("307").first?.route.id ?? "") {
+            guard let journey = metadata.journey(routeID: route.id, direction: "0"), journey.anchors.count > 10 else { continue }
+            let middle = journey.anchors.count / 2
+            let trips = network.plan(from: journey.anchors[middle].stop.coordinate,
+                to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20)
+            chosen = trips.first { trip in
+                guard trip.rides.count == 1, let ride = trip.rides.first,
+                      let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
+                      let boarding = pattern.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
+                return (boarding.match.along - pattern.anchors[0].match.along) * Double(pattern.direction) > 1_000
+            }
+            if chosen != nil { break }
+        }
+        guard let trip = chosen, let ride = trip.rides.first,
+              let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
+              let line = metadata.line(ride.route.id, direction: ride.direction),
+              let boarding = journey.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
+        let date = Date()
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 28_800); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let rows = [100.0, 450, 900].enumerated().map { index, distance -> [String: Any] in
+            let sample = line.sample(fraction: (boarding.match.along - distance * Double(journey.direction)) / line.length)
+            return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": ride.route.id,
+                "GoBack": ride.direction, "Latitude": sample.0.latitude, "Longitude": sample.0.longitude,
+                "Speed": 25, "Azimuth": (sample.1 + (journey.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360),
+                "BusStatus": "0", "DutyStatus": "0", "DataTime": formatter.string(from: date)]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: ["BusInfo": rows,
+            "EssentialInfo": ["UpdateTime": formatter.string(from: date)]]),
+              let result = try? FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date) else { return false }
+        let estimates = EstimateFeed(seconds: ["\(ride.route.parentID):\(ride.boarding.id)": 120], updatedAt: date)
+        applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
+                                      estimates: estimates, revision: snapshot.revision + 1))
+        previewNotice = "介面驗證用資料 · 非即時車輛"
+        planner.prepareBoardingPreview(trip)
+        if track, let vehicle = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: date).approaches.first?.vehicle {
+            trackApproachingVehicle(vehicle)
+        }
+        return true
     }
 #endif
 }

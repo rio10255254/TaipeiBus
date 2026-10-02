@@ -93,6 +93,11 @@ public enum FeedDecoder {
                                                                address: text(row["address"]), bearing: text(row["bearing"]), stopIDs: [])
                     }
                     metadata.stations[stationID]?.stopIDs.append(id)
+                    for name in [stop.name, text(row["nameEn"])] where !name.isEmpty {
+                        if metadata.stations[stationID]?.searchNames.contains(name) == false {
+                            metadata.stations[stationID]?.searchNames.append(name)
+                        }
+                    }
                 }
             case "GetProvider":
                 for row in rows {
@@ -123,6 +128,7 @@ public enum FeedDecoder {
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
         metadata.rebuildRouteCatalog()
+        metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
         metadata.rebuildJourneys()
         return metadata
     }

@@ -2,66 +2,6 @@ import SwiftUI
 import MapKit
 import TransitCore
 
-struct TravelPlace: Identifiable, Codable, Sendable {
-    var id: String { "\(coordinate.latitude):\(coordinate.longitude):\(name)" }
-    let name: String
-    let address: String
-    let coordinate: Coordinate
-    var mapItem: MKMapItem {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate.locationCoordinate))
-        item.name = name
-        return item
-    }
-}
-
-@MainActor
-final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSearchCompleterDelegate {
-    @Published private(set) var suggestions: [MKLocalSearchCompletion] = []
-    @Published private(set) var searching = false
-    @Published private(set) var error: String?
-    private let completer = MKLocalSearchCompleter()
-    private var search: MKLocalSearch?
-    static let region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 25.07, longitude: 121.54),
-        span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.4))
-
-    override init() {
-        super.init()
-        completer.delegate = self
-        completer.region = Self.region
-        completer.resultTypes = [.address, .pointOfInterest]
-    }
-    func update(_ text: String) {
-        error = nil
-        suggestions = []
-        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        searching = !query.isEmpty
-        completer.queryFragment = query
-        if query.isEmpty { completer.cancel(); searching = false }
-    }
-    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        suggestions = Array(completer.results.prefix(8)); searching = false
-    }
-    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        searching = false; suggestions = []; self.error = "地點搜尋暫時無法連線，可改選下方站牌。"
-    }
-    func resolve(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> TravelPlace? {
-        search?.cancel()
-        let request = completion.map { MKLocalSearch.Request(completion: $0) } ?? MKLocalSearch.Request()
-        if completion == nil { request.naturalLanguageQuery = text }
-        request.region = Self.region
-        request.resultTypes = [.address, .pointOfInterest]
-        let operation = MKLocalSearch(request: request); search = operation
-        let response = try await operation.start()
-        try Task.checkCancellation()
-        guard let item = response.mapItems.first(where: {
-            Coordinate(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).isInServiceArea
-        }) else { return nil }
-        return TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "",
-            coordinate: Coordinate(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude))
-    }
-    func cancel() { search?.cancel(); completer.cancel(); searching = false }
-}
-
 struct WalkingLeg: Sendable {
     let from: Coordinate
     let to: Coordinate
@@ -102,7 +42,7 @@ private actor TripNetwork {
     private var key = ""
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate) -> [TransitTrip] {
-        let signature = metadata.routes.keys.sorted().joined(separator: ",") + ":\(metadata.stops.count):\(metadata.paths.count)"
+        let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
@@ -183,7 +123,7 @@ final class JourneyPlannerModel: ObservableObject {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
         }
         guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea else {
-            message = "公車規劃目前涵蓋台北市區與周邊。可改選出發地，或用 Apple 地圖規劃。"; return
+            message = "此地超出公車規劃範圍"; return
         }
         guard !metadata.routes.isEmpty else { message = "路線資料載入後即可規劃。"; return }
         planning = true
@@ -229,7 +169,7 @@ final class JourneyPlannerModel: ObservableObject {
             }
             options = choices; selectedID = choices.first?.id; planning = false; mapRevision += 1
             guard !choices.isEmpty else {
-                message = "附近未找到直達或一次轉乘的公車。可改選出發地，或用 Apple 地圖查看其他轉乘。"; return
+                message = "附近沒有合適公車"; return
             }
             checkingWalks = true
             // Only calculate routes being presented to the user. Validate the recommended option first.
@@ -323,7 +263,8 @@ final class JourneyPlannerModel: ObservableObject {
         let leg = option.walks[index]
         let title = index < option.rides.count ? option.rides[index].boarding.name : destination?.name ?? "目的地"
         let target = TravelPlace(name: title, address: "", coordinate: leg.to).mapItem
-        let source = TravelPlace(name: index == 0 ? origin?.name ?? "出發地" : "下車站", address: "", coordinate: leg.from).mapItem
+        let source = index == 0 && usingLocation ? MKMapItem.forCurrentLocation() :
+            TravelPlace(name: index == 0 ? origin?.name ?? "出發地" : "下車站", address: "", coordinate: leg.from).mapItem
         MKMapItem.openMaps(with: [source, target], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
     }
     func openAppleTransit() {
@@ -342,4 +283,18 @@ final class JourneyPlannerModel: ObservableObject {
         task?.cancel(); task = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
+
+#if DEBUG
+    func prepareBoardingPreview(_ trip: TransitTrip) {
+        cancelRequests()
+        guard let first = trip.rides.first, let last = trip.rides.last else { return }
+        origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate)
+        destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate)
+        usingLocation = false; started = false; stepIndex = 0
+        let walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0),
+                     WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0)]
+        options = [JourneyOption(id: trip.id, trip: trip, walks: walks)]
+        selectedID = trip.id; message = nil; mapRevision += 1
+    }
+#endif
 }

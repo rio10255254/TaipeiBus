@@ -34,7 +34,7 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, location: location.usableCoordinate,
-                             bottomInset: showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) || (showJourney && planner.selected != nil) ? 330 + geometry.safeAreaInsets.bottom + 24 : bottomControlsHeight + geometry.safeAreaInsets.bottom + 24,
+                             bottomInset: (showJourney && planner.selected != nil ? 460 : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? 330 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -43,7 +43,7 @@ struct TransitHomeView: View {
                     MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
                 }
                 HStack(alignment: .top, spacing: 12) {
-                    SourceStatusView(snapshot: model.snapshot, loading: model.loading || model.refreshing) {
+                    SourceStatusView(snapshot: model.snapshot, loading: model.loading || model.refreshing, compact: planner.selected != nil) {
                         if model.loadError != nil { model.retry() }
                         else { Task { await model.refresh() } }
                     }
@@ -55,8 +55,14 @@ struct TransitHomeView: View {
                     .accessibilityLabel("資料來源與地圖設定")
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
+#if DEBUG
+                if let notice = model.previewNotice {
+                    Text(notice).font(.caption.weight(.semibold)).padding(8)
+                        .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80)
+                }
+#endif
 
-                if !showDetails, !showSearch, !planner.started, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                if !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(model.selectedRouteName ?? route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
                             .foregroundStyle(Color.accentColor).lineLimit(2)
@@ -89,6 +95,7 @@ struct TransitHomeView: View {
                     Spacer()
                 PhoneGlassGroup {
                 VStack(spacing: 12) {
+                    if planner.selected == nil {
                     HStack {
                         Spacer()
                         Button {
@@ -104,17 +111,20 @@ struct TransitHomeView: View {
                         .phoneGlass(in: Circle())
                         .accessibilityLabel("尋找我的位置與附近站牌")
                     }
+                    }
                     if let message = location.message {
                         Text(message).font(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
                     if planner.started {
                         JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
+                    } else if planner.selected != nil {
+                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else {
-                        Button { journeyDetent = planner.selected == nil ? .large : .height(330); showJourney = true } label: {
+                        Button { journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
-                                Text("你想去哪裡？").font(.body.weight(.semibold))
+                                Text("搜尋目的地").font(.body.weight(.semibold))
                                 Spacer(minLength: 0)
                                 Image(systemName: "arrow.up.right").font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
                             }.padding(.horizontal, 20).frame(minHeight: 58)
@@ -135,6 +145,7 @@ struct TransitHomeView: View {
                             }
                         }.transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
+                    if planner.selected == nil {
                     HStack(spacing: 4) {
                         Button { openBrowse(.stops) } label: {
                             Label("站牌", systemImage: "mappin.and.ellipse").font(.subheadline.weight(.medium))
@@ -168,6 +179,7 @@ struct TransitHomeView: View {
                     .phoneGlass(in: Capsule())
                     .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
                     .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
+                    }
                 }
                 }
                 .background {
@@ -210,9 +222,9 @@ struct TransitHomeView: View {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(330) } })
-                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(330), .large], selection: $journeyDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })
+                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(460)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
@@ -224,14 +236,19 @@ struct TransitHomeView: View {
         .onChange(of: planner.mapRevision) { _, _ in
             let coordinates = planner.mapCoordinates
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
-                model.clearSelection()
-                if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                let sameVehicle = model.selectedVehicle.map { bus in
+                    planner.selected?.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                } ?? false
+                if !sameVehicle {
+                    model.clearSelection()
+                    if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                }
             }
 #if DEBUG
             model.markJourneyPreviewReady()
             if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil {
                 showJourney = !planner.started
-                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(330)
+                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(460)
             }
 #endif
         }
@@ -315,6 +332,7 @@ struct PhonePressStyle: ButtonStyle {
 private struct SourceStatusView: View {
     let snapshot: TransitSnapshot
     let loading: Bool
+    var compact = false
     let refresh: () -> Void
     static let clockStyle = Date.FormatStyle(date: .omitted, time: .shortened,
         locale: Locale(identifier: "zh_TW"), timeZone: TimeZone(identifier: "Asia/Taipei")!)
@@ -329,15 +347,15 @@ private struct SourceStatusView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle().fill(healthy ? Color.green : Color.orange).frame(width: 6, height: 6)
-                    Text(loading || (snapshot.sourceUpdatedAt == nil && snapshot.vehicleError == nil) ? "更新中" : healthy ? "臺北市公車" : "資料延遲 · 點此重試")
+                    Text(loading || (snapshot.sourceUpdatedAt == nil && snapshot.vehicleError == nil) ? "更新中" : healthy ? (compact ? "即時" : "臺北市公車") : "資料延遲 · 重試")
                         .font(.subheadline.weight(.semibold))
                 }
-                if let date = snapshot.sourceUpdatedAt {
+                if !compact, let date = snapshot.sourceUpdatedAt {
                     HStack(spacing: 4) {
                         Text("更新"); Text(date.formatted(Self.clockStyle))
                         if let age, age >= 120 { Text("· \(Int(age / 60)) 分鐘前") }
                     }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                } else { Text("定位與到站預估").font(.caption).foregroundStyle(.secondary) }
+                } else if !compact { Text("定位與到站預估").font(.caption).foregroundStyle(.secondary) }
             }
             .padding(.horizontal, 13).padding(.vertical, 10)
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))

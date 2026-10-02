@@ -14,7 +14,7 @@ on:
       preview_scope:
         description: 'Capture all phone states or focus on route catalog and variants'
         type: choice
-        options: ['all', 'routes', 'journeys', 'journey-layout']
+        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation']
         default: 'all'
 
 permissions:
@@ -77,6 +77,7 @@ jobs:
           PY
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections
+          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         timeout-minutes: 12
@@ -224,7 +225,46 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
           fi
-          if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
+          if [ '${{ inputs.preview_scope }}' = 'navigation' ]; then
+          for group in transit landmarks addresses; do
+          launch_ready --preview-place-audit --preview-audit-group "$group"
+          python3 - "$container/Documents/place-search-audit.json" "$token" "$RUNNER_TEMP/phone-screenshots/place-search-$group.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          data = json.loads(Path(sys.argv[1]).read_text())
+          Path(sys.argv[3]).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+          assert data['token'] == sys.argv[2] and not data['error'], data
+          targets = {
+              '內湖站': (25.08,25.09,121.59,121.60), '内湖站': (25.08,25.09,121.59,121.60),
+              '台北 內湖站': (25.08,25.09,121.59,121.60), '東湖站': (25.06,25.075,121.60,121.625),
+              '港墘站': (25.075,25.085,121.57,121.585), '西門站': (25.038,25.047,121.503,121.514),
+              '臺北車站': (25.042,25.052,121.51,121.525), '臺北101': (25.03,25.038,121.56,121.57),
+              '台大': (25.008,25.025,121.528,121.552), '三總': (25.065,25.08,121.58,121.605),
+              '小巨蛋': (25.046,25.058,121.542,121.558), '忠孝東路四段100號': (25.035,25.05,121.535,121.56)}
+          for row in data['results']:
+              assert row['places'], row
+              south,north,west,east = targets[row['query']]
+              assert any(south < place['latitude'] < north and west < place['longitude'] < east for place in row['places']), row
+              if row['query'] == '內湖站':
+                  assert row['stations'] and all(name.startswith('捷運內湖站') for name in row['stations']), row
+          print('Native place searches verified:', data['group'], ', '.join(row['query'] for row in data['results']))
+          PY
+          sim terminate "$device" com.example.TaipeiBus
+          done
+          launch_ready --preview-journey-search --preview-search-query '內湖站'
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-neihu-search.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-boarding-fixture
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-boarding-three-vehicles-fixture.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-boarding-fixture --preview-track-next
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-track-next-fixture.png"
+          sim terminate "$device" com.example.TaipeiBus
+          fi
+          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ]; then
           if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready
           sleep 6

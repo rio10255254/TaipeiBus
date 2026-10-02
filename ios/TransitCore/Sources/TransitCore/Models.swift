@@ -33,6 +33,7 @@ public struct Station: Identifiable, Sendable {
     public let address: String
     public let bearing: String
     public var stopIDs: [String]
+    public var searchNames: [String] = []
     public var bearingLabel: String {
         ["N": "北向", "NE": "東北向", "E": "東向", "SE": "東南向",
          "S": "南向", "SW": "西南向", "W": "西向", "NW": "西北向"][bearing] ?? bearing
@@ -96,6 +97,7 @@ public struct StopReference: Sendable {
 }
 
 public struct TransitMetadata: Sendable {
+    public let revision = UUID()
     public var routes: [String: BusRoute] = [:]
     public var parents: [String: BusRoute] = [:]
     public var stops: [String: BusStop] = [:]
@@ -106,6 +108,7 @@ public struct TransitMetadata: Sendable {
     public var directionalLines: [String: RouteLine] = [:]
     public var journeys: [String: RouteJourney] = [:]
     public var routeCatalog = RouteCatalog()
+    public var stationSearch = StationSearchIndex()
 
     public init() {}
     public func route(_ id: String) -> BusRoute? { routes[id] ?? parents[id] }

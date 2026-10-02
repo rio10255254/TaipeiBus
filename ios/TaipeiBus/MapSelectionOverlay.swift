@@ -36,6 +36,13 @@ struct MapContextLabels: View {
                 }
                 .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .allowsHitTesting(false)
+                if model.planner.selected != nil, model.selectedVehicleID != nil {
+                    Image(systemName: "bus.fill").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .frame(width: 28, height: 28).background(Color.accentColor, in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                        .shadow(color: Color.accentColor.opacity(0.25), radius: 7)
+                        .position(anchor).allowsHitTesting(false)
+                }
                 label.frame(width: width).position(x: x, y: y)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: x)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: y)
@@ -90,6 +97,14 @@ struct MapContextLabels: View {
                 Text("官方路線預估").font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
             }
         } else if let bus = model.selectedVehicle {
+            if model.planner.selected != nil {
+                HStack(spacing: 8) {
+                    Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
+                    Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
+                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                        .accessibilityLabel("車輛資訊")
+                }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
+            } else {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .center, spacing: 8) {
                     Text(bus.routeName).font(.system(.title, design: .rounded).weight(.bold)).foregroundStyle(Color.accentColor)
@@ -122,6 +137,7 @@ struct MapContextLabels: View {
                 }
             }
             .shadow(color: .white.opacity(0.95), radius: 4)
+            }
         }
     }
 }
