@@ -297,6 +297,9 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func begin() {
         guard let option = selected, option.walkIssue == nil, !checkingWalks else { return }
+        if let ride = option.rides.first,
+           let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()),
+           [-2, -3, -4].contains(eta) { return }
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }

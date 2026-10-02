@@ -107,7 +107,7 @@ jobs:
           container=$(sim get_app_container "$device" com.example.TaipeiBus data)
           launch_ready() {
             token="$RANDOM-$RANDOM"
-            sim launch "$device" com.example.TaipeiBus --preview-capture "$token" "$@"
+            sim launch "$device" com.example.TaipeiBus -AppleLanguages '(zh-Hant)' -AppleLocale 'zh_TW' --preview-capture "$token" "$@"
             python3 - "$container/Documents/transit-preview-ready" "$token" <<'PY'
           import sys, time
           from pathlib import Path
@@ -118,6 +118,20 @@ jobs:
                   raise RuntimeError('Live-data preview did not reach its requested state.')
               time.sleep(1)
           print('Requested live-data preview is ready.', flush=True)
+          PY
+          }
+          verify_journey_ready() {
+            python3 - "$container/Documents/transit-preview-journey.json" "$token" "$2" "$RUNNER_TEMP/phone-screenshots/$1-journey.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          state = json.loads(Path(sys.argv[1]).read_text())
+          assert state['token'] == sys.argv[2], 'Journey state belongs to an older launch.'
+          assert state['phase'] == sys.argv[3], f'Unexpected journey phase: {state}'
+          assert state['destination'] and state['rides'], 'The requested bus journey is missing.'
+          assert all(leg['verified'] and leg['seconds'] >= 0 and
+              (leg['distance'] < 1 or leg['points'] >= 2) for leg in state['walks']), 'Apple walking routes were not verified.'
+          Path(sys.argv[4]).write_text(json.dumps(state, ensure_ascii=False, indent=2))
+          print('Native journey verified:', state['destination'], state['phase'], flush=True)
           PY
           }
           wait_route_map_ready() {
@@ -218,22 +232,26 @@ jobs:
           launch_ready --preview-destination '臺北車站'
           sleep 6
           wait_route_map_ready iPhone17-journey-options
+          verify_journey_ready iPhone17-journey-options planning
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-options.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-destination '臺北車站' --preview-journey-start
           sleep 6
           wait_route_map_ready iPhone17-journey-walking
+          verify_journey_ready iPhone17-journey-walking walking
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-walking.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-destination '臺北車站' --preview-journey-start --preview-journey-step 1
           sleep 6
           wait_route_map_ready iPhone17-journey-bus
+          verify_journey_ready iPhone17-journey-bus riding
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-bus.png"
           sim terminate "$device" com.example.TaipeiBus
           sim privacy "$device" revoke location com.example.TaipeiBus
           launch_ready --preview-destination '臺北車站' --preview-origin-station 6922
           sleep 6
           wait_route_map_ready iPhone17-journey-manual-origin
+          verify_journey_ready iPhone17-journey-manual-origin planning
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-manual-origin.png"
           sim terminate "$device" com.example.TaipeiBus
           fi

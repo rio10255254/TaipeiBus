@@ -67,7 +67,7 @@ struct TransitHomeView: View {
                             }
                         }
                         Button { showDetails = true } label: {
-                            Text("\(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) 輛可定位 · 查看車牌")
+                            Text("\(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) 輛可定位 · 查看公車")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                         }
                     }
@@ -214,7 +214,7 @@ struct TransitHomeView: View {
             }
 #if DEBUG
             model.markJourneyPreviewReady()
-            if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil, !planner.started { showJourney = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil { showJourney = !planner.started }
 #endif
         }
         .onChange(of: model.loading) { _, loading in

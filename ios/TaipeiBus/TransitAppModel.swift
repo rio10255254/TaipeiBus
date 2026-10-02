@@ -263,6 +263,27 @@ final class TransitAppModel: ObservableObject {
                 for _ in 0..<min(count, planner.steps.count) { planner.advance() }
             }
         }
+        guard !arguments.contains("--preview-journey-start") || planner.started, let option = planner.selected else { return }
+        let phase: String
+        if !planner.started { phase = "planning" }
+        else {
+            switch planner.currentStep {
+            case .walk(_)?: phase = "walking"
+            case .ride(_)?: phase = "riding"
+            case nil: phase = "arrived"
+            }
+        }
+        let state: [String: Any] = [
+            "token": arguments[index + 1], "phase": phase, "started": planner.started,
+            "destination": planner.destination?.name ?? "", "using_location": planner.usingLocation,
+            "rides": option.rides.map { ["route": $0.route.displayName, "direction": $0.direction,
+                                        "boarding": $0.boarding.name, "alighting": $0.alighting.name] },
+            "walks": option.walks.map { ["verified": $0.verified, "points": $0.coordinates.count,
+                                        "distance": $0.distance ?? -1, "seconds": $0.duration ?? -1] as [String: Any] }
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: directory.appendingPathComponent("transit-preview-journey.json"), options: .atomic)
+        }
         try? Data(arguments[index + 1].utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 #endif
