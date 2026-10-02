@@ -173,7 +173,7 @@ struct NativeBusMap: UIViewRepresentable {
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
-            let routeKey = "\(model.selectedRoute?.parentID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction)"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction)"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if let route = model.selectedRoute {
@@ -196,8 +196,9 @@ struct NativeBusMap: UIViewRepresentable {
             buses.highlightSelected = model.highlightVehicle
             buses.reduceMotion = reduceMotion
             // Station dots remain tappable; their names must not cover the vehicle's anchored information.
-            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.selectedVehicleID == nil
-            buildingOpacityTarget = model.highlightVehicle && model.selectedVehicleID != nil ? 0.26 : 1
+            let hasVehicle = model.selectedVehicle != nil
+            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = !hasVehicle
+            buildingOpacityTarget = model.highlightVehicle && hasVehicle ? 0.26 : 1
             if reduceMotion {
                 buildingOpacity = buildingOpacityTarget
                 buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
