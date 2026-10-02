@@ -318,7 +318,7 @@ final class TransitAppModel: ObservableObject {
             do {
                 let places = try await search.find(text: query)
                 let stations = metadata.stationSearch.search(query, near: .taipei, limit: 4)
-                results.append(["query": query, "places": places.map { ["name": $0.name, "address": $0.address, "latitude": $0.coordinate.latitude,
+                results.append(["query": query, "places": places.map { ["name": $0.name, "address": $0.address, "transit": $0.isTransitPlace ?? false, "latitude": $0.coordinate.latitude,
                     "longitude": $0.coordinate.longitude] as [String: Any] }, "stations": stations.map(\.name)])
                 if places.isEmpty { failure = "Missing Apple results for \(query)" }
             } catch { failure = error.localizedDescription; break }

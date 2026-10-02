@@ -13,6 +13,7 @@ struct TravelPlace: Identifiable, Codable, Sendable {
     let name: String
     let address: String
     let coordinate: Coordinate
+    var isTransitPlace: Bool? = nil
     var mapItem: MKMapItem {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate.locationCoordinate))
         item.name = name
@@ -39,7 +40,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         super.init()
         completer.delegate = self
         completer.region = Self.region
-        completer.resultTypes = [.address, .pointOfInterest, .query]
+        completer.resultTypes = [.address, .pointOfInterest]
     }
     func update(_ text: String) {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -54,10 +55,21 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         if query.isEmpty { completer.cancel(); searching = false }
     }
     func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        suggestions = Array(completer.results.sorted {
+        let ordered = completer.results.sorted {
             (StationSearch.placeRank(name: $0.title, address: $0.subtitle, query: query) ?? 9) <
                 (StationSearch.placeRank(name: $1.title, address: $1.subtitle, query: query) ?? 9)
-        }.prefix(12)); searching = false
+        }
+        let hasStrongMatch = ordered.contains { (StationSearch.placeRank(name: $0.title, address: $0.subtitle, query: query) ?? 9) <= 1 }
+        var unique: [MKLocalSearchCompletion] = []
+        for completion in ordered {
+            if hasStrongMatch, (StationSearch.placeRank(name: completion.title, address: completion.subtitle, query: query) ?? 9) > 2 { continue }
+            if unique.contains(where: {
+                StationSearch.normalize($0.subtitle) == StationSearch.normalize(completion.subtitle) &&
+                (StationSearch.rank(name: $0.title, query: completion.title) ?? 9) <= 1
+            }) { continue }
+            unique.append(completion)
+        }
+        suggestions = Array(unique.prefix(12)); searching = false
     }
     func setContext(_ coordinate: Coordinate?) {
         preferredPosition = coordinate?.isInServiceArea == true ? coordinate! : .taipei
@@ -103,7 +115,8 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
                     guard coordinate.latitude.isFinite, coordinate.longitude.isFinite,
                           (-85...85).contains(coordinate.latitude), (-180...180).contains(coordinate.longitude),
                           abs(coordinate.latitude) + abs(coordinate.longitude) > 0.001 else { continue }
-                    let place = TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "", coordinate: coordinate)
+                    let place = TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "", coordinate: coordinate,
+                                            isTransitPlace: item.pointOfInterestCategory == .publicTransport)
                     let relevant = StationSearch.placeRank(name: place.name, address: place.address, query: text) != nil ||
                         StationSearch.placeRank(name: place.name, address: place.address, query: query) != nil
                     guard completion != nil || relevant || (category != nil && item.pointOfInterestCategory == category) else { continue }
@@ -124,6 +137,9 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
             let a = StationSearch.placeRank(name: $0.name, address: $0.address, query: text) ?? 9
             let b = StationSearch.placeRank(name: $1.name, address: $1.address, query: text) ?? 9
             if a != b { return a < b }
+            if !transitQuery, !addressQuery, $0.isTransitPlace != $1.isTransitPlace {
+                return $0.isTransitPlace != true
+            }
             return $0.coordinate.distance(to: preferredPosition) < $1.coordinate.distance(to: preferredPosition)
         }
         places = Array(matches.prefix(12))
