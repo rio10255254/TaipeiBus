@@ -1,53 +1,189 @@
-# Windows 上建置與推送 TestFlight
+# TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
-## 原生編譯與模擬器
+更新：2026-10-02。此專案不需要你先取得 Mac；Xcode 建置和自動簽名由 GitHub 的 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。
 
-GitHub Actions 的 **iPhone app** workflow 使用 macOS 15、Xcode 26.3。推送 `ios/` 或 workflow 變更後會自動執行；也可在 Actions → iPhone app → Run workflow 手動執行，保留 `sign_ipa = false`。
+## 目前進度
 
-流程先執行 `TransitCore` 的 Swift 測試，再編譯 SwiftUI／MapLibre Native／Metal 的模擬器 App 與 iPhone Release App，啟動 iPhone 17 模擬器、等待公開即時資料載入並截圖。完成後下載 `iPhone17-simulator` artifact，內含模擬器 App、截圖、32 秒跟車影片與 Debug／Release build log。影片使用真實公車回報；附近站牌截圖的使用者位置為模擬器設定。此產物只供 macOS 模擬器使用。
-
-## 沿用 Apple Developer 帳號
-
-安裝到實機需要有效 Apple Developer Program 資格、Team ID、App 的 Bundle ID，以及對應的簽名憑證與 provisioning profile。Apple ID 本身與既有 App 不代表目前資格仍有效。
-
-沿用既有 Bundle ID 時，請確認它屬於自己的 Team，並接受同 Bundle ID 的測試版會替代手機上原有 App；要並存請註冊新的 Bundle ID。Team ID 可在 [Apple Developer 會員資料](https://developer.apple.com/account/#/membership)查看；App ID、憑證與測試裝置在 [Certificates, Identifiers & Profiles](https://developer.apple.com/account/resources/identifiers/list) 管理。
-
-在 [App Store Connect](https://appstoreconnect.apple.com/) 的 Users and Access → Integrations 準備 Team API key，確認該 key 及角色可以存取憑證、識別碼與描述檔。私鑰 `.p8` 只下載一次，請自行妥善保存。
-
-把以下資料放入私人儲存庫的 **Settings → Secrets and variables → Actions → New repository secret**：
-
-| Secret | 內容 |
+| 項目 | 狀態／處理方式 |
 | --- | --- |
-| `APPLE_TEAM_ID` | Apple Developer Team ID |
-| `ASC_KEY_ID` | App Store Connect API key 的 Key ID |
-| `ASC_ISSUER_ID` | Team API key 的 Issuer ID |
-| `ASC_PRIVATE_KEY` | `.p8` 完整內容，包含開頭、結尾及換行 |
+| 原生 iPhone App | SwiftUI、CoreLocation、MapLibre Native／Metal；優先適配 iPhone 17，最低 iOS 17 |
+| 版本 | `0.2.0`；build 在上傳前查 Apple 現有版本並自動遞增，重跑也使用不同 build |
+| 建置工具 | 固定 Xcode 26.3；符合 2026-04-28 起 iOS 26 SDK 以上的上傳要求 |
+| App 圖示 | 已有 1024 × 1024 RGB 圖示，無透明背景 |
+| 定位／隱私 | 已有使用期間定位說明、Privacy Manifest、App 內隱私說明及政策 HTML 草稿 |
+| 網路與加密 | 使用 HTTPS；現有 Info.plist 宣告 `ITSAppUsesNonExemptEncryption=false`，若新增自訂加密須重新評估 |
+| 測試 | 21 項公車核心測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
+| GitHub 儲存庫 | 私人 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；發布流程已獨立 |
+| Apple 帳號授權 | **尚未提供**：目前沒有四個簽名 Secrets，不能簽名或上傳 |
+| App 身分 | 提案 `com.rio10255254.TaipeiBus`；未驗證註冊、尚未建立 App Store Connect App 記錄 |
+| 真機／TestFlight | **尚未上傳或安裝**；通過 unsigned 編譯不代表已可在 iPhone 安裝 |
 
-私鑰不用貼進聊天，也不提交到 Git。workflow 只在簽名工作期間寫入暫存檔，結束時移除。
+SDK 要求見 [Apple 2026 上傳公告](https://developer.apple.com/news/?id=ueeok6yw)。模擬器 `.app` 和原始碼 ZIP 都不能直接安裝到 iPhone。
 
-## 取得可安裝的 IPA
+## 第一次上傳：你需完成的帳號設定
 
-1. 若使用 `release-testing`，先在 Apple Developer 登記這支 iPhone 17 的 UDID。可在 Windows 使用 [Apple Devices](https://support.apple.com/guide/devices-windows/welcome/windows) 連接 iPhone 取得裝置資料。
-2. 在 Actions → iPhone app → Run workflow 勾選 `sign_ipa`，填入真實 Bundle ID，選擇 `release-testing`。
-3. 模擬器建置成功後才進行 archive 及自動簽名。成功後下載 `TaipeiBus-signed-IPA` artifact。
-4. 可使用受信任的裝置管理工具安裝 Ad Hoc IPA 到已登記的 iPhone。安裝工具及實機流程需另外驗證。
+### 1. 確認 Apple Developer 會員與 App 身分
 
-`debugging` 適用開發測試；未勾選 `publish_testflight` 時，`app-store-connect` 只匯出供上傳的 IPA。直接上傳方式見下一節。
+登入 [Apple Developer Account](https://developer.apple.com/account/) 與 [App Store Connect](https://appstoreconnect.apple.com/)。確認付費 Apple Developer Program 會員有效，帳號可管理正確 Team；若 Apple 顯示新版合約，需由 Account Holder 接受。
 
-workflow 以 API key 交給 Xcode 自動處理 provisioning。若 Team 政策不允許雲端管理憑證、API key 權限不足或簽名失敗，需依 Xcode 錯誤改用自己的憑證及描述檔；不把未簽名產物描述為可安裝版本。
+新 App 建議使用獨立 Bundle ID `com.rio10255254.TaipeiBus`。如果要沿用舊 App，必須改成其已註冊 Bundle ID，並核對既有版本及用途。Team ID 是 Developer 會員頁面的 10 位識別碼，**不是** Issuer ID。App Store Connect App 記錄在上傳後不能更換 Bundle ID；請先確定身分。
 
-## 直接推送 TestFlight
+[Apple：建立 App 記錄及角色要求](https://developer.apple.com/help/app-store-connect/create-an-app-record/add-a-new-app/)。
 
-本專案的手機安裝流程優先使用 TestFlight，不需要登記 iPhone UDID。
+### 2. 產生 Team API Key
 
-1. 在 Apple Developer 註冊這個 App 的 Bundle ID，例如 `com.rio10255254.TaipeiBus`。在 App Store Connect → My Apps 建立對應 App 記錄；如沿用現有記錄，使用其原本 Bundle ID。
-2. 設定上表四個 GitHub Secrets。Team API key 需要上傳 App 與自動簽名所需的角色及權限；可參考 Apple 的[雲端簽名說明](https://developer.apple.com/videos/play/wwdc2021/10204/)。
-3. Actions → iPhone app → Run workflow 勾選 `publish_testflight`，填入該 Bundle ID；不必勾選 `sign_ipa`。流程會先完成模擬器測試，再檢查 App 記錄、archive、自動簽名，並由 Xcode 直接上傳 App Store Connect。
-4. Xcode 自動管理上傳的 build number。workflow 最多查詢 20 分鐘確認 Apple 處理結果；若 Apple 仍在處理，Actions 摘要會清楚標示尚未完成。
-5. 在 App Store Connect 的 TestFlight 加入自己的內部測試群組，在 iPhone 的 TestFlight 安裝。外部測試可能需要 Apple Beta App Review；本流程不提交 App Store 正式上架，也不自動邀請其他測試者。
+App Store Connect → Users and Access → Integrations → App Store Connect API → **Team Keys**。若尚未取得 API 存取，先由 Account Holder 申請啟用。為 GitHub CI 建立 Team Key，建議由 Account Holder／Admin 配置 Admin 角色，讓 CI 可管理 App ID、自動簽名與內部測試群組。
 
-`publish_testflight` 會覆蓋匯出選項，使用 `app-store-connect` 與 `destination = upload`。自動上傳僅在手動觸發這個選項時執行；一般推送程式碼只編譯模擬器及保存截圖。
+記下 Key ID（10 位）和 Issuer ID（UUID），下載 `.p8` 私鑰並妥善保存；Apple 只允許下載一次。這個 key 是 App Store Connect API 授權，不是 `.p12` Distribution Certificate。**Individual API Key 不能完成這裡所需的自動 provisioning**。Team Key 權限可能涵蓋團隊多個 App，請確認使用專門給此 CI 的 key。
 
-## Mac 本機備用方式
+[Apple：建立 API Key](https://developer.apple.com/documentation/appstoreconnectapi/creating-api-keys-for-app-store-connect-api)、[API 存取與角色](https://developer.apple.com/help/app-store-connect/get-started/app-store-connect-api)、[雲端簽名憑證權限](https://developer.apple.com/help/account/certificates/cloud-managed-certificates/)。
 
-在 Xcode 26 開啟 `TaipeiBus.xcodeproj`，選擇 Signing & Capabilities、自己的 Team 和 Bundle ID，選接上的 iPhone 17 執行。`verify-on-mac.sh` 可執行核心測試與未簽名模擬器建置。
+### 3. 將四個值存入 GitHub Secrets
+
+儲存庫 Settings → Secrets and variables → Actions → New repository secret：
+
+| Secret | 值 |
+| --- | --- |
+| `APPLE_TEAM_ID` | Developer 會員頁的 Team ID |
+| `ASC_KEY_ID` | Team API Key 的 Key ID |
+| `ASC_ISSUER_ID` | 該 Team API Key 的 Issuer ID |
+| `ASC_PRIVATE_KEY` | `.p8` 完整內容，包含 BEGIN／END PRIVATE KEY 與換行 |
+
+不要把私鑰貼進聊天、提交到 Git 或加入公開網址。Windows 已登入 GitHub CLI 時，可用本專案的腳本一次設定，不會印出私鑰或將其放入命令列參數：
+
+```powershell
+.\ios\Configure-TestFlight.ps1 `
+  -TeamId '你的10位TEAMID' `
+  -KeyId '你的10位KEYID' `
+  -IssuerId '你的Issuer-UUID' `
+  -PrivateKeyPath 'C:\你的資料夾\AuthKey_XXXXXXXXXX.p8' `
+  -BundleId 'com.rio10255254.TaipeiBus'
+```
+
+範例中的中文值必須換成實際值。原始 `.p8` 仍由你保管，腳本不會刪除。Secrets 只能寫入／覆蓋，後續只能查名稱，無法從 GitHub 取回私鑰。
+
+Repository Variables（不是 Secrets）可配置：
+
+| Variable | 用途 |
+| --- | --- |
+| `BUS_BUNDLE_ID` | 已確定的 App Bundle ID；腳本會設定 |
+| `BUS_FEEDBACK_EMAIL` | 真實、可收到測試回饋的信箱；外部測試前補齊 |
+| `BUS_PRIVACY_POLICY_URL` | 發布後的公開 HTTPS 隱私政策；外部審查／正式發布前補齊 |
+
+腳本接受 `-FeedbackEmail` 與 `-PrivacyPolicyUrl` 選用參數。沒有提供時會保留 GitHub／Apple 既有值，不填假的資料。
+
+### 4. 註冊 App ID，建立 App Store Connect App 記錄
+
+開啟 [GitHub Actions → TestFlight](https://github.com/rio10255254/TaipeiBus/actions/workflows/testflight.yml) → Run workflow → branch `main`：
+
+1. `operation=register-app-id`：由 API 註冊 Bundle ID；已存在則沿用。如果你在 Developer 網站已註冊同一 ID，可跳過此步。
+2. 在 App Store Connect → My Apps → `+` → New App 建立記錄。此步需要網站操作；Apple 的 Apps API 沒有新增 App 記錄端點。
+
+填寫：
+
+| 欄位 | 建議 |
+| --- | --- |
+| Platforms | iOS |
+| Name | 台北公車；若名稱不可用，需選擇可用名稱 |
+| Primary Language | Chinese (Traditional)／繁體中文 |
+| Bundle ID | 與 CI 完全相同的已註冊 ID |
+| SKU | `TaipeiBus-iOS`，或你自己可唯一辨識的代碼 |
+| User Access | 按團隊實際需求設定 |
+
+App 記錄建立完成後，執行 `operation=check-only`。這只讀取帳號、App 記錄與現有 build，產生預檢回條，不上傳或修改測試群組。成功後再選 `operation=upload`。
+
+## 自動上傳做什麼
+
+`TestFlight` workflow 只有手動明確選 `upload` 才發布；一般 push 和 PR 只做測試／編譯。不同發布依序排隊，不會因新提交而中斷已開始的上傳。
+
+1. 檢查圖示、隱私 Manifest、定位文案、版本、平台與測試說明。
+2. 驗證 App ID／App 記錄，查現有 build，選出唯一 `major.attempt.0` build number。
+3. 執行發布腳本測試與 21 項 Swift 核心測試。
+4. 使用 Release、iPhoneOS SDK、正確 Team／Bundle ID／版本自動 archive。
+5. 驗證實際 archive 的簽名、SDK、圖示、Manifest、dSYM 與版本，確認沒有 Debug 預覽入口。
+6. 使用 Xcode 直接上傳 App Store Connect。禁止 Xcode 自動改寫 build number，以便可靠核對。
+7. 只追蹤這次指定的 App、marketing version 和 build number。等待 Apple processing；確認可內部測試後，建立／沿用 `TaipeiBus Internal` 群組並加入該 build。
+8. 寫入繁體中文 Beta 描述與 What to Test；設定了信箱／政策網址才更新相應欄位。
+9. 保存無私鑰的回條、建置／上傳紀錄與 crash symbols 14 天；工作結束移除暫存 `.p8`。
+
+群組以 App 範圍及名稱比對，不會把 build 加入同名外部群組。流程不新增測試者、不寄邀請、不開公開連結，也不代填審查聯絡人或自動送外部審查。
+
+App Store Connect 仍可能因權限、憑證、合約或 export compliance 要求額外操作；這些狀態會明確回報。**job 成功但回條為 `processing_pending` 時，仍不能宣稱已可安裝。**
+
+## 在 iPhone 安裝：最快內部測試
+
+在 App Store Connect → 此 App → TestFlight → Internal Testing → `TaipeiBus Internal`，把你自己的符合資格 App Store Connect 使用者加入群組；若你本來已在這個群組中，核對最新 build 是否顯示可測試。帳號持有人或管理員亦需確認該使用者的角色與 App 存取權。
+
+iPhone 安裝 Apple 的 TestFlight，使用對應測試者 Apple 帳號，接受 App Store Connect 提供的測試邀請／入口並安裝。此處不需要實機 UDID，也不用將 iPhone 接到 Mac。
+
+內部測試最多 100 名符合資格的 App Store Connect 使用者，最快開始；外部測試最多 10,000 人，第一個外部 build 必須經 Beta App Review。build 最多可測試 90 天，之後需新 build。Apple 處理或審查時間無法保證。
+
+[Apple：TestFlight 概覽](https://developer.apple.com/help/app-store-connect/test-a-beta-version/testflight-overview/)、[新增內部測試者](https://developer.apple.com/help/app-store-connect/test-a-beta-version/add-internal-testers/)。
+
+## Apple 處理延遲、失敗與接續
+
+每次 run 的 Summary 與 `TestFlight-<run>-<attempt>` artifact 有 `testflight-receipt.json`，包含 App、Bundle ID、版本、build、commit 與狀態。先核對回條與 Apple 網站同一 build。
+
+| 狀態／錯誤 | 做法 |
+| --- | --- |
+| `account_verified` | 帳號預檢通過，尚未上傳 |
+| `uploaded_processing_pending` | Xcode 上傳命令成功，Apple 處理／可測試狀態待確認 |
+| `processing_pending` | 20 分鐘內尚未確認可測試；稍後用下述 `finish-processing` 接續，不重傳相同 build |
+| `internal_group_assigned` | Apple 已處理、build 已掛到內部群組；還要核對自身測試者資格／安裝 |
+| `apple_action_required` | 在 Apple 網站處理 export compliance 等顯示問題，再接續 |
+| HTTP 401 | 核對 Issuer ID、Key ID、完整 `.p8` 是否相配／已撤銷 |
+| HTTP 403 | 核對 Team Key 角色、App 權限、最新合約及 Developer 會員 |
+| No app record／Bundle ID mismatch | 先註冊相同 Bundle ID，建立該 App 記錄，勿上傳到其他 App |
+| Automatic signing／cloud certificate 失敗 | Account Holder／Admin 核對雲端簽名權限與可用 Distribution 憑證；必要時改成另行配置 `.p12` 與 provisioning profile，不要當作已有簽名 |
+| FAILED／INVALID／已過期 | 查看 Apple 的實際原因；修正後發布新 build |
+| 重複 build number | 核對其他 CI 是否同時發布；本流程會依 Apple 已有 build 遞增，仍需避免另一條發布管線競爭 |
+
+接續操作：Run workflow → `operation=finish-processing` → 填回條中的同一 `bundle_id`、`version`、`resume_build`。這只查詢該 build、更新測試文案並掛群組，不會再次 archive／上傳。重跑群組掛載會跳過已存在的關聯。
+
+## 外部測試：額外需求
+
+確定內部實機測試可用後，在 App Store Connect 建立外部測試群組、選同一 build，依 Apple 介面補齊：
+
+- Beta App Description、Feedback Email、What to Test；本專案已準備描述與測試文字。
+- 真實審查聯絡人姓名、電話、信箱。
+- 若 App 有登入才需要審查帳密；目前無帳號，可註明不需登入。
+- 完整且可公開存取的隱私政策網址；不能填本機路徑、私人 GitHub 文件或未發布草稿。
+- 核對加密／export compliance 狀態，再提交 Beta App Review。
+- 審查通過後由你選擇邀請對象或開啟有名額上限的公開連結。
+
+[Apple：提供測試資料](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information/)。一般使用者應採外部測試，無須加入你的 App Store Connect 團隊。
+
+## 隱私政策與 App Privacy
+
+`ios/release/privacy-policy.html` 已準備與目前實作一致的繁體中文草稿。發布前補入營運者名稱、可聯絡信箱、生效日期；放在你的 HTTPS 網站，再設定 `BUS_PRIVACY_POLICY_URL`。尚未有公開網站／聯絡資料，因此未假裝已部署。
+
+目前使用者定位在裝置上找站牌，公車查詢為固定公開檔案；收藏／近期選擇保存在手機，沒有 App 帳號、廣告、分析 SDK 或自建個資後端。**地圖圖磚請求會向 OpenFreeMap／其服務商揭露地圖範圍和連線資訊**，不能只因 App manifest 的 collected-types 為空就一律填「不收集資料」。發布時仍須按 Apple 定義確認第三方是否留存／使用相關資料，以及是否形成粗略位置等需揭露的資料。
+
+Apple 對僅在裝置處理、暫時服務請求及送出後留存的資料有不同定義；請核對 App 及第三方實際行為再完成 App Privacy。新增 SDK、分析、廣告、帳號或後端時重新檢查 Manifest、政策及隱私問卷。
+
+[Apple：管理 App Privacy](https://developer.apple.com/help/app-store-connect/manage-app-information/manage-app-privacy)、[App 隱私資料定義](https://developer.apple.com/go/?id=info-1)、[OpenFreeMap 隱私政策](https://openfreemap.org/privacy/)。
+
+## 正式 App Store 上線：與 TestFlight 分開
+
+TestFlight 可供 Beta 安裝，不等於已在 App Store 公開上架。正式上架還需：可用的 App 名稱／副標題、說明／關鍵字、類別、年齡分級、Support URL、Privacy Policy URL、App Privacy、內容／版權聲明、售價與發行地區、對應 Apple 顯示尺寸的實際截圖，以及 App Review 聯絡資料。建立 App Store 版本，選擇已處理的同一 build，通過 App Review 後依你選的方式發行。
+
+目前優先台北公車；發布文案必須如實標示 MapLibre／OpenFreeMap，不能宣稱使用 Apple Maps 底圖、車道級定位或特定車牌專屬官方 ETA。第三方資料／地圖的 attribution 已在 App 提供。
+
+## 已備妥的檔案與日常驗證
+
+| 檔案 | 用途 |
+| --- | --- |
+| `.github/workflows/testflight.yml` | 帳號預檢、註冊 App ID、Release 上傳、處理接續 |
+| `.github/workflows/ios.yml` | 一般提交的核心／發布腳本測試與 Debug／Release 編譯 |
+| `ios/Configure-TestFlight.ps1` | Windows 一次設定四個 Secrets 及選用 Variables |
+| `ios/release/testflight.json` | 預設 App 身分、版本、語言與內部群組名稱 |
+| `ios/release/beta-description.zh-Hant.txt` | Beta App Description |
+| `ios/release/what-to-test.zh-Hant.txt` | What to Test |
+| `ios/release/review-notes.txt` | 審查員手動搜尋台北站牌／路線操作說明 |
+| `ios/release/privacy-policy.html` | 待聯絡資料及部署的政策草稿 |
+| `ios/release-check.py` | 不讀 Apple 私鑰的 source／實際 archive 預檢 |
+| `ios/apple-connect.rb`、`ios/release/apple_client.rb` | JWT／官方 API、精確 build 查詢與內部群組配置 |
+
+本機可先跑 `python ios/release-check.py`；發布腳本測試使用 `ruby ios/release/apple_client_test.rb`。Mac 可執行 `swift test --package-path ios/TransitCore` 或 `ios/verify-on-mac.sh`。
+
+需要新原生照片時，另執行 `iPhone app` workflow，勾選 `capture_preview=true`；生成 10 張 iPhone 17 原生即時資料截圖，選用影片只在可驗證有效時保留。正常提交不啟動模擬器，TestFlight 上傳也不等待截圖／影片。

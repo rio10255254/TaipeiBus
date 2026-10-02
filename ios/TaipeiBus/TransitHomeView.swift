@@ -666,10 +666,38 @@ private struct AppInformationView: View {
                         if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
                     }
                 }
+                Section("隱私") {
+                    NavigationLink("隱私權說明") { PrivacyExplanationView() }
+                }
             }
             .navigationTitle("資訊與設定").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
         }
+    }
+}
+
+private struct PrivacyExplanationView: View {
+    var body: some View {
+        List {
+            Section("你的位置") {
+                Text("定位為選用，只在使用 App 時尋找附近站牌與定位地圖。也能拒絕定位，手動搜尋站牌、路線或車牌。App 不會將定位座標加入公車資料查詢。")
+                Text("地圖供應者會收到目前畫面需要的圖磚請求及網路連線資訊，因此可能得知你正在查看的大致區域。")
+            }
+            Section("保存在手機") {
+                Text("收藏站牌、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。")
+            }
+            Section("網路服務") {
+                Text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。")
+                Link("OpenFreeMap 隱私政策", destination: URL(string: "https://openfreemap.org/privacy/")!)
+            }
+            Section("測試回饋") {
+                Text("透過 TestFlight 主動回報時，Apple 與開發者可能收到你提交的內容、截圖及診斷資訊。分享前請留意截圖是否包含你的位置。")
+            }
+            Section("管理權限") {
+                Text("可在 iPhone 系統設定關閉定位。刪除 App 可移除其本機收藏與偏好。")
+            }
+        }
+        .navigationTitle("隱私權說明").navigationBarTitleDisplayMode(.inline)
     }
 }
 

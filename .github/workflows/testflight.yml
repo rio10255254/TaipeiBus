@@ -1,0 +1,150 @@
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Check account, register App ID, upload, or finish an existing upload'
+        type: choice
+        options: ['check-only', 'register-app-id', 'upload', 'finish-processing']
+        default: 'check-only'
+      bundle_id:
+        description: 'Leave empty to use BUS_BUNDLE_ID repository variable / release config'
+        type: string
+        default: ''
+      version:
+        description: 'Marketing version; leave empty to use release config'
+        type: string
+        default: ''
+      resume_build:
+        description: 'Exact build number from the receipt; required for finish-processing'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# Never interrupt an archive/upload in progress. Serialize releases to avoid build collisions.
+concurrency:
+  group: testflight-${{ github.repository }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  release:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      BUS_BUNDLE_ID: ${{ inputs.bundle_id || vars.BUS_BUNDLE_ID }}
+      BUS_VERSION: ${{ inputs.version }}
+      BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
+      BUS_FEEDBACK_EMAIL: ${{ vars.BUS_FEEDBACK_EMAIL }}
+      BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release source and Apple configuration
+        run: |
+          set -euo pipefail
+          python3 ios/release-check.py
+          ruby ios/release/apple_client_test.rb
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          required = ['APPLE_TEAM_ID', 'ASC_KEY_ID', 'ASC_ISSUER_ID', 'ASC_PRIVATE_KEY']
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing GitHub Secrets: ' + ', '.join(missing) + '. See ios/CLOUD_BUILD.md.')
+          directory = Path(os.environ['RUNNER_TEMP']) / 'bus-signing'
+          directory.mkdir(mode=0o700, exist_ok=True)
+          key = directory / 'AuthKey.p8'
+          key.write_text(os.environ['ASC_PRIVATE_KEY'].lstrip('\ufeff').strip() + '\n')
+          key.chmod(0o600)
+          PY
+      - name: Register App ID only
+        if: inputs.operation == 'register-app-id'
+        run: ruby ios/apple-connect.rb register-app-id
+      - name: Verify app record and select exact build number
+        if: inputs.operation == 'check-only' || inputs.operation == 'upload'
+        run: ruby ios/apple-connect.rb preflight
+      - name: Test transit algorithms and compile signed iPhone archive
+        if: inputs.operation == 'upload'
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift test --package-path ios/TransitCore
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
+            MARKETING_VERSION="$BUS_VERSION" CURRENT_PROJECT_VERSION="$BUS_BUILD_NUMBER" \
+            CODE_SIGN_STYLE=Automatic archive | tee "$RUNNER_TEMP/testflight-archive.log"
+          python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
+            --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/TaipeiBus.xcarchive/dSYMs" "$RUNNER_TEMP/testflight-dSYMs.zip"
+      - name: Upload archive to App Store Connect
+        if: inputs.operation == 'upload'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, plistlib
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'bus-signing/ExportOptions.plist'
+          with path.open('wb') as output:
+              plistlib.dump({'method': 'app-store-connect', 'destination': 'upload',
+                            'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
+                            'manageAppVersionAndBuildNumber': False}, output)
+          PY
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
+            -exportPath "$RUNNER_TEMP/BusExport" \
+            -exportOptionsPlist "$RUNNER_TEMP/bus-signing/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee "$RUNNER_TEMP/testflight-upload.log"
+          python3 - <<'PY'
+          import json, os
+          from datetime import datetime, timezone
+          from pathlib import Path
+          path = Path(os.environ['RUNNER_TEMP']) / 'testflight-receipt.json'
+          data = json.loads(path.read_text())
+          data.update(status='uploaded_processing_pending', upload_confirmed=True,
+                      uploaded_at=datetime.now(timezone.utc).isoformat())
+          path.write_text(json.dumps(data, indent=2) + '\n')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as output:
+              output.write(f"Upload command succeeded: {data['version']} ({data['build_number']}). Apple processing and tester availability are still pending.\n\n")
+          PY
+          echo 'BUS_UPLOAD_SUCCEEDED=true' >> "$GITHUB_ENV"
+      - name: Confirm exact build and assign internal testing group
+        if: inputs.operation == 'upload' || inputs.operation == 'finish-processing'
+        run: ruby ios/apple-connect.rb processing
+      - name: Preserve release receipt, logs and crash symbols
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: TestFlight-${{ github.run_number }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/testflight-receipt.json
+            ${{ runner.temp }}/testflight-archive.log
+            ${{ runner.temp }}/testflight-upload.log
+            ${{ runner.temp }}/testflight-dSYMs.zip
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Remove temporary signing key
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          (Path(os.environ['RUNNER_TEMP']) / 'bus-signing/AuthKey.p8').unlink(missing_ok=True)
+          PY

@@ -42,9 +42,9 @@ GPS 在官方路線軌跡 40 公尺內時匹配軌跡；候選路段同時檢查
 
 最低 iOS 17；iPhone 17 模擬器使用 Xcode 26。在 Mac 開啟 `ios/TaipeiBus.xcodeproj`，選 TaipeiBus scheme 與 iPhone 模擬器，即可編譯。安裝到實機需自己的 Bundle ID 與 Apple Signing Team。
 
-Windows 使用本專案的 GitHub Actions：提交 `ios/` 變更後，macOS runner 執行 Swift 核心測試、編譯模擬器及 iPhone Release App、啟動 iPhone 17 模擬器並保存功能截圖。另嘗試錄製 32 秒原生跟車影片，只有錄製結束且可讀取片長的影片才保存；模擬器錄影失敗不阻擋核心驗證或簽名。車輛和 ETA 使用公開即時資料；附近站牌截圖的使用者位置由模擬器設定。artifact 的 `.app` 僅供 macOS 模擬器，不能直接安裝到 iPhone。
+Windows 使用本專案的 GitHub Actions：提交 `ios/` 變更後，macOS runner 執行 Swift 核心與發布腳本測試，編譯模擬器及 iPhone Release App。需要新原生截圖時，手動執行 `iPhone app` 並勾選 `capture_preview`，才啟動 iPhone 17、保存功能截圖及嘗試有效的跟車影片。車輛和 ETA 使用公開即時資料；附近站牌截圖的使用者位置由模擬器設定。artifact 的 `.app` 僅供 macOS 模擬器，不能直接安裝到 iPhone。
 
-[雲端建置及 TestFlight 步驟](ios/CLOUD_BUILD.md)說明如何使用既有 Apple Developer 帳號，簽名後直接上傳 TestFlight；也保留單獨匯出 IPA 的入口。簽名金鑰放在 GitHub Actions secrets，不寫入原始碼或聊天。
+[雲端建置及 TestFlight 步驟](ios/CLOUD_BUILD.md)提供完整帳號需求、Windows 設定腳本、App 記錄建立、內部安裝及外部測試步驟。獨立的 `TestFlight` workflow 自動簽名、上傳、核對指定版本並加入內部群組，Apple 處理延遲時可接續而不重傳；發布不等待模擬器截圖。簽名金鑰放在 GitHub Actions secrets，不寫入原始碼或聊天。
 
 ## 資料與授權
 

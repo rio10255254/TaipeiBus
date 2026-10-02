@@ -2,28 +2,15 @@ name: iPhone app
 
 on:
   push:
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', '.github/workflows/ios.yml', '.github/workflows/testflight.yml']
   pull_request:
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    paths: ['ios/**', '.github/workflows/ios.yml', '.github/workflows/testflight.yml']
   workflow_dispatch:
     inputs:
-      sign_ipa:
-        description: 'Also export a signed IPA using configured Apple secrets'
+      capture_preview:
+        description: 'Also launch iPhone 17 and capture native live-data screenshots'
         type: boolean
         default: false
-      publish_testflight:
-        description: 'Sign and upload directly to TestFlight using configured Apple secrets'
-        type: boolean
-        default: false
-      bundle_id:
-        description: 'Existing app Bundle ID (required for signed IPA)'
-        type: string
-        default: 'com.rio10255254.TaipeiBus'
-      export_method:
-        description: 'Signed IPA distribution method'
-        type: choice
-        options: ['release-testing', 'debugging', 'app-store-connect']
-        default: 'release-testing'
 
 permissions:
   contents: read
@@ -46,6 +33,8 @@ jobs:
           xcodebuild -version
           swift test --package-path ios/TransitCore
           ruby -c ios/apple-connect.rb
+          ruby ios/release/apple_client_test.rb
+          python3 ios/release-check.py
       - name: Build native app
         run: |
           set -o pipefail
@@ -65,6 +54,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: iPhone 17 launch and screenshots
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         timeout-minutes: 12
         run: |
           set -euo pipefail
@@ -149,6 +139,7 @@ jobs:
           sleep 32
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
       - name: Record optional native preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         # Recording is a preview artifact; it must not gate native checks or signing.
         continue-on-error: true
         timeout-minutes: 4
@@ -235,69 +226,3 @@ jobs:
             ${{ runner.temp }}/iPhone17-live-follow.mp4
             ${{ runner.temp }}/video-record.log
           retention-days: 7
-
-  signed-ipa:
-    if: github.event_name == 'workflow_dispatch' && (inputs.sign_ipa || inputs.publish_testflight)
-    needs: simulator
-    runs-on: macos-15
-    timeout-minutes: 30
-    env:
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
-      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
-      BUS_BUNDLE_ID: ${{ inputs.bundle_id }}
-      BUS_EXPORT_METHOD: ${{ inputs.export_method }}
-      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.publish_testflight }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Prepare automatic signing
-        run: |
-          set -euo pipefail
-          test -n "$APPLE_TEAM_ID" && test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$ASC_PRIVATE_KEY"
-          test "$BUS_BUNDLE_ID" != com.example.TaipeiBus
-          mkdir -p "$RUNNER_TEMP/bus-signing"
-          printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/bus-signing/AuthKey.p8"
-          chmod 600 "$RUNNER_TEMP/bus-signing/AuthKey.p8"
-          python3 - <<'PY'
-          import os, plistlib
-          with open(os.path.join(os.environ['RUNNER_TEMP'], 'bus-signing/ExportOptions.plist'), 'wb') as f:
-              publish = os.environ['BUS_PUBLISH_TESTFLIGHT'] == 'true'
-              plistlib.dump({'method': 'app-store-connect' if publish else os.environ['BUS_EXPORT_METHOD'],
-                             'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
-                             'destination': 'upload' if publish else 'export',
-                             'manageAppVersionAndBuildNumber': True}, f)
-          PY
-      - name: Verify App Store Connect app record
-        if: inputs.publish_testflight
-        run: ruby ios/apple-connect.rb preflight
-      - name: Archive and export signed IPA
-        run: |
-          set -euo pipefail
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
-            -configuration Release -destination 'generic/platform=iOS' \
-            -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" archive
-          date +%s > "$RUNNER_TEMP/bus-signing/upload-start"
-          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
-            -exportPath "$RUNNER_TEMP/BusIPA" \
-            -exportOptionsPlist "$RUNNER_TEMP/bus-signing/ExportOptions.plist" \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
-            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
-      - name: Confirm TestFlight processing
-        if: inputs.publish_testflight
-        run: ruby ios/apple-connect.rb processing
-      - uses: actions/upload-artifact@v4
-        if: ${{ !inputs.publish_testflight }}
-        with:
-          name: TaipeiBus-signed-IPA
-          path: ${{ runner.temp }}/BusIPA/*.ipa
-          retention-days: 7
-      - name: Remove signing material
-        if: always()
-        run: rm -f "$RUNNER_TEMP/bus-signing/AuthKey.p8"
