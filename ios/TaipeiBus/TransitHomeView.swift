@@ -307,14 +307,24 @@ private struct TransitPanel: View {
         .onChange(of: model.selectedVehicleID) { _, _ in searchFocused = false }
     }
 
+    private var browseTitle: String {
+        switch model.mode {
+        case .stops: return location.usableCoordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌"
+        case .routes: return "公車路線"
+        case .vehicles: return "搜尋車牌"
+        }
+    }
+
     private var browseHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(location.coordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌")
+                Text(browseTitle)
                     .font(.title2.weight(.bold))
                 Spacer()
-                Button { location.request() } label: { Label("定位", systemImage: "location.fill") }
-                    .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                if model.mode == .stops {
+                    Button { location.request() } label: { Label("定位", systemImage: "location.fill") }
+                        .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+                }
             }
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
