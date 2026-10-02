@@ -227,6 +227,7 @@ final class TransitCoreTests: XCTestCase {
             metadata: metadata, previous: [], now: now).vehicles
         XCTAssertFalse(vehicles[0].hasHeading)
         XCTAssertEqual(vehicles[0].roadMatch?.segment, 0)
+        XCTAssertEqual(vehicles[0].heading, 90, accuracy: 0.01)
     }
 
     func testOlderGPSCannotRewindDetailsOrSwitchThePhysicalBusToAnOldRoute() throws {

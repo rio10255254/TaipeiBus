@@ -45,7 +45,7 @@ public struct BusVehicle: Identifiable, Sendable {
     public let destination: String
     public var coordinate: Coordinate
     public let rawCoordinate: Coordinate
-    public let heading: Double
+    public var heading: Double
     public let speed: Double
     public let observedAt: Date
     public let status: String

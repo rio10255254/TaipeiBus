@@ -57,7 +57,7 @@ struct TransitHomeView: View {
                             }.phoneGlass(in: Circle()).accessibilityLabel("切換路線方向")
                         }
                         Button { showDetails = true } label: {
-                            Text("\(model.routeVehicles().filter { $0.isFresh(at: Date()) }.count) 輛車 · 選方向與車牌")
+                            Text("\(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) 輛可定位 · 查看車牌")
                                 .font(.subheadline.weight(.medium)).frame(minHeight: 44)
                         }
                     }
@@ -495,7 +495,9 @@ private struct RouteDetails: View {
                 Text("往 \(route.departure)").tag("1")
             }.pickerStyle(.segmented)
             let buses = model.routeVehicles()
-            Text("\(buses.count) 輛車 · 點車牌查看位置").font(.subheadline).foregroundStyle(.secondary)
+            let count = buses.filter { $0.hasReliablePosition(at: Date()) }.count
+            Text("\(count) 輛可定位" + (count < buses.count ? " · \(buses.count - count) 輛等待定位" : ""))
+                .font(.subheadline).foregroundStyle(.secondary)
             ForEach(buses) { bus in
                 VehicleRow(vehicle: bus) { model.selectVehicle(bus) }
                 Divider()
@@ -576,7 +578,7 @@ private struct VehicleDetails: View {
                 .sorted { $0.coordinate.distance(to: vehicle.rawCoordinate) < $1.coordinate.distance(to: vehicle.rawCoordinate) }
             if upcoming.isEmpty, let stop = stops.first {
                 Divider()
-                Text("鄰近站牌 · \(stop.name)").font(.subheadline.weight(.semibold))
+                Text("最後 GPS 附近 · \(stop.name)").font(.subheadline.weight(.semibold))
                 Text("GPS 直線距離 \(distanceLabel(vehicle.rawCoordinate.distance(to: stop.coordinate)))")
                     .font(.caption).foregroundStyle(.secondary)
                 Button {
