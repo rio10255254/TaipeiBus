@@ -144,8 +144,8 @@ fileprivate struct IndexedName: Sendable {
     }
     func rank(_ query: SearchQuery) -> Int? {
         guard !query.text.isEmpty else { return 0 }
-        if full == query.text { return 0 }
-        if !aliases.isDisjoint(with: query.aliases) { return 1 }
+        if full == query.text { return query.transit && !metro ? 1 : 0 }
+        if !aliases.isDisjoint(with: query.aliases) { return query.transit && metro ? 0 : 1 }
         let partial = query.aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= 2 }
         if partial.contains(where: { part in aliases.contains { $0.hasPrefix(part) } }) { return query.transit && !metro ? 3 : 2 }
         if partial.contains(where: { part in aliases.contains { $0.contains(part) } }) { return query.transit && !metro ? 4 : 3 }

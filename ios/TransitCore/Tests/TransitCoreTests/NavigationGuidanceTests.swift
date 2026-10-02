@@ -133,6 +133,8 @@ final class NavigationGuidanceTests: XCTestCase {
                           StationSearch.rank(name: "捷運西湖站", query: "西們站") ?? 99)
         XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "臺北101"))
         XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "101"))
+        XCTAssertLessThan(StationSearch.rank(name: "捷運東湖站(南湖高中)", query: "東湖站") ?? 99,
+                          StationSearch.rank(name: "東湖站", query: "東湖站") ?? 99)
     }
 
     func testStationGroupsKeepPhysicalSidesWhileShowingTheSharedNameOnce() {
