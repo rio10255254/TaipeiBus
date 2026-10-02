@@ -207,9 +207,11 @@ struct TransitHomeView: View {
             if position.isInServiceArea, !hasSelection { model.focusMap(.coordinate(position)) }
         }
         .onChange(of: planner.mapRevision) { _, _ in
-            model.clearSelection()
             let coordinates = planner.mapCoordinates
-            if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+            if !showDetails {
+                model.clearSelection()
+                if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+            }
 #if DEBUG
             model.markJourneyPreviewReady()
             if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil, !planner.started { showJourney = true }

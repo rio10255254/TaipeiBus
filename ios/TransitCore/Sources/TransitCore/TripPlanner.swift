@@ -98,8 +98,13 @@ public struct TripPlanner: Sendable {
                      maximumWalk: Double = 1_000, limit: Int = 6) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
         func nearby(_ point: Coordinate) -> [(id: String, distance: Double)] {
-            stations.values.map { ($0.id, $0.coordinate.distance(to: point)) }.filter { $0.1 <= maximumWalk }
-                .sorted { $0.1 == $1.1 ? $0.0 < $1.0 : $0.1 < $1.1 }.prefix(20).map { $0 }
+            var matches: [(id: String, distance: Double)] = []
+            for station in stations.values {
+                let distance = station.coordinate.distance(to: point)
+                if distance <= maximumWalk { matches.append((station.id, distance)) }
+            }
+            matches.sort { a, b in a.distance == b.distance ? a.id < b.id : a.distance < b.distance }
+            return Array(matches.prefix(20))
         }
         let origins = nearby(origin), destinations = nearby(destination)
         guard !origins.isEmpty, !destinations.isEmpty else { return [] }

@@ -16,6 +16,7 @@ struct JourneyPlanningView: View {
     @State private var searchError: String?
     @State private var resolveTask: Task<Void, Never>?
     @State private var resolveToken = UUID()
+    @State private var resolvingQuery = ""
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
     var body: some View {
@@ -58,7 +59,12 @@ struct JourneyPlanningView: View {
             if ProcessInfo.processInfo.arguments.contains("--preview-journey-search") { focused = false; query = "臺北車站" }
 #endif
         }
-        .onChange(of: query) { _, value in searchError = nil; search.update(value) }
+        .onChange(of: query) { _, value in
+            if resolving && value != resolvingQuery {
+                resolveTask?.cancel(); resolveToken = UUID(); resolving = false; search.cancel()
+            }
+            searchError = nil; search.update(value)
+        }
         .onDisappear { resolveTask?.cancel(); search.cancel() }
     }
     private var originButton: some View {
@@ -151,7 +157,7 @@ struct JourneyPlanningView: View {
     private func resolve(text: String, completion: MKLocalSearchCompletion? = nil) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         resolveTask?.cancel(); resolveToken = UUID(); let token = resolveToken
-        resolving = true; searchError = nil
+        resolving = true; resolvingQuery = query; searchError = nil
         resolveTask = Task {
             do {
                 let place = try await search.resolve(text: text, completion: completion)

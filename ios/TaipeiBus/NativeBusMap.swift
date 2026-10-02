@@ -220,7 +220,7 @@ struct NativeBusMap: UIViewRepresentable {
                 lastMotionSetting = reduceMotion
             }
             if routeKey != lastRouteKey {
-                let paths = model.selectedRouteID != nil ? model.routePaths : model.planner.selected?.rides.map(\.coordinates).filter { $0.count >= 2 } ?? []
+                let paths: [[Coordinate]] = model.selectedRouteID != nil ? model.routePaths : model.planner.selected?.rides.map(\.coordinates).filter { $0.count >= 2 } ?? []
                 let features = paths.map { path -> MLNPolylineFeature in
                     var coordinates = path.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
