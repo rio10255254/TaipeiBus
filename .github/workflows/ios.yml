@@ -14,7 +14,7 @@ on:
       preview_scope:
         description: 'Capture all phone states or focus on route catalog and variants'
         type: choice
-        options: ['all', 'routes', 'journeys', 'journey-layout']
+        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation']
         default: 'all'
 
 permissions:
@@ -77,6 +77,7 @@ jobs:
           PY
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections
+          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         timeout-minutes: 12
@@ -224,7 +225,34 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
           fi
-          if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
+          if [ '${{ inputs.preview_scope }}' = 'navigation' ]; then
+          launch_ready --preview-place-audit
+          python3 - "$container/Documents/place-search-audit.json" "$token" "$RUNNER_TEMP/phone-screenshots/place-search-audit.json" <<'PY'
+          import json, sys
+          from pathlib import Path
+          data = json.loads(Path(sys.argv[1]).read_text())
+          assert data['token'] == sys.argv[2] and not data['error'], data
+          neihu = next(row for row in data['results'] if row['query'] == '內湖站')
+          assert neihu['stations'] and all(name.startswith('捷運內湖站') for name in neihu['stations']), neihu
+          assert any('內湖' in place['name'] and 25.08 < place['latitude'] < 25.09 and 121.59 < place['longitude'] < 121.60 for place in neihu['places']), neihu
+          Path(sys.argv[3]).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+          print('Native Apple search and official Neihu platforms verified.')
+          PY
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-journey-search --preview-search-query '內湖站'
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-neihu-search.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-boarding-fixture
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-boarding-three-vehicles-fixture.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-boarding-fixture --preview-track-next
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-track-next-fixture.png"
+          sim terminate "$device" com.example.TaipeiBus
+          fi
+          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ]; then
           if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready
           sleep 6

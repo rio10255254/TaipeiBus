@@ -2,66 +2,6 @@ import SwiftUI
 import MapKit
 import TransitCore
 
-struct TravelPlace: Identifiable, Codable, Sendable {
-    var id: String { "\(coordinate.latitude):\(coordinate.longitude):\(name)" }
-    let name: String
-    let address: String
-    let coordinate: Coordinate
-    var mapItem: MKMapItem {
-        let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate.locationCoordinate))
-        item.name = name
-        return item
-    }
-}
-
-@MainActor
-final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSearchCompleterDelegate {
-    @Published private(set) var suggestions: [MKLocalSearchCompletion] = []
-    @Published private(set) var searching = false
-    @Published private(set) var error: String?
-    private let completer = MKLocalSearchCompleter()
-    private var search: MKLocalSearch?
-    static let region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 25.07, longitude: 121.54),
-        span: MKCoordinateSpan(latitudeDelta: 0.3, longitudeDelta: 0.4))
-
-    override init() {
-        super.init()
-        completer.delegate = self
-        completer.region = Self.region
-        completer.resultTypes = [.address, .pointOfInterest]
-    }
-    func update(_ text: String) {
-        error = nil
-        suggestions = []
-        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        searching = !query.isEmpty
-        completer.queryFragment = query
-        if query.isEmpty { completer.cancel(); searching = false }
-    }
-    func completerDidUpdateResults(_ completer: MKLocalSearchCompleter) {
-        suggestions = Array(completer.results.prefix(8)); searching = false
-    }
-    func completer(_ completer: MKLocalSearchCompleter, didFailWithError error: Error) {
-        searching = false; suggestions = []; self.error = "地點搜尋暫時無法連線，可改選下方站牌。"
-    }
-    func resolve(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> TravelPlace? {
-        search?.cancel()
-        let request = completion.map { MKLocalSearch.Request(completion: $0) } ?? MKLocalSearch.Request()
-        if completion == nil { request.naturalLanguageQuery = text }
-        request.region = Self.region
-        request.resultTypes = [.address, .pointOfInterest]
-        let operation = MKLocalSearch(request: request); search = operation
-        let response = try await operation.start()
-        try Task.checkCancellation()
-        guard let item = response.mapItems.first(where: {
-            Coordinate(latitude: $0.placemark.coordinate.latitude, longitude: $0.placemark.coordinate.longitude).isInServiceArea
-        }) else { return nil }
-        return TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "",
-            coordinate: Coordinate(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude))
-    }
-    func cancel() { search?.cancel(); completer.cancel(); searching = false }
-}
-
 struct WalkingLeg: Sendable {
     let from: Coordinate
     let to: Coordinate
@@ -342,4 +282,18 @@ final class JourneyPlannerModel: ObservableObject {
         task?.cancel(); task = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
+
+#if DEBUG
+    func prepareBoardingPreview(_ trip: TransitTrip) {
+        cancelRequests()
+        guard let first = trip.rides.first, let last = trip.rides.last else { return }
+        origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate)
+        destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate)
+        usingLocation = false; started = false; stepIndex = 0
+        let walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0),
+                     WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0)]
+        options = [JourneyOption(id: trip.id, trip: trip, walks: walks)]
+        selectedID = trip.id; message = nil; mapRevision += 1
+    }
+#endif
 }

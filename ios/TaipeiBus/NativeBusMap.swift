@@ -3,12 +3,6 @@ import MapLibre
 import MetalKit
 import TransitCore
 
-extension Coordinate {
-    var locationCoordinate: CLLocationCoordinate2D {
-        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
-    }
-}
-
 struct NativeBusMap: UIViewRepresentable {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel

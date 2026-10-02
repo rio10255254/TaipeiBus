@@ -93,6 +93,11 @@ public enum FeedDecoder {
                                                                address: text(row["address"]), bearing: text(row["bearing"]), stopIDs: [])
                     }
                     metadata.stations[stationID]?.stopIDs.append(id)
+                    for name in [stop.name, text(row["nameEn"])] where !name.isEmpty {
+                        if metadata.stations[stationID]?.searchNames.contains(name) == false {
+                            metadata.stations[stationID]?.searchNames.append(name)
+                        }
+                    }
                 }
             case "GetProvider":
                 for row in rows {

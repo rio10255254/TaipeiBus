@@ -33,6 +33,7 @@ public struct Station: Identifiable, Sendable {
     public let address: String
     public let bearing: String
     public var stopIDs: [String]
+    public var searchNames: [String] = []
     public var bearingLabel: String {
         ["N": "北向", "NE": "東北向", "E": "東向", "SE": "東南向",
          "S": "南向", "SW": "西南向", "W": "西向", "NW": "西北向"][bearing] ?? bearing

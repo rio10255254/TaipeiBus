@@ -34,7 +34,7 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, location: location.usableCoordinate,
-                             bottomInset: showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) || (showJourney && planner.selected != nil) ? 330 + geometry.safeAreaInsets.bottom + 24 : bottomControlsHeight + geometry.safeAreaInsets.bottom + 24,
+                             bottomInset: (showJourney && planner.selected != nil ? 460 : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? 330 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -55,6 +55,12 @@ struct TransitHomeView: View {
                     .accessibilityLabel("資料來源與地圖設定")
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
+#if DEBUG
+                if let notice = model.previewNotice {
+                    Text(notice).font(.caption.weight(.semibold)).padding(8)
+                        .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80)
+                }
+#endif
 
                 if !showDetails, !showSearch, !planner.started, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
@@ -110,8 +116,10 @@ struct TransitHomeView: View {
                     }
                     if planner.started {
                         JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
+                    } else if planner.selected != nil {
+                        JourneyQuickCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else {
-                        Button { journeyDetent = planner.selected == nil ? .large : .height(330); showJourney = true } label: {
+                        Button { journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
                                 Text("你想去哪裡？").font(.body.weight(.semibold))
@@ -210,9 +218,9 @@ struct TransitHomeView: View {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(330) } })
-                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(330), .large], selection: $journeyDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })
+                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(460)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
@@ -224,14 +232,19 @@ struct TransitHomeView: View {
         .onChange(of: planner.mapRevision) { _, _ in
             let coordinates = planner.mapCoordinates
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
-                model.clearSelection()
-                if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                let sameVehicle = model.selectedVehicle.map { bus in
+                    planner.selected?.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                } ?? false
+                if !sameVehicle {
+                    model.clearSelection()
+                    if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                }
             }
 #if DEBUG
             model.markJourneyPreviewReady()
             if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil {
                 showJourney = !planner.started
-                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(330)
+                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(460)
             }
 #endif
         }
