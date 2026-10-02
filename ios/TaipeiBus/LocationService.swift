@@ -3,7 +3,7 @@ import Combine
 import TransitCore
 
 @MainActor
-final class LocationService: NSObject, ObservableObject, CLLocationManagerDelegate {
+final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocationManagerDelegate {
     @Published private(set) var coordinate: Coordinate?
     @Published private(set) var message: String?
     @Published private(set) var requesting = false

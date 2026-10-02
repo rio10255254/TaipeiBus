@@ -114,7 +114,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         localToWorld.columns.3 = SIMD4(origin.x * worldSize, origin.y * worldSize, 0, 1)
         // Match native buildings' near clipping. Multiplication in double avoids Mercator jitter.
         let projection = matrix(context.nearClippedProjectionMatrix) * localToWorld
-        var uniforms = Uniforms(matrix: simd_float4x4(projection), mode: .zero)
+        func floatColumn(_ value: SIMD4<Double>) -> SIMD4<Float> {
+            SIMD4(Float(value.x), Float(value.y), Float(value.z), Float(value.w))
+        }
+        let gpuProjection = simd_float4x4(columns: (floatColumn(projection.columns.0), floatColumn(projection.columns.1),
+                                                  floatColumn(projection.columns.2), floatColumn(projection.columns.3)))
+        var uniforms = Uniforms(matrix: gpuProjection, mode: .zero)
         let poses = motion.poses(time: CACurrentMediaTime(), now: Date())
         var candidates: [(pose: VehiclePose, instance: Instance, point: CGPoint, size: CGFloat, score: Double)] = []
         for pose in poses {
