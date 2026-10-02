@@ -14,7 +14,14 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     var highlightSelected = true {
         didSet { if highlightSelected != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
     }
-    var reduceMotion = false
+    var reduceMotion = false {
+        didSet {
+            if reduceMotion != oldValue {
+                if reduceMotion { motion.finishAnimations(time: CACurrentMediaTime(), now: Date()) }
+                setNeedsDisplay()
+            }
+        }
+    }
     private var selectionStartedAt: CFTimeInterval = 0
     private var motion = VehicleMotion()
     private var pipeline: MTLRenderPipelineState?
@@ -95,8 +102,10 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let edges = outline()
             outlineCount = edges.count
             outlineBuffer = edges.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
-            let shadow: [Vertex] = [(-1.75,-6.4), (1.75,-6.4), (1.75,6.4), (-1.75,-6.4), (1.75,6.4), (-1.75,6.4)].map { x, y in
-                Vertex(position: SIMD4(Float(x), Float(y), 0.035, 0), normal: SIMD4(Float(x / 1.75), Float(y / 6.4), 0, 0), color: .zero)
+            let shadowPositions: [SIMD2<Float>] = [SIMD2(-1.75,-6.4),SIMD2(1.75,-6.4),SIMD2(1.75,6.4),
+                                                    SIMD2(-1.75,-6.4),SIMD2(1.75,6.4),SIMD2(-1.75,6.4)]
+            let shadow = shadowPositions.map { p in
+                Vertex(position: SIMD4(p.x,p.y,0.035,0), normal: SIMD4(p.x / 1.75,p.y / 6.4,0,0), color: .zero)
             }
             shadowBuffer = shadow.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
             instanceBuffers = (0..<3).compactMap { _ in device.makeBuffer(length: MemoryLayout<Instance>.stride * (Self.maximumVisible + 1), options: .storageModeShared) }
@@ -289,8 +298,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                     let a = Float(i) * .pi / 2
                     let along = SIMD2<Float>(cos(a),sin(a)), cross = SIMD2<Float>(-sin(a),cos(a)) * 0.025
                     let center = SIMD2<Float>(wheelY,0.51)
-                    let points = [center + along*0.06 - cross,center + along*0.23 - cross,
-                                  center + along*0.23 + cross,center + along*0.06 + cross]
+                    let short = along * Float(0.06), long = along * Float(0.23)
+                    let innerSpoke = center + short, outerSpoke = center + long
+                    let points: [SIMD2<Float>] = [innerSpoke - cross,outerSpoke - cross,outerSpoke + cross,innerSpoke + cross]
                     let x = outer + side*0.012
                     quad(SIMD3(x,points[0].x,points[0].y),SIMD3(x,points[1].x,points[1].y),
                          SIMD3(x,points[2].x,points[2].y),SIMD3(x,points[3].x,points[3].y),color:SIMD3(repeating:0.31),

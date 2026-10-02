@@ -119,6 +119,16 @@ public struct VehicleMotion {
         states.keys.compactMap { pose(id: $0, time: time, now: now) }
     }
 
+    /// Accessibility changes can end an in-flight transition without waiting for a new GPS timestamp.
+    public mutating func finishAnimations(time: TimeInterval, now: Date) {
+        states = states.mapValues { state in
+            let end = pose(state: state, time: max(time, state.startedAt + state.duration), now: now)
+            return State(vehicle: state.vehicle, path: RouteLine(coordinates: [state.vehicle.coordinate]),
+                         startedAt: time, duration: 0, startHeading: end.heading,
+                         startDistance: state.startDistance + state.path.length, startSlope: 0, endSlope: 0)
+        }
+    }
+
     public func isAnimating(time: TimeInterval, now: Date) -> Bool {
         states.values.contains { $0.duration > 0 && time < $0.startedAt + $0.duration && $0.vehicle.isFresh(at: now) }
     }

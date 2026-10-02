@@ -88,6 +88,11 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertTrue(stale.stale)
         XCTAssertEqual(stale.coordinate, second[0].coordinate)
         XCTAssertFalse(motion.isAnimating(time: 18, now: now.addingTimeInterval(180)))
+        motion.finishAnimations(time: 18, now: now)
+        XCTAssertEqual(motion.pose(id: "physical-1", time: 18, now: now)!.coordinate, second[0].coordinate)
+        XCTAssertFalse(motion.isAnimating(time: 18, now: now))
+        motion.ingest(second, time: 19, now: now)
+        XCTAssertFalse(motion.isAnimating(time: 19, now: now))
     }
 
     private func movingBus(_ points: [Coordinate], observedAt: Date, speed: Double = 36,

@@ -90,7 +90,7 @@ struct NativeBusMap: UIViewRepresentable {
         func attach(_ map: MLNMapView) {
             self.map = map
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
-            let rate = Float(map.window?.windowScene?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond)
+            let rate = Float(map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
             link.add(to: .main, forMode: .common)
@@ -298,7 +298,7 @@ struct NativeBusMap: UIViewRepresentable {
             lastTickTime = now
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-                let maximum = map.window?.windowScene?.screen.maximumFramesPerSecond ?? UIScreen.main.maximumFramesPerSecond
+                let maximum = map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60
                 let rate = lowPower || reduceMotion ? 30 : maximum
                 link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: Float(rate), preferred: Float(rate))
                 map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)

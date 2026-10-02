@@ -27,7 +27,7 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, location: location.coordinate,
-                             bottomInset: 140,
+                             bottomInset: nearbyStations.isEmpty ? 140 : 210,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -64,9 +64,10 @@ struct TransitHomeView: View {
                     }
                     .phoneGlass(in: Capsule()).padding(.top, 100)
                 }
+                VStack(spacing: 0) {
+                    Spacer()
                 PhoneGlassGroup {
                 VStack(spacing: 12) {
-                    Spacer()
                     HStack {
                         Spacer()
                         Button {
@@ -136,7 +137,9 @@ struct TransitHomeView: View {
                     .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
                 }
                 }
+                }
                 .padding(.horizontal, 24).padding(.bottom, 12)
+                .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
                 if let error = model.mapError ?? model.loadError {
                     Text(error).font(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
