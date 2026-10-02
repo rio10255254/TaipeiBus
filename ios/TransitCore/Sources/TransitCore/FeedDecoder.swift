@@ -69,12 +69,13 @@ public enum FeedDecoder {
                 for row in rows {
                     let id = text(row["pathAttributeId"]), parent = text(row["Id"])
                     guard !id.isEmpty, !parent.isEmpty else { continue }
-                    let route = BusRoute(id: id, parentID: parent, name: text(row["nameZh"]),
+                    var route = BusRoute(id: id, parentID: parent, name: text(row["nameZh"]),
                                          variantName: text(row["pathAttributeName"]),
                                          departure: text(row["departureZh"]), destination: text(row["destinationZh"]))
+                    route.englishName = text(row["nameEn"])
+                    route.englishVariantName = text(row["pathAttributeEname"])
+                    route.aliasName = text(row["aliasName"])
                     metadata.routes[id] = route
-                    // Prefer the base variant for the route picker; every variant remains addressable.
-                    if metadata.parents[parent] == nil || route.variantName == route.name { metadata.parents[parent] = route }
                 }
             case "GetStop":
                 for row in rows {
@@ -119,6 +120,7 @@ public enum FeedDecoder {
             }
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
+        metadata.rebuildRouteCatalog()
         metadata.rebuildJourneys()
         return metadata
     }

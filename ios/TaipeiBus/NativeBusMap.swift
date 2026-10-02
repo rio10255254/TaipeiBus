@@ -173,24 +173,21 @@ struct NativeBusMap: UIViewRepresentable {
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction)"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants)"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
-                if let route = model.selectedRoute {
-                    vehicles = vehicles.filter { $0.parentRouteID == route.parentID && $0.direction == model.direction }
-                }
+                if model.selectedRoute != nil { vehicles = model.routeVehicles() }
                 if reduceMotion { vehicles = vehicles.map { var bus = $0; bus.path = [bus.coordinate]; return bus } }
                 buses.ingest(vehicles, time: CACurrentMediaTime())
                 lastSnapshotRevision = model.snapshot.revision
                 lastMotionSetting = reduceMotion
             }
             if routeKey != lastRouteKey {
-                routeSource?.shape = model.selectedRouteID.flatMap { model.metadata.line($0) }.flatMap { routeLine in
-                    guard routeLine.coordinates.count >= 2 else { return nil }
-                    let journey = model.selectedRouteID.flatMap { model.metadata.journey(routeID: $0, direction: model.direction) }
-                    var coordinates = (journey?.coordinates(on: routeLine) ?? routeLine.coordinates).map(\.locationCoordinate)
+                let features = model.routePaths.map { path -> MLNPolylineFeature in
+                    var coordinates = path.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
+                routeSource?.shape = features.isEmpty ? nil : MLNShapeCollectionFeature(shapes: features)
                 lastRouteKey = routeKey
             }
             buses.selectedID = model.selectedVehicleID
@@ -279,8 +276,13 @@ struct NativeBusMap: UIViewRepresentable {
                               withDuration: reduceMotion ? 0 : 0.65,
                               animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut), completionHandler: nil)
             case .route(let id):
-                let coordinates = model.metadata.line(id)?.coordinates ?? model.snapshot.vehicles
-                    .filter { $0.parentRouteID == model.metadata.route(id)?.parentID }.map(\.coordinate)
+                var coordinates = model.metadata.displayPaths(routeID: id, direction: model.direction,
+                                                               allVariants: model.allRouteVariants).flatMap { $0 }
+                if coordinates.isEmpty {
+                    coordinates = model.metadata.displayStops(routeID: id, direction: model.direction,
+                                                               allVariants: model.allRouteVariants).map(\.coordinate)
+                }
+                if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
                 guard let first = coordinates.first else { return }
                 let south = coordinates.map(\.latitude).min() ?? first.latitude
                 let north = coordinates.map(\.latitude).max() ?? first.latitude

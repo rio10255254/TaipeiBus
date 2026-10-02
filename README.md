@@ -10,6 +10,8 @@
 - 點定位按鈕，才請求使用期間定位權限。定位後地圖上提供兩個最近的實體站牌入口，顯示方向和直線距離；也可手動選站。
 - 點站牌查看官方路線到站時間，詳細頁可收藏站牌，或開啟 Apple Maps 步行導航。
 - 搜尋路線、切換行駛方向、選車牌，查看指定公車。跟車時鏡頭隨車移動，手動拖曳地圖會停止跟車。
+- 路線清單完整使用官方 `GetRoute`，不限制前 60 條。2026-10-02 核對為 416 條主路線、722 個不重複行駛版本；數量隨官方資料更新。沒有近期 GPS 的路線仍保留，支援路線／英文代碼／別名／起訖站／支線搜尋與全形輸入。
+- 主路線預設顯示全部走法的同方向車輛與各走法軌跡；詳情可用原生選單切換個別走法。單向走法自動選擇正確方向，車輛、站序及軌跡依版本篩選。全部走法的站牌列表顯示主要站序，分支站序在個別走法查看。
 - 地圖上的路線方向可直接切換；站牌詳情可改看同名反方向站牌。收藏與最近查看的站牌優先出現在搜尋，車牌可省略連字號，完整吻合優先。
 - 車輛資訊包含車牌、路線方向、業者、低底盤資訊、GPS 回報速度與定位時間。
 - 軌跡與站序能確認時，車旁顯示前方站牌及沿線距離，點一下即可查看該站官方預估；詳情提供前方三站。訊號暫缺、定位跳動和原始 GPS 分別標示。
@@ -50,11 +52,11 @@ Windows 使用本專案的 GitHub Actions：提交 `ios/` 變更後，macOS runn
 
 使用[臺北市公共運輸處公開 API](https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079)：`GetBusData`、`GetEstimateTime`、`GetRoute`、`GetStop`、`GetPathDetail`、`GetProvider`、`GetBusShape`。全部為公開 gzip JSON，來源為 `https://tcgbusfs.blob.core.windows.net/blobbus/`。
 
-車輛範圍先限制台北市區周邊（121.40–121.72°E、24.94–25.23°N），包含經過此範圍的跨市路線。底圖為 OpenStreetMap／OpenMapTiles、OpenFreeMap；地圖保留來源 attribution。MapLibre Native 固定為 6.31.0。SDK 及修改後 Liberty 樣式授權收錄於 `ios/TaipeiBus/Licenses.txt`。
+車輛與站牌範圍限制台北市區周邊（121.35–121.72°E、24.94–25.23°N），涵蓋目前官方路線的全部站牌，包含經過此範圍的跨市路線。底圖為 OpenStreetMap／OpenMapTiles、OpenFreeMap；地圖保留來源 attribution。MapLibre Native 固定為 6.31.0。SDK 及修改後 Liberty 樣式授權收錄於 `ios/TaipeiBus/Licenses.txt`。
 
 ## 本機驗證與手機預覽
 
-`ios/TransitCore` 是可獨立測試的 Swift package。21 項測試涵蓋台北時區、異常及過期回報、同名站牌方向、支線停靠站、轉彎及反向路徑、重複 snapshot、ETA 與車牌分離，以及 GPS 動畫接續、剩餘路口、朝向跨北方、停車、舊回報、平行道路與重複交叉、缺少朝向／速度、GPS 抖動、異常位移確認、短暫漏報、結束營運、去返行程、已通過車輛、軌跡來源失效及資料不足時降級。gzip 解壓縮已測試正常資料、截斷資料與大小限制。UIKit／Metal App 的編譯、截圖與影片由 macOS Actions 驗證；實機簽名另行處理。
+`ios/TransitCore` 是可獨立測試的 Swift package。28 項離線核心測試涵蓋台北時區、異常及過期回報、同名站牌方向、支線停靠站、轉彎及反向路徑、重複 snapshot、ETA 與車牌分離，以及 GPS 動畫接續、剩餘路口、朝向跨北方、停車、舊回報、平行道路與重複交叉、缺少朝向／速度、GPS 抖動、異常位移確認、短暫漏報、結束營運、去返行程、已通過車輛、軌跡來源失效及資料不足時降級。新增完整路線清單、全形與英文代碼搜尋、支線篩選、單向站序、地圖支線軌跡及跨市站牌範圍的回歸測試。手動擷取 iPhone 預覽時，另以當天官方資料核對全部路線與行駛版本 ID。gzip 解壓縮已測試正常資料、截斷資料與大小限制。UIKit／Metal App 的編譯、截圖與影片由 macOS Actions 驗證；實機簽名另行處理。
 
 原有 `src/`、`server/` 保留為手機尺寸的互動預覽，可在 Windows 查看設計：
 

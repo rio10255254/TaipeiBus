@@ -53,6 +53,24 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
+      - name: Audit complete official route catalog
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        run: |
+          export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/live-transit-feeds"
+          python3 - <<'PY'
+          import concurrent.futures, gzip, os
+          from pathlib import Path
+          from urllib.request import urlopen
+          root = Path(os.environ['BUS_LIVE_FEEDS_DIRECTORY'])
+          root.mkdir(exist_ok=True)
+          def fetch(name):
+              with urlopen(f'https://tcgbusfs.blob.core.windows.net/blobbus/{name}.gz', timeout=40) as response:
+                  data = response.read()
+              (root / f'{name}.json').write_bytes(gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data)
+          with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+              list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']))
+          PY
+          swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         timeout-minutes: 12
@@ -127,6 +145,22 @@ jobs:
           launch_ready --preview-route 284
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route-search ''
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-all-routes.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route-search '幹線'
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-trunk-route-search.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route 307 --preview-details
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route-variants.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route '紅5往陽明山' --preview-details
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-search EAA207
           sleep 6

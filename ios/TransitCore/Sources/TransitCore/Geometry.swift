@@ -12,7 +12,7 @@ public struct Coordinate: Codable, Hashable, Sendable {
     public static let taipei = Coordinate(latitude: 25.0377, longitude: 121.56)
     public var isInServiceArea: Bool {
         latitude.isFinite && longitude.isFinite &&
-        (24.94...25.23).contains(latitude) && (121.40...121.72).contains(longitude)
+        (24.94...25.23).contains(latitude) && (121.35...121.72).contains(longitude)
     }
 
     public func distance(to other: Coordinate) -> Double {

@@ -27,6 +27,7 @@ final class TransitAppModel: ObservableObject {
     @Published var query = ""
     @Published var selectedStationID: String?
     @Published var selectedRouteID: String?
+    @Published private(set) var allRouteVariants = true
     @Published var selectedVehicleID: String?
     @Published var direction = "0"
     @Published var following = false
@@ -54,6 +55,17 @@ final class TransitAppModel: ObservableObject {
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
+    var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.name : $0.displayName } }
+    var routeVariants: [BusRoute] { selectedRouteID.map { metadata.variants(routeID: $0) } ?? [] }
+    var routeDirections: [String] {
+        selectedRouteID.map { metadata.directions(routeID: $0, allVariants: allRouteVariants) } ?? ["0", "1"]
+    }
+    var routeStops: [BusStop] {
+        selectedRouteID.map { metadata.displayStops(routeID: $0, direction: direction, allVariants: allRouteVariants) } ?? []
+    }
+    var routePaths: [[Coordinate]] {
+        selectedRouteID.map { metadata.displayPaths(routeID: $0, direction: direction, allVariants: allRouteVariants) } ?? []
+    }
 
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
@@ -100,6 +112,7 @@ final class TransitAppModel: ObservableObject {
         guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
         if selectedRouteID != bus.routeID { selectedRouteID = bus.routeID }
+        allRouteVariants = false
         if direction != bus.direction { direction = bus.direction }
     }
 
@@ -108,28 +121,40 @@ final class TransitAppModel: ObservableObject {
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
         defaults.set(recentStationIDs, forKey: "recentStations")
         selectedStationID = station.id
-        selectedRouteID = nil; selectedVehicleID = nil; following = false; query = ""
+        selectedRouteID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
         focusMap(.coordinate(station.coordinate)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
-    func selectRoute(_ route: BusRoute, direction: String = "0") {
-        selectedRouteID = route.id; self.direction = direction
+    func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false) {
+        selectedRouteID = route.id; allRouteVariants = !variantOnly
+        let available = metadata.directions(routeID: route.id, allVariants: !variantOnly)
+        self.direction = available.contains(direction) ? direction : available.first ?? "0"
         selectedStationID = nil; selectedVehicleID = nil; following = false; query = ""
         focusMap(.route(route.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectVehicle(_ vehicle: BusVehicle) {
-        selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID
+        selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
         selectedStationID = nil; direction = vehicle.direction; following = true; query = ""
         defaults.set(vehicle.id, forKey: "lastVehicleID")
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
+    func changeRouteVariant(_ variant: BusRoute?) {
+        guard let selected = selectedRoute else { return }
+        let route = variant ?? metadata.parents[selected.parentID] ?? selected
+        selectedRouteID = route.id; allRouteVariants = variant == nil
+        let available = metadata.directions(routeID: route.id, allVariants: allRouteVariants)
+        if !available.contains(direction) { direction = available.first ?? "0" }
+        selectedVehicleID = nil; following = false
+        focusMap(.route(route.id))
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
     func clearSelection() {
-        selectedVehicleID = nil; selectedRouteID = nil; selectedStationID = nil; following = false
+        selectedVehicleID = nil; selectedRouteID = nil; allRouteVariants = true; selectedStationID = nil; following = false
         sheetDetent = .height(330)
     }
     func toggleFavorite(_ station: Station) {
@@ -159,15 +184,7 @@ final class TransitAppModel: ObservableObject {
             return $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position)
         }.prefix(40).map { $0 }
     }
-    func routes(query: String) -> [BusRoute] {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        return metadata.parents.values.filter {
-            text.isEmpty || $0.name.localizedCaseInsensitiveContains(text) || $0.departure.contains(text) || $0.destination.contains(text)
-        }.sorted {
-            if $0.name == text || $1.name == text { return $0.name == text }
-            return $0.name.localizedStandardCompare($1.name) == .orderedAscending
-        }.prefix(60).map { $0 }
-    }
+    func routes(query: String) -> [RouteSearchResult] { metadata.routeCatalog.search(query) }
     var lastViewedVehicle: BusVehicle? {
         guard let id = defaults.string(forKey: "lastVehicleID") else { return nil }
         return snapshot.vehicles.first { $0.id == id }
@@ -177,8 +194,8 @@ final class TransitAppModel: ObservableObject {
         return metadata.journey(routeID: vehicle.routeID, direction: vehicle.direction)?.upcoming(vehicle: vehicle, at: Date()) ?? []
     }
     func switchDirection() {
-        guard let route = selectedRoute else { return }
-        selectRoute(route, direction: direction == "0" ? "1" : "0")
+        guard let route = selectedRoute, let next = routeDirections.first(where: { $0 != direction }) else { return }
+        selectRoute(route, direction: next, variantOnly: !allRouteVariants)
     }
     func oppositeStations(to station: Station) -> [Station] {
         metadata.stations.values.filter {
@@ -199,9 +216,8 @@ final class TransitAppModel: ObservableObject {
             }.prefix(60).map { $0 }
     }
     func routeVehicles() -> [BusVehicle] {
-        guard let route = selectedRoute else { return [] }
-        return snapshot.vehicles.filter { $0.parentRouteID == route.parentID && $0.direction == direction }
-            .sorted { $0.observedAt > $1.observedAt }
+        guard let id = selectedRouteID else { return [] }
+        return metadata.vehicles(routeID: id, direction: direction, allVariants: allRouteVariants, in: snapshot.vehicles)
     }
 
 #if DEBUG
@@ -216,8 +232,11 @@ final class TransitAppModel: ObservableObject {
         }
         if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
             selectStation(station); previewSelectionApplied = true
-        } else if let name = value(after: "--preview-route"), let route = metadata.parents.values.first(where: { $0.name == name }) {
-            selectRoute(route, direction: value(after: "--preview-direction") ?? "0"); previewSelectionApplied = true
+        } else if let name = value(after: "--preview-route"), let result = metadata.routeCatalog.search(name).first {
+            selectRoute(result.route, direction: value(after: "--preview-direction") ?? "0", variantOnly: result.matchedVariant != nil)
+            previewSelectionApplied = true
+        } else if let text = value(after: "--preview-route-search") {
+            mode = .routes; query = text; previewSelectionApplied = true
         } else if let text = value(after: "--preview-search") {
             mode = .vehicles; query = text; previewSelectionApplied = true
         } else if let name = value(after: "--preview-vehicle-route") {
@@ -228,7 +247,7 @@ final class TransitAppModel: ObservableObject {
                 selectVehicle(vehicle); previewSelectionApplied = true
             }
         }
-        let requestedSelection = ["--preview-station", "--preview-route", "--preview-search", "--preview-vehicle-route"]
+        let requestedSelection = ["--preview-station", "--preview-route", "--preview-route-search", "--preview-search", "--preview-vehicle-route"]
             .contains(where: { arguments.contains($0) })
         // A unique capture token prevents cloud screenshots from racing live-feed preparation.
         if (!requestedSelection || previewSelectionApplied), let token = value(after: "--preview-capture"),

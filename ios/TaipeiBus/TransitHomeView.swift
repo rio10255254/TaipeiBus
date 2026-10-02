@@ -51,12 +51,15 @@ struct TransitHomeView: View {
 
                 if model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(route.name).font(.system(.largeTitle, design: .rounded).weight(.bold)).foregroundStyle(Color.accentColor)
+                        Text(model.selectedRouteName ?? route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
+                            .foregroundStyle(Color.accentColor).lineLimit(2)
                         HStack(spacing: 10) {
                             Text("往 \(route.destination(direction: model.direction))").font(.subheadline)
-                            Button { model.switchDirection() } label: {
-                                Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44)
-                            }.phoneGlass(in: Circle()).accessibilityLabel("切換路線方向")
+                            if model.routeDirections.count > 1 {
+                                Button { model.switchDirection() } label: {
+                                    Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44)
+                                }.phoneGlass(in: Circle()).accessibilityLabel("切換路線方向")
+                            }
                         }
                         Button { showDetails = true } label: {
                             Text("\(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) 輛可定位 · 查看車牌")
@@ -185,7 +188,11 @@ struct TransitHomeView: View {
         }
 #if DEBUG
         .onChange(of: model.query) { _, value in
-            if !value.isEmpty, ProcessInfo.processInfo.arguments.contains("--preview-search") { showSearch = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") ||
+                (!value.isEmpty && ProcessInfo.processInfo.arguments.contains("--preview-search")) { showSearch = true }
+        }
+        .onChange(of: model.mode) { _, _ in
+            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { showSearch = true }
         }
 #endif
     }
@@ -300,7 +307,10 @@ private struct TransitPanel: View {
             }
         }
         .padding(.top, 16)
-        .onAppear { if browseOnly { searchFocused = true } }
+        .onAppear { if browseOnly { searchFocused = model.mode != .routes || !model.query.isEmpty } }
+        .onChange(of: model.mode) { _, mode in
+            if mode == .routes && model.query.isEmpty { searchFocused = false }
+        }
         .onChange(of: searchFocused) { _, focused in if focused { model.sheetDetent = .large } }
         .onChange(of: model.selectedStationID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedRouteID) { _, _ in searchFocused = false }
@@ -321,6 +331,10 @@ private struct TransitPanel: View {
                 Text(browseTitle)
                     .font(.title2.weight(.bold))
                 Spacer()
+                if model.mode == .routes, !model.loading {
+                    Text("\(model.metadata.routeCatalog.groups.count) 條")
+                        .font(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                }
                 if model.mode == .stops {
                     Button { location.request() } label: { Label("定位", systemImage: "location.fill") }
                         .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
@@ -351,7 +365,7 @@ private struct TransitPanel: View {
             Button { model.clearSelection() } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 44, height: 44) }
                 .accessibilityLabel("返回搜尋")
             VStack(alignment: .leading, spacing: 3) {
-                Text(model.selectedStation?.name ?? model.selectedVehicle?.routeName ?? model.selectedRoute?.name ?? "公車動態")
+                Text(model.selectedStation?.name ?? model.selectedVehicle?.routeName ?? model.selectedRouteName ?? "公車動態")
                     .font(.title2.weight(.bold)).lineLimit(2)
                 if let station = model.selectedStation { Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary) }
                 else if let vehicle = model.selectedVehicle { Text(vehicle.plate).font(.subheadline).foregroundStyle(.secondary).monospaced() }
@@ -392,14 +406,20 @@ private struct TransitPanel: View {
             }
         } else if model.mode == .routes {
             let routes = model.routes(query: model.query)
+            let counts = RouteVehicleCounts(vehicles: model.snapshot.vehicles, at: Date())
             if routes.isEmpty { emptyResult }
-            ForEach(routes) { route in
-                Button { model.selectRoute(route) } label: {
+            ForEach(routes) { result in
+                let route = result.route
+                Button { model.selectRoute(route, variantOnly: result.matchedVariant != nil) } label: {
                     HStack(spacing: 12) {
                         RouteBadge(name: route.name)
                         VStack(alignment: .leading, spacing: 4) {
+                            if result.matchedVariant != nil {
+                                Text(result.name).font(.subheadline.weight(.semibold)).lineLimit(2)
+                            }
                             Text("\(route.departure) → \(route.destination)").font(.subheadline).lineLimit(2)
-                            Text("\(model.snapshot.vehicles.filter { $0.parentRouteID == route.parentID && $0.isFresh(at: Date()) }.count) 輛近期回報")
+                            Text("\(counts.count(route: route, allVariants: result.matchedVariant == nil)) 輛可定位" +
+                                 (result.group.variants.count > 1 ? " · \(result.group.variants.count) 個走法" : ""))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 0)
@@ -502,10 +522,37 @@ private struct RouteDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Picker("行駛方向", selection: $model.direction) {
-                Text("往 \(route.destination)").tag("0")
-                Text("往 \(route.departure)").tag("1")
-            }.pickerStyle(.segmented)
+            if model.routeVariants.count > 1 {
+                Menu {
+                    Button { model.changeRouteVariant(nil) } label: {
+                        Label("全部走法", systemImage: model.allRouteVariants ? "checkmark" : "point.topleft.down.to.point.bottomright.curvepath")
+                    }
+                    ForEach(model.routeVariants) { variant in
+                        Button { model.changeRouteVariant(variant) } label: {
+                            if !model.allRouteVariants && variant.id == route.id {
+                                Label(variant.displayName, systemImage: "checkmark")
+                            } else { Text(variant.displayName) }
+                        }
+                    }
+                } label: {
+                    HStack {
+                        Text(model.allRouteVariants ? "全部走法 · \(model.routeVariants.count)" : route.displayName)
+                            .font(.subheadline.weight(.semibold)).lineLimit(2)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.up.chevron.down").font(.caption.weight(.semibold))
+                    }.padding(.horizontal, 14).frame(minHeight: 48)
+                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13))
+                }.accessibilityLabel("選擇路線走法")
+            }
+            if model.routeDirections.count > 1 {
+                Picker("行駛方向", selection: $model.direction) {
+                    ForEach(model.routeDirections, id: \.self) { direction in
+                        Text("往 \(route.destination(direction: direction))").tag(direction)
+                    }
+                }.pickerStyle(.segmented)
+            } else {
+                Text("往 \(route.destination(direction: model.direction))").font(.subheadline).foregroundStyle(.secondary)
+            }
             let buses = model.routeVehicles()
             let count = buses.filter { $0.hasReliablePosition(at: Date()) }.count
             Text("\(count) 輛可定位" + (count < buses.count ? " · \(buses.count - count) 輛等待定位" : ""))
@@ -515,9 +562,13 @@ private struct RouteDetails: View {
                 Divider()
             }
             if buses.isEmpty { Text("目前沒有此方向的車輛回報").font(.subheadline).foregroundStyle(.secondary) }
-            Text("沿線站牌").font(.headline).padding(.top, 8)
+            Text(model.allRouteVariants && model.routeVariants.count > 1 ? "主要站序" : "沿線站牌")
+                .font(.headline).padding(.top, 8)
+            if model.allRouteVariants && model.routeVariants.count > 1 {
+                Text("切換上方走法，可看各支線停靠站。").font(.caption).foregroundStyle(.secondary)
+            }
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                ForEach(model.metadata.orderedStops(routeID: route.id, direction: model.direction)) { stop in
+                ForEach(model.routeStops) { stop in
                     Button {
                         if let station = model.metadata.stations[stop.stationID] { model.selectStation(station) }
                     } label: {
@@ -565,7 +616,7 @@ private struct VehicleDetails: View {
                 } label: { Label("跟隨公車", systemImage: "scope").frame(maxWidth: .infinity, minHeight: 36) }
                     .buttonStyle(.borderedProminent)
                 Button {
-                    if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction) }
+                    if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction, variantOnly: true) }
                 } label: { Text("查看路線").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered)
             }
             if !vehicle.aligned { Text("目前顯示原始 GPS，尚未匹配道路軌跡").font(.caption).foregroundStyle(.secondary) }
@@ -645,6 +696,7 @@ private struct AppInformationView: View {
         NavigationStack {
             List {
                 Section("即時資料") {
+                    Text("\(model.metadata.routeCatalog.groups.count) 條路線 · \(model.metadata.routes.count) 個走法")
                     Text("臺北市公共運輸處公開資料，每 15 秒重新取得。個別公車回報時間以車輛卡片為準。")
                     if let error = model.snapshot.vehicleError { Label(error, systemImage: "wifi.exclamationmark") }
                     if let error = model.snapshot.estimates.error { Text(error) }
