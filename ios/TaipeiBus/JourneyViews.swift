@@ -342,7 +342,14 @@ struct JourneyGuideCard: View {
                         let target = index < option.rides.count ? option.rides[index].boarding.name : planner.destination?.name ?? "目的地"
                         Text("走到 \(target)").font(.title2.weight(.bold)).lineLimit(2)
                         Text(walk.timeLabel + (walk.distance.map { " · \(distanceLabel($0))" } ?? "")).font(.subheadline).foregroundStyle(.secondary)
-                        if index < option.rides.count { JourneyArrivalView(model: model, ride: option.rides[index], walk: walk) }
+                        if index < option.rides.count {
+                            let ride = option.rides[index]
+                            HStack(spacing: 10) {
+                                RouteBadge(name: ride.route.name)
+                                Text("往 \(ride.route.destination(direction: ride.direction))").font(.subheadline)
+                            }
+                            JourneyArrivalView(model: model, ride: ride, walk: walk)
+                        }
                         HStack(spacing: 10) {
                             Button { planner.navigateWalk(index) } label: {
                                 Label("步行導航", systemImage: "arrow.triangle.turn.up.right.diamond.fill")

@@ -192,9 +192,11 @@ final class JourneyPlannerModel: ObservableObject {
             guard let self else { return }
             let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate)
             guard !Task.isCancelled, token == generation else { return }
+            let estimates = latestSnapshot.estimates
+            let now = Date()
             func availability(_ trip: TransitTrip) -> Int {
                 guard let ride = trip.rides.first,
-                      let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()) else { return 1 }
+                      let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now) else { return 1 }
                 return eta >= 0 ? 0 : [-2, -3, -4].contains(eta) ? 2 : 1
             }
             let ordered = trips.sorted {

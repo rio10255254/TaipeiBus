@@ -11,7 +11,8 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var updatedAt: Date?
     private let manager = CLLocationManager()
     var usableCoordinate: Coordinate? {
-        guard let updatedAt, abs(updatedAt.timeIntervalSinceNow) < 300 else { return nil }
+        guard manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways,
+              let updatedAt, abs(updatedAt.timeIntervalSinceNow) < 300 else { return nil }
         return coordinate
     }
 
@@ -32,9 +33,9 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             manager.requestLocation()
         case .restricted, .denied:
             requesting = false
-            message = "定位未開啟，可直接搜尋站牌"
+            message = "定位未開啟，可手動選擇出發地"
         @unknown default:
-            message = "目前無法定位，可直接搜尋站牌"
+            message = "目前無法定位，可手動選擇出發地或站牌"
         }
     }
 
@@ -50,18 +51,18 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         requesting = false
         guard let location = locations.last, location.horizontalAccuracy >= 0,
               abs(location.timestamp.timeIntervalSinceNow) < 120 else {
-            message = "尚未取得位置，可直接搜尋站牌"; return
+            message = "尚未取得位置，可手動選擇出發地或站牌"; return
         }
         coordinate = Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
         accuracy = location.horizontalAccuracy
         updatedAt = location.timestamp
-        if coordinate?.isInServiceArea == false { message = "目前在服務範圍外，可搜尋台北站牌" }
+        if coordinate?.isInServiceArea == false { message = "目前在服務範圍外，可手動選擇台北出發地" }
         else if location.horizontalAccuracy > 100 { message = "定位約 ±\(Int(location.horizontalAccuracy.rounded())) m，請確認站牌方向" }
         else { message = nil }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         requesting = false
-        message = "目前無法定位，可直接搜尋站牌"
+        message = "目前無法定位，可手動選擇出發地或站牌"
     }
 }
