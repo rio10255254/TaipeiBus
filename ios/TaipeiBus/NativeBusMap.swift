@@ -195,6 +195,8 @@ struct NativeBusMap: UIViewRepresentable {
             buses.selectedID = model.selectedVehicleID
             buses.highlightSelected = model.highlightVehicle
             buses.reduceMotion = reduceMotion
+            // Station dots remain tappable; their names must not cover the vehicle's anchored information.
+            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.selectedVehicleID == nil
             buildingOpacityTarget = model.highlightVehicle && model.selectedVehicleID != nil ? 0.26 : 1
             if reduceMotion {
                 buildingOpacity = buildingOpacityTarget

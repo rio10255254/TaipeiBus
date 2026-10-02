@@ -90,25 +90,26 @@ jobs:
           BUS_SIM_DEVICE="$device" python3 - <<'PY'
           import os, signal, subprocess, time
           output = os.path.join(os.environ['RUNNER_TEMP'], 'iPhone17-live-follow.mp4')
+          simctl = subprocess.check_output(['xcrun', '--find', 'simctl'], text=True).strip()
           with open(os.path.join(os.environ['RUNNER_TEMP'], 'video-record.log'), 'w') as log:
-              # Launch in the foreground Python process so the child does not inherit a shell's ignored SIGINT.
-              process = subprocess.Popen(['xcrun', 'simctl', 'io', os.environ['BUS_SIM_DEVICE'],
+              # Signal the actual recorder and its process group, rather than only the xcrun wrapper.
+              process = subprocess.Popen([simctl, 'io', os.environ['BUS_SIM_DEVICE'],
                   'recordVideo', '--codec=h264', output], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
               try:
                   time.sleep(32)
-                  process.send_signal(signal.SIGINT)
-                  process.wait(timeout=20)
+                  os.killpg(process.pid, signal.SIGINT)
+                  process.wait(timeout=30)
               except subprocess.TimeoutExpired:
-                  process.terminate()
+                  os.killpg(process.pid, signal.SIGTERM)
                   try:
                       process.wait(timeout=5)
                   except subprocess.TimeoutExpired:
-                      process.kill()
+                      os.killpg(process.pid, signal.SIGKILL)
                       process.wait(timeout=5)
-                  raise SystemExit('Simulator recording did not finalize within 20 seconds.')
+                  raise SystemExit('Simulator recording did not finalize within 30 seconds.')
               finally:
                   if process.poll() is None:
-                      process.kill()
+                      os.killpg(process.pid, signal.SIGKILL)
                       process.wait(timeout=5)
               if process.returncode != 0:
                   raise SystemExit(f'Simulator recording failed with exit code {process.returncode}.')
