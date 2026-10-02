@@ -106,8 +106,8 @@ private actor TripNetwork {
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
-        let nearby = planner!.plan(from: from, to: to, maximumWalk: 800)
-        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: 1_200) : nearby
+        let nearby = planner!.plan(from: from, to: to, maximumWalk: 800, limit: 18)
+        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: 1_200, limit: 18) : nearby
     }
 }
 
@@ -195,13 +195,22 @@ final class JourneyPlannerModel: ObservableObject {
             let estimates = latestSnapshot.estimates
             let now = Date()
             func availability(_ trip: TransitTrip) -> Int {
+                for ride in trip.rides {
+                    if let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now),
+                       [-2, -3, -4].contains(eta) { return 2 }
+                }
                 guard let ride = trip.rides.first,
                       let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now) else { return 1 }
-                return eta >= 0 ? 0 : [-2, -3, -4].contains(eta) ? 2 : 1
+                return eta >= 0 && trip.accessDistance / 1.2 <= Double(eta) + 45 ? 0 : 1
             }
-            let ordered = trips.sorted {
+            func waitingScore(_ trip: TransitTrip) -> Double {
+                guard let ride = trip.rides.first,
+                      let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now), eta >= 0 else { return trip.score }
+                return trip.score + max(0, Double(eta) - trip.accessDistance / 1.2)
+            }
+            let ordered = trips.filter { availability($0) != 2 }.sorted {
                 let a = availability($0), b = availability($1)
-                return a == b ? $0.score < $1.score : a < b
+                return a == b ? waitingScore($0) < waitingScore($1) : a < b
             }
             var choices = ordered.prefix(3).map { trip -> JourneyOption in
                 var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
@@ -297,9 +306,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func begin() {
         guard let option = selected, option.walkIssue == nil, !checkingWalks else { return }
-        if let ride = option.rides.first,
-           let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()),
-           [-2, -3, -4].contains(eta) { return }
+        guard unavailableBoarding(option) == nil else { return }
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -323,6 +330,13 @@ final class JourneyPlannerModel: ObservableObject {
         guard let destination else { return }
         let source = origin?.mapItem ?? MKMapItem.forCurrentLocation()
         MKMapItem.openMaps(with: [source, destination.mapItem], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeTransit])
+    }
+    func unavailableBoarding(_ option: JourneyOption) -> (route: String, status: Int)? {
+        for ride in option.rides {
+            if let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()),
+               [-2, -3, -4].contains(eta) { return (ride.route.name, eta) }
+        }
+        return nil
     }
     private func cancelRequests() {
         task?.cancel(); task = nil; directions.forEach { $0.cancel() }; directions = []

@@ -296,8 +296,7 @@ private struct JourneyStartButton: View {
     var body: some View {
         if let option = planner.selected {
             let ride = option.rides.first
-            let eta = ride.flatMap { model.snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: Date()) }
-            let closed = eta.map { [-2, -3, -4].contains($0) } ?? false
+            let unavailable = planner.unavailableBoarding(option)
             VStack(spacing: 8) {
                 if let walk = option.walks.first {
                     Text(planner.checkingWalks ? "確認步行路線中" :
@@ -308,8 +307,10 @@ private struct JourneyStartButton: View {
                     Label(option.walkingOnly ? "開始步行" : "開始行程", systemImage: "arrow.up.right")
                         .font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 54)
                 }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                    .disabled(planner.planning || planner.checkingWalks || option.walkIssue != nil || closed)
-                if closed { Text("此站目前無法上車：\(EstimateFeed.label(eta))").font(.caption).foregroundStyle(.secondary) }
+                    .disabled(planner.planning || planner.checkingWalks || option.walkIssue != nil || unavailable != nil)
+                if let unavailable {
+                    Text("\(unavailable.route) 上車站：\(EstimateFeed.label(unavailable.status))").font(.caption).foregroundStyle(.secondary)
+                }
                 if let issue = option.walkIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
             }
         }

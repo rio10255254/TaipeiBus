@@ -30,7 +30,7 @@ struct TransitHomeView: View {
             .sorted { $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position) }.prefix(2).map { $0 }
     }
 
-    var body: some View {
+    private var mapContent: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, location: location.usableCoordinate,
@@ -184,6 +184,10 @@ struct TransitHomeView: View {
                 }
             }
         }
+    }
+
+    var body: some View {
+        mapContent
         .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .sheet(isPresented: $showSearch) {
@@ -258,6 +262,10 @@ struct TransitHomeView: View {
         }
 #endif
     }
+
+    private func openBrowse(_ mode: BrowseMode) {
+        model.clearSelection(); model.mode = mode; model.sheetDetent = .large; showSearch = true
+    }
 }
 
 private struct MapBottomControlsHeightKey: PreferenceKey {
@@ -280,9 +288,6 @@ private struct PhoneGlassBackground<S: Shape>: ViewModifier {
         }
     }
 
-    private func openBrowse(_ mode: BrowseMode) {
-        model.clearSelection(); model.mode = mode; model.sheetDetent = .large; showSearch = true
-    }
 }
 
 extension View {

@@ -278,7 +278,8 @@ final class TransitAppModel: ObservableObject {
             "destination": planner.destination?.name ?? "", "using_location": planner.usingLocation,
             "origin": planner.origin?.name ?? "",
             "rides": option.rides.map { ["route": $0.route.displayName, "direction": $0.direction,
-                                        "boarding": $0.boarding.name, "alighting": $0.alighting.name] },
+                                        "boarding": $0.boarding.name, "alighting": $0.alighting.name,
+                                        "boarding_eta_seconds": snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: Date()).map { String($0) } ?? "unknown"] },
             "walks": option.walks.map { ["verified": $0.verified, "points": $0.coordinates.count,
                                         "distance": $0.distance ?? -1, "seconds": $0.duration ?? -1] as [String: Any] }
         ]

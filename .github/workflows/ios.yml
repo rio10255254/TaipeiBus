@@ -130,6 +130,8 @@ jobs:
           assert state['destination'] and state['rides'], 'The requested bus journey is missing.'
           if 'manual-origin' in sys.argv[4]:
               assert not state['using_location'] and state['origin'], 'Manual departure requires a selected origin.'
+          if state['started']:
+              assert all(ride['boarding_eta_seconds'] not in ['-2', '-3', '-4'] for ride in state['rides']), 'A known closed bus segment was started.'
           assert all(leg['verified'] and leg['seconds'] >= 0 and
               (leg['distance'] < 1 or leg['points'] >= 2) for leg in state['walks']), 'Apple walking routes were not verified.'
           Path(sys.argv[4]).write_text(json.dumps(state, ensure_ascii=False, indent=2))
