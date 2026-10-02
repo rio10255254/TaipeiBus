@@ -276,6 +276,7 @@ final class TransitAppModel: ObservableObject {
         let state: [String: Any] = [
             "token": arguments[index + 1], "phase": phase, "started": planner.started,
             "destination": planner.destination?.name ?? "", "using_location": planner.usingLocation,
+            "origin": planner.origin?.name ?? "",
             "rides": option.rides.map { ["route": $0.route.displayName, "direction": $0.direction,
                                         "boarding": $0.boarding.name, "alighting": $0.alighting.name] },
             "walks": option.walks.map { ["verified": $0.verified, "points": $0.coordinates.count,

@@ -6,6 +6,9 @@ struct JourneyPlanningView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     @ObservedObject var location: LocationService
+    let compact: Bool
+    let expand: () -> Void
+    let collapse: () -> Void
     @StateObject private var search = PlaceSearch()
     @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
@@ -19,10 +22,13 @@ struct JourneyPlanningView: View {
     @State private var resolvingQuery = ""
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
+    private var showingPreview: Bool { compact && !searchingPlaces && !planner.started && planner.selected != nil }
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if showingPreview { JourneyMapPreviewView(model: model, planner: planner) }
+                    else {
                     originButton
                     if searchingPlaces { placeSearch }
                     else {
@@ -38,8 +44,9 @@ struct JourneyPlanningView: View {
                             JourneyItineraryView(model: model, planner: planner)
                             Button("結束行程") { planner.finish(); dismiss() }.frame(minHeight: 44)
                         } else {
-                            JourneyOptionsView(model: model, planner: planner)
+                            JourneyOptionsView(model: model, planner: planner, collapse: collapse)
                         }
+                    }
                     }
                 }.padding(.horizontal, 20).padding(.vertical, 16)
             }
@@ -53,9 +60,14 @@ struct JourneyPlanningView: View {
                     .padding(.horizontal, 20).padding(.vertical, 12).background(.regularMaterial)
                 }
             }
-            .navigationTitle(editingOrigin ? "從哪裡出發？" : searchingPlaces ? "你想去哪裡？" : "搭車方案")
+            .navigationTitle(showingPreview ? planner.destination?.name ?? "路線預覽" : editingOrigin ? "從哪裡出發？" : searchingPlaces ? "你想去哪裡？" : "搭車方案")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+            .toolbar {
+                if showingPreview { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(showingPreview ? "方案" : "完成") { if showingPreview { expand() } else { dismiss() } }
+                }
+            }
         }
         .onAppear {
             editingDestination = planner.destination == nil
@@ -73,6 +85,9 @@ struct JourneyPlanningView: View {
                 resolveTask?.cancel(); resolveToken = UUID(); resolving = false; search.cancel()
             }
             searchError = nil; search.update(value)
+        }
+        .onChange(of: planner.selectedID) { _, id in
+            if id != nil, !searchingPlaces, !planner.started { focused = false; collapse() }
         }
         .onDisappear { resolveTask?.cancel(); search.cancel() }
     }
@@ -161,6 +176,7 @@ struct JourneyPlanningView: View {
         }.buttonStyle(.plain).disabled(resolving)
     }
     private func edit(origin: Bool) {
+        expand()
         resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
         editingOrigin = origin; editingDestination = !origin; query = ""; searchError = nil; focused = true
     }
@@ -190,9 +206,34 @@ struct JourneyPlanningView: View {
     }
 }
 
+private struct JourneyMapPreviewView: View {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    var body: some View {
+        if let option = planner.selected {
+            VStack(alignment: .leading, spacing: 12) {
+                if option.walkingOnly { Label("步行即可", systemImage: "figure.walk").font(.headline) }
+                else {
+                    HStack(spacing: 8) {
+                        ForEach(option.rides) { ride in RouteBadge(name: ride.route.name) }
+                        Text(option.rides.count == 1 ? "直達" : "轉乘 1 次").font(.subheadline.weight(.medium))
+                    }
+                    if let first = option.rides.first, let last = option.rides.last {
+                        Text("\(first.boarding.name) → \(last.alighting.name)").font(.subheadline.weight(.semibold)).lineLimit(2)
+                        Text("往 \(first.route.destination(direction: first.direction)) · \(option.rides.reduce(0) { $0 + $1.stopCount }) 站")
+                            .font(.caption).foregroundStyle(.secondary)
+                        JourneyArrivalView(model: model, ride: first, walk: option.walks.first)
+                    }
+                }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
 struct JourneyOptionsView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
+    let collapse: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if planner.planning || model.loading {
@@ -200,7 +241,7 @@ struct JourneyOptionsView: View {
             }
             if let message = planner.message { Text(message).font(.subheadline).foregroundStyle(.secondary) }
             ForEach(planner.options) { option in
-                Button { planner.select(option) } label: {
+                Button { planner.select(option); collapse() } label: {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack(spacing: 8) {
                             if option.walkingOnly { Label("步行即可", systemImage: "figure.walk").font(.headline) }

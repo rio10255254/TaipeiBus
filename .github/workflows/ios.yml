@@ -128,6 +128,8 @@ jobs:
           assert state['token'] == sys.argv[2], 'Journey state belongs to an older launch.'
           assert state['phase'] == sys.argv[3], f'Unexpected journey phase: {state}'
           assert state['destination'] and state['rides'], 'The requested bus journey is missing.'
+          if 'manual-origin' in sys.argv[4]:
+              assert not state['using_location'] and state['origin'], 'Manual departure requires a selected origin.'
           assert all(leg['verified'] and leg['seconds'] >= 0 and
               (leg['distance'] < 1 or leg['points'] >= 2) for leg in state['walks']), 'Apple walking routes were not verified.'
           Path(sys.argv[4]).write_text(json.dumps(state, ensure_ascii=False, indent=2))
@@ -235,6 +237,12 @@ jobs:
           verify_journey_ready iPhone17-journey-options planning
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-options.png"
           sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-destination '臺北車站' --preview-journey-expanded
+          sleep 6
+          wait_route_map_ready iPhone17-journey-expanded
+          verify_journey_ready iPhone17-journey-expanded planning
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-expanded.png"
+          sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-destination '臺北車站' --preview-journey-start
           sleep 6
           wait_route_map_ready iPhone17-journey-walking
@@ -253,6 +261,11 @@ jobs:
           wait_route_map_ready iPhone17-journey-manual-origin
           verify_journey_ready iPhone17-journey-manual-origin planning
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-manual-origin.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-route 307 --preview-details
+          sleep 6
+          wait_route_map_ready iPhone17-compact-route
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-compact-route.png"
           sim terminate "$device" com.example.TaipeiBus
           fi
           if [ '${{ inputs.preview_scope }}' = 'all' ]; then

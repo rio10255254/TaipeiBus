@@ -11,6 +11,7 @@ struct TransitHomeView: View {
     @State private var showDetails = false
     @State private var showInformation = false
     @State private var showJourney = false
+    @State private var journeyDetent: PresentationDetent = .large
     @State private var pendingJourneyDetail = false
     @State private var bottomControlsHeight: CGFloat = 210
     @StateObject private var selectionOverlay = MapSelectionOverlay()
@@ -21,7 +22,8 @@ struct TransitHomeView: View {
         planner = model.planner
     }
 
-    private var hasSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || planner.selected != nil }
+    private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
+    private var hasSelection: Bool { hasTransitSelection || planner.selected != nil }
     private var nearbyStations: [Station] {
         guard !hasSelection, let position = location.usableCoordinate, position.isInServiceArea else { return [] }
         return model.metadata.stations.values.filter { $0.coordinate.distance(to: position) <= 800 }
@@ -32,12 +34,12 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, location: location.usableCoordinate,
-                             bottomInset: showDetails ? geometry.size.height * 0.48 + 50 : bottomControlsHeight + geometry.safeAreaInsets.bottom + 24,
+                             bottomInset: showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) || (showJourney && planner.selected != nil) ? 330 + geometry.safeAreaInsets.bottom + 24 : bottomControlsHeight + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
                     .accessibilityLabel("台北公車地圖")
-                if !showDetails && !showSearch && !showJourney {
+                if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                     MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
                 }
                 HStack(alignment: .top, spacing: 12) {
@@ -54,7 +56,7 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
 
-                if !showDetails, !planner.started, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                if !showDetails, !showSearch, !planner.started, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(model.selectedRouteName ?? route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
                             .foregroundStyle(Color.accentColor).lineLimit(2)
@@ -82,6 +84,7 @@ struct TransitHomeView: View {
                     }
                     .phoneGlass(in: Capsule()).padding(.top, 100)
                 }
+                if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                 VStack(spacing: 0) {
                     Spacer()
                 PhoneGlassGroup {
@@ -106,9 +109,9 @@ struct TransitHomeView: View {
                             .background(.regularMaterial, in: Capsule())
                     }
                     if planner.started {
-                        JourneyGuideCard(model: model, planner: planner) { showJourney = true }
+                        JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else {
-                        Button { showJourney = true } label: {
+                        Button { journeyDetent = planner.selected == nil ? .large : .height(330); showJourney = true } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
                                 Text("你想去哪裡？").font(.body.weight(.semibold))
@@ -133,7 +136,7 @@ struct TransitHomeView: View {
                         }.transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                     HStack(spacing: 4) {
-                        Button { model.mode = .stops; showSearch = true } label: {
+                        Button { openBrowse(.stops) } label: {
                             Label("站牌", systemImage: "mappin.and.ellipse").font(.subheadline.weight(.medium))
                                 .padding(.horizontal, 18).frame(minHeight: 56)
                         }.buttonStyle(PhonePressStyle())
@@ -150,7 +153,7 @@ struct TransitHomeView: View {
                                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                             }.accessibilityLabel(model.following ? "停止跟車" : "跟車")
                         } else {
-                            Button { model.mode = .routes; showSearch = true } label: {
+                            Button { openBrowse(.routes) } label: {
                                 Label("路線", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                                     .font(.subheadline.weight(.medium)).padding(.horizontal, 12).frame(minHeight: 50)
                             }
@@ -173,6 +176,7 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 24).padding(.bottom, 12)
                 .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
+                }
                 if let error = model.mapError ?? model.loadError {
                     Text(error).font(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
@@ -183,22 +187,29 @@ struct TransitHomeView: View {
         .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .sheet(isPresented: $showSearch) {
-            TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: true)
-                .presentationDetents([.large])
+            TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
+                .presentationDetents(hasTransitSelection ? [.height(330), .large] : [.large], selection: $model.sheetDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
         .sheet(isPresented: $showDetails) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
-                .presentationDetents([.medium, .large])
+                .presentationDetents([.height(330), .large], selection: $model.sheetDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
         .sheet(isPresented: $showJourney, onDismiss: {
             if pendingJourneyDetail { pendingJourneyDetail = false; showDetails = true }
         }) {
-            JourneyPlanningView(model: model, planner: planner, location: location)
-                .presentationDetents([.large]).presentationDragIndicator(.visible).presentationCornerRadius(30)
+            JourneyPlanningView(model: model, planner: planner, location: location,
+                                compact: journeyDetent != .large,
+                                expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(330) } })
+                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(330), .large], selection: $journeyDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
+                .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .onChange(of: location.coordinate) { _, position in
@@ -208,34 +219,39 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             let coordinates = planner.mapCoordinates
-            if !showDetails {
+            if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
                 model.clearSelection()
                 if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
             }
 #if DEBUG
             model.markJourneyPreviewReady()
-            if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil { showJourney = !planner.started }
+            if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil {
+                showJourney = !planner.started
+                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(330)
+            }
 #endif
         }
         .onChange(of: model.loading) { _, loading in
             if !loading, planner.destination != nil, planner.options.isEmpty { planner.plan(metadata: model.metadata) }
         }
         .onChange(of: model.selectionRevision) { _, _ in
+            let wasShowingDetails = showDetails
             selectionOverlay.update(nil)
-            showSearch = false
-            showDetails = false
-            if showJourney { pendingJourneyDetail = true; showJourney = false }
-            else if planner.started { showDetails = true }
+            if showJourney { showDetails = false; pendingJourneyDetail = true; showJourney = false }
+            else if showSearch {
+                withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { model.sheetDetent = .height(330) }
+            }
+            else { showDetails = planner.started || wasShowingDetails }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--preview-details") { showDetails = true }
 #endif
         }
 #if DEBUG
         .onChange(of: model.query) { _, value in
-            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { showSearch = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { model.sheetDetent = .large; showSearch = true }
         }
         .onChange(of: model.mode) { _, _ in
-            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { showSearch = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { model.sheetDetent = .large; showSearch = true }
         }
         .onChange(of: model.loading) { _, loading in
             if !loading && ProcessInfo.processInfo.arguments.contains("--preview-journey-search") { showJourney = true }
@@ -262,6 +278,10 @@ private struct PhoneGlassBackground<S: Shape>: ViewModifier {
         } else {
             content.background(.regularMaterial, in: shape)
         }
+    }
+
+    private func openBrowse(_ mode: BrowseMode) {
+        model.clearSelection(); model.mode = mode; model.sheetDetent = .large; showSearch = true
     }
 }
 
@@ -420,7 +440,7 @@ private struct TransitPanel: View {
 
     private var detailHeader: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { model.clearSelection() } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 44, height: 44) }
+            Button { model.clearSelection(); model.sheetDetent = .large } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 44, height: 44) }
                 .accessibilityLabel("返回搜尋")
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.selectedStation?.name ?? model.selectedVehicle?.routeName ?? model.selectedRouteName ?? "公車動態")
