@@ -36,6 +36,13 @@ struct MapContextLabels: View {
                 }
                 .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .allowsHitTesting(false)
+                if model.planner.selected != nil, model.selectedVehicleID != nil {
+                    Image(systemName: "bus.fill").font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .frame(width: 28, height: 28).background(Color.accentColor, in: Circle())
+                        .overlay(Circle().stroke(.white, lineWidth: 2))
+                        .shadow(color: Color.accentColor.opacity(0.25), radius: 7)
+                        .position(anchor).allowsHitTesting(false)
+                }
                 label.frame(width: width).position(x: x, y: y)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: x)
                     .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: y)
