@@ -2,6 +2,9 @@ name: iPhone app
 
 on:
   push:
+    # Feature branches are checked by pull_request or an explicit preview run.
+    # Running on every branch push also starts a redundant macOS job for those events.
+    branches: ['main']
     paths: ['ios/**', '.github/workflows/ios.yml', '.github/workflows/testflight.yml']
   pull_request:
     paths: ['ios/**', '.github/workflows/ios.yml', '.github/workflows/testflight.yml']
@@ -12,7 +15,7 @@ on:
         type: boolean
         default: false
       preview_scope:
-        description: 'Capture all phone states or focus on route catalog and variants'
+        description: 'Choose which iPhone screens to capture'
         type: choice
         options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation']
         default: 'all'
@@ -42,18 +45,21 @@ jobs:
           python3 ios/release-check.py
       - name: Build native app
         run: |
-          set -o pipefail
+          set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
+      - name: Package simulator app for requested preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        run: |
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
         run: |
-          set -o pipefail
+          set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
@@ -413,4 +419,5 @@ jobs:
             ${{ runner.temp }}/ios-runtime.log
             ${{ runner.temp }}/iPhone17-live-follow.mp4
             ${{ runner.temp }}/video-record.log
+          if-no-files-found: ignore
           retention-days: 7

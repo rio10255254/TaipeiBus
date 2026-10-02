@@ -1,22 +1,23 @@
 # TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
-更新：2026-10-02。此專案不需要你先取得 Mac；Xcode 建置和自動簽名由 GitHub 的 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。
+更新：2026-10-03。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。私人儲存庫的製作時間與預覽檔案會計入 GitHub Actions 用量，與 GitHub Releases 的成品存放空間分開計算。
 
 ## 目前進度
 
 | 項目 | 狀態／處理方式 |
 | --- | --- |
 | 原生 iPhone App | SwiftUI、CoreLocation、MapLibre Native／Metal；優先適配 iPhone 17，最低 iOS 17 |
-| 版本 | `0.2.0`；build 在上傳前查 Apple 現有版本並自動遞增，重跑也使用不同 build |
+| 版本 | `0.4.1` 已通過原生編譯；最近確認成功加入內部群組的是 `0.4.0 (8.1.0)`；新版本尚未上傳 |
 | 建置工具 | 固定 Xcode 26.3；符合 2026-04-28 起 iOS 26 SDK 以上的上傳要求 |
 | App 圖示 | 已有 1024 × 1024 RGB 圖示，無透明背景 |
 | 定位／隱私 | 已有使用期間定位說明、Privacy Manifest、App 內隱私說明及政策 HTML 草稿 |
 | 網路與加密 | 使用 HTTPS；現有 Info.plist 宣告 `ITSAppUsesNonExemptEncryption=false`，若新增自訂加密須重新評估 |
-| 測試 | 21 項公車核心測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
+| 測試 | 49 項離線公車核心測試、3 項手動預覽時執行的官方資料測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
 | GitHub 儲存庫 | 私人 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；發布流程已獨立 |
-| Apple 帳號授權 | **尚未提供**：目前沒有四個簽名 Secrets，不能簽名或上傳 |
-| App 身分 | 提案 `com.rio10255254.TaipeiBus`；未驗證註冊、尚未建立 App Store Connect App 記錄 |
-| 真機／TestFlight | **尚未上傳或安裝**；通過 unsigned 編譯不代表已可在 iPhone 安裝 |
+| Apple 帳號授權 | 已設定 API 授權與發行憑證、描述檔；最近成功發佈已完成正式簽名及上傳 |
+| App 身分 | `com.rio10255254.TaipeiBus`；已建立 App Store Connect App 記錄並完成過發佈 |
+| 真機／TestFlight | `0.4.0 (8.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
+| 目前發佈阻礙 | `0.4.1` 發佈工作尚未開始製作，GitHub 提示付款失敗或支出上限；需查帳號帳務頁面 |
 
 SDK 要求見 [Apple 2026 上傳公告](https://developer.apple.com/news/?id=ueeok6yw)。模擬器 `.app` 和原始碼 ZIP 都不能直接安裝到 iPhone。
 
@@ -94,12 +95,12 @@ App 記錄建立完成後，執行 `operation=check-only`。這只讀取帳號�
 
 ## 自動上傳做什麼
 
-`TestFlight` workflow 只有手動明確選 `upload` 才發布；一般 push 和 PR 只做測試／編譯。不同發布依序排隊，不會因新提交而中斷已開始的上傳。
+`TestFlight` workflow 只有手動明確選 `upload` 才發布；`main` 提交和 PR 只做測試／編譯。修改分支的普通提交不另開重複工作，未建立 PR 時可手動驗證。一般檢查只保存紀錄，只有手動要求預覽才打包模擬器 App。不同發布依序排隊，不會因新提交而中斷已開始的上傳。
 
 1. 檢查圖示、隱私 Manifest、定位文案、版本、平台與測試說明。
 2. 驗證 App ID／App 記錄，查現有 build，選出唯一 `major.attempt.0` build number。
-3. 執行發布腳本測試與 21 項 Swift 核心測試。
-4. 使用 Release、iPhoneOS SDK、正確 Team／Bundle ID／版本自動 archive。
+3. 執行發布腳本測試與 49 項離線 Swift 核心測試。
+4. 使用 Release、iPhoneOS SDK、正確 Team／Bundle ID／版本與發行簽名 archive。
 5. 驗證實際 archive 的簽名、SDK、圖示、Manifest、dSYM 與版本，確認沒有 Debug 預覽入口。
 6. 使用 Xcode 直接上傳 App Store Connect。禁止 Xcode 自動改寫 build number，以便可靠核對。
 7. 只追蹤這次指定的 App、marketing version 和 build number。等待 Apple processing；確認可內部測試後，建立／沿用 `TaipeiBus Internal` 群組並加入該 build。
@@ -140,6 +141,14 @@ iPhone 安裝 Apple 的 TestFlight，使用對應測試者 Apple 帳號，接受
 
 接續操作：Run workflow → `operation=finish-processing` → 填回條中的同一 `bundle_id`、`version`、`resume_build`。這只查詢該 build、更新測試文案並掛群組，不會再次 archive／上傳。重跑群組掛載會跳過已存在的關聯。
 
+### GitHub 在幾秒內失敗，沒有開始製作
+
+先看執行頁面的錯誤註記，而非只看紅色 `Run failed`。若註記提到付款失敗或 spending limit，且工作沒有任何步驟，代表 GitHub 尚未分配製作電腦；沒有執行 App 編譯，也沒有上傳到 Apple。重跑、修改 App 或移動成品到 Releases 都不能解除帳號限制。
+
+在 [GitHub 帳務總覽](https://github.com/settings/billing/summary)核對 Actions 用量、Budgets 的停止使用設定及付款狀態。私人儲存庫有依帳號方案計算的免費製作時間與檔案額度；標準電腦在公開儲存庫的規則不同。不要只憑這則共用錯誤訊息斷定是哪一項超額，也不要把現有檔案大小視為完整帳務用量。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+
+[GitHub Releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)的成品存放及下載限制是另一套規則。調高支出上限、更改付款資料或公開儲存庫需由帳號持有人決定；本專案的製作流程不會自動變更這些設定。解除帳號限制後，再執行一次 `operation=upload`；若之前已上傳成功，應依回條使用 `finish-processing`，避免重傳。
+
 ## 外部測試：額外需求
 
 確定內部實機測試可用後，在 App Store Connect 建立外部測試群組、選同一 build，依 Apple 介面補齊：
@@ -174,7 +183,7 @@ TestFlight 可供 Beta 安裝，不等於已在 App Store 公開上架。正式�
 | 檔案 | 用途 |
 | --- | --- |
 | `.github/workflows/testflight.yml` | 帳號預檢、註冊 App ID、Release 上傳、處理接續 |
-| `.github/workflows/ios.yml` | 一般提交的核心／發布腳本測試與 Debug／Release 編譯 |
+| `.github/workflows/ios.yml` | `main` 提交／PR／手動驗證的核心及發布腳本測試與 Debug／Release 編譯 |
 | `ios/Configure-TestFlight.ps1` | Windows 一次設定四個 Secrets 及選用 Variables |
 | `ios/release/testflight.json` | 預設 App 身分、版本、語言與內部群組名稱 |
 | `ios/release/beta-description.zh-Hant.txt` | Beta App Description |
@@ -186,4 +195,4 @@ TestFlight 可供 Beta 安裝，不等於已在 App Store 公開上架。正式�
 
 本機可先跑 `python ios/release-check.py`；發布腳本測試使用 `ruby ios/release/apple_client_test.rb`。Mac 可執行 `swift test --package-path ios/TransitCore` 或 `ios/verify-on-mac.sh`。
 
-需要新原生照片時，另執行 `iPhone app` workflow，勾選 `capture_preview=true`；生成 10 張 iPhone 17 原生即時資料截圖，選用影片只在可驗證有效時保留。正常提交不啟動模擬器，TestFlight 上傳也不等待截圖／影片。
+需要新原生照片時，執行 `iPhone app` workflow，勾選 `capture_preview=true` 並選擇所需畫面；選用影片只在可驗證有效時保留。普通提交不啟動模擬器、不打包預覽 App，TestFlight 上傳也不等待截圖／影片。單純檢查不需在自動檢查之後再手動重跑。
