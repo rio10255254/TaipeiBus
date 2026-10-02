@@ -14,7 +14,7 @@ on:
       preview_scope:
         description: 'Capture all phone states or focus on route catalog and variants'
         type: choice
-        options: ['all', 'routes', 'journeys']
+        options: ['all', 'routes', 'journeys', 'journey-layout']
         default: 'all'
 
 permissions:
@@ -204,7 +204,7 @@ jobs:
             sim location "$device" set 25.0377,121.56
             sim privacy "$device" grant location com.example.TaipeiBus
           fi
-          if [ '${{ inputs.preview_scope }}' != 'journeys' ]; then
+          if [ '${{ inputs.preview_scope }}' = 'all' ] || [ '${{ inputs.preview_scope }}' = 'routes' ]; then
           launch_ready --preview-route-search ''
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-all-routes.png"
@@ -225,6 +225,7 @@ jobs:
           sim terminate "$device" com.example.TaipeiBus
           fi
           if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
+          if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-destination-home.png"
@@ -233,6 +234,7 @@ jobs:
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-destination-search.png"
           sim terminate "$device" com.example.TaipeiBus
+          fi
           launch_ready --preview-destination '臺北車站'
           sleep 6
           wait_route_map_ready iPhone17-journey-options
@@ -245,6 +247,7 @@ jobs:
           verify_journey_ready iPhone17-journey-expanded planning
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-expanded.png"
           sim terminate "$device" com.example.TaipeiBus
+          if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready --preview-destination '臺北車站' --preview-journey-start
           sleep 6
           wait_route_map_ready iPhone17-journey-walking
@@ -269,6 +272,7 @@ jobs:
           wait_route_map_ready iPhone17-compact-route
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-compact-route.png"
           sim terminate "$device" com.example.TaipeiBus
+          fi
           fi
           if [ '${{ inputs.preview_scope }}' = 'all' ]; then
           launch_ready --preview-route 284 --preview-details

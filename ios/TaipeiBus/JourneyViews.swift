@@ -217,12 +217,21 @@ private struct JourneyMapPreviewView: View {
                     HStack(spacing: 8) {
                         ForEach(option.rides) { ride in RouteBadge(name: ride.route.name) }
                         Text(option.rides.count == 1 ? "直達" : "轉乘 1 次").font(.subheadline.weight(.medium))
+                        Spacer(minLength: 0)
+                        if let first = option.rides.first {
+                            TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                                Text("到站：\(EstimateFeed.label(model.snapshot.estimates.value(routeID: first.route.parentID, stopID: first.boarding.id, at: timeline.date)))")
+                                    .font(.subheadline.weight(.semibold)).monospacedDigit().lineLimit(2)
+                            }.layoutPriority(1)
+                        }
                     }
                     if let first = option.rides.first, let last = option.rides.last {
                         Text("\(first.boarding.name) → \(last.alighting.name)").font(.subheadline.weight(.semibold)).lineLimit(2)
                         Text("往 \(first.route.destination(direction: first.direction)) · \(option.rides.reduce(0) { $0 + $1.stopCount }) 站")
                             .font(.caption).foregroundStyle(.secondary)
-                        JourneyArrivalView(model: model, ride: first, walk: option.walks.first)
+                        if first.route.displayName != first.route.name {
+                            Text(first.route.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
                     }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading)
@@ -302,6 +311,14 @@ private struct JourneyStartButton: View {
                     Text(planner.checkingWalks ? "確認步行路線中" :
                          "\(walk.timeLabel) · \(ride?.boarding.name ?? planner.destination?.name ?? "目的地")")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                if let ride, let walk = option.walks.first {
+                    TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                        if let eta = model.snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: timeline.date),
+                           eta >= 0, let duration = walk.duration, duration > Double(eta) + 45 {
+                            Text("這班可能趕不上，請留意下一班或其他方案").font(.caption).foregroundStyle(.orange)
+                        }
+                    }
                 }
                 Button(action: begin) {
                     Label(option.walkingOnly ? "開始步行" : "開始行程", systemImage: "arrow.up.right")
