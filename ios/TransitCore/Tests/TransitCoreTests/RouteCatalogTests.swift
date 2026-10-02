@@ -148,6 +148,29 @@ final class RouteCatalogTests: XCTestCase {
         XCTAssertEqual(matched.coordinate.latitude, 25.0403, accuracy: 0.000001)
     }
 
+    func testWideRouteOverviewFitsAboveAFormAndStaysCenteredOnTheRoute() throws {
+        let points = [Coordinate(latitude: 24.995, longitude: 121.45), Coordinate(latitude: 25.066, longitude: 121.57)]
+        let overview = try XCTUnwrap(RouteOverview(coordinates: points, viewportWidth: 378, viewportHeight: 278))
+        XCTAssertTrue(overview.center.isInServiceArea)
+        let center = overview.center.mercator, scale = 512 * pow(2, overview.zoom)
+        for point in points {
+            XCTAssertLessThan(abs(point.mercator.x - center.x) * scale, (378 - 48) / 2)
+            XCTAssertLessThan(abs(point.mercator.y - center.y) * scale, (278 - 48) / 2)
+        }
+        let full = try XCTUnwrap(RouteOverview(coordinates: points, viewportWidth: 378, viewportHeight: 700))
+        XCTAssertGreaterThanOrEqual(full.zoom, overview.zoom)
+        XCTAssertEqual(full.center, overview.center)
+    }
+
+    func testOverviewRejectsInvalidViewportsAndIgnoresWorldOriginOutliers() throws {
+        let points = [Coordinate.taipei, Coordinate(latitude: 0, longitude: 0)]
+        XCTAssertNil(RouteOverview(coordinates: points, viewportWidth: 0, viewportHeight: 874))
+        XCTAssertNil(RouteOverview(coordinates: [], viewportWidth: 402, viewportHeight: 874))
+        let overview = try XCTUnwrap(RouteOverview(coordinates: points, viewportWidth: 402, viewportHeight: 874))
+        XCTAssertLessThan(overview.center.distance(to: .taipei), 1)
+        XCTAssertTrue(overview.zoom.isFinite)
+    }
+
     /// Optional cloud audit: compare the decoder/catalog against every currently published official ID.
     func testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant() throws {
         guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else {

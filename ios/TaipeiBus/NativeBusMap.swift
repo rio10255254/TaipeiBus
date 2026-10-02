@@ -24,7 +24,8 @@ struct NativeBusMap: UIViewRepresentable {
         let map = MLNMapView(frame: .zero, styleURL: style)
         map.delegate = context.coordinator
         map.maximumZoomLevel = 20
-        map.minimumZoomLevel = 11
+        map.minimumZoomLevel = 9
+        map.automaticallyAdjustsContentInset = false
         map.showsUserLocation = false // A single Core Location service owns permission and location requests.
         map.showsLogoView = false
         map.attributionButtonPosition = .bottomLeft
@@ -87,6 +88,9 @@ struct NativeBusMap: UIViewRepresentable {
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
         private var positionedInitialCamera = false
+#if DEBUG
+        private var lastPreviewCameraSignature = ""
+#endif
 
         init(model: TransitAppModel, overlay: MapSelectionOverlay) { self.model = model; self.overlay = overlay }
         func attach(_ map: MLNMapView) {
@@ -258,6 +262,9 @@ struct NativeBusMap: UIViewRepresentable {
                 }
             }
             updateStationAnchor()
+#if DEBUG
+            recordPreviewCamera(mapView, fullyRendered: fullyRendered)
+#endif
         }
 
         private func point(_ coordinate: Coordinate?) -> MLNPointFeature? {
@@ -288,19 +295,40 @@ struct NativeBusMap: UIViewRepresentable {
                                                                allVariants: model.allRouteVariants).map(\.coordinate)
                 }
                 if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
-                guard let first = coordinates.first else { return }
-                let south = coordinates.map(\.latitude).min() ?? first.latitude
-                let north = coordinates.map(\.latitude).max() ?? first.latitude
-                let west = coordinates.map(\.longitude).min() ?? first.longitude
-                let east = coordinates.map(\.longitude).max() ?? first.longitude
-                if south == north && west == east { map.setCenter(first.locationCoordinate, zoomLevel: 15, animated: !reduceMotion) }
-                else {
-                    let bounds = MLNCoordinateBounds(sw: CLLocationCoordinate2D(latitude: south, longitude: west),
-                                                     ne: CLLocationCoordinate2D(latitude: north, longitude: east))
-                    map.setVisibleCoordinateBounds(bounds, edgePadding: UIEdgeInsets(top: 24, left: 30, bottom: 24, right: 30), animated: !reduceMotion, completionHandler: nil)
-                }
+                guard let overview = RouteOverview(coordinates: coordinates,
+                    viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
+                    viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return }
+                // Use a fixed orientation for an overview. Bounds fitting at a steep pitch with a half-screen
+                // sheet can move the camera away from the route; set an explicit center and Mercator zoom.
+                map.setCamera(MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate,
+                                          altitude: 1000, pitch: 35, heading: 0), animated: false)
+                map.setCenter(overview.center.locationCoordinate, zoomLevel: overview.zoom, animated: false)
             }
         }
+
+#if DEBUG
+        private func recordPreviewCamera(_ map: MLNMapView, fullyRendered: Bool) {
+            let arguments = ProcessInfo.processInfo.arguments
+            guard fullyRendered, model.selectedRoute != nil, model.selectedVehicleID == nil,
+                  lastFocusRevision == model.focusRevision,
+                  let index = arguments.firstIndex(of: "--preview-capture"), arguments.indices.contains(index + 1) else { return }
+            let center = map.centerCoordinate
+            let signature = "\(model.focusRevision):\(map.contentInset.bottom):\(center.latitude):\(center.longitude):\(map.zoomLevel)"
+            guard signature != lastPreviewCameraSignature else { return }
+            let expected = RouteOverview(coordinates: model.routePaths.flatMap { $0 },
+                viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom))
+            let state: [String: Any] = ["token": arguments[index + 1], "route": model.selectedRouteName ?? "",
+                "latitude": center.latitude, "longitude": center.longitude, "zoom": map.zoomLevel, "fully_rendered": true,
+                "expected_latitude": expected?.center.latitude ?? center.latitude,
+                "expected_longitude": expected?.center.longitude ?? center.longitude,
+                "expected_zoom": expected?.zoom ?? map.zoomLevel]
+            guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+                  let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) else { return }
+            try? data.write(to: directory.appendingPathComponent("transit-preview-map.json"), options: .atomic)
+            lastPreviewCameraSignature = signature
+        }
+#endif
 
         @objc private func tick(_ link: CADisplayLink) {
             guard model.isActive, let map, let buses else { return }

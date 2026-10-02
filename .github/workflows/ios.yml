@@ -119,6 +119,33 @@ jobs:
           print('Requested live-data preview is ready.', flush=True)
           PY
           }
+          wait_route_map_ready() {
+            python3 - "$container/Documents/transit-preview-map.json" "$token" "$RUNNER_TEMP/phone-screenshots/$1-camera.json" <<'PY'
+          import json, math, sys, time
+          from pathlib import Path
+          marker, token, output = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+          deadline = time.monotonic() + 90
+          state = None
+          while time.monotonic() < deadline:
+              try:
+                  state = json.loads(marker.read_text())
+                  lat, lon, zoom = state['latitude'], state['longitude'], state['zoom']
+                  distance = math.hypot(lat - state['expected_latitude'],
+                      (lon - state['expected_longitude']) * math.cos(math.radians(lat))) * 111320
+                  if (state['token'] == token and state['fully_rendered'] and
+                      24.94 < lat < 25.23 and 121.35 < lon < 121.72 and
+                      distance < 500 and abs(zoom - state['expected_zoom']) < 0.2):
+                      output.write_text(json.dumps(state, ensure_ascii=False, indent=2))
+                      print('Route camera and rendered map verified:', state['route'],
+                          f'{lat:.6f}, {lon:.6f}, zoom {zoom:.2f}', flush=True)
+                      break
+              except (OSError, ValueError, KeyError):
+                  pass
+              time.sleep(1)
+          else:
+              raise RuntimeError(f'Route camera did not finish at the expected route: {state}')
+          PY
+          }
           if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
           launch_ready
           sleep 15
@@ -168,10 +195,12 @@ jobs:
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-route 307 --preview-details
           sleep 6
+          wait_route_map_ready iPhone17-route-variants
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route-variants.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-route '紅5往陽明山' --preview-details
           sleep 6
+          wait_route_map_ready iPhone17-one-way-variant
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
           if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
