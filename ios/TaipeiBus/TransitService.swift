@@ -7,7 +7,7 @@ actor TransitService {
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()
     private var snapshot = TransitSnapshot()
-    private var busy = false
+    private var refreshTask: Task<TransitSnapshot, Never>?
     private var metadataLoadedAt: Date?
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
@@ -63,26 +63,44 @@ actor TransitService {
     }
 
     func refresh() async -> TransitSnapshot {
-        guard !busy else { return snapshot }
-        busy = true
-        defer { busy = false }
+        // A pull-to-refresh joins polling instead of returning an old snapshot while it is busy.
+        if let task = refreshTask {
+            return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
+        }
+        let task = Task { await self.performRefresh() }
+        refreshTask = task
+        let result = await withTaskCancellationHandler {
+            await task.value
+        } onCancel: { task.cancel() }
+        refreshTask = nil
+        return result
+    }
+
+    private func performRefresh() async -> TransitSnapshot {
         async let vehicleData = fetch("GetBusData")
         async let estimateData = fetch("GetEstimateTime")
         do {
             let data = try await vehicleData
             try Task.checkCancellation()
             let result = try FeedDecoder.vehicles(data, metadata: metadata, previous: snapshot.vehicles, now: Date())
-            snapshot.vehicles = result.vehicles
-            snapshot.sourceUpdatedAt = result.updatedAt
-            snapshot.receivedAt = Date()
-            snapshot.vehicleError = nil
+            if let updatedAt = result.updatedAt,
+               snapshot.sourceUpdatedAt.map({ updatedAt >= $0 }) ?? true {
+                snapshot.vehicles = result.vehicles
+                snapshot.sourceUpdatedAt = updatedAt
+                snapshot.receivedAt = Date()
+                snapshot.vehicleError = nil
+            } else { snapshot.vehicleError = "定位來源回報較舊，保留最後資料" }
         } catch {
             if !Task.isCancelled { snapshot.vehicleError = "定位來源連線中斷，保留最後回報" }
         }
         do {
             let data = try await estimateData
             try Task.checkCancellation()
-            snapshot.estimates = try FeedDecoder.estimates(data)
+            let result = try FeedDecoder.estimates(data)
+            if let updatedAt = result.updatedAt,
+               snapshot.estimates.updatedAt.map({ updatedAt >= $0 }) ?? true {
+                snapshot.estimates = result
+            } else { snapshot.estimates.error = "到站預估來源回報較舊" }
         } catch {
             if !Task.isCancelled { snapshot.estimates.error = "到站預估來源連線中斷" }
         }

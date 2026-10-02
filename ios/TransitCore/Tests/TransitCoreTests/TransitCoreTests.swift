@@ -183,4 +183,158 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertEqual(arrivals[0].nearbyVehicles.map(\.id), ["physical-1"])
         XCTAssertTrue(StationArrival.rows(station: metadata.stations["6921"]!, metadata: metadata, snapshot: snapshot, now: now)[0].nearbyVehicles.isEmpty)
     }
+
+    func testContinuousMatchingDoesNotJumpToParallelReturnLegOrEarlierCrossing() {
+        let a = Coordinate(latitude: 25.04, longitude: 121.55)
+        let b = Coordinate(latitude: 25.04, longitude: 121.56)
+        let c = Coordinate(latitude: 25.04015, longitude: 121.56)
+        let d = Coordinate(latitude: 25.04015, longitude: 121.55)
+        let line = RouteLine(coordinates: [a,b,c,d])
+        let old = line.match(Coordinate(latitude: 25.04, longitude: 121.551), heading: 90)!
+        let noisy = Coordinate(latitude: 25.0401, longitude: 121.5512)
+        XCTAssertEqual(line.match(noisy, heading: 90)?.segment, 2)
+        let continuous = line.match(noisy, heading: 90, previous: old, maximumTravel: 200, travelDirection: 1)!
+        XCTAssertEqual(continuous.segment, 0)
+        XCTAssertLessThan(abs(continuous.along - old.along), 30)
+        let crossing = RouteLine(coordinates: [a,b,c,a,Coordinate(latitude: 25.039, longitude: 121.55)])
+        let from = crossing.candidates(a).max(by: { $0.along < $1.along })!
+        let match = crossing.match(Coordinate(latitude: 25.03995, longitude: 121.55), heading: 180,
+            previous: from, maximumTravel: 80, travelDirection: 1)!
+        XCTAssertEqual(match.segment, 3)
+    }
+
+    func testStationaryGPSNoiseUpdatesTimestampWithoutMovingTheBus() throws {
+        let metadata = try metadata()
+        let first = try FeedDecoder.vehicles(feed([row(["Speed": 0])]), metadata: metadata, previous: [], now: now).vehicles
+        let second = try FeedDecoder.vehicles(feed([row(["Speed": 0, "Azimuth": 270, "Longitude": 121.55016,
+            "DataTime": "2026-10-02 10:15:30"])]), metadata: metadata, previous: first, now: now).vehicles
+        XCTAssertEqual(second[0].coordinate, first[0].coordinate)
+        XCTAssertNotEqual(second[0].rawCoordinate, first[0].rawCoordinate)
+        XCTAssertEqual(second[0].observedAt, now)
+        XCTAssertEqual(second[0].path.count, 1)
+        var motion = VehicleMotion()
+        motion.ingest(first, time: 0, now: now); motion.ingest(second, time: 15, now: now)
+        XCTAssertEqual(motion.pose(id: "physical-1", time: 17, now: now)?.heading, first[0].heading)
+        XCTAssertFalse(motion.isAnimating(time: 17, now: now))
+    }
+
+    func testMissingHeadingIsNotInventedAsNorthAtACrossing() throws {
+        var metadata = try metadata()
+        metadata.lines["sub:10"] = RouteLine(coordinates: [Coordinate(latitude: 25.04, longitude: 121.55),
+            Coordinate(latitude: 25.04, longitude: 121.552), Coordinate(latitude: 25.042, longitude: 121.552),
+            Coordinate(latitude: 25.042, longitude: 121.551), Coordinate(latitude: 25.039, longitude: 121.551)])
+        let vehicles = try FeedDecoder.vehicles(feed([row(["Azimuth": NSNull(), "Longitude": 121.55093])]),
+            metadata: metadata, previous: [], now: now).vehicles
+        XCTAssertFalse(vehicles[0].hasHeading)
+        XCTAssertEqual(vehicles[0].roadMatch?.segment, 0)
+    }
+
+    func testOlderGPSCannotRewindDetailsOrSwitchThePhysicalBusToAnOldRoute() throws {
+        let metadata = try metadata()
+        let first = try FeedDecoder.vehicles(feed([row(["DataTime": "2026-10-02 10:15:30"])]), metadata: metadata, previous: [], now: now).vehicles
+        let older = try FeedDecoder.vehicles(feed([row(["RouteID": 999, "GoBack": "1", "Longitude": 121.559,
+            "DataTime": "2026-10-02 10:15:15"])]), metadata: metadata, previous: first, now: now).vehicles
+        XCTAssertEqual(older[0].observedAt, now)
+        XCTAssertEqual(older[0].routeID, "10")
+        XCTAssertEqual(older[0].coordinate, first[0].coordinate)
+    }
+
+    func testTeleportIsQuarantinedAndTwoCoherentFixesReacquireWithoutDrivingAcrossBlocks() throws {
+        let metadata = try metadata()
+        let first = try FeedDecoder.vehicles(feed([row()]), metadata: metadata, previous: [], now: now).vehicles
+        let rejected = try FeedDecoder.vehicles(feed([row(["Longitude": 121.59, "Latitude": 25.05,
+            "DataTime": "2026-10-02 10:15:30"])]), metadata: metadata, previous: first, now: now).vehicles
+        XCTAssertEqual(rejected[0].coordinate, first[0].coordinate)
+        XCTAssertEqual(rejected[0].observedAt, first[0].observedAt)
+        XCTAssertEqual(rejected[0].trackingIssue, .rejected)
+        let recovered = try FeedDecoder.vehicles(feed([row(["Longitude": 121.5901, "Latitude": 25.05,
+            "DataTime": "2026-10-02 10:15:45"])]), metadata: metadata, previous: rejected, now: now.addingTimeInterval(15)).vehicles
+        XCTAssertNil(recovered[0].trackingIssue)
+        XCTAssertEqual(recovered[0].rawCoordinate.longitude, 121.5901)
+        XCTAssertEqual(recovered[0].path.count, 1)
+    }
+
+    func testMissingPacketRetainsOriginalAgeButAnExplicitEndAndExpiredGraceRemoveTheBus() throws {
+        let metadata = try metadata()
+        let first = try FeedDecoder.vehicles(feed([row()]), metadata: metadata, previous: [], now: now).vehicles
+        let other = row(["CarID": "other", "BusID": "DEF-456", "DataTime": "2026-10-02 10:15:30"])
+        let missing = try FeedDecoder.vehicles(feed([other]), metadata: metadata, previous: first, now: now).vehicles
+        let retained = missing.first { $0.id == "physical-1" }!
+        XCTAssertEqual(retained.observedAt, first[0].observedAt)
+        XCTAssertEqual(retained.trackingIssue, .missing)
+        XCTAssertFalse(retained.hasReliablePosition(at: now))
+        let ended = try FeedDecoder.vehicles(feed([other, row(["DutyStatus": "2", "Longitude": 0,
+            "DataTime": "2026-10-02 10:15:30"])]), metadata: metadata, previous: first, now: now).vehicles
+        XCTAssertEqual(ended.map(\.id), ["other"])
+        let expired = try FeedDecoder.vehicles(feed([other]), metadata: metadata, previous: missing,
+                                               now: now.addingTimeInterval(80)).vehicles
+        XCTAssertFalse(expired.contains { $0.id == "physical-1" })
+    }
+
+    private func progressMetadata() -> TransitMetadata {
+        var metadata = TransitMetadata()
+        let route = BusRoute(id: "10", parentID: "100", name: "284", variantName: "284", departure: "西", destination: "東")
+        metadata.routes["10"] = route; metadata.parents["100"] = route
+        metadata.lines["sub:10"] = RouteLine(coordinates: [Coordinate(latitude: 25.04, longitude: 121.55),
+            Coordinate(latitude: 25.04, longitude: 121.56), Coordinate(latitude: 25.04015, longitude: 121.56),
+            Coordinate(latitude: 25.04015, longitude: 121.55)])
+        for direction in ["0", "1"] {
+            for index in 0..<3 {
+                let id = "\(direction)-\(index)"
+                let coordinate = Coordinate(latitude: direction == "0" ? 25.04 : 25.04015,
+                    longitude: direction == "0" ? 121.551 + Double(index) * 0.003 : 121.557 - Double(index) * 0.003)
+                metadata.stops[id] = BusStop(id: id, routeID: "100", stationID: id, name: "站\(index)",
+                    direction: direction, sequence: index + 1, coordinate: coordinate)
+                metadata.stations[id] = Station(id: id, name: "站\(index)", coordinate: coordinate,
+                    address: "", bearing: direction == "0" ? "E" : "W", stopIDs: [id])
+            }
+        }
+        metadata.rebuildJourneys()
+        return metadata
+    }
+
+    func testOrderedStopsDisambiguateTwoDirectionsAndVehicleProgress() {
+        let metadata = progressMetadata()
+        let outbound = metadata.journey(routeID: "10", direction: "0")!
+        let inbound = metadata.journey(routeID: "10", direction: "1")!
+        XCTAssertTrue(outbound.anchors.allSatisfy { $0.match.segment == 0 })
+        XCTAssertTrue(inbound.anchors.allSatisfy { $0.match.segment == 2 })
+        let bus = VehicleTracker.accept(movingBus([Coordinate(latitude: 25.04002, longitude: 121.553)], observedAt: now),
+                                       previous: nil, metadata: metadata, now: now)
+        XCTAssertTrue(bus.aligned)
+        let ahead = outbound.upcoming(vehicle: bus, at: now)
+        XCTAssertEqual(ahead.map { $0.stop.id }, ["0-1", "0-2"])
+        XCTAssertEqual(ahead[0].distance, 100.8, accuracy: 2)
+        XCTAssertLessThan(outbound.progress(stopID: "0-0", vehicle: bus, at: now)!.distance, 0)
+        XCTAssertTrue(outbound.upcoming(vehicle: bus, at: now.addingTimeInterval(121)).isEmpty)
+    }
+
+    func testApproachingVehiclesExcludePassedStopsAndDoNotUseUncertainFixes() {
+        let metadata = progressMetadata()
+        var approaching = VehicleTracker.accept(movingBus([Coordinate(latitude: 25.04, longitude: 121.553)], observedAt: now),
+                                                previous: nil, metadata: metadata, now: now)
+        let passed = VehicleTracker.accept(movingBus([Coordinate(latitude: 25.04, longitude: 121.5545)], observedAt: now),
+                                           previous: nil, metadata: metadata, now: now)
+        let station = metadata.stations["0-1"]!
+        let rows = StationArrival.rows(station: station, metadata: metadata,
+            snapshot: TransitSnapshot(vehicles: [passed, approaching]), now: now)
+        XCTAssertEqual(rows[0].approaches.count, 1)
+        XCTAssertEqual(rows[0].approaches[0].alongDistance!, 100.8, accuracy: 2)
+        approaching.trackingIssue = .missing
+        XCTAssertTrue(StationArrival.rows(station: station, metadata: metadata,
+            snapshot: TransitSnapshot(vehicles: [approaching]), now: now)[0].approaches.isEmpty)
+        XCTAssertNil(rows[0].estimateSeconds)
+    }
+
+    func testNoStopProgressIsInventedWhenTheShapeOrStopOrderIsUnusable() {
+        let a = Coordinate(latitude: 25.04, longitude: 121.55)
+        let stop = BusStop(id: "1", routeID: "100", stationID: "1", name: "站", direction: "0", sequence: 1, coordinate: a)
+        XCTAssertNil(RouteJourney.build(stops: [stop], line: RouteLine(coordinates: [a]), stations: [:]))
+        var metadata = progressMetadata()
+        metadata.lines = [:]; metadata.rebuildJourneys()
+        let bus = VehicleTracker.accept(movingBus([a], observedAt: now), previous: nil, metadata: metadata, now: now)
+        XCTAssertFalse(bus.aligned)
+        XCTAssertNil(metadata.journey(routeID: "10", direction: "0"))
+        XCTAssertEqual(bus.coordinate, a)
+    }
 }

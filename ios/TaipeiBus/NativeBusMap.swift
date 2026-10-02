@@ -187,7 +187,8 @@ struct NativeBusMap: UIViewRepresentable {
             if routeKey != lastRouteKey {
                 routeSource?.shape = model.selectedRouteID.flatMap { model.metadata.line($0) }.flatMap { routeLine in
                     guard routeLine.coordinates.count >= 2 else { return nil }
-                    var coordinates = routeLine.coordinates.map(\.locationCoordinate)
+                    let journey = model.selectedRouteID.flatMap { model.metadata.journey(routeID: $0, direction: model.direction) }
+                    var coordinates = (journey?.coordinates(on: routeLine) ?? routeLine.coordinates).map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 lastRouteKey = routeKey

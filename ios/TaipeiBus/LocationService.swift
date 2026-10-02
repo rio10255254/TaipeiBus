@@ -7,7 +7,13 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var coordinate: Coordinate?
     @Published private(set) var message: String?
     @Published private(set) var requesting = false
+    @Published private(set) var accuracy: Double?
+    @Published private(set) var updatedAt: Date?
     private let manager = CLLocationManager()
+    var usableCoordinate: Coordinate? {
+        guard let updatedAt, abs(updatedAt.timeIntervalSinceNow) < 300 else { return nil }
+        return coordinate
+    }
 
     override init() {
         super.init()
@@ -47,8 +53,10 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             message = "尚未取得位置，可直接搜尋站牌"; return
         }
         coordinate = Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
+        accuracy = location.horizontalAccuracy
+        updatedAt = location.timestamp
         if coordinate?.isInServiceArea == false { message = "目前在服務範圍外，可搜尋台北站牌" }
-        else if location.horizontalAccuracy > 250 { message = "定位較粗略，請確認站牌方向" }
+        else if location.horizontalAccuracy > 100 { message = "定位約 ±\(Int(location.horizontalAccuracy.rounded())) m，請確認站牌方向" }
         else { message = nil }
     }
 

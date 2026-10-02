@@ -110,6 +110,7 @@ public enum FeedDecoder {
             }
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
+        metadata.rebuildJourneys()
         return metadata
     }
 
@@ -131,15 +132,19 @@ public enum FeedDecoder {
         let prior = Dictionary(previous.map { ($0.id, $0) }, uniquingKeysWith: { a, b in a.observedAt > b.observedAt ? a : b })
         let dateFormatter = makeTaipeiFormatter()
         var unique: [String: BusVehicle] = [:]
+        var ended: [String: Date] = [:]
         for row in rows {
             let plate = text(row["BusID"]), routeID = text(row["RouteID"])
-            guard !plate.isEmpty, let lat = number(row["Latitude"]), let lon = number(row["Longitude"]),
-                  let date = taipeiDate(text(row["DataTime"]), formatter: dateFormatter),
-                  (-60...900).contains(now.timeIntervalSince(date)),
-                  text(row["DutyStatus"]) != "2", text(row["BusStatus"]) != "99" else { continue }
+            let carID = text(row["CarID"]), id = carID.isEmpty ? plate : carID
+            guard !plate.isEmpty, let date = taipeiDate(text(row["DataTime"]), formatter: dateFormatter),
+                  (-60...900).contains(now.timeIntervalSince(date)) else { continue }
+            if text(row["DutyStatus"]) == "2" || text(row["BusStatus"]) == "99" {
+                if date >= (prior[id]?.observedAt ?? .distantPast) { ended[id] = max(ended[id] ?? .distantPast, date) }
+                continue
+            }
+            guard let lat = number(row["Latitude"]), let lon = number(row["Longitude"]) else { continue }
             let coordinate = Coordinate(latitude: lat, longitude: lon)
             guard coordinate.isInServiceArea else { continue }
-            let carID = text(row["CarID"]), id = carID.isEmpty ? plate : carID
             if let other = unique[id], other.observedAt >= date { continue }
             let route = metadata.route(routeID), direction = text(row["GoBack"])
             let speed = number(row["Speed"]) ?? 0
@@ -152,21 +157,13 @@ public enum FeedDecoder {
                 speed: (0..<180).contains(speed) ? speed : 0, observedAt: date,
                 status: text(row["BusStatus"]), lowFloor: text(row["CarType"]) == "1",
                 provider: metadata.providers[text(row["ProviderID"])])
-            if let line = metadata.line(routeID), let match = line.match(coordinate, heading: speed > 2 ? vehicle.heading : nil) {
-                vehicle.coordinate = match.coordinate; vehicle.aligned = true
-                if let old = prior[id], old.routeID == routeID, old.direction == direction,
-                   date > old.observedAt, date.timeIntervalSince(old.observedAt) <= 60,
-                   let from = line.match(old.rawCoordinate, heading: old.speed > 2 ? old.heading : nil) {
-                    let distance = old.coordinate.distance(to: vehicle.coordinate)
-                    if distance < 1_000 && abs(match.along - from.along) < max(100, distance * 2.5) {
-                        vehicle.path = line.slice(from: from, to: match)
-                    }
-                }
-            }
-            if vehicle.path.isEmpty { vehicle.path = [vehicle.coordinate] }
+            vehicle.hasHeading = number(row["Azimuth"]).map { (0...360).contains($0) } ?? false
             unique[id] = vehicle
         }
-        guard !unique.isEmpty else { throw FeedError.invalid("近期營運車輛") }
-        return (unique.values.sorted { $0.id < $1.id }, updatedAt)
+        unique = unique.filter { id, vehicle in ended[id].map { $0 < vehicle.observedAt } ?? true }
+        let accepted = unique.values.map { VehicleTracker.accept($0, previous: prior[$0.id], metadata: metadata, now: now) }
+        let retired = Set(ended.keys.filter { unique[$0] == nil })
+        let retained = VehicleTracker.retainMissing(previous: previous, current: accepted, ended: retired, now: now)
+        return ((accepted + retained).sorted { $0.id < $1.id }, updatedAt)
     }
 }

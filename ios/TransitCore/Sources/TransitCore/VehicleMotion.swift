@@ -12,7 +12,7 @@ public struct VehiclePose: Sendable {
 /// Animates only between received observations on an official route. No future extrapolation.
 public struct VehicleMotion {
     private struct State {
-        let vehicle: BusVehicle
+        var vehicle: BusVehicle
         let path: RouteLine
         let startedAt: TimeInterval
         let duration: TimeInterval
@@ -40,7 +40,9 @@ public struct VehicleMotion {
             let old = states[vehicle.id]
             let sameJourney = old?.vehicle.routeID == vehicle.routeID && old?.vehicle.direction == vehicle.direction
             if let old, sameJourney, vehicle.observedAt <= old.vehicle.observedAt {
-                next[vehicle.id] = old
+                var retained = old
+                if vehicle.observedAt == old.vehicle.observedAt { retained.vehicle = vehicle }
+                next[vehicle.id] = retained
                 continue
             }
             var points = [vehicle.coordinate]
@@ -106,7 +108,8 @@ public struct VehicleMotion {
             let entry = min(1, max(0, (time - state.startedAt) / 0.7))
             heading = Self.blendHeading(state.startHeading, heading, fraction: entry * entry * (3 - 2 * entry))
         }
-        return VehiclePose(id: state.vehicle.id, coordinate: coordinate, heading: heading, stale: stale,
+        return VehiclePose(id: state.vehicle.id, coordinate: coordinate, heading: heading,
+                           stale: stale || state.vehicle.trackingIssue != nil,
                            traveledDistance: state.startDistance + along)
     }
 

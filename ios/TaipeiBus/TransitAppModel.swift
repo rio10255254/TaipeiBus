@@ -22,6 +22,7 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var loadError: String?
     @Published private(set) var metadataNotice: String?
     @Published private(set) var isActive = false
+    @Published private(set) var refreshing = false
     @Published var mode: BrowseMode = .stops
     @Published var query = ""
     @Published var selectedStationID: String?
@@ -36,6 +37,7 @@ final class TransitAppModel: ObservableObject {
     @Published var selectionRevision = 0
     @Published var mapError: String?
     @Published private(set) var favorites: Set<String>
+    @Published private(set) var recentStationIDs: [String]
 
     let location = LocationService()
     private let service = TransitService()
@@ -45,7 +47,10 @@ final class TransitAppModel: ObservableObject {
     private var previewSelectionApplied = false
 #endif
 
-    init() { favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? []) }
+    init() {
+        favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? [])
+        recentStationIDs = UserDefaults.standard.stringArray(forKey: "recentStations") ?? []
+    }
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
@@ -80,11 +85,15 @@ final class TransitAppModel: ObservableObject {
 
     func retry() { setActive(false); setActive(true) }
     func refresh() async {
-        guard !loading else { return }
-        applySnapshot(await service.refresh())
+        guard !loading, !refreshing else { return }
+        refreshing = true
+        defer { refreshing = false }
+        let result = await service.refresh()
+        if !Task.isCancelled, isActive { applySnapshot(result) }
     }
 
     private func applySnapshot(_ result: TransitSnapshot) {
+        guard result.revision >= snapshot.revision else { return }
         snapshot = result
         guard let id = selectedVehicleID else { return }
         guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
@@ -95,6 +104,8 @@ final class TransitAppModel: ObservableObject {
 
     func focusMap(_ target: MapFocus) { focus = target; focusRevision += 1 }
     func selectStation(_ station: Station) {
+        recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
+        defaults.set(recentStationIDs, forKey: "recentStations")
         selectedStationID = station.id
         selectedRouteID = nil; selectedVehicleID = nil; following = false; query = ""
         focusMap(.coordinate(station.coordinate)); sheetDetent = .height(330)
@@ -133,11 +144,17 @@ final class TransitAppModel: ObservableObject {
 
     func stations(query: String) -> [Station] {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        let position = location.coordinate?.isInServiceArea == true ? location.coordinate! : .taipei
+        let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .taipei
         return metadata.stations.values.filter {
             text.isEmpty || $0.name.localizedCaseInsensitiveContains(text) || $0.address.localizedCaseInsensitiveContains(text)
         }.sorted {
             if text.isEmpty, favorites.contains($0.id) != favorites.contains($1.id) { return favorites.contains($0.id) }
+            if text.isEmpty {
+                let a = recentStationIDs.firstIndex(of: $0.id) ?? Int.max
+                let b = recentStationIDs.firstIndex(of: $1.id) ?? Int.max
+                if a != b { return a < b }
+            }
+            if !text.isEmpty, ($0.name == text) != ($1.name == text) { return $0.name == text }
             return $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position)
         }.prefix(40).map { $0 }
     }
@@ -150,9 +167,35 @@ final class TransitAppModel: ObservableObject {
             return $0.name.localizedStandardCompare($1.name) == .orderedAscending
         }.prefix(60).map { $0 }
     }
+    var lastViewedVehicle: BusVehicle? {
+        guard let id = defaults.string(forKey: "lastVehicleID") else { return nil }
+        return snapshot.vehicles.first { $0.id == id }
+    }
+    var upcomingStops: [StopProgress] {
+        guard let vehicle = selectedVehicle else { return [] }
+        return metadata.journey(routeID: vehicle.routeID, direction: vehicle.direction)?.upcoming(vehicle: vehicle, at: Date()) ?? []
+    }
+    func switchDirection() {
+        guard let route = selectedRoute else { return }
+        selectRoute(route, direction: direction == "0" ? "1" : "0")
+    }
+    func oppositeStations(to station: Station) -> [Station] {
+        metadata.stations.values.filter {
+            $0.id != station.id && $0.name == station.name && $0.bearing != station.bearing &&
+            $0.coordinate.distance(to: station.coordinate) < 250
+        }.sorted { $0.coordinate.distance(to: station.coordinate) < $1.coordinate.distance(to: station.coordinate) }
+    }
     func vehicles(query: String) -> [BusVehicle] {
-        snapshot.vehicles.filter { query.isEmpty || $0.plate.localizedCaseInsensitiveContains(query) || $0.routeName.contains(query) }
-            .sorted { $0.observedAt > $1.observedAt }.prefix(60).map { $0 }
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        let plateQuery = text.replacingOccurrences(of: "-", with: "").replacingOccurrences(of: " ", with: "")
+        let now = Date()
+        func plate(_ bus: BusVehicle) -> String { bus.plate.uppercased().replacingOccurrences(of: "-", with: "") }
+        return snapshot.vehicles.filter { text.isEmpty || plate($0).contains(plateQuery) || $0.routeName.localizedCaseInsensitiveContains(text) }
+            .sorted {
+                if !text.isEmpty, (plate($0) == plateQuery) != (plate($1) == plateQuery) { return plate($0) == plateQuery }
+                if $0.hasReliablePosition(at: now) != $1.hasReliablePosition(at: now) { return $0.hasReliablePosition(at: now) }
+                return $0.observedAt > $1.observedAt
+            }.prefix(60).map { $0 }
     }
     func routeVehicles() -> [BusVehicle] {
         guard let route = selectedRoute else { return [] }
@@ -172,6 +215,10 @@ final class TransitAppModel: ObservableObject {
         }
         if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
             selectStation(station); previewSelectionApplied = true
+        } else if let name = value(after: "--preview-route"), let route = metadata.parents.values.first(where: { $0.name == name }) {
+            selectRoute(route, direction: value(after: "--preview-direction") ?? "0"); previewSelectionApplied = true
+        } else if let text = value(after: "--preview-search") {
+            mode = .vehicles; query = text; previewSelectionApplied = true
         } else if let name = value(after: "--preview-vehicle-route") {
             let vehicles = snapshot.vehicles.filter { $0.routeName == name && $0.isFresh(at: Date()) }
             let moving = vehicles.filter { $0.speed >= 5 && metadata.line($0.routeID) != nil }

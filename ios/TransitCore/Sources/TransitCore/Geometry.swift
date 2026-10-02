@@ -72,37 +72,65 @@ public struct RouteLine: Sendable {
         return coordinates.count >= 2 ? RouteLine(coordinates: coordinates) : nil
     }
 
-    public func match(_ point: Coordinate, heading: Double?) -> LineMatch? {
-        guard coordinates.count >= 2 else { return nil }
+    /// Keep all nearby projections: the closest one can belong to the return leg of a route.
+    public func candidates(_ point: Coordinate, maximumDistance: Double = 40) -> [LineMatch] {
+        guard coordinates.count >= 2 else { return [] }
         let cosine = cos(point.latitude * .pi / 180)
-        var best: LineMatch?
-        var bestScore = Double.infinity
+        let margin = maximumDistance / 100_000
+        var matches: [LineMatch] = []
         for i in 0..<(coordinates.count - 1) {
             let a = coordinates[i], b = coordinates[i + 1]
-            guard point.longitude >= min(a.longitude, b.longitude) - 0.00065,
-                  point.longitude <= max(a.longitude, b.longitude) + 0.00065,
-                  point.latitude >= min(a.latitude, b.latitude) - 0.00065,
-                  point.latitude <= max(a.latitude, b.latitude) + 0.00065 else { continue }
+            guard point.longitude >= min(a.longitude, b.longitude) - margin,
+                  point.longitude <= max(a.longitude, b.longitude) + margin,
+                  point.latitude >= min(a.latitude, b.latitude) - margin,
+                  point.latitude <= max(a.latitude, b.latitude) + margin else { continue }
             let dx = (b.longitude - a.longitude) * cosine, dy = b.latitude - a.latitude
             let squared = dx * dx + dy * dy
             guard squared > 0 else { continue }
             let t = max(0, min(1, ((point.longitude - a.longitude) * cosine * dx + (point.latitude - a.latitude) * dy) / squared))
             let coordinate = a.interpolate(to: b, fraction: t)
             let distance = point.distance(to: coordinate)
-            var angle = 0.0
-            if let heading {
-                angle = abs((a.bearing(to: b) - heading + 540).truncatingRemainder(dividingBy: 360) - 180)
-                angle = min(angle, 180 - angle) // Public shapes can contain both directions.
-            }
-            let score = distance + angle * 0.18
-            if score < bestScore {
-                bestScore = score
-                best = LineMatch(coordinate: coordinate, segment: i,
-                                 along: cumulative[i] + (cumulative[i + 1] - cumulative[i]) * t,
-                                 distance: distance)
+            if distance <= maximumDistance {
+                matches.append(LineMatch(coordinate: coordinate, segment: i,
+                    along: cumulative[i] + (cumulative[i + 1] - cumulative[i]) * t, distance: distance))
             }
         }
-        return best.flatMap { $0.distance <= 40 ? $0 : nil }
+        return matches
+    }
+
+    public func bearing(at match: LineMatch, direction: Int = 1) -> Double {
+        guard coordinates.indices.contains(match.segment + 1) else { return 0 }
+        let bearing = coordinates[match.segment].bearing(to: coordinates[match.segment + 1])
+        return (bearing + (direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360)
+    }
+
+    public func match(_ point: Coordinate, heading: Double?, previous: LineMatch? = nil,
+                      maximumTravel: Double? = nil, travelDirection: Int = 0,
+                      alongRange: ClosedRange<Double>? = nil) -> LineMatch? {
+        var best: LineMatch?
+        var bestScore = Double.infinity
+        for candidate in candidates(point) {
+            if let alongRange, !alongRange.contains(candidate.along) { continue }
+            let delta = previous.map { candidate.along - $0.along }
+            if let delta, let maximumTravel, abs(delta) > maximumTravel { continue }
+            var angle = heading.map { Self.headingDifference(bearing(at: candidate, direction: travelDirection), $0) } ?? 0
+            if travelDirection == 0 { angle = min(angle, 180 - angle) }
+            var score = candidate.distance + angle * 0.18
+            if let delta {
+                // Discourage discontinuous branch switches and small backwards jumps, without
+                // requiring a guessed future position or preventing a real turn at a terminus.
+                score += abs(delta) * 0.035
+                if travelDirection != 0, delta * Double(travelDirection) < -8 {
+                    score += min(50, abs(delta) * 0.35)
+                }
+            }
+            if score < bestScore { bestScore = score; best = candidate }
+        }
+        return best
+    }
+
+    public static func headingDifference(_ a: Double, _ b: Double) -> Double {
+        abs((a - b + 540).truncatingRemainder(dividingBy: 360) - 180)
     }
 
     public func slice(from: LineMatch, to: LineMatch) -> [Coordinate] {
@@ -120,7 +148,13 @@ public struct RouteLine: Sendable {
         guard let first = coordinates.first else { return (.taipei, 0) }
         guard coordinates.count >= 2, length > 0 else { return (first, 0) }
         let distance = min(length, max(0, fraction * length))
-        for i in 1..<coordinates.count where cumulative[i] >= distance {
+        var low = 1, high = coordinates.count - 1
+        while low < high {
+            let middle = (low + high) / 2
+            if cumulative[middle] < distance { low = middle + 1 } else { high = middle }
+        }
+        let i = low
+        if cumulative[i] >= distance {
             let span = cumulative[i] - cumulative[i - 1]
             let t = span > 0 ? (distance - cumulative[i - 1]) / span : 1
             return (coordinates[i - 1].interpolate(to: coordinates[i], fraction: t),

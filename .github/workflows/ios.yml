@@ -124,6 +124,22 @@ jobs:
           sleep 12
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-nearby.png"
           xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-station 6922 --preview-details
+          sleep 12
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station-details.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284 --preview-details
+          sleep 12
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-details.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-route 284
+          sleep 12
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-search EAA207
+          sleep 12
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
       - uses: actions/upload-artifact@v4
         if: always()
         with:

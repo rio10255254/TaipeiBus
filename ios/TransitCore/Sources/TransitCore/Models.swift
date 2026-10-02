@@ -53,15 +53,35 @@ public struct BusVehicle: Identifiable, Sendable {
     public let provider: String?
     public var aligned: Bool = false
     public var path: [Coordinate] = []
+    public var roadMatch: LineMatch?
+    public var travelDirection: Int = 0
+    public var hasHeading = true
+    public var trackingIssue: TrackingIssue?
+    public var rejectedObservation: RejectedObservation?
 
     public func isFresh(at date: Date) -> Bool {
         let age = date.timeIntervalSince(observedAt)
         return (-60...120).contains(age)
     }
+    public func hasReliablePosition(at date: Date) -> Bool { isFresh(at: date) && trackingIssue == nil }
+    public func trackingLabel(at date: Date) -> String? {
+        if !isFresh(at: date) { return "定位已延遲" }
+        switch trackingIssue {
+        case .missing: return "訊號暫缺，保留最後位置"
+        case .rejected: return "定位跳動，等待確認"
+        case nil: return aligned ? nil : "原始 GPS · 軌跡未確認"
+        }
+    }
     public var statusLabel: String {
         ["0": "營運中", "1": "事故", "2": "車輛故障", "3": "交通壅塞",
          "4": "緊急狀況", "5": "加油中"][status] ?? "狀態未提供"
     }
+}
+
+public enum TrackingIssue: Sendable { case missing, rejected }
+public struct RejectedObservation: Sendable {
+    public let coordinate: Coordinate
+    public let observedAt: Date
 }
 
 public struct StopReference: Sendable {
@@ -77,6 +97,7 @@ public struct TransitMetadata: Sendable {
     public var paths: [String: [StopReference]] = [:]
     public var providers: [String: String] = [:]
     public var lines: [String: RouteLine] = [:]
+    public var journeys: [String: RouteJourney] = [:]
 
     public init() {}
     public func route(_ id: String) -> BusRoute? { routes[id] ?? parents[id] }
@@ -94,6 +115,17 @@ public struct TransitMetadata: Sendable {
             }
         } else { rows = stops.values.filter { $0.routeID == parent } }
         return rows.filter { $0.direction == direction }.sorted { $0.sequence < $1.sequence }
+    }
+    public func journey(routeID: String, direction: String) -> RouteJourney? { journeys["\(routeID):\(direction)"] }
+    public mutating func rebuildJourneys() {
+        journeys = [:]
+        for route in routes.values {
+            guard let line = line(route.id) else { continue }
+            for direction in ["0", "1"] {
+                if let journey = RouteJourney.build(stops: orderedStops(routeID: route.id, direction: direction),
+                    line: line, stations: stations) { journeys["\(route.id):\(direction)"] = journey }
+            }
+        }
     }
 }
 
@@ -135,27 +167,42 @@ public struct TransitSnapshot: Sendable {
 }
 
 /// Official ETA is for a route at a stop. Nearby vehicle IDs are a separate GPS observation.
+public struct VehicleApproach: Identifiable, Sendable {
+    public var id: String { vehicle.id }
+    public let vehicle: BusVehicle
+    public let alongDistance: Double?
+    public let directDistance: Double
+}
+
 public struct StationArrival: Identifiable, Sendable {
     public var id: String { "\(stop.routeID):\(stop.direction)" }
     public let stop: BusStop
     public let route: BusRoute?
     public let estimateSeconds: Int?
-    public let nearbyVehicles: [BusVehicle]
+    public let approaches: [VehicleApproach]
+    public var nearbyVehicles: [BusVehicle] { approaches.map(\.vehicle) }
 
     public static func rows(station: Station, metadata: TransitMetadata,
                             snapshot: TransitSnapshot, now: Date) -> [StationArrival] {
         var seen = Set<String>()
         return station.stopIDs.compactMap { id -> StationArrival? in
             guard let stop = metadata.stops[id], seen.insert("\(stop.routeID):\(stop.direction)").inserted else { return nil }
-            let buses = snapshot.vehicles.filter { bus in
+            let buses = snapshot.vehicles.compactMap { bus -> VehicleApproach? in
                 guard bus.parentRouteID == stop.routeID, bus.direction == stop.direction,
-                      bus.isFresh(at: now) else { return false }
+                      bus.hasReliablePosition(at: now) else { return nil }
                 let path = metadata.paths[bus.routeID]
-                return path == nil || path!.isEmpty || path!.contains { $0.stopID == id }
-            }.sorted { $0.rawCoordinate.distance(to: station.coordinate) < $1.rawCoordinate.distance(to: station.coordinate) }
+                guard path == nil || path!.isEmpty || path!.contains(where: { $0.stopID == id }) else { return nil }
+                let progress = metadata.journey(routeID: bus.routeID, direction: bus.direction)?.progress(stopID: id, vehicle: bus, at: now)
+                if let progress, progress.distance < -20 { return nil }
+                return VehicleApproach(vehicle: bus, alongDistance: progress.map { max(0, $0.distance) },
+                                       directDistance: bus.rawCoordinate.distance(to: station.coordinate))
+            }.sorted {
+                if ($0.alongDistance != nil) != ($1.alongDistance != nil) { return $0.alongDistance != nil }
+                return ($0.alongDistance ?? $0.directDistance) < ($1.alongDistance ?? $1.directDistance)
+            }
             return StationArrival(stop: stop, route: metadata.parents[stop.routeID],
                                   estimateSeconds: snapshot.estimates.value(routeID: stop.routeID, stopID: id, at: now),
-                                  nearbyVehicles: Array(buses.prefix(2)))
+                                  approaches: Array(buses.prefix(2)))
         }.sorted {
             let a = $0.estimateSeconds.flatMap { $0 >= 0 ? $0 : nil } ?? Int.max
             let b = $1.estimateSeconds.flatMap { $0 >= 0 ? $0 : nil } ?? Int.max

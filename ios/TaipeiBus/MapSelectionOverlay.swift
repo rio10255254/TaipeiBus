@@ -53,6 +53,14 @@ struct MapContextLabels: View {
                         Text(station.name).font(.headline).foregroundStyle(.primary)
                             .shadow(color: .white, radius: 4)
                     }.buttonStyle(.plain).frame(minHeight: 44)
+                        .contextMenu {
+                            Button { model.toggleFavorite(station) } label: {
+                                Label(model.favorites.contains(station.id) ? "移除收藏" : "收藏站牌", systemImage: "star")
+                            }
+                            ForEach(model.oppositeStations(to: station)) { opposite in
+                                Button("改看\(opposite.bearingLabel)站牌") { model.selectStation(opposite) }
+                            }
+                        }
                     Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
                     Spacer(minLength: 0)
                     Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
@@ -92,8 +100,25 @@ struct MapContextLabels: View {
                 }
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    Text(bus.isFresh(at: timeline.date) ? "GPS \(Int(bus.speed)) km/h · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "定位已延遲")
-                        .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(bus.hasReliablePosition(at: timeline.date) ? "GPS \(Int(bus.speed)) km/h · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "最後回報 · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前")
+                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        if let state = bus.trackingLabel(at: timeline.date) {
+                            Text(state).font(.caption).foregroundStyle(bus.trackingIssue == nil && bus.isFresh(at: timeline.date) ? Color.secondary : Color.orange)
+                        }
+                        if let next = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)?.upcoming(vehicle: bus, at: timeline.date).first {
+                            Button {
+                                if let station = model.metadata.stations[next.stop.stationID] { model.selectStation(station) }
+                            } label: {
+                                HStack(spacing: 5) {
+                                    Image(systemName: "mappin").font(.caption)
+                                    Text(next.distance <= 25 ? "\(next.stop.name)附近" : "前方 · \(next.stop.name)").lineLimit(1)
+                                    Spacer(minLength: 0)
+                                    if next.distance > 25 { Text(next.distance >= 1_000 ? String(format: "%.1f km", next.distance / 1_000) : "\(Int(next.distance.rounded())) m").monospacedDigit() }
+                                }.font(.caption.weight(.medium)).frame(minHeight: 32)
+                            }.buttonStyle(.plain).accessibilityHint("查看前方站牌的官方到站預估")
+                        }
+                    }
                 }
             }
             .shadow(color: .white.opacity(0.95), radius: 4)
