@@ -37,7 +37,7 @@ env:
 
 jobs:
   simulator:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -107,44 +107,44 @@ jobs:
           PY
           }
           launch_ready
-          sleep 40
+          sleep 15
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-station 6922
-          sleep 15
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-vehicle-route 284
-          sleep 15
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
           sim terminate "$device" com.example.TaipeiBus
           # Location is simulated here; vehicle GPS and ETAs still come from the public live feeds.
           sim location "$device" set 25.0377,121.56
           sim privacy "$device" grant location com.example.TaipeiBus
           launch_ready
-          sleep 12
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-nearby.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-station 6922 --preview-details
-          sleep 12
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station-details.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-vehicle-route 284 --preview-details
-          sleep 12
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-details.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-route 284
-          sleep 12
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
           sim terminate "$device" com.example.TaipeiBus
           launch_ready --preview-search EAA207
-          sleep 12
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
           sim terminate "$device" com.example.TaipeiBus
           # Finish the functional screenshots before recording so a recorder failure cannot hide them.
           launch_ready --preview-vehicle-route 284
-          sleep 15
+          sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-follow-start.png"
           sleep 32
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
