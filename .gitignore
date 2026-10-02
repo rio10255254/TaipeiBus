@@ -11,3 +11,4 @@ TaipeiBus*-source.zip
 ios/**/xcuserdata/
 ios/**/.build/
 ios/**/.swiftpm/
+__pycache__/
