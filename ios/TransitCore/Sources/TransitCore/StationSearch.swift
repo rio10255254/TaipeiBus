@@ -144,7 +144,7 @@ fileprivate struct IndexedName: Sendable {
     }
     func rank(_ query: SearchQuery) -> Int? {
         guard !query.text.isEmpty else { return 0 }
-        if full == query.text { return query.transit && !metro ? 1 : 0 }
+        if full == query.text { return 0 }
         if !aliases.isDisjoint(with: query.aliases) { return query.transit && metro ? 0 : 1 }
         let partial = query.aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= 2 }
         if partial.contains(where: { part in aliases.contains { $0.hasPrefix(part) } }) { return query.transit && !metro ? 3 : 2 }
@@ -193,11 +193,12 @@ public struct StationSearchIndex: Sendable {
     public func search(_ query: String, near position: Coordinate, favorites: Set<String> = [], recent: [String] = [], limit: Int = 40) -> [Station] {
         guard limit > 0 else { return [] }
         let input = SearchQuery(query)
-        return entries.compactMap { entry -> (Station, Int)? in
-            if let rank = entry.names.compactMap({ $0.rank(input) }).min() { return (entry.station, rank) }
-            if !input.text.isEmpty, entry.address.contains(input.text) { return (entry.station, 4) }
-            if input.addressLike, input.aliases.contains(where: { $0.count >= 2 && entry.address.contains($0) }) { return (entry.station, 4) }
-            if input.tokens.count > 1, input.tokens.allSatisfy({ token in entry.address.contains(token) || entry.names.contains { $0.aliases.contains { $0.contains(token) } } }) { return (entry.station, 4) }
+        return entries.compactMap { entry -> (Station, Int, Bool)? in
+            let metro = entry.names.contains { $0.metro }
+            if let rank = entry.names.compactMap({ $0.rank(input) }).min() { return (entry.station, rank, metro) }
+            if !input.text.isEmpty, entry.address.contains(input.text) { return (entry.station, 4, metro) }
+            if input.addressLike, input.aliases.contains(where: { $0.count >= 2 && entry.address.contains($0) }) { return (entry.station, 4, metro) }
+            if input.tokens.count > 1, input.tokens.allSatisfy({ token in entry.address.contains(token) || entry.names.contains { $0.aliases.contains { $0.contains(token) } } }) { return (entry.station, 4, metro) }
             return nil
         }.sorted { a, b in
             if input.text.isEmpty {
@@ -205,6 +206,7 @@ public struct StationSearchIndex: Sendable {
                 let ar = recent.firstIndex(of: a.0.id) ?? Int.max, br = recent.firstIndex(of: b.0.id) ?? Int.max
                 if ar != br { return ar < br }
             } else if a.1 != b.1 { return a.1 < b.1 }
+            if input.transit, a.2 != b.2 { return a.2 }
             let ad = a.0.coordinate.distance(to: position), bd = b.0.coordinate.distance(to: position)
             return ad == bd ? a.0.id < b.0.id : ad < bd
         }.prefix(limit).map { $0.0 }

@@ -133,8 +133,6 @@ final class NavigationGuidanceTests: XCTestCase {
                           StationSearch.rank(name: "捷運西湖站", query: "西們站") ?? 99)
         XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "臺北101"))
         XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "101"))
-        XCTAssertLessThan(StationSearch.rank(name: "捷運東湖站(南湖高中)", query: "東湖站") ?? 99,
-                          StationSearch.rank(name: "東湖站", query: "東湖站") ?? 99)
     }
 
     func testStationGroupsKeepPhysicalSidesWhileShowingTheSharedNameOnce() {
@@ -146,6 +144,8 @@ final class NavigationGuidanceTests: XCTestCase {
         XCTAssertEqual(groups[0].stations.map(\.id), ["north", "south"])
         let index = StationSearchIndex(stations: [first, second])
         XCTAssertEqual(index.search("东湖站", near: .taipei).count, 2)
+        let depot = Station(id: "depot", name: "東湖站", coordinate: .taipei, address: "安康路228巷", bearing: "W", stopIDs: [])
+        XCTAssertEqual(StationSearchIndex(stations: [depot, first, second]).search("東湖站", near: .taipei).first?.id, "north")
     }
 
     func testStaleMissingSpeedUnmatchedGPSAndPassedStopHaveNoFabricatedTime() {
