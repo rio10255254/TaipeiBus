@@ -32,7 +32,7 @@ public enum VehicleTracker {
             }
         }
         let journey = metadata.journey(routeID: vehicle.routeID, direction: vehicle.direction)
-        if let line = metadata.line(vehicle.routeID) {
+        if let line = metadata.line(vehicle.routeID, direction: vehicle.direction) {
             let from = old.flatMap { $0.roadMatch ?? ($0.aligned ? line.match($0.coordinate, heading: nil) : nil) }
             let context = interval <= 60 && !reacquired ? from : nil
             let direction = journey?.direction ?? old?.travelDirection ?? 0

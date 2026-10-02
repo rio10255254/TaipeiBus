@@ -47,8 +47,10 @@ struct NativeBusMap: UIViewRepresentable {
     func updateUIView(_ map: MLNMapView, context: Context) {
         context.coordinator.model = model
         context.coordinator.reduceMotion = reduceMotion
-        map.contentInset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
-        context.coordinator.update(location: location)
+        let inset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
+        let viewportChanged = map.contentInset != inset
+        if viewportChanged { map.contentInset = inset }
+        context.coordinator.update(location: location, viewportChanged: viewportChanged)
     }
 
     static func dismantleUIView(_ map: MLNMapView, coordinator: Coordinator) {
@@ -160,7 +162,7 @@ struct NativeBusMap: UIViewRepresentable {
             return source
         }
 
-        func update(location: Coordinate?) {
+        func update(location: Coordinate?, viewportChanged: Bool = false) {
             pendingLocation = location
             displayLink?.isPaused = !model.isActive
             guard let map else { return }
@@ -210,7 +212,10 @@ struct NativeBusMap: UIViewRepresentable {
                 locationSource?.shape = point(location)
                 lastLocation = location
             }
-            if lastFocusRevision != model.focusRevision, map.bounds.width > 0 {
+            // Opening a sheet changes the viewport and can cancel an in-flight bounds animation.
+            // Refit a selected route after that change; keep ordinary updates from resetting the camera.
+            let refitRoute = viewportChanged && model.selectedRoute != nil && model.selectedVehicleID == nil
+            if (lastFocusRevision != model.focusRevision || refitRoute), map.bounds.width > 0 {
                 focus(model.focus, map: map)
                 lastFocusRevision = model.focusRevision
             }

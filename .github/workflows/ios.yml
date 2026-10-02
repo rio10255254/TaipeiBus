@@ -11,6 +11,11 @@ on:
         description: 'Also launch iPhone 17 and capture native live-data screenshots'
         type: boolean
         default: false
+      preview_scope:
+        description: 'Capture all phone states or focus on route catalog and variants'
+        type: choice
+        options: ['all', 'routes']
+        default: 'all'
 
 permissions:
   contents: read
@@ -114,6 +119,7 @@ jobs:
           print('Requested live-data preview is ready.', flush=True)
           PY
           }
+          if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
           launch_ready
           sleep 15
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
@@ -146,6 +152,12 @@ jobs:
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route.png"
           sim terminate "$device" com.example.TaipeiBus
+          fi
+          mkdir -p "$RUNNER_TEMP/phone-screenshots"
+          if [ '${{ inputs.preview_scope }}' = 'routes' ]; then
+            sim location "$device" set 25.0377,121.56
+            sim privacy "$device" grant location com.example.TaipeiBus
+          fi
           launch_ready --preview-route-search ''
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-all-routes.png"
@@ -162,6 +174,7 @@ jobs:
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
+          if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
           launch_ready --preview-search EAA207
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
@@ -172,8 +185,9 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-follow-start.png"
           sleep 32
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
+          fi
       - name: Record optional native preview
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope != 'routes'
         # Recording is a preview artifact; it must not gate native checks or signing.
         continue-on-error: true
         timeout-minutes: 4

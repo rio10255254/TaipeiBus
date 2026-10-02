@@ -103,13 +103,21 @@ public struct TransitMetadata: Sendable {
     public var paths: [String: [StopReference]] = [:]
     public var providers: [String: String] = [:]
     public var lines: [String: RouteLine] = [:]
+    public var directionalLines: [String: RouteLine] = [:]
     public var journeys: [String: RouteJourney] = [:]
     public var routeCatalog = RouteCatalog()
 
     public init() {}
     public func route(_ id: String) -> BusRoute? { routes[id] ?? parents[id] }
-    public func line(_ id: String) -> RouteLine? {
-        lines["sub:\(id)"] ?? lines["route:\(route(id)?.parentID ?? id)"]
+    public func line(_ id: String, direction: String? = nil) -> RouteLine? {
+        let parent = route(id)?.parentID ?? id
+        if let direction {
+            // Some single-direction subroutes publish their sole shape as GoBack=0 for both trip directions.
+            // Their exact subroute shape still takes precedence over a parent fallback.
+            return directionalLines["sub:\(id):\(direction)"] ?? lines["sub:\(id)"] ??
+                directionalLines["route:\(parent):\(direction)"] ?? lines["route:\(parent)"]
+        }
+        return lines["sub:\(id)"] ?? lines["route:\(parent)"]
     }
     public func orderedStops(routeID: String, direction: String) -> [BusStop] {
         let parent = route(routeID)?.parentID ?? routeID
@@ -127,8 +135,8 @@ public struct TransitMetadata: Sendable {
     public mutating func rebuildJourneys() {
         journeys = [:]
         for route in routes.values {
-            guard let line = line(route.id) else { continue }
             for direction in ["0", "1"] {
+                guard let line = line(route.id, direction: direction) else { continue }
                 if let journey = RouteJourney.build(stops: orderedStops(routeID: route.id, direction: direction),
                     line: line, stations: stations) { journeys["\(route.id):\(direction)"] = journey }
             }

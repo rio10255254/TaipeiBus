@@ -241,7 +241,7 @@ final class TransitAppModel: ObservableObject {
             mode = .vehicles; query = text; previewSelectionApplied = true
         } else if let name = value(after: "--preview-vehicle-route") {
             let vehicles = snapshot.vehicles.filter { $0.routeName == name && $0.isFresh(at: Date()) }
-            let moving = vehicles.filter { $0.speed >= 5 && metadata.line($0.routeID) != nil }
+            let moving = vehicles.filter { $0.speed >= 5 && metadata.line($0.routeID, direction: $0.direction) != nil }
             if let vehicle = (moving.isEmpty ? vehicles : moving)
                 .min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
                 selectVehicle(vehicle); previewSelectionApplied = true

@@ -114,7 +114,9 @@ public enum FeedDecoder {
                     guard let line = RouteLine.parse(wkt: text(row["wkt"])) else { continue }
                     let sub = text(row["SubRouteID"])
                     let key = (number(row["SubRouteID"]) ?? -1) > 0 ? "sub:\(sub)" : "route:\(text(row["RouteID"]))"
-                    metadata.lines[key] = line
+                    let direction = text(row["GoBack"])
+                    if ["0", "1"].contains(direction) { metadata.directionalLines["\(key):\(direction)"] = line }
+                    if metadata.lines[key] == nil || direction == "0" { metadata.lines[key] = line }
                 }
             default: break
             }

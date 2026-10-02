@@ -140,7 +140,7 @@ public extension TransitMetadata {
         return options.compactMap { variant in
             if let references = paths[variant.id], !references.isEmpty,
                orderedStops(routeID: variant.id, direction: direction).isEmpty { return nil }
-            guard let line = line(variant.id) else { return nil }
+            guard let line = line(variant.id, direction: direction) else { return nil }
             let coordinates = journey(routeID: variant.id, direction: direction)?.coordinates(on: line) ?? line.coordinates
             guard coordinates.count >= 2, seen.insert(coordinates).inserted else { return nil }
             return coordinates

@@ -112,6 +112,42 @@ final class RouteCatalogTests: XCTestCase {
         XCTAssertFalse(Coordinate(latitude: 24.5, longitude: 121.5).isInServiceArea)
     }
 
+    func testGoAndReturnShapesSurviveFeedDecodingAndMatchTheCorrectRoad() throws {
+        func feed(_ rows: [[String: Any]]) throws -> Data {
+            try JSONSerialization.data(withJSONObject: ["BusInfo": rows])
+        }
+        let go = "LINESTRING(121.55 25.04,121.552 25.04)"
+        let back = "LINESTRING(121.55 25.0403,121.552 25.0403)"
+        let shapes: [[String: Any]] = [
+            ["RouteID": 100, "SubRouteID": -1, "GoBack": 1, "wkt": back],
+            ["RouteID": 100, "SubRouteID": -1, "GoBack": 0, "wkt": go],
+            // The official feed labels some single-direction return variants as shape GoBack=0.
+            ["RouteID": 100, "SubRouteID": 20, "GoBack": 0, "wkt": back]]
+        let metadata = try FeedDecoder.metadata(feeds: [
+            "GetRoute": feed([["Id": 100, "pathAttributeId": 10, "nameZh": "307", "pathAttributeName": "307"],
+                               ["Id": 100, "pathAttributeId": 20, "nameZh": "307", "pathAttributeName": "307往板橋"]]),
+            "GetStop": feed([["Id": 101, "routeId": 100, "nameZh": "去程", "goBack": "0", "seqNo": 1,
+                              "longitude": 121.55, "latitude": 25.04],
+                             ["Id": 102, "routeId": 100, "nameZh": "返程", "goBack": "1", "seqNo": 1,
+                              "longitude": 121.55, "latitude": 25.0403]]),
+            "GetPathDetail": feed([["pathAttributeId": 10, "stopId": 101, "sequenceNo": 1],
+                                   ["pathAttributeId": 10, "stopId": 102, "sequenceNo": 1],
+                                   ["pathAttributeId": 20, "stopId": 102, "sequenceNo": 1]]),
+            "GetBusShape": JSONSerialization.data(withJSONObject: shapes)])
+        XCTAssertEqual(metadata.line("10", direction: "0")?.coordinates, RouteLine.parse(wkt: go)?.coordinates)
+        XCTAssertEqual(metadata.line("10", direction: "1")?.coordinates, RouteLine.parse(wkt: back)?.coordinates)
+        XCTAssertEqual(metadata.line("20", direction: "1")?.coordinates, RouteLine.parse(wkt: back)?.coordinates)
+        XCTAssertEqual(metadata.directionalLines.count, 3)
+        let now = Date(timeIntervalSince1970: 1000)
+        let coordinate = Coordinate(latitude: 25.04031, longitude: 121.551)
+        let vehicle = BusVehicle(id: "return", plate: "ABC-123", routeID: "10", parentRouteID: "100", routeName: "307",
+            direction: "1", destination: "板橋", coordinate: coordinate, rawCoordinate: coordinate, heading: 90,
+            speed: 30, observedAt: now, status: "0", lowFloor: false, provider: nil)
+        let matched = VehicleTracker.accept(vehicle, previous: nil, metadata: metadata, now: now)
+        XCTAssertTrue(matched.aligned)
+        XCTAssertEqual(matched.coordinate.latitude, 25.0403, accuracy: 0.000001)
+    }
+
     /// Optional cloud audit: compare the decoder/catalog against every currently published official ID.
     func testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant() throws {
         guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else {

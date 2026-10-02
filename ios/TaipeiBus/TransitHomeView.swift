@@ -49,7 +49,7 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
 
-                if model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                if !showDetails, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(model.selectedRouteName ?? route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
                             .foregroundStyle(Color.accentColor).lineLimit(2)
@@ -307,7 +307,15 @@ private struct TransitPanel: View {
             }
         }
         .padding(.top, 16)
-        .onAppear { if browseOnly { searchFocused = model.mode != .routes || !model.query.isEmpty } }
+        .onAppear {
+            if browseOnly {
+                searchFocused = model.mode != .routes || !model.query.isEmpty
+#if DEBUG
+                // Route screenshots do not need the simulator's first-use keyboard tutorial.
+                if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { searchFocused = false }
+#endif
+            }
+        }
         .onChange(of: model.mode) { _, mode in
             if mode == .routes && model.query.isEmpty { searchFocused = false }
         }
