@@ -90,6 +90,68 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertFalse(motion.isAnimating(time: 18, now: now.addingTimeInterval(180)))
     }
 
+    private func movingBus(_ points: [Coordinate], observedAt: Date, speed: Double = 36,
+                           heading: Double = 90, route: String = "10") -> BusVehicle {
+        BusVehicle(id: "bus", plate: "ABC-123", routeID: route, parentRouteID: "100", routeName: "284",
+                   direction: "0", destination: "終點", coordinate: points.last!, rawCoordinate: points.last!,
+                   heading: heading, speed: speed, observedAt: observedAt, status: "0", lowFloor: true,
+                   provider: nil, aligned: true, path: points)
+    }
+
+    func testGPSRetargetKeepsRenderedPositionHeadingWheelsAndRemainingCorners() {
+        let a = Coordinate(latitude: 25.04, longitude: 121.55)
+        let b = Coordinate(latitude: 25.04, longitude: 121.551)
+        let c = Coordinate(latitude: 25.041, longitude: 121.551)
+        let d = Coordinate(latitude: 25.041, longitude: 121.552)
+        var motion = VehicleMotion()
+        motion.ingest([movingBus([a], observedAt: now.addingTimeInterval(-30))], time: 0, now: now)
+        motion.ingest([movingBus([a,b,c], observedAt: now.addingTimeInterval(-15), heading: 0)], time: 10, now: now)
+        let before = motion.pose(id: "bus", time: 14, now: now)!
+        motion.ingest([movingBus([c,d], observedAt: now)], time: 14, now: now)
+        let after = motion.pose(id: "bus", time: 14, now: now)!
+        XCTAssertLessThan(before.coordinate.distance(to: after.coordinate), 0.001)
+        XCTAssertEqual(before.heading, after.heading, accuracy: 0.001)
+        XCTAssertEqual(before.traveledDistance, after.traveledDistance, accuracy: 0.001)
+        let road = RouteLine(coordinates: [a,b,c,d])
+        var previousDistance = after.traveledDistance
+        for index in 0...150 {
+            let pose = motion.pose(id: "bus", time: 14 + Double(index) / 10, now: now)!
+            XCTAssertLessThan(road.match(pose.coordinate, heading: nil)!.distance, 0.01)
+            XCTAssertGreaterThanOrEqual(pose.traveledDistance, previousDistance)
+            previousDistance = pose.traveledDistance
+        }
+        XCTAssertLessThan(motion.pose(id: "bus", time: 60, now: now)!.coordinate.distance(to: d), 0.001)
+    }
+
+    func testNorthHeadingWrapAndAStopNeverRotateOrExtrapolate() {
+        let a = Coordinate(latitude: 25.04, longitude: 121.55)
+        let b = Coordinate(latitude: 25.041, longitude: 121.55)
+        var motion = VehicleMotion()
+        motion.ingest([movingBus([a], observedAt: now.addingTimeInterval(-15), heading: 359)], time: 0, now: now)
+        motion.ingest([movingBus([a,b], observedAt: now, speed: 0, heading: 1)], time: 1, now: now)
+        let turning = motion.pose(id: "bus", time: 1.35, now: now)!
+        XCTAssertTrue(turning.heading > 350 || turning.heading < 10)
+        XCTAssertLessThan(motion.pose(id: "bus", time: 16, now: now)!.coordinate.distance(to: b), 0.001)
+        XCTAssertEqual(motion.pose(id: "bus", time: 16, now: now)!.traveledDistance,
+                       motion.pose(id: "bus", time: 50, now: now)!.traveledDistance)
+        let stoppedHeading = motion.pose(id: "bus", time: 16, now: now)!.heading
+        motion.ingest([movingBus([b,b], observedAt: now.addingTimeInterval(15), speed: 0, heading: 180)], time: 17, now: now)
+        XCTAssertEqual(motion.pose(id: "bus", time: 18, now: now)!.heading, stoppedHeading, accuracy: 0.001)
+    }
+
+    func testOlderGPSIsIgnoredAndChangedRouteDoesNotDriveAcrossBlocks() {
+        let a = Coordinate(latitude: 25.04, longitude: 121.55)
+        let b = Coordinate(latitude: 25.041, longitude: 121.55)
+        let c = Coordinate(latitude: 25.042, longitude: 121.553)
+        var motion = VehicleMotion()
+        motion.ingest([movingBus([a], observedAt: now)], time: 0, now: now)
+        motion.ingest([movingBus([b], observedAt: now.addingTimeInterval(-15))], time: 1, now: now)
+        XCTAssertEqual(motion.pose(id: "bus", time: 1, now: now)!.coordinate, a)
+        motion.ingest([movingBus([a,c], observedAt: now.addingTimeInterval(15), route: "11")], time: 2, now: now)
+        XCTAssertEqual(motion.pose(id: "bus", time: 2, now: now)!.coordinate, c)
+        XCTAssertFalse(motion.isAnimating(time: 2, now: now))
+    }
+
     func testETANullFailureAndAgeNeverTurnIntoAnArrivingBus() throws {
         let data = try feed([
             ["RouteID": 100, "StopID": 101, "EstimateTime": NSNull()],

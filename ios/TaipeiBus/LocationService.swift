@@ -12,7 +12,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     override init() {
         super.init()
         manager.delegate = self
-        manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+        manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
     }
 
     func request() {
@@ -48,6 +48,8 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         }
         coordinate = Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude)
         if coordinate?.isInServiceArea == false { message = "目前在服務範圍外，可搜尋台北站牌" }
+        else if location.horizontalAccuracy > 250 { message = "定位較粗略，請確認站牌方向" }
+        else { message = nil }
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {

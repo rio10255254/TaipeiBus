@@ -17,6 +17,11 @@ struct TransitHomeView: View {
     }
 
     private var hasSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil }
+    private var nearbyStations: [Station] {
+        guard !hasSelection, let position = location.coordinate, position.isInServiceArea else { return [] }
+        return model.metadata.stations.values.filter { $0.coordinate.distance(to: position) <= 800 }
+            .sorted { $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position) }.prefix(2).map { $0 }
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -34,7 +39,7 @@ struct TransitHomeView: View {
                     Button { showInformation = true } label: {
                         Image(systemName: "info.circle").font(.title3).frame(width: 46, height: 46)
                     }
-                    .background(.regularMaterial, in: Circle())
+                    .phoneGlass(in: Circle())
                     .accessibilityLabel("資料來源與地圖設定")
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
@@ -52,37 +57,66 @@ struct TransitHomeView: View {
                     .shadow(color: .white, radius: 4)
                     .padding(.horizontal, 24).padding(.top, 104)
                 }
+                if model.selectedVehicleID != nil, model.selectedVehicle == nil {
+                    Button { showDetails = true } label: {
+                        Label("此車目前沒有定位 · 查看路線車輛", systemImage: "location.slash")
+                            .font(.subheadline).padding(.horizontal, 14).padding(.vertical, 12)
+                    }
+                    .phoneGlass(in: Capsule()).padding(.top, 100)
+                }
+                PhoneGlassGroup {
                 VStack(spacing: 12) {
                     Spacer()
                     HStack {
                         Spacer()
-                        Button { location.request() } label: {
+                        Button {
+                            model.clearSelection()
+                            if let position = location.coordinate, position.isInServiceArea { model.focusMap(.coordinate(position)) }
+                            location.request()
+                        } label: {
                             Group {
                                 if location.requesting { ProgressView() }
                                 else { Image(systemName: "location.fill").font(.title3) }
                             }.frame(width: 48, height: 48)
                         }
-                        .background(.regularMaterial, in: Circle())
+                        .phoneGlass(in: Circle())
                         .accessibilityLabel("尋找我的位置與附近站牌")
                     }
                     if let message = location.message {
                         Text(message).font(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
+                    if !nearbyStations.isEmpty, let position = location.coordinate {
+                        HStack(spacing: 10) {
+                            ForEach(nearbyStations) { station in
+                                Button { model.selectStation(station) } label: {
+                                    VStack(alignment: .leading, spacing: 3) {
+                                        Text(station.name).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                        Text("\(station.bearingLabel) · 直線 \(distanceLabel(position.distance(to: station.coordinate)))")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }.padding(.horizontal, 14).padding(.vertical, 10).frame(maxWidth: .infinity, minHeight: 48)
+                                }
+                                .buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
+                                .accessibilityLabel("附近站牌 \(station.name) \(station.bearingLabel)，直線距離 \(distanceLabel(position.distance(to: station.coordinate)))")
+                            }
+                        }.transition(.opacity.combined(with: .move(edge: .bottom)))
+                    }
                     HStack(spacing: 4) {
                         Button { showSearch = true } label: {
                             Label("搜尋", systemImage: "magnifyingglass").font(.body.weight(.semibold))
                                 .padding(.horizontal, 18).frame(minHeight: 56)
-                        }.buttonStyle(.plain)
+                        }.buttonStyle(PhonePressStyle())
                         Spacer(minLength: 0)
                         if let bus = model.selectedVehicle {
                             Button {
                                 model.following.toggle()
+                                UISelectionFeedbackGenerator().selectionChanged()
                                 if model.following { model.focusMap(.vehicle(bus.id)) }
                             } label: {
                                 Image(systemName: model.following ? "scope" : "bus.fill")
                                     .font(.title3).frame(width: 50, height: 50)
                                     .foregroundStyle(model.following ? Color.accentColor : Color.primary)
+                                    .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                             }.accessibilityLabel(model.following ? "停止跟車" : "跟車")
                         } else {
                             Button { model.mode = .routes; showSearch = true } label: {
@@ -97,8 +131,10 @@ struct TransitHomeView: View {
                         }
                     }
                     .padding(.horizontal, 6)
-                    .background(.regularMaterial, in: Capsule())
+                    .phoneGlass(in: Capsule())
                     .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
+                    .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
+                }
                 }
                 .padding(.horizontal, 24).padding(.bottom, 12)
                 if let error = model.mapError ?? model.loadError {
@@ -114,18 +150,16 @@ struct TransitHomeView: View {
                 .presentationDetents([.large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
-                .presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showDetails) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
-                .presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .onChange(of: location.coordinate) { _, position in
-            guard let position, position.isInServiceArea else { return }
+            guard let position, position.isInServiceArea, !hasSelection else { return }
             model.focusMap(.coordinate(position))
         }
         .onChange(of: model.selectionRevision) { _, _ in
@@ -133,6 +167,44 @@ struct TransitHomeView: View {
             showSearch = false
             showDetails = false
         }
+    }
+}
+
+// Native Liquid Glass follows system appearance and accessibility preferences on iOS 26.
+// Earlier systems keep the same control shapes with the system material.
+private struct PhoneGlassBackground<S: Shape>: ViewModifier {
+    let shape: S
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ViewBuilder func body(content: Content) -> some View {
+        if reduceTransparency {
+            content.background(Color(uiColor: .systemBackground), in: shape)
+        } else if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
+    }
+}
+
+extension View {
+    func phoneGlass<S: Shape>(in shape: S) -> some View { modifier(PhoneGlassBackground(shape: shape)) }
+}
+
+struct PhoneGlassGroup<Content: View>: View {
+    private let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    @ViewBuilder var body: some View {
+        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 10) { content } }
+        else { content }
+    }
+}
+
+struct PhonePressStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label.scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.78 : 1)
+            .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
     }
 }
 
@@ -202,6 +274,7 @@ private struct TransitPanel: View {
             }
         }
         .padding(.top, 16)
+        .onAppear { if browseOnly { searchFocused = true } }
         .onChange(of: searchFocused) { _, focused in if focused { model.sheetDetent = .large } }
         .onChange(of: model.selectedStationID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedRouteID) { _, _ in searchFocused = false }

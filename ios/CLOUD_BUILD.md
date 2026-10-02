@@ -4,7 +4,7 @@
 
 GitHub Actions 的 **iPhone app** workflow 使用 macOS 15、Xcode 26.3。推送 `ios/` 或 workflow 變更後會自動執行；也可在 Actions → iPhone app → Run workflow 手動執行，保留 `sign_ipa = false`。
 
-流程先執行 `TransitCore` 的 Swift 測試，再編譯 SwiftUI／MapLibre Native／Metal App，啟動 iPhone 17 模擬器、等待公開即時資料載入並截圖。完成後下載 `iPhone17-simulator` artifact，內含 App、截圖與 build log。模擬器產物只供 macOS 模擬器使用。
+流程先執行 `TransitCore` 的 Swift 測試，再編譯 SwiftUI／MapLibre Native／Metal 的模擬器 App 與 iPhone Release App，啟動 iPhone 17 模擬器、等待公開即時資料載入並截圖。完成後下載 `iPhone17-simulator` artifact，內含模擬器 App、截圖、32 秒跟車影片與 Debug／Release build log。影片使用真實公車回報；附近站牌截圖的使用者位置為模擬器設定。此產物只供 macOS 模擬器使用。
 
 ## 沿用 Apple Developer 帳號
 

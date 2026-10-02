@@ -8,15 +8,24 @@ import TransitCore
 final class NativeBusLayer: MLNCustomStyleLayer {
     var onError: ((String) -> Void)?
     var onSelectedPoint: ((CGPoint?) -> Void)?
-    var selectedID: String?
-    var highlightSelected = true
+    var selectedID: String? {
+        didSet { if selectedID != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
+    }
+    var highlightSelected = true {
+        didSet { if highlightSelected != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
+    }
+    var reduceMotion = false
+    private var selectionStartedAt: CFTimeInterval = 0
     private var motion = VehicleMotion()
     private var pipeline: MTLRenderPipelineState?
     private var outlinePipeline: MTLRenderPipelineState?
+    private var shadowPipeline: MTLRenderPipelineState?
     private var normalDepth: MTLDepthStencilState?
     private var highlightDepth: MTLDepthStencilState?
+    private var shadowDepth: MTLDepthStencilState?
     private var vertexBuffer: MTLBuffer?
     private var outlineBuffer: MTLBuffer?
+    private var shadowBuffer: MTLBuffer?
     private var instanceBuffers: [MTLBuffer] = []
     private var bufferBusy = [false, false, false]
     private let bufferLock = NSLock()
@@ -28,17 +37,19 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private static let origin = Coordinate(latitude: 25.04, longitude: 121.55)
     private static let circumference = 40_075_016.68557849
 
-    // SIMD4 alignment matches Metal's layout. Instances are 32 bytes; uniforms are 80 bytes.
-    private struct Vertex { var position: SIMD4<Float>; var color: SIMD4<Float> }
+    // SIMD4 alignment matches Metal: vertices 48, instances 32, uniforms 96 bytes.
+    private struct Vertex { var position: SIMD4<Float>; var normal: SIMD4<Float>; var color: SIMD4<Float> }
     private struct Instance { var position: SIMD4<Float>; var style: SIMD4<Float> }
-    private struct Uniforms { var matrix: simd_float4x4; var mode: SIMD4<Float> }
+    private struct Uniforms { var matrix: simd_float4x4; var mode: SIMD4<Float>; var viewDirection: SIMD4<Float> }
 
     func ingest(_ vehicles: [BusVehicle], time: TimeInterval) {
         motion.ingest(vehicles, time: time, now: Date())
         setNeedsDisplay()
     }
     func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
-    func isAnimating(time: TimeInterval, now: Date) -> Bool { motion.isAnimating(time: time, now: now) }
+    func isAnimating(time: TimeInterval, now: Date) -> Bool {
+        motion.isAnimating(time: time, now: now) || (selectedID != nil && !reduceMotion && time - selectionStartedAt < 0.45)
+    }
 
     override func didMove(to mapView: MLNMapView) {
         let resource = mapView.backendResource()
@@ -63,10 +74,17 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             descriptor.inputPrimitiveTopology = .line
             descriptor.label = "Selected bus outline"
             outlinePipeline = try device.makeRenderPipelineState(descriptor: descriptor)
+            descriptor.inputPrimitiveTopology = .triangle
+            descriptor.vertexFunction = library.makeFunction(name: "busShadowVertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "busShadowFragment")
+            descriptor.label = "Soft road contact shadows"
+            shadowPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             let depth = MTLDepthStencilDescriptor()
             depth.depthCompareFunction = .lessEqual
             depth.isDepthWriteEnabled = true
             normalDepth = device.makeDepthStencilState(descriptor: depth)
+            depth.isDepthWriteEnabled = false
+            shadowDepth = device.makeDepthStencilState(descriptor: depth)
             depth.depthCompareFunction = .always
             depth.isDepthWriteEnabled = false
             highlightDepth = device.makeDepthStencilState(descriptor: depth)
@@ -77,8 +95,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let edges = outline()
             outlineCount = edges.count
             outlineBuffer = edges.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
+            let shadow: [Vertex] = [(-1.75,-6.4), (1.75,-6.4), (1.75,6.4), (-1.75,-6.4), (1.75,6.4), (-1.75,6.4)].map { x, y in
+                Vertex(position: SIMD4(Float(x), Float(y), 0.035, 0), normal: SIMD4(Float(x / 1.75), Float(y / 6.4), 0, 0), color: .zero)
+            }
+            shadowBuffer = shadow.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
             instanceBuffers = (0..<3).compactMap { _ in device.makeBuffer(length: MemoryLayout<Instance>.stride * (Self.maximumVisible + 1), options: .storageModeShared) }
-            guard instanceBuffers.count == 3, vertexBuffer != nil, outlineBuffer != nil else { throw FeedError.invalid("Metal 記憶體") }
+            guard instanceBuffers.count == 3, vertexBuffer != nil, outlineBuffer != nil, shadowBuffer != nil else { throw FeedError.invalid("Metal 記憶體") }
             drawableSize = resource.mtkView.drawableSize
         } catch {
             onError?("公車 3D 圖層載入失敗；仍可使用路線與站牌查詢")
@@ -86,14 +108,15 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     override func willMove(from mapView: MLNMapView) {
-        pipeline = nil; outlinePipeline = nil; vertexBuffer = nil; outlineBuffer = nil
+        pipeline = nil; outlinePipeline = nil; shadowPipeline = nil
+        vertexBuffer = nil; outlineBuffer = nil; shadowBuffer = nil
         instanceBuffers = []; hitPoints = []
     }
 
     override func draw(in mapView: MLNMapView, with context: MLNStyleLayerDrawingContext) {
-        guard let encoder = renderEncoder, let commandBuffer, let pipeline, let outlinePipeline,
-              let vertexBuffer, let outlineBuffer, instanceBuffers.count == 3,
-              let normalDepth, let highlightDepth else { return }
+        guard let encoder = renderEncoder, let commandBuffer, let pipeline, let outlinePipeline, let shadowPipeline,
+              let vertexBuffer, let outlineBuffer, let shadowBuffer, instanceBuffers.count == 3,
+              let normalDepth, let highlightDepth, let shadowDepth else { return }
         bufferLock.lock()
         let slot = bufferBusy.firstIndex(of: false)
         if let slot { bufferBusy[slot] = true }
@@ -119,8 +142,13 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         }
         let gpuProjection = simd_float4x4(columns: (floatColumn(projection.columns.0), floatColumn(projection.columns.1),
                                                   floatColumn(projection.columns.2), floatColumn(projection.columns.3)))
-        var uniforms = Uniforms(matrix: gpuProjection, mode: .zero)
-        let poses = motion.poses(time: CACurrentMediaTime(), now: Date())
+        let heading = Float(mapView.camera.heading * .pi / 180), pitch = Float(mapView.camera.pitch * .pi / 180)
+        var uniforms = Uniforms(matrix: gpuProjection, mode: .zero,
+                                viewDirection: SIMD4(-sin(heading) * sin(pitch), -cos(heading) * sin(pitch), cos(pitch), 0))
+        let time = CACurrentMediaTime()
+        let selection = reduceMotion ? 1 : min(1, max(0, (time - selectionStartedAt) / 0.45))
+        let selectionStrength = Float(selection * selection * (3 - 2 * selection))
+        let poses = motion.poses(time: time, now: Date())
         var candidates: [(pose: VehiclePose, instance: Instance, point: CGPoint, size: CGFloat, score: Double)] = []
         for pose in poses {
             let mercator = pose.coordinate.mercator
@@ -134,15 +162,18 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                                  y: (1 - ndc.y) * context.size.height / 2)
             let selected = pose.id == selectedID
             let instance = Instance(position: SIMD4(Float(east), Float(north), 0, 1),
-                                    style: SIMD4(Float(pose.heading * .pi / 180), selected ? 1 : 0, pose.stale ? 1 : 0, 0))
-            let front = projection * SIMD4(east, north + 6, 1.75, 1)
-            let screenLength = abs((front.y / front.w - ndc.y) * context.size.height / 2)
-            candidates.append((pose, instance, screen, max(14, min(30, screenLength + 8)), selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y))
+                                    style: SIMD4(Float(pose.heading * .pi / 180), selected ? selectionStrength : 0,
+                                                 pose.stale ? 1 : 0, Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
+            let angle = pose.heading * .pi / 180
+            let front = projection * SIMD4(east + sin(angle) * 6, north + cos(angle) * 6, 1.75, 1)
+            let screenLength = hypot((front.x / front.w - ndc.x) * context.size.width / 2,
+                                     (front.y / front.w - ndc.y) * context.size.height / 2)
+            candidates.append((pose, instance, screen, max(22, min(38, screenLength + 8)), selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y))
         }
         candidates.sort { $0.score < $1.score }
         candidates = Array(candidates.prefix(Self.maximumVisible))
         hitPoints = candidates.map { ($0.pose.id, $0.point, $0.size) }
-        var instances = candidates.filter { !highlightSelected || $0.pose.id != selectedID }.map(\.instance)
+        var instances = candidates.map(\.instance)
         let selected = candidates.first { $0.pose.id == selectedID }
         onSelectedPoint?(selected?.point)
         let selectedOffset = instances.count * MemoryLayout<Instance>.stride
@@ -155,12 +186,19 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         // Custom layers inherit a 2D sublayer depth range. Restore the native 3D viewport.
         encoder.setViewport(MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1))
         encoder.setCullMode(.none)
+        encoder.setRenderPipelineState(shadowPipeline)
+        encoder.setDepthStencilState(shadowDepth)
+        encoder.setVertexBuffer(shadowBuffer, offset: 0, index: 0)
+        encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        encoder.setVertexBuffer(buffer, offset: 0, index: 2)
+        if !candidates.isEmpty { encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: candidates.count) }
         encoder.setRenderPipelineState(pipeline)
         encoder.setDepthStencilState(normalDepth)
         encoder.setVertexBuffer(vertexBuffer, offset: 0, index: 0)
         encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
         encoder.setVertexBuffer(buffer, offset: 0, index: 2)
-        let normalCount = candidates.filter { !highlightSelected || $0.pose.id != selectedID }.count
+        let normalCount = candidates.count
         if normalCount > 0 { encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount, instanceCount: normalCount) }
         if selected != nil {
             encoder.setVertexBuffer(buffer, offset: selectedOffset, index: 2)
@@ -168,10 +206,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                 encoder.setDepthStencilState(highlightDepth)
                 uniforms.mode.x = 1
                 encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
                 encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: vertexCount, instanceCount: 1)
             }
             uniforms.mode.x = 2
             encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setRenderPipelineState(outlinePipeline)
             encoder.setVertexBuffer(outlineBuffer, offset: 0, index: 0)
             encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: outlineCount, instanceCount: 1)
@@ -191,32 +231,96 @@ final class NativeBusLayer: MLNCustomStyleLayer {
 
     private func mesh() -> [Vertex] {
         var vertices: [Vertex] = []
-        func box(width: Float, length: Float, bottom: Float, top: Float, y: Float = 0, shade: Float) {
-            let x = width / 2, l = length / 2
-            let points: [SIMD4<Float>] = [SIMD4(-x, y-l, bottom, 1), SIMD4(x, y-l, bottom, 1), SIMD4(x, y+l, bottom, 1), SIMD4(-x, y+l, bottom, 1),
-                                         SIMD4(-x, y-l, top, 1), SIMD4(x, y-l, top, 1), SIMD4(x, y+l, top, 1), SIMD4(-x, y+l, top, 1)]
-            let faces: [([Int], Float)] = [([0,1,2,3], 0.7), ([4,7,6,5], 1.12), ([0,4,5,1], 0.85),
-                                         ([1,5,6,2], 0.9), ([2,6,7,3], 0.76), ([3,7,4,0], 1.0)]
-            for (indices, light) in faces {
-                let color = SIMD4<Float>(repeating: min(0.92, shade * light))
-                for index in [indices[0], indices[1], indices[2], indices[0], indices[2], indices[3]] {
-                    vertices.append(Vertex(position: points[index], color: SIMD4(color.x, color.y, color.z, 1)))
-                }
+        func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, color: SIMD3<Float>,
+                      normal: SIMD3<Float>? = nil, material: Float = 0, wheelY: Float = 0) {
+            let n = normal ?? simd_normalize(simd_cross(b - a, c - a))
+            for p in [a,b,c] {
+                vertices.append(Vertex(position: SIMD4(p.x,p.y,p.z,wheelY), normal: SIMD4(n.x,n.y,n.z,material),
+                                       color: SIMD4(color.x,color.y,color.z,1)))
             }
         }
-        box(width: 2.55, length: 11.8, bottom: 0.28, top: 3.45, shade: 0.66)
-        box(width: 1.8, length: 5.2, bottom: 3.45, top: 3.56, shade: 0.76)
-        box(width: 2.25, length: 0.04, bottom: 2, top: 3.16, y: 5.92, shade: 0.32)
-        box(width: 2.7, length: 0.95, bottom: 0.12, top: 0.85, y: 3.7, shade: 0.26)
-        box(width: 2.7, length: 0.95, bottom: 0.12, top: 0.85, y: -3.6, shade: 0.26)
+        func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>,
+                  color: SIMD3<Float>, normal: SIMD3<Float>? = nil, material: Float = 0, wheelY: Float = 0) {
+            triangle(a,b,c,color:color,normal:normal,material:material,wheelY:wheelY)
+            triangle(a,c,d,color:color,normal:normal,material:material,wheelY:wheelY)
+        }
+        func shell(_ rings: [[SIMD3<Float>]], shade: Float) {
+            for level in 1..<rings.count {
+                for i in 0..<8 {
+                    let j = (i + 1) % 8
+                    quad(rings[level-1][i],rings[level-1][j],rings[level][j],rings[level][i], color: SIMD3(repeating: shade))
+                }
+            }
+            let roof = rings.last!, center = roof.reduce(SIMD3<Float>.zero, +) / 8
+            for i in 0..<8 { triangle(center,roof[i],roof[(i+1)%8],color:SIMD3(repeating: shade + 0.06),normal:SIMD3(0,0,1)) }
+        }
+        // Chamfered corners and a bevel into the roof retain the simple gray silhouette.
+        shell([bodyRing(width:2.42,length:11.66,z:0.42),bodyRing(width:2.55,length:11.8,z:0.64),
+               bodyRing(width:2.55,length:11.8,z:3.15),bodyRing(width:2.30,length:11.54,z:3.40)],shade:0.73)
+        shell([bodyRing(width:1.65,length:3.8,z:3.40,y:-0.45),bodyRing(width:1.53,length:3.68,z:3.55,y:-0.45)],shade:0.77)
+        let glass = SIMD3<Float>(0.33,0.36,0.38)
+        quad(SIMD3(-1.04,5.91,1.99),SIMD3(1.04,5.91,1.99),SIMD3(1.04,5.91,3.05),SIMD3(-1.04,5.91,3.05),
+             color:glass,normal:SIMD3(0,1,0),material:1)
+        quad(SIMD3(-0.98,-5.91,2.11),SIMD3(0.98,-5.91,2.11),SIMD3(0.98,-5.91,3.0),SIMD3(-0.98,-5.91,3.0),
+             color:glass,normal:SIMD3(0,-1,0),material:1)
+        for side: Float in [-1,1] {
+            let x = side * 1.281
+            for (start, end): (Float, Float) in [(-5.2,-2.9),(-2.75,-0.45),(-0.30,2.0),(2.15,5.18)] {
+                quad(SIMD3(x,start,1.92),SIMD3(x,end,1.92),SIMD3(x,end,3.0),SIMD3(x,start,3.0),
+                     color:glass,normal:SIMD3(side,0,0),material:1)
+            }
+            for wheelY: Float in [-3.55,3.65] {
+                let inner = side * 1.18, outer = side * 1.38, radius: Float = 0.49
+                let hub = SIMD3<Float>(outer,wheelY,0.51)
+                for i in 0..<20 {
+                    let a = Float(i) * .pi / 10, b = Float(i+1) * .pi / 10
+                    let p = SIMD3<Float>(outer,wheelY + cos(a)*radius,0.51 + sin(a)*radius)
+                    let q = SIMD3<Float>(outer,wheelY + cos(b)*radius,0.51 + sin(b)*radius)
+                    triangle(hub,p,q,color:SIMD3(repeating:0.22),normal:SIMD3(side,0,0),material:2,wheelY:wheelY)
+                    quad(SIMD3(inner,p.y,p.z),p,q,SIMD3(inner,q.y,q.z),color:SIMD3(repeating:0.20),
+                         normal:SIMD3(0,cos((a+b)/2),sin((a+b)/2)),material:2,wheelY:wheelY)
+                    let hubP = SIMD3<Float>(outer + side*0.008,wheelY + cos(a)*0.235,0.51 + sin(a)*0.235)
+                    let hubQ = SIMD3<Float>(outer + side*0.008,wheelY + cos(b)*0.235,0.51 + sin(b)*0.235)
+                    triangle(SIMD3(outer + side*0.008,wheelY,0.51),hubP,hubQ,color:SIMD3(repeating:0.48),
+                             normal:SIMD3(side,0,0),wheelY:wheelY)
+                }
+                // Four small spokes make rolling visible when zoomed in, without extra textures.
+                for i in 0..<4 {
+                    let a = Float(i) * .pi / 2
+                    let along = SIMD2<Float>(cos(a),sin(a)), cross = SIMD2<Float>(-sin(a),cos(a)) * 0.025
+                    let center = SIMD2<Float>(wheelY,0.51)
+                    let points = [center + along*0.06 - cross,center + along*0.23 - cross,
+                                  center + along*0.23 + cross,center + along*0.06 + cross]
+                    let x = outer + side*0.012
+                    quad(SIMD3(x,points[0].x,points[0].y),SIMD3(x,points[1].x,points[1].y),
+                         SIMD3(x,points[2].x,points[2].y),SIMD3(x,points[3].x,points[3].y),color:SIMD3(repeating:0.31),
+                         normal:SIMD3(side,0,0),wheelY:wheelY)
+                }
+            }
+            let lightX = side * 0.88
+            quad(SIMD3(lightX-0.20,5.915,1.12),SIMD3(lightX+0.20,5.915,1.12),
+                 SIMD3(lightX+0.20,5.915,1.25),SIMD3(lightX-0.20,5.915,1.25),
+                 color:SIMD3(0.92,0.92,0.88),normal:SIMD3(0,1,0),material:3)
+            quad(SIMD3(lightX-0.07,-5.915,1.14),SIMD3(lightX+0.07,-5.915,1.14),
+                 SIMD3(lightX+0.07,-5.915,1.45),SIMD3(lightX-0.07,-5.915,1.45),
+                 color:SIMD3(0.56,0.24,0.22),normal:SIMD3(0,-1,0),material:3)
+        }
         return vertices
     }
 
+    private func bodyRing(width: Float, length: Float, z: Float, y: Float = 0) -> [SIMD3<Float>] {
+        let x = width/2, l = length/2, bevel: Float = min(0.22,width/5)
+        return [SIMD3(-x+bevel,y-l,z),SIMD3(x-bevel,y-l,z),SIMD3(x,y-l+bevel,z),SIMD3(x,y+l-bevel,z),
+                SIMD3(x-bevel,y+l,z),SIMD3(-x+bevel,y+l,z),SIMD3(-x,y+l-bevel,z),SIMD3(-x,y-l+bevel,z)]
+    }
+
     private func outline() -> [Vertex] {
-        let points: [SIMD4<Float>] = [SIMD4(-1.30,-5.93,0.25,1), SIMD4(1.30,-5.93,0.25,1), SIMD4(1.30,5.93,0.25,1), SIMD4(-1.30,5.93,0.25,1),
-                                     SIMD4(-1.30,-5.93,3.49,1), SIMD4(1.30,-5.93,3.49,1), SIMD4(1.30,5.93,3.49,1), SIMD4(-1.30,5.93,3.49,1)]
-        return [[0,1],[1,2],[2,3],[3,0],[4,5],[5,6],[6,7],[7,4],[0,4],[1,5],[2,6],[3,7]].flatMap { pair in
-            pair.map { Vertex(position: points[$0], color: SIMD4(0.16,0.42,0.96,1)) }
+        let lower = bodyRing(width:2.56,length:11.81,z:0.43), upper = bodyRing(width:2.32,length:11.56,z:3.42)
+        var edges: [(SIMD3<Float>,SIMD3<Float>)] = []
+        for i in 0..<8 {
+            edges.append((lower[i],lower[(i+1)%8])); edges.append((upper[i],upper[(i+1)%8]))
+            if i % 2 == 0 { edges.append((lower[i],upper[i])) }
         }
+        return edges.flatMap { a,b in [a,b].map { p in Vertex(position:SIMD4(p.x,p.y,p.z,0),normal:SIMD4(0,0,1,0),color:SIMD4(0.12,0.42,0.96,1)) } }
     }
 }

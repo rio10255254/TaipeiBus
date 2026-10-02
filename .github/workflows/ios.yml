@@ -57,6 +57,13 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
+      - name: Compile release app for iPhone
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: iPhone 17 launch and screenshots
         run: |
           set -euo pipefail
@@ -79,8 +86,21 @@ jobs:
           xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284
           sleep 15
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
+          xcrun simctl io "$device" recordVideo --codec=h264 "$RUNNER_TEMP/iPhone17-live-follow.mp4" > "$RUNNER_TEMP/video-record.log" 2>&1 &
+          recording=$!
+          sleep 32
+          kill -INT "$recording"
+          wait "$recording" || true
+          test -s "$RUNNER_TEMP/iPhone17-live-follow.mp4"
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           xcrun simctl terminate "$device" com.example.TaipeiBus
-          xcrun simctl shutdown "$device"
+          # Location is simulated here; vehicle GPS and ETAs still come from the public live feeds.
+          xcrun simctl location "$device" set 25.0377,121.56
+          xcrun simctl privacy "$device" grant location com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus
+          sleep 12
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-nearby.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -89,7 +109,10 @@ jobs:
             ${{ runner.temp }}/TaipeiBus-simulator.app.zip
             ${{ runner.temp }}/phone-screenshots
             ${{ runner.temp }}/ios-build.log
+            ${{ runner.temp }}/ios-release-build.log
             ${{ runner.temp }}/ios-runtime.log
+            ${{ runner.temp }}/iPhone17-live-follow.mp4
+            ${{ runner.temp }}/video-record.log
           retention-days: 7
 
   signed-ipa:

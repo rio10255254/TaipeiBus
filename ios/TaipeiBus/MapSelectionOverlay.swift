@@ -8,8 +8,8 @@ final class MapSelectionOverlay: ObservableObject {
     private var lastUpdate: CFTimeInterval = 0
     func update(_ point: CGPoint?) {
         let time = CACurrentMediaTime()
-        guard point == nil || time - lastUpdate > 0.08 else { return }
-        if let old = windowPoint, let point, hypot(old.x - point.x, old.y - point.y) < 0.6 { return }
+        guard point == nil || time - lastUpdate > 1.0 / 30 else { return }
+        if let old = windowPoint, let point, hypot(old.x - point.x, old.y - point.y) < 0.25 { return }
         if windowPoint != point { windowPoint = point }
         lastUpdate = time
     }
@@ -37,10 +37,12 @@ struct MapContextLabels: View {
                 .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .allowsHitTesting(false)
                 label.frame(width: width).position(x: x, y: y)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: x)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.10), value: y)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: x)
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: y)
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: overlay.windowPoint != nil)
     }
 
     @ViewBuilder private var label: some View {
@@ -54,7 +56,7 @@ struct MapContextLabels: View {
                     Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
                     Spacer(minLength: 0)
                     Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .background(.regularMaterial, in: Circle()).accessibilityLabel("此站所有路線與到站預估")
+                        .phoneGlass(in: Circle()).accessibilityLabel("此站所有路線與到站預估")
                 }
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
                     let arrivals = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
@@ -66,11 +68,13 @@ struct MapContextLabels: View {
                                 VStack(alignment: .leading, spacing: 3) {
                                     Text(arrival.route?.name ?? arrival.stop.routeID).font(.caption.weight(.semibold))
                                     Text(EstimateFeed.label(arrival.estimateSeconds)).font(.body.weight(.bold)).monospacedDigit()
+                                        .contentTransition(reduceMotion ? .identity : .numericText())
+                                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: arrival.estimateSeconds)
                                 }
                                 .padding(.horizontal, 13).padding(.vertical, 8).frame(minHeight: 48)
                                 .foregroundStyle(arrival.estimateSeconds == nil ? Color.secondary : Color.accentColor)
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
-                            }.buttonStyle(.plain)
+                            }.buttonStyle(PhonePressStyle())
                         }
                         if arrivals.isEmpty { Text("暫無到站資訊").font(.subheadline).shadow(color: .white, radius: 3) }
                     }
@@ -84,7 +88,7 @@ struct MapContextLabels: View {
                     Text("往 \(bus.destination)").font(.subheadline).lineLimit(2)
                     Spacer(minLength: 0)
                     Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .background(.regularMaterial, in: Circle()).accessibilityLabel("車輛資訊")
+                        .phoneGlass(in: Circle()).accessibilityLabel("車輛資訊")
                 }
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in

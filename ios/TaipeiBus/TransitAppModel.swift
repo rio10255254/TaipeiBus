@@ -65,6 +65,7 @@ final class TransitAppModel: ObservableObject {
                     let result = await service.refresh()
                     guard !Task.isCancelled else { return }
                     snapshot = result
+                    if let id = selectedVehicleID, !snapshot.vehicles.contains(where: { $0.id == id }) { following = false }
 #if DEBUG
                     applyPreviewSelection()
 #endif
@@ -163,10 +164,13 @@ final class TransitAppModel: ObservableObject {
         }
         if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
             selectStation(station); previewSelectionApplied = true
-        } else if let name = value(after: "--preview-vehicle-route"),
-                  let vehicle = snapshot.vehicles.filter({ $0.routeName == name && $0.isFresh(at: Date()) })
-                    .min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
-            selectVehicle(vehicle); previewSelectionApplied = true
+        } else if let name = value(after: "--preview-vehicle-route") {
+            let vehicles = snapshot.vehicles.filter { $0.routeName == name && $0.isFresh(at: Date()) }
+            let moving = vehicles.filter { $0.speed >= 5 && metadata.line($0.routeID) != nil }
+            if let vehicle = (moving.isEmpty ? vehicles : moving)
+                .min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
+                selectVehicle(vehicle); previewSelectionApplied = true
+            }
         }
     }
 #endif
