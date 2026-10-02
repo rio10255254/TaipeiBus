@@ -65,6 +65,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: iPhone 17 launch and screenshots
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
@@ -86,11 +87,32 @@ jobs:
           xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284
           sleep 15
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
-          xcrun simctl io "$device" recordVideo --codec=h264 "$RUNNER_TEMP/iPhone17-live-follow.mp4" > "$RUNNER_TEMP/video-record.log" 2>&1 &
-          recording=$!
-          sleep 32
-          kill -INT "$recording"
-          wait "$recording" || true
+          BUS_SIM_DEVICE="$device" python3 - <<'PY'
+          import os, signal, subprocess, time
+          output = os.path.join(os.environ['RUNNER_TEMP'], 'iPhone17-live-follow.mp4')
+          with open(os.path.join(os.environ['RUNNER_TEMP'], 'video-record.log'), 'w') as log:
+              # Launch in the foreground Python process so the child does not inherit a shell's ignored SIGINT.
+              process = subprocess.Popen(['xcrun', 'simctl', 'io', os.environ['BUS_SIM_DEVICE'],
+                  'recordVideo', '--codec=h264', output], stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+              try:
+                  time.sleep(32)
+                  process.send_signal(signal.SIGINT)
+                  process.wait(timeout=20)
+              except subprocess.TimeoutExpired:
+                  process.terminate()
+                  try:
+                      process.wait(timeout=5)
+                  except subprocess.TimeoutExpired:
+                      process.kill()
+                      process.wait(timeout=5)
+                  raise SystemExit('Simulator recording did not finalize within 20 seconds.')
+              finally:
+                  if process.poll() is None:
+                      process.kill()
+                      process.wait(timeout=5)
+              if process.returncode != 0:
+                  raise SystemExit(f'Simulator recording failed with exit code {process.returncode}.')
+          PY
           test -s "$RUNNER_TEMP/iPhone17-live-follow.mp4"
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           xcrun simctl terminate "$device" com.example.TaipeiBus

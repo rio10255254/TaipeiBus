@@ -64,8 +64,7 @@ final class TransitAppModel: ObservableObject {
                 while !Task.isCancelled {
                     let result = await service.refresh()
                     guard !Task.isCancelled else { return }
-                    snapshot = result
-                    if let id = selectedVehicleID, !snapshot.vehicles.contains(where: { $0.id == id }) { following = false }
+                    applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
 #endif
@@ -82,7 +81,16 @@ final class TransitAppModel: ObservableObject {
     func retry() { setActive(false); setActive(true) }
     func refresh() async {
         guard !loading else { return }
-        snapshot = await service.refresh()
+        applySnapshot(await service.refresh())
+    }
+
+    private func applySnapshot(_ result: TransitSnapshot) {
+        snapshot = result
+        guard let id = selectedVehicleID else { return }
+        guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
+        // Follow a physical bus through a return trip or branch change, keeping its current route visible.
+        if selectedRouteID != bus.routeID { selectedRouteID = bus.routeID }
+        if direction != bus.direction { direction = bus.direction }
     }
 
     func focusMap(_ target: MapFocus) { focus = target; focusRevision += 1 }
