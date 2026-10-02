@@ -264,7 +264,7 @@ struct NativeBusMap: UIViewRepresentable {
             var features: [String: MLNPointFeature] = [:]
             func add(_ coordinate: Coordinate, id: String, title: String) {
                 let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
-                feature.attributes = ["name": title]; features[id] = feature
+                feature.attributes = ["name": title, "stationID": id]; features[id] = feature
             }
             for (index, ride) in option.rides.enumerated() {
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: "\(index == 0 ? "上車" : "轉乘") · \(ride.boarding.name)")
@@ -433,7 +433,7 @@ struct NativeBusMap: UIViewRepresentable {
             let point = gesture.location(in: map)
             guard let id = buses.hitTest(point), let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else {
                 let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
-                let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names"]))
+                let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
                 if let stationID = features.first?.attribute(forKey: "stationID") as? String,
                    let station = model.metadata.stations[stationID] { model.selectStation(station) }
                 return

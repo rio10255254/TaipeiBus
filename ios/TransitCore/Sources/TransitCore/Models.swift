@@ -97,6 +97,7 @@ public struct StopReference: Sendable {
 }
 
 public struct TransitMetadata: Sendable {
+    public let revision = UUID()
     public var routes: [String: BusRoute] = [:]
     public var parents: [String: BusRoute] = [:]
     public var stops: [String: BusStop] = [:]
@@ -107,6 +108,7 @@ public struct TransitMetadata: Sendable {
     public var directionalLines: [String: RouteLine] = [:]
     public var journeys: [String: RouteJourney] = [:]
     public var routeCatalog = RouteCatalog()
+    public var stationSearch = StationSearchIndex()
 
     public init() {}
     public func route(_ id: String) -> BusRoute? { routes[id] ?? parents[id] }

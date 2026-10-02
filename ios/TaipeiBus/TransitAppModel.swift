@@ -170,7 +170,7 @@ final class TransitAppModel: ObservableObject {
 
     func stations(query: String) -> [Station] {
         let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .taipei
-        return StationSearch.search(query, metadata: metadata, near: position, favorites: favorites, recent: recentStationIDs)
+        return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs)
     }
 
     func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {
@@ -223,7 +223,7 @@ final class TransitAppModel: ObservableObject {
             mode = .routes; query = text; previewSelectionApplied = true
         } else if arguments.contains("--preview-place-audit") {
             previewSelectionApplied = true
-            Task { await auditPlaces(token: value(after: "--preview-capture") ?? "") }
+            Task { await auditPlaces(token: value(after: "--preview-capture") ?? "", group: value(after: "--preview-audit-group") ?? "transit") }
             return
         } else if arguments.contains("--preview-boarding-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"))
@@ -303,21 +303,27 @@ final class TransitAppModel: ObservableObject {
         try? Data(arguments[index + 1].utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 
-    private func auditPlaces(token: String) async {
+    private func auditPlaces(token: String, group: String) async {
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let search = PlaceSearch()
         var results: [[String: Any]] = []
         var failure: String?
-        for query in ["內湖站", "臺北車站", "臺北101"] {
+        let queries: [String]
+        switch group {
+        case "landmarks": queries = ["臺北車站", "臺北101", "台大", "三總", "小巨蛋"]
+        case "addresses": queries = ["忠孝東路四段100號", "内湖站", "台北 內湖站"]
+        default: queries = ["內湖站", "東湖站", "港墘站", "西門站"]
+        }
+        for query in queries {
             do {
                 let places = try await search.find(text: query)
-                let stations = Array(StationSearch.search(query, metadata: metadata, near: .taipei, limit: 4))
-                results.append(["query": query, "places": places.map { ["name": $0.name, "latitude": $0.coordinate.latitude,
+                let stations = metadata.stationSearch.search(query, near: .taipei, limit: 4)
+                results.append(["query": query, "places": places.map { ["name": $0.name, "address": $0.address, "latitude": $0.coordinate.latitude,
                     "longitude": $0.coordinate.longitude] as [String: Any] }, "stations": stations.map(\.name)])
                 if places.isEmpty { failure = "Missing Apple results for \(query)" }
             } catch { failure = error.localizedDescription; break }
         }
-        let result: [String: Any] = ["token": token, "results": results, "error": failure ?? ""]
+        let result: [String: Any] = ["token": token, "group": group, "results": results, "error": failure ?? ""]
         if let data = try? JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys]) {
             try? data.write(to: directory.appendingPathComponent("place-search-audit.json"), options: .atomic)
         }
@@ -357,7 +363,7 @@ final class TransitAppModel: ObservableObject {
         guard let data = try? JSONSerialization.data(withJSONObject: ["BusInfo": rows,
             "EssentialInfo": ["UpdateTime": formatter.string(from: date)]]),
               let result = try? FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date) else { return false }
-        let estimates = EstimateFeed(seconds: ["\(ride.route.parentID):\(ride.boarding.id)": 240], updatedAt: date)
+        let estimates = EstimateFeed(seconds: ["\(ride.route.parentID):\(ride.boarding.id)": 120], updatedAt: date)
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"

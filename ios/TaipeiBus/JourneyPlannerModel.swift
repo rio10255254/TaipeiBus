@@ -42,7 +42,7 @@ private actor TripNetwork {
     private var key = ""
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate) -> [TransitTrip] {
-        let signature = metadata.routes.keys.sorted().joined(separator: ",") + ":\(metadata.stops.count):\(metadata.paths.count)"
+        let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
@@ -123,7 +123,7 @@ final class JourneyPlannerModel: ObservableObject {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
         }
         guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea else {
-            message = "公車規劃目前涵蓋台北市區與周邊。可改選出發地，或用 Apple 地圖規劃。"; return
+            message = "此地超出公車規劃範圍"; return
         }
         guard !metadata.routes.isEmpty else { message = "路線資料載入後即可規劃。"; return }
         planning = true
@@ -169,7 +169,7 @@ final class JourneyPlannerModel: ObservableObject {
             }
             options = choices; selectedID = choices.first?.id; planning = false; mapRevision += 1
             guard !choices.isEmpty else {
-                message = "附近未找到直達或一次轉乘的公車。可改選出發地，或用 Apple 地圖查看其他轉乘。"; return
+                message = "附近沒有合適公車"; return
             }
             checkingWalks = true
             // Only calculate routes being presented to the user. Validate the recommended option first.
@@ -263,7 +263,8 @@ final class JourneyPlannerModel: ObservableObject {
         let leg = option.walks[index]
         let title = index < option.rides.count ? option.rides[index].boarding.name : destination?.name ?? "目的地"
         let target = TravelPlace(name: title, address: "", coordinate: leg.to).mapItem
-        let source = TravelPlace(name: index == 0 ? origin?.name ?? "出發地" : "下車站", address: "", coordinate: leg.from).mapItem
+        let source = index == 0 && usingLocation ? MKMapItem.forCurrentLocation() :
+            TravelPlace(name: index == 0 ? origin?.name ?? "出發地" : "下車站", address: "", coordinate: leg.from).mapItem
         MKMapItem.openMaps(with: [source, target], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
     }
     func openAppleTransit() {

@@ -128,6 +128,7 @@ public enum FeedDecoder {
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
         metadata.rebuildRouteCatalog()
+        metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
         metadata.rebuildJourneys()
         return metadata
     }

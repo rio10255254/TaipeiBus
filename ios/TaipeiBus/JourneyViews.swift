@@ -59,7 +59,7 @@ struct JourneyPlanningView: View {
                     .padding(.horizontal, 20).padding(.vertical, 12).background(.regularMaterial)
                 }
             }
-            .navigationTitle(showingPreview ? "前往 \(planner.destination?.name ?? "目的地")" : editingOrigin ? "從哪裡出發？" : searchingPlaces ? "你想去哪裡？" : "搭車方案")
+            .navigationTitle(showingPreview ? planner.destination?.name ?? "目的地" : editingOrigin ? "出發地" : searchingPlaces ? "目的地" : "搭車方案")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if showingPreview { ToolbarItem(placement: .cancellationAction) { Button("關閉") { dismiss() } } }
@@ -69,6 +69,7 @@ struct JourneyPlanningView: View {
             }
         }
         .onAppear {
+            search.setContext(planner.origin?.coordinate ?? location.usableCoordinate)
             editingDestination = planner.destination == nil
             if planner.origin == nil && planner.usingLocation {
                 planner.useLocation(location.usableCoordinate, metadata: model.metadata)
@@ -90,6 +91,7 @@ struct JourneyPlanningView: View {
             }
             searchError = nil; search.update(value)
         }
+        .onChange(of: location.coordinate) { _, coordinate in search.setContext(planner.origin?.coordinate ?? coordinate) }
         .onChange(of: planner.selectedID) { _, id in
             if id != nil, !searchingPlaces, !planner.started { focused = false; collapse() }
         }
@@ -150,16 +152,8 @@ struct JourneyPlanningView: View {
                 Text("地點搜尋結果").font(.subheadline.weight(.semibold)).padding(.top, 8)
                 ForEach(search.places) { place in placeButton(place, symbol: "mappin.circle.fill") }
             }
-            let stations = Array(model.stations(query: query).prefix(query.isEmpty ? 3 : 12))
-            if !stations.isEmpty {
-                Text(query.isEmpty ? (editingOrigin ? "也可以選站牌出發" : "也可以選站牌當目的地") : "符合名稱的公車站牌")
-                    .font(.subheadline.weight(.semibold)).padding(.top, 8)
-            }
-            ForEach(stations) { station in
-                placeButton(TravelPlace(name: station.name, address: "\(station.bearingLabel) · \(station.address)", coordinate: station.coordinate), symbol: "bus.fill")
-            }
-            if !search.suggestions.isEmpty && search.places.isEmpty { Text("其他地點").font(.subheadline.weight(.semibold)).padding(.top, 8) }
-            ForEach(Array((search.places.isEmpty ? search.suggestions : []).enumerated()), id: \.offset) { _, completion in
+            if !search.suggestions.isEmpty && search.places.isEmpty { Text("地點").font(.subheadline.weight(.semibold)).padding(.top, 8) }
+            ForEach(Array((search.places.isEmpty ? Array(search.suggestions.prefix(6)) : []).enumerated()), id: \.offset) { _, completion in
                 Button { resolve(text: completion.title, completion: completion) } label: {
                     HStack(spacing: 12) {
                         Image(systemName: "mappin.circle").font(.title2).foregroundStyle(Color.accentColor)
@@ -172,6 +166,26 @@ struct JourneyPlanningView: View {
                 }.buttonStyle(.plain).disabled(resolving)
                 Divider()
             }
+            let stations = Array(model.stations(query: query).prefix(query.isEmpty ? 3 : 12))
+            if !stations.isEmpty { Text("公車站牌").font(.subheadline.weight(.semibold)).padding(.top, 8) }
+            ForEach(StationSearch.groups(stations)) { group in
+                Text(group.name).font(.subheadline.weight(.semibold)).padding(.top, 8)
+                ForEach(group.stations) { station in
+                    Button {
+                        choose(TravelPlace(name: station.name, address: "\(station.bearingLabel) · \(station.address)", coordinate: station.coordinate))
+                    } label: {
+                        HStack(spacing: 12) {
+                            Image(systemName: "bus.fill").foregroundStyle(Color.accentColor).frame(width: 22)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(station.bearingLabel.isEmpty ? station.name : station.bearingLabel).font(.subheadline.weight(.medium))
+                                Text(station.address.isEmpty ? station.name : station.address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            }
+                            Spacer(minLength: 4)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                        }.frame(minHeight: 52).contentShape(Rectangle())
+                    }.buttonStyle(.plain).disabled(resolving)
+                }
+            }
         }
     }
     private func placeButton(_ place: TravelPlace, symbol: String) -> some View {
@@ -181,6 +195,7 @@ struct JourneyPlanningView: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(place.name).font(.body.weight(.medium))
                     if !place.address.isEmpty { Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                    if !place.coordinate.isInServiceArea { Text("公車規劃範圍外").font(.caption).foregroundStyle(.secondary) }
                 }
                 Spacer(); Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
             }.frame(minHeight: 58).contentShape(Rectangle())
@@ -190,6 +205,7 @@ struct JourneyPlanningView: View {
         expand()
         resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
         editingOrigin = origin; editingDestination = !origin; query = ""; searchError = nil; focused = true
+        search.setContext(planner.origin?.coordinate ?? location.usableCoordinate)
     }
     private func resolve(text: String, completion: MKLocalSearchCompletion? = nil) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -201,7 +217,7 @@ struct JourneyPlanningView: View {
                 guard !Task.isCancelled, token == resolveToken else { return }
                 resolving = false
                 if completion != nil, let place = places.first { choose(place) }
-                else if places.isEmpty { searchError = "沒有找到台北市區內的地點，請加上地址或選擇下方站牌。" }
+                else if places.isEmpty { searchError = "找不到相符地點，試試地址或站牌" }
                 else { focused = false }
             } catch {
                 guard !Task.isCancelled, token == resolveToken else { return }
@@ -234,107 +250,137 @@ private struct JourneyMapPreviewView: View {
     }
 }
 
-/// The destination flow's main result: one boarding platform, one direction, and the first few real vehicles.
+/// A flat boarding display shared by the sheet and the edge of the map.
 struct JourneyBoardingView: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
-
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date)
-            let next = guide.approaches.first { $0.alongDistance != nil }
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(spacing: 10) {
-                    RouteBadge(name: ride.route.name)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("搭這條線 · 往 \(ride.route.destination(direction: ride.direction))").font(.subheadline.weight(.semibold)).lineLimit(2)
-                        if ride.route.displayName != ride.route.name {
-                            Text(ride.route.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text("上車：\(ride.boarding.name)\(guide.station.map { " · " + $0.bearingLabel } ?? "")")
-                        .font(.subheadline.weight(.semibold)).lineLimit(2)
-                    if let station = guide.station, !station.address.isEmpty {
-                        Text(station.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    Text("下車：\(ride.alighting.name)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                }
-                Text("官方：\(guide.arrivalLabel)").font(.headline).foregroundStyle(Color.accentColor).monospacedDigit()
-                HStack {
-                    Text("即將到站的公車").font(.caption.weight(.semibold))
-                    Spacer(minLength: 8)
-                    Button {
-                        if let next { model.trackApproachingVehicle(next.vehicle) }
-                    } label: {
-                        Label(model.following && next?.id == model.selectedVehicleID ? "追蹤中" : "追蹤下一輛", systemImage: "scope")
-                    }.font(.caption.weight(.semibold)).frame(minHeight: 36).disabled(next == nil)
-                }
-                if guide.approaches.isEmpty {
-                    Text("目前沒有可定位的同方向公車，請以上方官方到站時間為準。")
-                        .font(.caption).foregroundStyle(.secondary).padding(.vertical, 4)
-                }
-                ForEach(Array(guide.approaches.prefix(3))) { approach in
-                    let bus = approach.vehicle
-                    let estimate = model.arrivalEstimate(approach, ride: ride, at: timeline.date)
-                    let upcoming = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)?
-                        .upcoming(vehicle: bus, at: timeline.date).first
-                    Button { model.trackApproachingVehicle(bus) } label: {
-                        HStack(spacing: 10) {
-                            Image(systemName: model.selectedVehicleID == bus.id ? "scope" : "bus.fill")
-                                .foregroundStyle(Color.accentColor).frame(width: 20)
-                            VStack(alignment: .leading, spacing: 3) {
-                                HStack(spacing: 6) {
-                                    Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                                    if next?.id == bus.id { Text("位置最近").font(.caption2).foregroundStyle(Color.accentColor) }
-                                }
-                                Text(upcoming.map { "前方：" + $0.stop.name } ?? "道路位置尚待確認")
-                                    .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                            Spacer(minLength: 4)
-                            VStack(alignment: .trailing, spacing: 3) {
-                                Text(estimate.label).font(.subheadline.weight(.semibold)).monospacedDigit()
-                                Text(approach.alongDistance.map { "距站 " + distanceLabel($0) } ?? "直線 " + distanceLabel(approach.directDistance))
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }.frame(minHeight: 46).padding(.horizontal, 10).padding(.vertical, 4)
-                            .background(model.selectedVehicleID == bus.id ? Color.accentColor.opacity(0.08) : Color(uiColor: .tertiarySystemFill),
-                                        in: RoundedRectangle(cornerRadius: 12))
-                    }.buttonStyle(.plain).accessibilityHint("在地圖上追蹤這輛公車")
-                }
-                Text("各車時間依位置估算；官方到站時間未指定車牌。上車前請確認車頭方向。")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity, alignment: .leading)
+            JourneyBoardingContent(model: model, ride: ride, date: timeline.date)
         }
     }
 }
 
-struct JourneyQuickCard: View {
+private struct JourneyBoardingContent: View {
+    @ObservedObject var model: TransitAppModel
+    let ride: TransitRide
+    let date: Date
+    @State private var showTimingInfo = false
+    private var guide: BoardingGuide { BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date) }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            headline
+            platform
+            HStack {
+                Text("各車估算").font(.caption).foregroundStyle(.secondary)
+                Button { showTimingInfo = true } label: { Image(systemName: "info.circle").font(.caption).frame(width: 28, height: 28) }
+                    .accessibilityLabel("到站時間說明")
+                    .popover(isPresented: $showTimingInfo) {
+                        Text("官方時間是這條路線的到站預估，沒有指定車牌。各車時間依位置、近期移動和中途停靠估算。定位不足時不顯示時間。")
+                            .font(.subheadline).padding(20).frame(maxWidth: 300).presentationCompactAdaptation(.popover)
+                    }
+                Spacer()
+            }
+            .padding(.bottom, -10)
+            if guide.approaches.isEmpty { Text("暫無車輛位置").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6) }
+            VStack(spacing: 0) {
+                ForEach(Array(guide.approaches.prefix(3))) { approach in
+                    BoardingVehicleRow(model: model, ride: ride, approach: approach, date: date)
+                    if approach.id != guide.approaches.prefix(3).last?.id { Divider() }
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var headline: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(ride.route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .foregroundStyle(Color.accentColor).lineLimit(1).minimumScaleFactor(0.65)
+                Text("往 " + ride.route.destination(direction: ride.direction)).font(.subheadline).lineLimit(1)
+                if ride.route.displayName != ride.route.name { Text(ride.route.displayName).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            }
+            Spacer(minLength: 4)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(guide.arrivalShortLabel).font(.system(.largeTitle, design: .rounded).weight(.bold))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
+                Text(guide.estimateSeconds == nil ? "暫無預估" : "官方到站").font(.caption).foregroundStyle(.secondary)
+            }.layoutPriority(1)
+        }
+    }
+    private var platform: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "mappin.circle.fill").foregroundStyle(Color.accentColor)
+                Text("上車 · " + ride.boarding.name).font(.body.weight(.semibold)).lineLimit(2)
+                if let station = guide.station { Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary) }
+            }
+            if let station = guide.station, !station.address.isEmpty { Text(station.address).font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+            Text("下車 · " + ride.alighting.name).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+        }
+    }
+}
+
+private struct BoardingVehicleRow: View {
+    @ObservedObject var model: TransitAppModel
+    let ride: TransitRide
+    let approach: VehicleApproach
+    let date: Date
+    private var selected: Bool { model.selectedVehicleID == approach.id }
+    private var nextStop: String? {
+        model.metadata.journey(routeID: approach.vehicle.routeID, direction: approach.vehicle.direction)?
+            .upcoming(vehicle: approach.vehicle, at: date).first?.stop.name
+    }
+    var body: some View {
+        Button { model.trackApproachingVehicle(approach.vehicle) } label: {
+            HStack(spacing: 12) {
+                Circle().fill(selected ? Color.accentColor : Color.secondary.opacity(0.35)).frame(width: 6, height: 6)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(approach.vehicle.plate).font(.subheadline.weight(.semibold)).monospaced()
+                    Text(nextStop ?? "位置待確認").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                Text(model.arrivalEstimate(approach, ride: ride, at: date).label)
+                    .font(.system(.title3, design: .rounded).weight(.semibold)).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                Image(systemName: "scope").font(.body).foregroundStyle(selected ? Color.accentColor : Color.secondary)
+            }.frame(minHeight: 48).padding(.vertical, 4).contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityHint("點一下追蹤這輛公車")
+            .accessibilityValue(selected ? "追蹤中" : "")
+    }
+}
+
+struct JourneyArrivalDock: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let showJourney: () -> Void
     var body: some View {
         if let option = planner.selected {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("前往 \(planner.destination?.name ?? "目的地")").font(.caption.weight(.semibold)).lineLimit(1)
+                    Text(planner.destination?.name ?? "目的地").font(.subheadline.weight(.medium)).lineLimit(1)
                     Spacer()
-                    Button("方案", action: showJourney).font(.caption.weight(.semibold)).frame(minHeight: 36)
-                    Button { planner.finish(); model.clearSelection() } label: { Image(systemName: "xmark").frame(width: 36, height: 36) }
+                    Button("方案", action: showJourney).font(.subheadline).frame(minHeight: 36)
+                    Button { planner.finish(); model.clearSelection() } label: { Image(systemName: "xmark").font(.caption.weight(.semibold)).frame(width: 36, height: 36) }
                         .accessibilityLabel("結束查詢")
                 }
-                if let ride = option.rides.first {
-                    JourneyBoardingView(model: model, ride: ride)
-                    if option.rides.count > 1 {
-                        Text("在 \(ride.alighting.name) 轉搭 \(option.rides[1].route.displayName)").font(.caption).foregroundStyle(.secondary)
+                if let ride = option.rides.first { JourneyBoardingView(model: model, ride: ride) }
+                else { Text(option.walkingTimeLabel).font(.title3.weight(.semibold)) }
+                HStack(spacing: 12) {
+                    Button { planner.navigateWalk(0) } label: {
+                        Label("步行", systemImage: "figure.walk").font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                    if let ride = option.rides.first {
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            let next = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).approaches.first { $0.alongDistance != nil }
+                            Button { if let next { model.trackApproachingVehicle(next.vehicle) } } label: {
+                                Label(model.following && next?.id == model.selectedVehicleID ? "追蹤中" : "追蹤下一輛", systemImage: "scope")
+                                    .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                            }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).disabled(next == nil)
+                        }
                     }
-                } else { Text("步行即可 · \(option.walkingTimeLabel)").font(.subheadline.weight(.semibold)) }
-                Button { planner.navigateWalk(0) } label: {
-                    Label(option.walkingOnly ? "步行前往目的地" : "步行到上車站", systemImage: "figure.walk")
-                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-            }.padding(14).phoneGlass(in: RoundedRectangle(cornerRadius: 25))
+                }
+            }.padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 16)
+                .phoneGlass(in: UnevenRoundedRectangle(topLeadingRadius: 28, topTrailingRadius: 28))
+                .padding(.horizontal, -24).padding(.bottom, -12)
         }
     }
 }
@@ -346,7 +392,7 @@ struct JourneyOptionsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if planner.planning || model.loading {
-                HStack(spacing: 12) { ProgressView(); Text("尋找附近可搭的站牌").font(.subheadline) }.padding(.vertical, 16)
+                HStack(spacing: 12) { ProgressView(); Text("查詢中").font(.subheadline) }.padding(.vertical, 16)
             }
             if let message = planner.message { Text(message).font(.subheadline).foregroundStyle(.secondary) }
             ForEach(planner.options) { option in
@@ -378,11 +424,9 @@ struct JourneyOptionsView: View {
                             if option.id == planner.selectedID && planner.checkingWalks { ProgressView().controlSize(.small) }
                         }
                         if let issue = option.walkIssue { Text(issue).font(.caption).foregroundStyle(.orange) }
-                    }.padding(16).frame(maxWidth: .infinity, alignment: .leading)
-                        .background(option.id == planner.selectedID ? Color.accentColor.opacity(0.06) : Color(uiColor: .secondarySystemGroupedBackground),
-                                    in: RoundedRectangle(cornerRadius: 22))
-                        .overlay(RoundedRectangle(cornerRadius: 22).stroke(option.id == planner.selectedID ? Color.accentColor.opacity(0.4) : .clear, lineWidth: 1.5))
+                    }.padding(.vertical, 16).frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain)
+                Divider()
             }
             if planner.selected != nil {
                 DisclosureGroup("查看步行與乘車詳情") {
@@ -391,7 +435,7 @@ struct JourneyOptionsView: View {
             }
             if planner.destination != nil {
                 Button { planner.openAppleTransit() } label: {
-                    Label("用 Apple 地圖查看其他交通方式", systemImage: "map").font(.subheadline).frame(minHeight: 44)
+                                    Label("其他交通方式", systemImage: "map").font(.subheadline).frame(minHeight: 44)
                 }
             }
         }
@@ -409,7 +453,7 @@ private struct JourneyStartButton: View {
             VStack(spacing: 8) {
                 if let walk = option.walks.first {
                     Text(planner.checkingWalks ? "確認步行路線中" :
-                         "\(walk.timeLabel) · \(ride?.boarding.name ?? planner.destination?.name ?? "目的地")")
+                         walk.timeLabel + (walk.distance.map { " · " + distanceLabel($0) } ?? ""))
                         .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
                 if let ride, let walk = option.walks.first {
@@ -420,11 +464,22 @@ private struct JourneyStartButton: View {
                         }
                     }
                 }
-                Button(action: begin) {
-                    Label(option.walkingOnly ? "步行前往目的地" : "步行到上車站", systemImage: "figure.walk")
-                        .font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 54)
-                }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                    .disabled(planner.planning || planner.checkingWalks || option.walkIssue != nil || unavailable != nil)
+                HStack(spacing: 12) {
+                    Button(action: begin) {
+                        Label("步行", systemImage: "figure.walk")
+                            .font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 48)
+                    }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                        .disabled(planner.planning || planner.checkingWalks || option.walkIssue != nil || unavailable != nil)
+                    if let ride {
+                        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                            let next = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).approaches.first { $0.alongDistance != nil }
+                            Button { if let next { model.trackApproachingVehicle(next.vehicle) } } label: {
+                                Label(model.following && next?.id == model.selectedVehicleID ? "追蹤中" : "追蹤下一輛", systemImage: "scope")
+                                    .font(.body.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 48)
+                            }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).disabled(next == nil)
+                        }
+                    }
+                }
                 if let unavailable {
                     Text("\(unavailable.route) 上車站：\(EstimateFeed.label(unavailable.status))").font(.caption).foregroundStyle(.secondary)
                 }

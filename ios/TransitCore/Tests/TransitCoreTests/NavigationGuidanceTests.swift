@@ -64,6 +64,8 @@ final class NavigationGuidanceTests: XCTestCase {
         XCTAssertEqual(StationSearch.placeQueries("內湖站").first, "捷運內湖站")
         XCTAssertEqual(StationSearch.placeQueries("北車").first, "臺北車站")
         XCTAssertEqual(StationSearch.placeQueries("臺北車站"), ["臺北車站"])
+        XCTAssertEqual(StationSearch.rank(name: "內湖", query: "內湖站"), 1)
+        XCTAssertEqual(StationSearch.rank(name: "內湖捷運站", query: "內湖站"), 1)
         XCTAssertTrue(StationSearch.search("不存在的地方", metadata: metadata, near: .taipei).isEmpty)
     }
 
@@ -96,11 +98,52 @@ final class NavigationGuidanceTests: XCTestCase {
         }
         XCTAssertGreaterThanOrEqual(nearHigh, nearLow)
         XCTAssertGreaterThan(farLow, nearLow); XCTAssertGreaterThan(farHigh, nearHigh)
-        for seconds in [60, 900, -3] {
+        for seconds in [60, 900, -1] {
             let guide = BoardingGuide(ride: ride, metadata: metadata,
                 snapshot: TransitSnapshot(vehicles: vehicles, estimates: EstimateFeed(seconds: ["main:stop-4": seconds], updatedAt: now)), at: now)
             XCTAssertEqual(forecast.estimate(guide.approaches[0], ride: ride, metadata: metadata, at: now), first)
         }
+    }
+
+    func testOfficialClosedStopCannotRecommendAGPSVehicleAsTheNextBus() {
+        let (metadata, ride) = source()
+        let vehicle = bus("moving", longitude: 121.597, metadata: metadata)
+        for status in [-2, -3, -4] {
+            let guide = BoardingGuide(ride: ride, metadata: metadata,
+                snapshot: TransitSnapshot(vehicles: [vehicle], estimates: EstimateFeed(seconds: ["main:stop-4": status], updatedAt: now)), at: now)
+            XCTAssertTrue(guide.approaches.isEmpty)
+            XCTAssertEqual(guide.arrivalShortLabel, EstimateFeed.label(status))
+        }
+    }
+
+    func testGeneralSearchHandlesMetroWordOrderAliasesMixedScriptsRoadSegmentsAndTypos() {
+        for query in ["東湖站", "東湖捷運站", "捷運站東湖", "东湖站"] {
+            XCTAssertLessThanOrEqual(StationSearch.rank(name: "捷運東湖站(南湖高中)", query: query) ?? 99, 1)
+        }
+        for query in ["港墘站", "西門站", "台北 內湖站"] {
+            let name = query.contains("內湖") ? "捷運內湖站" : "捷運" + query
+            XCTAssertLessThanOrEqual(StationSearch.rank(name: name, query: query) ?? 99, 1)
+        }
+        XCTAssertLessThanOrEqual(StationSearch.rank(name: "國立臺灣大學", query: "台大") ?? 99, 1)
+        XCTAssertLessThanOrEqual(StationSearch.rank(name: "Taipei 101", query: "臺北101") ?? 99, 1)
+        XCTAssertLessThanOrEqual(StationSearch.rank(name: "臺北小巨蛋", query: "小巨蛋") ?? 99, 1)
+        XCTAssertEqual(StationSearch.placeRank(name: "路口", address: "臺北市忠孝東路四段100號", query: "忠孝東路4段100號"), 4)
+        XCTAssertNotNil(StationSearch.rank(name: "捷運西門站", query: "西們站"))
+        XCTAssertLessThan(StationSearch.rank(name: "捷運西門站", query: "西們站") ?? 99,
+                          StationSearch.rank(name: "捷運西湖站", query: "西們站") ?? 99)
+        XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "臺北101"))
+        XCTAssertNil(StationSearch.placeRank(name: "大直街101巷", address: "台北市大直街101巷", query: "101"))
+    }
+
+    func testStationGroupsKeepPhysicalSidesWhileShowingTheSharedNameOnce() {
+        let first = Station(id: "north", name: "捷運東湖站(南湖高中)", coordinate: .taipei, address: "康寧路北側", bearing: "N", stopIDs: [])
+        let second = Station(id: "south", name: "捷運東湖站", coordinate: .taipei, address: "康寧路南側", bearing: "S", stopIDs: [])
+        let groups = StationSearch.groups([first, second])
+        XCTAssertEqual(groups.count, 1)
+        XCTAssertEqual(groups[0].name, "捷運東湖站")
+        XCTAssertEqual(groups[0].stations.map(\.id), ["north", "south"])
+        let index = StationSearchIndex(stations: [first, second])
+        XCTAssertEqual(index.search("东湖站", near: .taipei).count, 2)
     }
 
     func testStaleMissingSpeedUnmatchedGPSAndPassedStopHaveNoFabricatedTime() {
@@ -153,9 +196,17 @@ final class NavigationGuidanceTests: XCTestCase {
         for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape"] { feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json")) }
         let metadata = try FeedDecoder.metadata(feeds: feeds)
         for query in ["內湖站", "內湖", "内湖站", "Neihu"] {
-            let stations = StationSearch.search(query, metadata: metadata, near: .taipei, limit: 4)
+            let stations = metadata.stationSearch.search(query, near: .taipei, limit: 4)
             XCTAssertFalse(stations.isEmpty, "Missing \(query)")
             XCTAssertTrue(stations.allSatisfy { $0.name.hasPrefix("捷運內湖站") }, "Wrong \(query): \(stations.map(\.name))")
         }
+        for (query, prefix) in [("東湖站", "捷運東湖站"), ("港墘站", "捷運港墘站"), ("西門站", "捷運西門站"),
+                                ("台北車站", "臺北車站"), ("台大", "臺大"), ("小巨蛋", "臺北小巨蛋")] {
+            let station = try XCTUnwrap(metadata.stationSearch.search(query, near: .taipei).first, query)
+            XCTAssertTrue(station.name.hasPrefix(prefix), "Wrong \(query): \(station.name)")
+        }
+        let start = Date()
+        for _ in 0..<3 { _ = metadata.stationSearch.search("內湖站", near: .taipei) }
+        print("Cached station search: \(Date().timeIntervalSince(start) / 3) seconds per query across \(metadata.stations.count) platforms.")
     }
 }

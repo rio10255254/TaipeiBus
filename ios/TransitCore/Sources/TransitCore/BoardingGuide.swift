@@ -12,13 +12,20 @@ public struct BoardingGuide: Sendable {
         station = metadata.stations[ride.boarding.stationID]
         estimateSeconds = snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date)
         estimateUpdatedAt = estimateSeconds == nil ? nil : snapshot.estimates.updatedAt
-        approaches = Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: true)
+        approaches = [-2, -3, -4].contains(estimateSeconds ?? 0) ? [] :
+            Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: true)
     }
 
     public var arrivalLabel: String {
         guard let seconds = estimateSeconds else { return "目前沒有到站預估" }
         if seconds < 0 { return EstimateFeed.label(seconds) }
         return seconds <= 60 ? "即將到上車站" : "約 \(Int(ceil(Double(seconds) / 60))) 分鐘到上車站"
+    }
+
+    public var arrivalShortLabel: String {
+        guard let seconds = estimateSeconds else { return "—" }
+        if seconds < 0 { return EstimateFeed.label(seconds) }
+        return seconds <= 60 ? "即將到站" : "\(Int(ceil(Double(seconds) / 60))) 分"
     }
 
     public static func vehicles(ride: TransitRide, metadata: TransitMetadata, snapshot: TransitSnapshot,
