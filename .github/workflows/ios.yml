@@ -68,14 +68,26 @@ jobs:
         timeout-minutes: 12
         run: |
           set -euo pipefail
+          simctl=$(xcrun --find simctl)
+          # Bound every simulator RPC and print the active command before it starts.
+          sim() {
+            python3 - "$simctl" "$@" <<'PY'
+          import os, subprocess, sys
+          command = sys.argv[1:]
+          print('Simulator command:', ' '.join(command[1:]), flush=True)
+          timeout = 180 if command[1] in ('bootstatus', 'install', 'launch') else 60
+          subprocess.run(command, check=True, timeout=timeout)
+          PY
+          }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
           device=$(xcrun simctl create TaipeiBus-iPhone17 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
           trap 'xcrun simctl spawn "$device" log show --style compact --last 3m --predicate '\''process == "TaipeiBus"'\'' > "$RUNNER_TEMP/ios-runtime.log" 2>&1 || true; xcrun simctl shutdown "$device" >/dev/null 2>&1 || true' EXIT
-          xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
-          xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
-          xcrun simctl install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
-          xcrun simctl launch "$device" com.example.TaipeiBus
+          sim boot "$device"
+          sim bootstatus "$device" -b
+          open -a Simulator --args -CurrentDeviceUDID "$device"
+          sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
+          sim status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
+          sim launch "$device" com.example.TaipeiBus
           sleep 40
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
