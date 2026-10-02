@@ -5,18 +5,23 @@ import TransitCore
 struct TransitHomeView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var location: LocationService
+    @ObservedObject private var planner: JourneyPlannerModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showSearch = false
     @State private var showDetails = false
     @State private var showInformation = false
+    @State private var showJourney = false
+    @State private var pendingJourneyDetail = false
+    @State private var bottomControlsHeight: CGFloat = 210
     @StateObject private var selectionOverlay = MapSelectionOverlay()
 
     init(model: TransitAppModel) {
         self.model = model
         location = model.location
+        planner = model.planner
     }
 
-    private var hasSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil }
+    private var hasSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || planner.selected != nil }
     private var nearbyStations: [Station] {
         guard !hasSelection, let position = location.usableCoordinate, position.isInServiceArea else { return [] }
         return model.metadata.stations.values.filter { $0.coordinate.distance(to: position) <= 800 }
@@ -26,13 +31,13 @@ struct TransitHomeView: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                NativeBusMap(model: model, location: location.usableCoordinate,
-                             bottomInset: showDetails ? geometry.size.height * 0.48 + 50 : nearbyStations.isEmpty ? 140 : 210,
+                NativeBusMap(model: model, planner: planner, location: location.usableCoordinate,
+                             bottomInset: showDetails ? geometry.size.height * 0.48 + 50 : bottomControlsHeight + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
                     .accessibilityLabel("台北公車地圖")
-                if !showDetails && !showSearch {
+                if !showDetails && !showSearch && !showJourney {
                     MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
                 }
                 HStack(alignment: .top, spacing: 12) {
@@ -49,7 +54,7 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 16).padding(.top, 8)
 
-                if !showDetails, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                if !showDetails, !planner.started, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(model.selectedRouteName ?? route.name).font(.system(.largeTitle, design: .rounded).weight(.bold))
                             .foregroundStyle(Color.accentColor).lineLimit(2)
@@ -100,6 +105,18 @@ struct TransitHomeView: View {
                         Text(message).font(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
+                    if planner.started {
+                        JourneyGuideCard(model: model, planner: planner) { showJourney = true }
+                    } else {
+                        Button { showJourney = true } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
+                                Text("你想去哪裡？").font(.body.weight(.semibold))
+                                Spacer(minLength: 0)
+                                Image(systemName: "arrow.up.right").font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
+                            }.padding(.horizontal, 20).frame(minHeight: 58)
+                        }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
+                    }
                     if !nearbyStations.isEmpty, let position = location.usableCoordinate {
                         HStack(spacing: 10) {
                             ForEach(nearbyStations) { station in
@@ -116,8 +133,8 @@ struct TransitHomeView: View {
                         }.transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                     HStack(spacing: 4) {
-                        Button { showSearch = true } label: {
-                            Label("搜尋", systemImage: "magnifyingglass").font(.body.weight(.semibold))
+                        Button { model.mode = .stops; showSearch = true } label: {
+                            Label("站牌", systemImage: "mappin.and.ellipse").font(.subheadline.weight(.medium))
                                 .padding(.horizontal, 18).frame(minHeight: 56)
                         }.buttonStyle(PhonePressStyle())
                         Spacer(minLength: 0)
@@ -138,7 +155,7 @@ struct TransitHomeView: View {
                                     .font(.subheadline.weight(.medium)).padding(.horizontal, 12).frame(minHeight: 50)
                             }
                         }
-                        if hasSelection {
+                        if model.selectedRouteID != nil || model.selectedStationID != nil {
                             Button { model.clearSelection() } label: {
                                 Image(systemName: "xmark").font(.subheadline.weight(.semibold)).frame(width: 50, height: 50)
                             }.accessibilityLabel("關閉選取")
@@ -149,6 +166,9 @@ struct TransitHomeView: View {
                     .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
                     .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
                 }
+                }
+                .background {
+                    GeometryReader { controls in Color.clear.preference(key: MapBottomControlsHeightKey.self, value: controls.size.height) }
                 }
                 }
                 .padding(.horizontal, 24).padding(.bottom, 12)
@@ -161,6 +181,7 @@ struct TransitHomeView: View {
             }
         }
         .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
+        .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .sheet(isPresented: $showSearch) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: true)
                 .presentationDetents([.large])
@@ -173,29 +194,57 @@ struct TransitHomeView: View {
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
+        .sheet(isPresented: $showJourney, onDismiss: {
+            if pendingJourneyDetail { pendingJourneyDetail = false; showDetails = true }
+        }) {
+            JourneyPlanningView(model: model, planner: planner, location: location)
+                .presentationDetents([.large]).presentationDragIndicator(.visible).presentationCornerRadius(30)
+        }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .onChange(of: location.coordinate) { _, position in
-            guard let position, position.isInServiceArea, !hasSelection else { return }
-            model.focusMap(.coordinate(position))
+            guard let position else { return }
+            planner.locationArrived(position, metadata: model.metadata)
+            if position.isInServiceArea, !hasSelection { model.focusMap(.coordinate(position)) }
+        }
+        .onChange(of: planner.mapRevision) { _, _ in
+            model.clearSelection()
+            let coordinates = planner.mapCoordinates
+            if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+#if DEBUG
+            model.markJourneyPreviewReady()
+            if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil, !planner.started { showJourney = true }
+#endif
+        }
+        .onChange(of: model.loading) { _, loading in
+            if !loading, planner.destination != nil, planner.options.isEmpty { planner.plan(metadata: model.metadata) }
         }
         .onChange(of: model.selectionRevision) { _, _ in
             selectionOverlay.update(nil)
             showSearch = false
             showDetails = false
+            if showJourney { pendingJourneyDetail = true; showJourney = false }
+            else if planner.started { showDetails = true }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--preview-details") { showDetails = true }
 #endif
         }
 #if DEBUG
         .onChange(of: model.query) { _, value in
-            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") ||
-                (!value.isEmpty && ProcessInfo.processInfo.arguments.contains("--preview-search")) { showSearch = true }
+            if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { showSearch = true }
         }
         .onChange(of: model.mode) { _, _ in
             if ProcessInfo.processInfo.arguments.contains("--preview-route-search") { showSearch = true }
         }
+        .onChange(of: model.loading) { _, loading in
+            if !loading && ProcessInfo.processInfo.arguments.contains("--preview-journey-search") { showJourney = true }
+        }
 #endif
     }
+}
+
+private struct MapBottomControlsHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 210
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 // Native Liquid Glass follows system appearance and accessibility preferences on iOS 26.
@@ -329,7 +378,6 @@ private struct TransitPanel: View {
         switch model.mode {
         case .stops: return location.usableCoordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌"
         case .routes: return "公車路線"
-        case .vehicles: return "搜尋車牌"
         }
     }
 
@@ -350,7 +398,7 @@ private struct TransitPanel: View {
             }
             HStack(spacing: 9) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField("搜尋站牌、路線或車牌", text: $model.query)
+                TextField("搜尋站牌或路線", text: $model.query)
                     .focused($searchFocused).submitLabel(.search).autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .onSubmit { searchFocused = false }
@@ -434,18 +482,6 @@ private struct TransitPanel: View {
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }.padding(.vertical, 15).contentShape(Rectangle())
                 }.buttonStyle(.plain)
-                Divider()
-            }
-        } else {
-            if let vehicle = model.lastViewedVehicle, model.query.isEmpty {
-                Button { model.restoreVehicle() } label: {
-                    Label("上次查看 · \(vehicle.plate)", systemImage: "clock.arrow.circlepath").font(.subheadline).frame(minHeight: 44)
-                }
-            }
-            let vehicles = model.vehicles(query: model.query)
-            if vehicles.isEmpty { emptyResult }
-            ForEach(vehicles) { vehicle in
-                VehicleRow(vehicle: vehicle) { model.selectVehicle(vehicle) }
                 Divider()
             }
         }
@@ -660,7 +696,7 @@ private struct VehicleDetails: View {
     }
 }
 
-private struct VehicleRow: View {
+struct VehicleRow: View {
     let vehicle: BusVehicle
     let action: () -> Void
     var body: some View {
@@ -686,7 +722,7 @@ private struct VehicleRow: View {
     }
 }
 
-private struct RouteBadge: View {
+struct RouteBadge: View {
     let name: String
     var body: some View {
         Text(name).font(.subheadline.weight(.bold)).lineLimit(2)
@@ -740,11 +776,12 @@ private struct PrivacyExplanationView: View {
     var body: some View {
         List {
             Section("你的位置") {
-                Text("定位為選用，只在使用 App 時尋找附近站牌與定位地圖。也能拒絕定位，手動搜尋站牌、路線或車牌。App 不會將定位座標加入公車資料查詢。")
+                Text("定位為選用，只在使用 App 時尋找附近站牌、規劃行程與定位地圖。也能拒絕定位，手動選擇出發地、站牌或路線。App 不會將定位座標加入公車資料查詢。")
+                Text("地點搜尋與步行路線由 Apple 地圖提供；搜尋文字及路線起終點由 Apple 處理。")
                 Text("地圖供應者會收到目前畫面需要的圖磚請求及網路連線資訊，因此可能得知你正在查看的大致區域。")
             }
             Section("保存在手機") {
-                Text("收藏站牌、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。")
+                Text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。")
             }
             Section("網路服務") {
                 Text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。")
@@ -772,6 +809,6 @@ private struct LicenseView: View {
     }
 }
 
-private func distanceLabel(_ meters: Double) -> String {
+func distanceLabel(_ meters: Double) -> String {
     meters >= 1_000 ? String(format: "%.1f km", meters / 1_000) : "\(Int(meters.rounded())) m"
 }

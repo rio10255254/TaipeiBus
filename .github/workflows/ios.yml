@@ -14,7 +14,7 @@ on:
       preview_scope:
         description: 'Capture all phone states or focus on route catalog and variants'
         type: choice
-        options: ['all', 'routes']
+        options: ['all', 'routes', 'journeys']
         default: 'all'
 
 permissions:
@@ -76,6 +76,7 @@ jobs:
               list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']))
           PY
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant
+          swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         timeout-minutes: 12
@@ -146,7 +147,7 @@ jobs:
               raise RuntimeError(f'Route camera did not finish at the expected route: {state}')
           PY
           }
-          if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
+          if [ '${{ inputs.preview_scope }}' = 'all' ]; then
           launch_ready
           sleep 15
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
@@ -181,10 +182,11 @@ jobs:
           sim terminate "$device" com.example.TaipeiBus
           fi
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
-          if [ '${{ inputs.preview_scope }}' = 'routes' ]; then
+          if [ '${{ inputs.preview_scope }}' != 'all' ]; then
             sim location "$device" set 25.0377,121.56
             sim privacy "$device" grant location com.example.TaipeiBus
           fi
+          if [ '${{ inputs.preview_scope }}' != 'journeys' ]; then
           launch_ready --preview-route-search ''
           sleep 6
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-all-routes.png"
@@ -203,10 +205,42 @@ jobs:
           wait_route_map_ready iPhone17-one-way-variant
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-one-way-variant.png"
           sim terminate "$device" com.example.TaipeiBus
+          fi
           if [ '${{ inputs.preview_scope }}' != 'routes' ]; then
-          launch_ready --preview-search EAA207
+          launch_ready
           sleep 6
-          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-plate-search.png"
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-destination-home.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-journey-search
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-destination-search.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-destination '臺北車站'
+          sleep 6
+          wait_route_map_ready iPhone17-journey-options
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-options.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-destination '臺北車站' --preview-journey-start
+          sleep 6
+          wait_route_map_ready iPhone17-journey-walking
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-walking.png"
+          sim terminate "$device" com.example.TaipeiBus
+          launch_ready --preview-destination '臺北車站' --preview-journey-start --preview-journey-step 1
+          sleep 6
+          wait_route_map_ready iPhone17-journey-bus
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-bus.png"
+          sim terminate "$device" com.example.TaipeiBus
+          sim privacy "$device" revoke location com.example.TaipeiBus
+          launch_ready --preview-destination '臺北車站' --preview-origin-station 6922
+          sleep 6
+          wait_route_map_ready iPhone17-journey-manual-origin
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-journey-manual-origin.png"
+          sim terminate "$device" com.example.TaipeiBus
+          fi
+          if [ '${{ inputs.preview_scope }}' = 'all' ]; then
+          launch_ready --preview-route 284 --preview-details
+          sleep 6
+          sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-route-quick-query.png"
           sim terminate "$device" com.example.TaipeiBus
           # Finish the functional screenshots before recording so a recorder failure cannot hide them.
           launch_ready --preview-vehicle-route 284
@@ -216,7 +250,7 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           fi
       - name: Record optional native preview
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope != 'routes'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'all'
         # Recording is a preview artifact; it must not gate native checks or signing.
         continue-on-error: true
         timeout-minutes: 4

@@ -11,6 +11,7 @@ extension Coordinate {
 
 struct NativeBusMap: UIViewRepresentable {
     @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
     let location: Coordinate?
     let bottomInset: CGFloat
     let topInset: CGFloat
@@ -82,6 +83,8 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastLocation: Coordinate?
         private var pendingLocation: Coordinate?
         private var routeSource: MLNShapeSource?
+        private var walkingSource: MLNShapeSource?
+        private var tripStopsSource: MLNShapeSource?
         private var stationSource: MLNShapeSource?
         private var locationSource: MLNShapeSource?
         private var nearbySource: MLNShapeSource?
@@ -116,6 +119,31 @@ struct NativeBusMap: UIViewRepresentable {
             line.lineOpacity = NSExpression(forConstantValue: 0.5)
             if let building = style.layer(withIdentifier: "building-3d") { style.insertLayer(line, below: building) }
             else { style.addLayer(line) }
+            let walking = MLNShapeSource(identifier: "journey-walking", shape: nil, options: nil)
+            style.addSource(walking); walkingSource = walking
+            let walkingLine = MLNLineStyleLayer(identifier: "journey-walking-line", source: walking)
+            walkingLine.lineColor = NSExpression(forConstantValue: UIColor.systemOrange)
+            walkingLine.lineWidth = NSExpression(forConstantValue: 3)
+            walkingLine.lineDashPattern = NSExpression(forConstantValue: [2, 2])
+            if let building = style.layer(withIdentifier: "building-3d") { style.insertLayer(walkingLine, below: building) }
+            else { style.addLayer(walkingLine) }
+            let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
+            style.addSource(tripStops); tripStopsSource = tripStops
+            let tripDots = MLNCircleStyleLayer(identifier: "journey-stop-dots", source: tripStops)
+            tripDots.circleColor = NSExpression(forConstantValue: UIColor.systemBlue)
+            tripDots.circleRadius = NSExpression(forConstantValue: 6)
+            tripDots.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+            tripDots.circleStrokeWidth = NSExpression(forConstantValue: 2)
+            style.addLayer(tripDots)
+            let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
+            tripNames.text = NSExpression(forKeyPath: "name")
+            tripNames.textFontSize = NSExpression(forConstantValue: 12)
+            tripNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
+            tripNames.textColor = NSExpression(forConstantValue: UIColor.darkGray)
+            tripNames.textHaloColor = NSExpression(forConstantValue: UIColor.white)
+            tripNames.textHaloWidth = NSExpression(forConstantValue: 2)
+            tripNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -16)))
+            style.addLayer(tripNames)
 
             let layer = NativeBusLayer(identifier: "native-buses")
             layer.onError = { [weak self] message in
@@ -179,21 +207,31 @@ struct NativeBusMap: UIViewRepresentable {
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants)"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision)"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.selectedRoute != nil { vehicles = model.routeVehicles() }
+                else if let trip = model.planner.selected, !trip.walkingOnly {
+                    vehicles = vehicles.filter { bus in trip.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } }
+                }
                 if reduceMotion { vehicles = vehicles.map { var bus = $0; bus.path = [bus.coordinate]; return bus } }
                 buses.ingest(vehicles, time: CACurrentMediaTime())
                 lastSnapshotRevision = model.snapshot.revision
                 lastMotionSetting = reduceMotion
             }
             if routeKey != lastRouteKey {
-                let features = model.routePaths.map { path -> MLNPolylineFeature in
+                let paths = model.selectedRouteID != nil ? model.routePaths : model.planner.selected?.rides.map(\.coordinates).filter { $0.count >= 2 } ?? []
+                let features = paths.map { path -> MLNPolylineFeature in
                     var coordinates = path.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 routeSource?.shape = features.isEmpty ? nil : MLNShapeCollectionFeature(shapes: features)
+                let walks = (model.planner.selected?.walks ?? []).filter { $0.coordinates.count >= 2 }.map { walk -> MLNPolylineFeature in
+                    var coordinates = walk.coordinates.map(\.locationCoordinate)
+                    return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
+                }
+                walkingSource?.shape = walks.isEmpty ? nil : MLNShapeCollectionFeature(shapes: walks)
+                updateTripStops()
                 lastRouteKey = routeKey
             }
             buses.selectedID = model.selectedVehicleID
@@ -201,7 +239,7 @@ struct NativeBusMap: UIViewRepresentable {
             buses.reduceMotion = reduceMotion
             // Station dots remain tappable; their names must not cover the vehicle's anchored information.
             let hasVehicle = model.selectedVehicle != nil
-            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = !hasVehicle
+            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = !hasVehicle && model.planner.selected == nil
             buildingOpacityTarget = model.highlightVehicle && hasVehicle ? 0.26 : 1
             if reduceMotion {
                 buildingOpacity = buildingOpacityTarget
@@ -218,13 +256,29 @@ struct NativeBusMap: UIViewRepresentable {
             }
             // Opening a sheet changes the viewport and can cancel an in-flight bounds animation.
             // Refit a selected route after that change; keep ordinary updates from resetting the camera.
-            let refitRoute = viewportChanged && model.selectedRoute != nil && model.selectedVehicleID == nil
+            let refitRoute = viewportChanged && (model.selectedRoute != nil || model.planner.selected != nil) && model.selectedVehicleID == nil
             if (lastFocusRevision != model.focusRevision || refitRoute), map.bounds.width > 0 {
                 focus(model.focus, map: map)
                 lastFocusRevision = model.focusRevision
             }
             buses.setNeedsDisplay()
             updateStationAnchor()
+        }
+
+        private func updateTripStops() {
+            guard let option = model.planner.selected else { tripStopsSource?.shape = nil; return }
+            var features: [String: MLNPointFeature] = [:]
+            func add(_ coordinate: Coordinate, id: String, title: String) {
+                let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
+                feature.attributes = ["name": title]; features[id] = feature
+            }
+            for (index, ride) in option.rides.enumerated() {
+                add(ride.boarding.coordinate, id: ride.boarding.stationID, title: "\(index == 0 ? "上車" : "轉乘") · \(ride.boarding.name)")
+                add(ride.alighting.coordinate, id: ride.alighting.stationID,
+                    title: "\(index == option.rides.count - 1 ? "下車" : "轉乘") · \(ride.alighting.name)")
+            }
+            if let destination = model.planner.destination { add(destination.coordinate, id: "destination", title: destination.name) }
+            tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: features.keys.sorted().compactMap { features[$0] })
         }
 
         private func updateNearbyStations(force: Bool = false) {
@@ -295,30 +349,36 @@ struct NativeBusMap: UIViewRepresentable {
                                                                allVariants: model.allRouteVariants).map(\.coordinate)
                 }
                 if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
-                guard let overview = RouteOverview(coordinates: coordinates,
-                    viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                    viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return }
-                // Use a fixed orientation for an overview. Bounds fitting at a steep pitch with a half-screen
-                // sheet can move the camera away from the route; set an explicit center and Mercator zoom.
-                map.setCamera(MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate,
-                                          altitude: 1000, pitch: 35, heading: 0), animated: false)
-                map.setCenter(overview.center.locationCoordinate, zoomLevel: overview.zoom, animated: false)
+                fit(coordinates, map: map)
+            case .journey(let coordinates): fit(coordinates, map: map)
             }
+        }
+
+        private func fit(_ coordinates: [Coordinate], map: MLNMapView) {
+            guard let overview = RouteOverview(coordinates: coordinates,
+                viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return }
+            map.setCamera(MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate,
+                                      altitude: 1000, pitch: 35, heading: 0), animated: false)
+            map.setCenter(overview.center.locationCoordinate, zoomLevel: overview.zoom, animated: false)
         }
 
 #if DEBUG
         private func recordPreviewCamera(_ map: MLNMapView, fullyRendered: Bool) {
             let arguments = ProcessInfo.processInfo.arguments
-            guard fullyRendered, model.selectedRoute != nil, model.selectedVehicleID == nil,
+            guard fullyRendered, (model.selectedRoute != nil || model.planner.selected != nil), model.selectedVehicleID == nil,
                   lastFocusRevision == model.focusRevision,
                   let index = arguments.firstIndex(of: "--preview-capture"), arguments.indices.contains(index + 1) else { return }
             let center = map.centerCoordinate
             let signature = "\(model.focusRevision):\(map.contentInset.bottom):\(center.latitude):\(center.longitude):\(map.zoomLevel)"
             guard signature != lastPreviewCameraSignature else { return }
-            let expected = RouteOverview(coordinates: model.routePaths.flatMap { $0 },
+            let coordinates: [Coordinate]
+            if case .journey(let points) = model.focus { coordinates = points }
+            else { coordinates = model.routePaths.flatMap { $0 } }
+            let expected = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
                 viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom))
-            let state: [String: Any] = ["token": arguments[index + 1], "route": model.selectedRouteName ?? "",
+            let state: [String: Any] = ["token": arguments[index + 1], "route": model.selectedRouteName ?? model.planner.destination?.name ?? "",
                 "latitude": center.latitude, "longitude": center.longitude, "zoom": map.zoomLevel, "fully_rendered": true,
                 "expected_latitude": expected?.center.latitude ?? center.latitude,
                 "expected_longitude": expected?.center.longitude ?? center.longitude,
