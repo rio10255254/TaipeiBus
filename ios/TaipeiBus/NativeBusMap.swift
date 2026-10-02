@@ -247,7 +247,7 @@ struct NativeBusMap: UIViewRepresentable {
                 else {
                     let bounds = MLNCoordinateBounds(sw: CLLocationCoordinate2D(latitude: south, longitude: west),
                                                      ne: CLLocationCoordinate2D(latitude: north, longitude: east))
-                    map.setVisibleCoordinateBounds(bounds, edgePadding: UIEdgeInsets(top: 24, left: 30, bottom: 24, right: 30), animated: !reduceMotion)
+                    map.setVisibleCoordinateBounds(bounds, edgePadding: UIEdgeInsets(top: 24, left: 30, bottom: 24, right: 30), animated: !reduceMotion, completionHandler: nil)
                 }
             }
         }

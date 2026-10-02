@@ -41,6 +41,9 @@ final class TransitAppModel: ObservableObject {
     private let service = TransitService()
     private var updateTask: Task<Void, Never>?
     private let defaults = UserDefaults.standard
+#if DEBUG
+    private var previewSelectionApplied = false
+#endif
 
     init() { favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? []) }
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
@@ -62,6 +65,9 @@ final class TransitAppModel: ObservableObject {
                     let result = await service.refresh()
                     guard !Task.isCancelled else { return }
                     snapshot = result
+#if DEBUG
+                    applyPreviewSelection()
+#endif
                     try await Task.sleep(for: .seconds(15))
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
@@ -144,4 +150,24 @@ final class TransitAppModel: ObservableObject {
         return snapshot.vehicles.filter { $0.parentRouteID == route.parentID && $0.direction == direction }
             .sorted { $0.observedAt > $1.observedAt }
     }
+
+#if DEBUG
+    // Simulator-only launch arguments let cloud builds capture real-data map states.
+    // Release builds have no preview selection behavior.
+    private func applyPreviewSelection() {
+        guard !previewSelectionApplied else { return }
+        let arguments = ProcessInfo.processInfo.arguments
+        func value(after flag: String) -> String? {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
+            return arguments[index + 1]
+        }
+        if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
+            selectStation(station); previewSelectionApplied = true
+        } else if let name = value(after: "--preview-vehicle-route"),
+                  let vehicle = snapshot.vehicles.filter({ $0.routeName == name && $0.isFresh(at: Date()) })
+                    .min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
+            selectVehicle(vehicle); previewSelectionApplied = true
+        }
+    }
+#endif
 }

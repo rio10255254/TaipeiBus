@@ -34,7 +34,7 @@ GPS 在官方路線軌跡 40 公尺內時匹配軌跡。相鄰回報屬於同車
 
 Windows 使用本專案的 GitHub Actions：提交 `ios/` 變更後，macOS runner 執行 Swift 核心測試、編譯原生 App、啟動 iPhone 17 模擬器並保存截圖。下載 Actions 的 `iPhone17-simulator` artifact 可取得 `.app`、截圖與編譯紀錄；模擬器 `.app` 不能直接安裝到 iPhone。
 
-[雲端建置及實機簽名步驟](ios/CLOUD_BUILD.md)說明如何使用既有 Apple Developer 帳號產生簽名 IPA。簽名金鑰放在 GitHub Actions secrets；不寫入原始碼或聊天。
+[雲端建置及 TestFlight 步驟](ios/CLOUD_BUILD.md)說明如何使用既有 Apple Developer 帳號，簽名後直接上傳 TestFlight；也保留單獨匯出 IPA 的入口。簽名金鑰放在 GitHub Actions secrets，不寫入原始碼或聊天。
 
 ## 資料與授權
 

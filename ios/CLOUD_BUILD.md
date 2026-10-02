@@ -1,4 +1,4 @@
-# Windows 上建置 iPhone App
+# Windows 上建置與推送 TestFlight
 
 ## 原生編譯與模擬器
 
@@ -32,9 +32,21 @@ GitHub Actions 的 **iPhone app** workflow 使用 macOS 15、Xcode 26.3。推送
 3. 模擬器建置成功後才進行 archive 及自動簽名。成功後下載 `TaipeiBus-signed-IPA` artifact。
 4. 可使用受信任的裝置管理工具安裝 Ad Hoc IPA 到已登記的 iPhone。安裝工具及實機流程需另外驗證。
 
-`debugging` 適用開發測試；`app-store-connect` 只匯出供上傳的 IPA，**目前 workflow 不會自動上傳 TestFlight 或 App Store**。要用 TestFlight，還需 App Store Connect 的 App 記錄、上傳、處理與測試人員設定。
+`debugging` 適用開發測試；未勾選 `publish_testflight` 時，`app-store-connect` 只匯出供上傳的 IPA。直接上傳方式見下一節。
 
 workflow 以 API key 交給 Xcode 自動處理 provisioning。若 Team 政策不允許雲端管理憑證、API key 權限不足或簽名失敗，需依 Xcode 錯誤改用自己的憑證及描述檔；不把未簽名產物描述為可安裝版本。
+
+## 直接推送 TestFlight
+
+本專案的手機安裝流程優先使用 TestFlight，不需要登記 iPhone UDID。
+
+1. 在 Apple Developer 註冊這個 App 的 Bundle ID，例如 `com.rio10255254.TaipeiBus`。在 App Store Connect → My Apps 建立對應 App 記錄；如沿用現有記錄，使用其原本 Bundle ID。
+2. 設定上表四個 GitHub Secrets。Team API key 需要上傳 App 與自動簽名所需的角色及權限；可參考 Apple 的[雲端簽名說明](https://developer.apple.com/videos/play/wwdc2021/10204/)。
+3. Actions → iPhone app → Run workflow 勾選 `publish_testflight`，填入該 Bundle ID；不必勾選 `sign_ipa`。流程會先完成模擬器測試，再檢查 App 記錄、archive、自動簽名，並由 Xcode 直接上傳 App Store Connect。
+4. Xcode 自動管理上傳的 build number。workflow 最多查詢 20 分鐘確認 Apple 處理結果；若 Apple 仍在處理，Actions 摘要會清楚標示尚未完成。
+5. 在 App Store Connect 的 TestFlight 加入自己的內部測試群組，在 iPhone 的 TestFlight 安裝。外部測試可能需要 Apple Beta App Review；本流程不提交 App Store 正式上架，也不自動邀請其他測試者。
+
+`publish_testflight` 會覆蓋匯出選項，使用 `app-store-connect` 與 `destination = upload`。自動上傳僅在手動觸發這個選項時執行；一般推送程式碼只編譯模擬器及保存截圖。
 
 ## Mac 本機備用方式
 

@@ -4,6 +4,9 @@ dist/
 .env.local
 work/
 TaipeiBus*-source.zip
+*.p8
+*.p12
+*.mobileprovision
 .DS_Store
 ios/**/xcuserdata/
 ios/**/.build/

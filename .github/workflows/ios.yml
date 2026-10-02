@@ -11,10 +11,14 @@ on:
         description: 'Also export a signed IPA using configured Apple secrets'
         type: boolean
         default: false
+      publish_testflight:
+        description: 'Sign and upload directly to TestFlight using configured Apple secrets'
+        type: boolean
+        default: false
       bundle_id:
         description: 'Existing app Bundle ID (required for signed IPA)'
         type: string
-        default: 'com.example.TaipeiBus'
+        default: 'com.rio10255254.TaipeiBus'
       export_method:
         description: 'Signed IPA distribution method'
         type: choice
@@ -41,6 +45,7 @@ jobs:
         run: |
           xcodebuild -version
           swift test --package-path ios/TransitCore
+          ruby -c ios/apple-connect.rb
       - name: Build native app
         run: |
           set -o pipefail
@@ -49,11 +54,15 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
+            "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: iPhone 17 launch and screenshots
         run: |
           set -euo pipefail
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
           device=$(xcrun simctl create TaipeiBus-iPhone17 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          trap 'xcrun simctl spawn "$device" log show --style compact --last 3m --predicate '\''process == "TaipeiBus"'\'' > "$RUNNER_TEMP/ios-runtime.log" 2>&1 || true; xcrun simctl shutdown "$device" >/dev/null 2>&1 || true' EXIT
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
           xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
@@ -63,19 +72,28 @@ jobs:
           mkdir -p "$RUNNER_TEMP/phone-screenshots"
           xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
           xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-station 6922
+          sleep 15
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-station.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl launch "$device" com.example.TaipeiBus --preview-vehicle-route 284
+          sleep 15
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
           xcrun simctl shutdown "$device"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: iPhone17-simulator
           path: |
-            ${{ runner.temp }}/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app
+            ${{ runner.temp }}/TaipeiBus-simulator.app.zip
             ${{ runner.temp }}/phone-screenshots
             ${{ runner.temp }}/ios-build.log
+            ${{ runner.temp }}/ios-runtime.log
           retention-days: 7
 
   signed-ipa:
-    if: github.event_name == 'workflow_dispatch' && inputs.sign_ipa
+    if: github.event_name == 'workflow_dispatch' && (inputs.sign_ipa || inputs.publish_testflight)
     needs: simulator
     runs-on: macos-15
     timeout-minutes: 30
@@ -86,6 +104,7 @@ jobs:
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
       BUS_BUNDLE_ID: ${{ inputs.bundle_id }}
       BUS_EXPORT_METHOD: ${{ inputs.export_method }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.publish_testflight }}
     steps:
       - uses: actions/checkout@v4
       - name: Prepare automatic signing
@@ -99,8 +118,15 @@ jobs:
           python3 - <<'PY'
           import os, plistlib
           with open(os.path.join(os.environ['RUNNER_TEMP'], 'bus-signing/ExportOptions.plist'), 'wb') as f:
-              plistlib.dump({'method': os.environ['BUS_EXPORT_METHOD'], 'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic', 'destination': 'export'}, f)
+              publish = os.environ['BUS_PUBLISH_TESTFLIGHT'] == 'true'
+              plistlib.dump({'method': 'app-store-connect' if publish else os.environ['BUS_EXPORT_METHOD'],
+                             'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
+                             'destination': 'upload' if publish else 'export',
+                             'manageAppVersionAndBuildNumber': True}, f)
           PY
+      - name: Verify App Store Connect app record
+        if: inputs.publish_testflight
+        run: ruby ios/apple-connect.rb preflight
       - name: Archive and export signed IPA
         run: |
           set -euo pipefail
@@ -110,14 +136,20 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" archive
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" archive
+          date +%s > "$RUNNER_TEMP/bus-signing/upload-start"
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             -exportPath "$RUNNER_TEMP/BusIPA" \
             -exportOptionsPlist "$RUNNER_TEMP/bus-signing/ExportOptions.plist" \
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      - name: Confirm TestFlight processing
+        if: inputs.publish_testflight
+        run: ruby ios/apple-connect.rb processing
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.publish_testflight }}
         with:
           name: TaipeiBus-signed-IPA
           path: ${{ runner.temp }}/BusIPA/*.ipa
