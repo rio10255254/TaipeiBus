@@ -41,14 +41,14 @@ public enum VehicleTracker {
                 previous: context, maximumTravel: travelLimit, travelDirection: direction, alongRange: journey?.range) {
                 vehicle.coordinate = match.coordinate; vehicle.roadMatch = match; vehicle.aligned = true
                 vehicle.travelDirection = direction
-                if !vehicle.hasHeading || vehicle.speed < 2 {
+                if !vehicle.hasHeading || (vehicle.hasSpeed && vehicle.speed < 2) {
                     let sign = direction != 0 ? direction : RouteLine.headingDifference(line.bearing(at: match), vehicle.heading) <= 90 ? 1 : -1
                     vehicle.heading = line.bearing(at: match, direction: sign)
                 }
                 if let old, let from = context, interval > 0 {
                     let delta = match.along - from.along
                     if journey == nil, abs(delta) >= 8 { vehicle.travelDirection = delta > 0 ? 1 : -1 }
-                    if old.speed < 2, vehicle.speed < 2, old.coordinate.distance(to: match.coordinate) < 9 {
+                    if old.hasSpeed, vehicle.hasSpeed, old.speed < 2, vehicle.speed < 2, old.coordinate.distance(to: match.coordinate) < 9 {
                         // Keep a stationary anchor while accepting the genuine timestamp and status.
                         vehicle.coordinate = old.coordinate; vehicle.roadMatch = from
                     } else if abs(delta) <= max(100, old.coordinate.distance(to: match.coordinate) * 3) {

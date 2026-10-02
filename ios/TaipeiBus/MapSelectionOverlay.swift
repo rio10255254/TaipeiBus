@@ -101,7 +101,7 @@ struct MapContextLabels: View {
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(bus.hasReliablePosition(at: timeline.date) ? "GPS \(Int(bus.speed)) km/h · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "最後回報 · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前")
+                        Text(bus.hasReliablePosition(at: timeline.date) ? "GPS \(bus.speedLabel) · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "最後回報 · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前")
                             .font(.caption).foregroundStyle(.secondary).monospacedDigit()
                         if let state = bus.trackingLabel(at: timeline.date) {
                             Text(state).font(.caption).foregroundStyle(bus.trackingIssue == nil && bus.isFresh(at: timeline.date) ? Color.secondary : Color.orange)
@@ -115,7 +115,7 @@ struct MapContextLabels: View {
                                     Text(next.distance <= 25 ? "\(next.stop.name)附近" : "前方 · \(next.stop.name)").lineLimit(1)
                                     Spacer(minLength: 0)
                                     if next.distance > 25 { Text(next.distance >= 1_000 ? String(format: "%.1f km", next.distance / 1_000) : "\(Int(next.distance.rounded())) m").monospacedDigit() }
-                                }.font(.caption.weight(.medium)).frame(minHeight: 32)
+                                }.font(.caption.weight(.medium)).frame(minHeight: 44)
                             }.buttonStyle(.plain).accessibilityHint("查看前方站牌的官方到站預估")
                         }
                     }

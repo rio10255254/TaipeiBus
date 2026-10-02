@@ -56,6 +56,7 @@ public struct BusVehicle: Identifiable, Sendable {
     public var roadMatch: LineMatch?
     public var travelDirection: Int = 0
     public var hasHeading = true
+    public var hasSpeed = true
     public var trackingIssue: TrackingIssue?
     public var rejectedObservation: RejectedObservation?
 
@@ -64,6 +65,7 @@ public struct BusVehicle: Identifiable, Sendable {
         return (-60...120).contains(age)
     }
     public func hasReliablePosition(at date: Date) -> Bool { isFresh(at: date) && trackingIssue == nil }
+    public var speedLabel: String { hasSpeed ? "\(Int(speed)) km/h" : "速度未提供" }
     public func trackingLabel(at date: Date) -> String? {
         if !isFresh(at: date) { return "定位已延遲" }
         switch trackingIssue {

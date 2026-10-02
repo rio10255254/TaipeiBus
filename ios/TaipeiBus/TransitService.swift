@@ -24,7 +24,8 @@ actor TransitService {
     }
 
     func prepare(force: Bool = false) async throws -> TransitMetadata {
-        if !force, let date = metadataLoadedAt, Date().timeIntervalSince(date) < 86_400 { return metadata }
+        let refreshInterval: TimeInterval = metadataNotice == nil ? 86_400 : 300
+        if !force, let date = metadataLoadedAt, Date().timeIntervalSince(date) < refreshInterval { return metadata }
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         var feeds: [String: Data] = [:]
         var notices: [String] = []
@@ -40,6 +41,7 @@ actor TransitService {
         }
         try Task.checkCancellation()
         let decoded = try FeedDecoder.metadata(feeds: feeds)
+        if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append("路線軌跡／站序") }
         metadata = decoded
         metadataLoadedAt = Date()
         metadataNotice = notices.isEmpty ? nil : "部分路線資料暫用快取或未取得"
@@ -51,14 +53,21 @@ actor TransitService {
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         let modified = attributes?[.modificationDate] as? Date
         if !force, let modified, Date().timeIntervalSince(modified) < 86_400,
-           let bytes = try? Data(contentsOf: url) { return (name, bytes, nil) }
+           let bytes = try? Data(contentsOf: url) {
+            do { try FeedDecoder.validateMetadataFeed(bytes); return (name, bytes, nil) }
+            catch { /* Treat an empty or malformed cache as a cache miss. */ }
+        }
         do {
             let bytes = try await fetch(name)
-            _ = try JSONSerialization.jsonObject(with: bytes)
+            try FeedDecoder.validateMetadataFeed(bytes)
             try bytes.write(to: url, options: .atomic)
             return (name, bytes, nil)
         } catch {
-            return (name, try? Data(contentsOf: url), name)
+            if let bytes = try? Data(contentsOf: url) {
+                do { try FeedDecoder.validateMetadataFeed(bytes); return (name, bytes, name) }
+                catch { /* A broken cache cannot become the fallback. */ }
+            }
+            return (name, nil, name)
         }
     }
 

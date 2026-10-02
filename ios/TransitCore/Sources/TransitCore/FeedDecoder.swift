@@ -50,11 +50,20 @@ public enum FeedDecoder {
         return result
     }
 
+    public static func validateMetadataFeed(_ data: Data) throws {
+        let (entries, _) = try rows(data)
+        guard !entries.isEmpty else { throw FeedError.invalid("路線／站牌") }
+    }
+
     public static func metadata(feeds: [String: Data]) throws -> TransitMetadata {
         var metadata = TransitMetadata()
         for (name, data) in feeds {
-            let (rows, _) = try rows(data)
-            guard !rows.isEmpty else { throw FeedError.invalid(name) }
+            let required = name == "GetRoute" || name == "GetStop"
+            let decoded: ([[String: Any]], Date?)
+            do { decoded = try rows(data) }
+            catch { if required { throw error }; continue }
+            let (rows, _) = decoded
+            guard !rows.isEmpty else { if required { throw FeedError.invalid(name) }; continue }
             switch name {
             case "GetRoute":
                 for row in rows {
@@ -158,6 +167,7 @@ public enum FeedDecoder {
                 status: text(row["BusStatus"]), lowFloor: text(row["CarType"]) == "1",
                 provider: metadata.providers[text(row["ProviderID"])])
             vehicle.hasHeading = number(row["Azimuth"]).map { (0...360).contains($0) } ?? false
+            vehicle.hasSpeed = number(row["Speed"]).map { (0..<180).contains($0) } ?? false
             unique[id] = vehicle
         }
         unique = unique.filter { id, vehicle in ended[id].map { $0 < vehicle.observedAt } ?? true }

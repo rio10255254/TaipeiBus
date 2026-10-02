@@ -44,6 +44,22 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertTrue(metadata.orderedStops(routeID: "10", direction: "1").isEmpty)
     }
 
+    func testUnavailableOptionalGeometryNeverDisablesStationArrivals() throws {
+        let metadata = try FeedDecoder.metadata(feeds: [
+            "GetRoute": feed([["Id": 100, "pathAttributeId": 10, "nameZh": "284"]]),
+            "GetStop": feed([["Id": 101, "routeId": 100, "stopLocationId": 6922, "nameZh": "站牌",
+                "goBack": "0", "seqNo": 1, "longitude": 121.55, "latitude": 25.04]]),
+            "GetBusShape": Data("[]".utf8), "GetPathDetail": Data("{\"error\":\"unavailable\"}".utf8),
+            "GetProvider": Data("invalid".utf8)])
+        XCTAssertEqual(metadata.stations.count, 1)
+        XCTAssertTrue(metadata.lines.isEmpty)
+        let estimates = try FeedDecoder.estimates(feed([["RouteID": 100, "StopID": 101, "EstimateTime": 120]]))
+        let arrivals = StationArrival.rows(station: metadata.stations["6922"]!, metadata: metadata,
+            snapshot: TransitSnapshot(estimates: estimates), now: now)
+        XCTAssertEqual(arrivals.first?.estimateSeconds, 120)
+        XCTAssertThrowsError(try FeedDecoder.metadata(feeds: ["GetRoute": Data("[]".utf8)]))
+    }
+
     func testInvalidAndEndedVehiclesNeverReplaceLiveData() throws {
         let metadata = try metadata()
         let good = row()
@@ -228,6 +244,18 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertFalse(vehicles[0].hasHeading)
         XCTAssertEqual(vehicles[0].roadMatch?.segment, 0)
         XCTAssertEqual(vehicles[0].heading, 90, accuracy: 0.01)
+    }
+
+    func testUnknownSpeedDoesNotBecomeAStationaryFixOrAFalseZeroSpeedLabel() throws {
+        let metadata = try metadata()
+        let first = try FeedDecoder.vehicles(feed([row(["Speed": 0])]), metadata: metadata, previous: [], now: now).vehicles
+        for unknown in [NSNull() as Any, "invalid", 180] {
+            let second = try FeedDecoder.vehicles(feed([row(["Speed": unknown, "Longitude": 121.55016,
+                "DataTime": "2026-10-02 10:15:30"])]), metadata: metadata, previous: first, now: now).vehicles[0]
+            XCTAssertFalse(second.hasSpeed)
+            XCTAssertEqual(second.speedLabel, "速度未提供")
+            XCTAssertGreaterThan(second.coordinate.distance(to: first[0].coordinate), 5)
+        }
     }
 
     func testOlderGPSCannotRewindDetailsOrSwitchThePhysicalBusToAnOldRoute() throws {

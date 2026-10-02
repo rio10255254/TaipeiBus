@@ -27,12 +27,14 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, location: location.usableCoordinate,
-                             bottomInset: nearbyStations.isEmpty ? 140 : 210,
+                             bottomInset: showDetails ? geometry.size.height * 0.48 + 50 : nearbyStations.isEmpty ? 140 : 210,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
                     .accessibilityLabel("台北公車地圖")
-                MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
+                if !showDetails && !showSearch {
+                    MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
+                }
                 HStack(alignment: .top, spacing: 12) {
                     SourceStatusView(snapshot: model.snapshot, loading: model.loading || model.refreshing) {
                         if model.loadError != nil { model.retry() }
@@ -231,7 +233,7 @@ private struct SourceStatusView: View {
     let snapshot: TransitSnapshot
     let loading: Bool
     let refresh: () -> Void
-    private static let clockStyle = Date.FormatStyle(date: .omitted, time: .shortened,
+    static let clockStyle = Date.FormatStyle(date: .omitted, time: .shortened,
         locale: Locale(identifier: "zh_TW"), timeZone: TimeZone(identifier: "Asia/Taipei")!)
 
     var body: some View {
@@ -244,7 +246,7 @@ private struct SourceStatusView: View {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(spacing: 6) {
                     Circle().fill(healthy ? Color.green : Color.orange).frame(width: 6, height: 6)
-                    Text(loading ? "更新中" : healthy ? "臺北市公車" : "資料延遲 · 點此重試")
+                    Text(loading || (snapshot.sourceUpdatedAt == nil && snapshot.vehicleError == nil) ? "更新中" : healthy ? "臺北市公車" : "資料延遲 · 點此重試")
                         .font(.subheadline.weight(.semibold))
                 }
                 if let date = snapshot.sourceUpdatedAt {
@@ -441,7 +443,7 @@ private struct StationDetails: View {
                     Text("官方到站預估").font(.subheadline.weight(.semibold))
                     Spacer()
                     if let time = model.snapshot.estimates.updatedAt {
-                        Text(time, style: .time).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        Text(time.formatted(SourceStatusView.clockStyle)).font(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }.padding(.bottom, 8)
                 if rows.isEmpty { Text("此站暫無路線資訊").foregroundStyle(.secondary).padding(.vertical) }
@@ -535,7 +537,7 @@ private struct VehicleDetails: View {
                 let fresh = vehicle.hasReliablePosition(at: timeline.date)
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(fresh ? "\(Int(vehicle.speed))" : "—").font(.system(.largeTitle, design: .rounded).weight(.semibold)).monospacedDigit()
+                        Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").font(.system(.largeTitle, design: .rounded).weight(.semibold)).monospacedDigit()
                         Text("GPS 回報 km/h").font(.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 5) {
@@ -604,7 +606,7 @@ private struct VehicleRow: View {
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
                     let reliable = vehicle.hasReliablePosition(at: timeline.date)
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(reliable ? "\(Int(vehicle.speed)) km/h" : vehicle.trackingIssue == .missing ? "訊號暫缺" : vehicle.trackingIssue == .rejected ? "確認中" : "延遲")
+                        Text(reliable ? vehicle.speedLabel : vehicle.trackingIssue == .missing ? "訊號暫缺" : vehicle.trackingIssue == .rejected ? "確認中" : "延遲")
                             .foregroundStyle(reliable ? Color.secondary : Color.orange)
                         Text("\(max(0, Int(timeline.date.timeIntervalSince(vehicle.observedAt)))) 秒前").foregroundStyle(.secondary)
                     }.font(.caption).monospacedDigit()
