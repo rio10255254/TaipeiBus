@@ -1,0 +1,542 @@
+import SwiftUI
+import MapKit
+import TransitCore
+
+struct TransitHomeView: View {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject private var location: LocationService
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var showSearch = false
+    @State private var showDetails = false
+    @State private var showInformation = false
+    @StateObject private var selectionOverlay = MapSelectionOverlay()
+
+    init(model: TransitAppModel) {
+        self.model = model
+        location = model.location
+    }
+
+    private var hasSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .top) {
+                NativeBusMap(model: model, location: location.coordinate,
+                             bottomInset: 140,
+                             topInset: geometry.safeAreaInsets.top + 64,
+                             reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
+                    .ignoresSafeArea()
+                    .accessibilityLabel("台北公車地圖")
+                MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
+                HStack(alignment: .top, spacing: 12) {
+                    SourceStatusView(snapshot: model.snapshot, loading: model.loading)
+                    Spacer(minLength: 0)
+                    Button { showInformation = true } label: {
+                        Image(systemName: "info.circle").font(.title3).frame(width: 46, height: 46)
+                    }
+                    .background(.regularMaterial, in: Circle())
+                    .accessibilityLabel("資料來源與地圖設定")
+                }
+                .padding(.horizontal, 16).padding(.top, 8)
+
+                if model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(route.name).font(.system(.largeTitle, design: .rounded).weight(.bold)).foregroundStyle(Color.accentColor)
+                        Text("往 \(route.destination(direction: model.direction))").font(.subheadline)
+                        Button { showDetails = true } label: {
+                            Text("\(model.routeVehicles().filter { $0.isFresh(at: Date()) }.count) 輛車 · 選方向與車牌")
+                                .font(.subheadline.weight(.medium)).frame(minHeight: 44)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .shadow(color: .white, radius: 4)
+                    .padding(.horizontal, 24).padding(.top, 104)
+                }
+                VStack(spacing: 12) {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Button { location.request() } label: {
+                            Group {
+                                if location.requesting { ProgressView() }
+                                else { Image(systemName: "location.fill").font(.title3) }
+                            }.frame(width: 48, height: 48)
+                        }
+                        .background(.regularMaterial, in: Circle())
+                        .accessibilityLabel("尋找我的位置與附近站牌")
+                    }
+                    if let message = location.message {
+                        Text(message).font(.caption).padding(10)
+                            .background(.regularMaterial, in: Capsule())
+                    }
+                    HStack(spacing: 4) {
+                        Button { showSearch = true } label: {
+                            Label("搜尋", systemImage: "magnifyingglass").font(.body.weight(.semibold))
+                                .padding(.horizontal, 18).frame(minHeight: 56)
+                        }.buttonStyle(.plain)
+                        Spacer(minLength: 0)
+                        if let bus = model.selectedVehicle {
+                            Button {
+                                model.following.toggle()
+                                if model.following { model.focusMap(.vehicle(bus.id)) }
+                            } label: {
+                                Image(systemName: model.following ? "scope" : "bus.fill")
+                                    .font(.title3).frame(width: 50, height: 50)
+                                    .foregroundStyle(model.following ? Color.accentColor : Color.primary)
+                            }.accessibilityLabel(model.following ? "停止跟車" : "跟車")
+                        } else {
+                            Button { model.mode = .routes; showSearch = true } label: {
+                                Label("路線", systemImage: "point.topleft.down.to.point.bottomright.curvepath")
+                                    .font(.subheadline.weight(.medium)).padding(.horizontal, 12).frame(minHeight: 50)
+                            }
+                        }
+                        if hasSelection {
+                            Button { model.clearSelection() } label: {
+                                Image(systemName: "xmark").font(.subheadline.weight(.semibold)).frame(width: 50, height: 50)
+                            }.accessibilityLabel("關閉選取")
+                        }
+                    }
+                    .padding(.horizontal, 6)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
+                }
+                .padding(.horizontal, 24).padding(.bottom, 12)
+                if let error = model.mapError ?? model.loadError {
+                    Text(error).font(.caption).padding(12)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+                        .padding(.top, 96).padding(.horizontal, 16)
+                }
+            }
+        }
+        .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
+        .sheet(isPresented: $showSearch) {
+            TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: true)
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(30)
+                .presentationBackground(.regularMaterial)
+        }
+        .sheet(isPresented: $showDetails) {
+            TransitPanel(model: model, location: location, showInformation: $showInformation)
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(30)
+                .presentationBackground(.regularMaterial)
+        }
+        .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .onChange(of: location.coordinate) { _, position in
+            guard let position, position.isInServiceArea else { return }
+            model.focusMap(.coordinate(position))
+        }
+        .onChange(of: model.selectionRevision) { _, _ in
+            selectionOverlay.update(nil)
+            showSearch = false
+            showDetails = false
+        }
+    }
+}
+
+private struct SourceStatusView: View {
+    let snapshot: TransitSnapshot
+    let loading: Bool
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { timeline in
+            let age = snapshot.sourceUpdatedAt.map { timeline.date.timeIntervalSince($0) }
+            let healthy = snapshot.vehicleError == nil && age != nil && age! <= 120
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 6) {
+                    Circle().fill(healthy ? Color.green : Color.orange).frame(width: 6, height: 6)
+                    Text(loading ? "正在取得公車資料" : healthy ? "臺北市公車" : "資料延遲")
+                        .font(.subheadline.weight(.semibold))
+                }
+                if let date = snapshot.sourceUpdatedAt {
+                    HStack(spacing: 4) {
+                        Text("更新"); Text(date, style: .time)
+                        if let age, age >= 120 { Text("· \(Int(age / 60)) 分鐘前") }
+                    }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                } else { Text("定位與到站預估").font(.caption).foregroundStyle(.secondary) }
+            }
+            .padding(.horizontal, 13).padding(.vertical, 10)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+        }
+    }
+}
+
+private struct TransitPanel: View {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var location: LocationService
+    @Binding var showInformation: Bool
+    var browseOnly = false
+    @FocusState private var searchFocused: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if !browseOnly && (model.selectedStationID != nil || model.selectedRouteID != nil) {
+                detailHeader
+            } else {
+                browseHeader
+            }
+            if model.loading {
+                VStack(spacing: 12) {
+                    ProgressView(); Text("取得站牌與路線中").font(.subheadline).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = model.loadError {
+                ContentUnavailableView {
+                    Label("無法連線", systemImage: "wifi.exclamationmark")
+                } description: { Text(error) } actions: { Button("重試") { model.retry() }.buttonStyle(.borderedProminent) }
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        if browseOnly { browseResults }
+                        else if let station = model.selectedStation { StationDetails(model: model, station: station) }
+                        else if let vehicle = model.selectedVehicle { VehicleDetails(model: model, vehicle: vehicle) }
+                        else if let route = model.selectedRoute { RouteDetails(model: model, route: route) }
+                        else { browseResults }
+                    }.padding(.horizontal, 18).padding(.bottom, 24)
+                }
+                .scrollDismissesKeyboard(.interactively)
+                .refreshable { await model.refresh() }
+            }
+        }
+        .padding(.top, 16)
+        .onChange(of: searchFocused) { _, focused in if focused { model.sheetDetent = .large } }
+        .onChange(of: model.selectedStationID) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedRouteID) { _, _ in searchFocused = false }
+        .onChange(of: model.selectedVehicleID) { _, _ in searchFocused = false }
+    }
+
+    private var browseHeader: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Text(location.coordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌")
+                    .font(.title2.weight(.bold))
+                Spacer()
+                Button { location.request() } label: { Label("定位", systemImage: "location.fill") }
+                    .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+            }
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("搜尋站牌、路線或車牌", text: $model.query)
+                    .focused($searchFocused).submitLabel(.search).autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .onSubmit { searchFocused = false }
+                if !model.query.isEmpty {
+                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                        .frame(width: 36, height: 40).accessibilityLabel("清除搜尋")
+                }
+            }
+            .padding(.horizontal, 12).frame(minHeight: 48)
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13))
+            Picker("查詢類型", selection: $model.mode) {
+                ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
+            }.pickerStyle(.segmented)
+            if let message = location.message { Text(message).font(.caption).foregroundStyle(.secondary) }
+        }.padding(.horizontal, 18).padding(.bottom, 12)
+    }
+
+    private var detailHeader: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Button { model.clearSelection() } label: { Image(systemName: "chevron.left").font(.body.weight(.semibold)).frame(width: 44, height: 44) }
+                .accessibilityLabel("返回搜尋")
+            VStack(alignment: .leading, spacing: 3) {
+                Text(model.selectedStation?.name ?? model.selectedVehicle?.routeName ?? model.selectedRoute?.name ?? "公車動態")
+                    .font(.title2.weight(.bold)).lineLimit(2)
+                if let station = model.selectedStation { Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary) }
+                else if let vehicle = model.selectedVehicle { Text(vehicle.plate).font(.subheadline).foregroundStyle(.secondary).monospaced() }
+                else { Text("路線動態").font(.caption).foregroundStyle(.secondary) }
+            }
+            Spacer(minLength: 4)
+            if let station = model.selectedStation {
+                Button { model.toggleFavorite(station) } label: {
+                    Image(systemName: model.favorites.contains(station.id) ? "star.fill" : "star")
+                        .font(.title3).frame(width: 44, height: 44)
+                }.accessibilityLabel(model.favorites.contains(station.id) ? "移除收藏站牌" : "收藏站牌")
+            }
+        }.padding(.leading, 6).padding(.trailing, 12).padding(.bottom, 12)
+    }
+
+    @ViewBuilder private var browseResults: some View {
+        if model.mode == .stops {
+            let stations = model.stations(query: model.query)
+            if stations.isEmpty { emptyResult }
+            ForEach(stations) { station in
+                Button { model.selectStation(station) } label: {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: model.favorites.contains(station.id) ? "star.fill" : "mappin.circle.fill")
+                            .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color.accentColor)
+                            .font(.title2).frame(width: 30)
+                        VStack(alignment: .leading, spacing: 5) {
+                            HStack { Text(station.name).font(.body.weight(.semibold)); Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary) }
+                            Text(station.address.isEmpty ? "站牌 \(station.id)" : station.address).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        Spacer(minLength: 0)
+                        if let position = location.coordinate, position.isInServiceArea {
+                            Text(distanceLabel(position.distance(to: station.coordinate))).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
+                    }.padding(.vertical, 15).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                Divider()
+            }
+        } else if model.mode == .routes {
+            let routes = model.routes(query: model.query)
+            if routes.isEmpty { emptyResult }
+            ForEach(routes) { route in
+                Button { model.selectRoute(route) } label: {
+                    HStack(spacing: 12) {
+                        RouteBadge(name: route.name)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("\(route.departure) → \(route.destination)").font(.subheadline).lineLimit(2)
+                            Text("\(model.snapshot.vehicles.filter { $0.parentRouteID == route.parentID && $0.isFresh(at: Date()) }.count) 輛近期回報")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+                    }.padding(.vertical, 15).contentShape(Rectangle())
+                }.buttonStyle(.plain)
+                Divider()
+            }
+        } else {
+            Button { model.restoreVehicle() } label: { Label("找回上次查看的公車", systemImage: "clock.arrow.circlepath").font(.subheadline).frame(minHeight: 44) }
+            let vehicles = model.vehicles(query: model.query)
+            if vehicles.isEmpty { emptyResult }
+            ForEach(vehicles) { vehicle in
+                VehicleRow(vehicle: vehicle) { model.selectVehicle(vehicle) }
+                Divider()
+            }
+        }
+    }
+
+    private var emptyResult: some View {
+        Text("找不到符合的資料，試試其他名稱").font(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24)
+    }
+}
+
+private struct StationDetails: View {
+    @ObservedObject var model: TransitAppModel
+    let station: Station
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { timeline in
+            let rows = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(station.address).font(.caption).foregroundStyle(.secondary).padding(.bottom, 12)
+                Button {
+                    let item = MKMapItem(placemark: MKPlacemark(coordinate: station.coordinate.locationCoordinate))
+                    item.name = station.name
+                    item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
+                } label: { Label("步行到這個站牌", systemImage: "figure.walk").font(.subheadline.weight(.medium)).frame(minHeight: 44) }
+                    .padding(.bottom, 12)
+                HStack {
+                    Text("官方到站預估").font(.subheadline.weight(.semibold))
+                    Spacer()
+                    if let time = model.snapshot.estimates.updatedAt {
+                        Text(time, style: .time).font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }.padding(.bottom, 8)
+                if rows.isEmpty { Text("此站暫無路線資訊").foregroundStyle(.secondary).padding(.vertical) }
+                ForEach(rows) { row in
+                    VStack(alignment: .leading, spacing: 10) {
+                        Button {
+                            if let route = row.route { model.selectRoute(route, direction: row.stop.direction) }
+                        } label: {
+                            HStack(spacing: 12) {
+                                RouteBadge(name: row.route?.name ?? row.stop.routeID)
+                                Text("往 \(row.route?.destination(direction: row.stop.direction) ?? "方向未提供")")
+                                    .font(.subheadline).lineLimit(2)
+                                Spacer(minLength: 4)
+                                Text(EstimateFeed.label(row.estimateSeconds))
+                                    .font(.body.weight(.semibold)).monospacedDigit()
+                                    .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color.accentColor : Color.secondary)
+                            }.contentShape(Rectangle())
+                        }.buttonStyle(.plain).frame(minHeight: 44)
+                        if !row.nearbyVehicles.isEmpty {
+                            Text("同方向附近車輛 · GPS 直線距離").font(.caption2).foregroundStyle(.secondary)
+                            HStack(spacing: 8) {
+                                ForEach(row.nearbyVehicles) { bus in
+                                    Button { model.selectVehicle(bus) } label: {
+                                        Text("\(bus.plate) · \(distanceLabel(bus.rawCoordinate.distance(to: station.coordinate)))")
+                                            .font(.caption).padding(.horizontal, 10).frame(minHeight: 44)
+                                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }
+                    }.padding(.vertical, 12)
+                    Divider()
+                }
+                Text("到站預估未綁定車牌；附近車輛不代表下一班。").font(.caption).foregroundStyle(.secondary).padding(.top, 14)
+            }
+        }
+    }
+}
+
+private struct RouteDetails: View {
+    @ObservedObject var model: TransitAppModel
+    let route: BusRoute
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Picker("行駛方向", selection: $model.direction) {
+                Text("往 \(route.destination)").tag("0")
+                Text("往 \(route.departure)").tag("1")
+            }.pickerStyle(.segmented)
+            let buses = model.routeVehicles()
+            Text("\(buses.count) 輛車 · 點車牌查看位置").font(.subheadline).foregroundStyle(.secondary)
+            ForEach(buses) { bus in
+                VehicleRow(vehicle: bus) { model.selectVehicle(bus) }
+                Divider()
+            }
+            if buses.isEmpty { Text("目前沒有此方向的車輛回報").font(.subheadline).foregroundStyle(.secondary) }
+            Text("沿線站牌").font(.headline).padding(.top, 8)
+            TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                ForEach(model.metadata.orderedStops(routeID: route.id, direction: model.direction)) { stop in
+                    Button {
+                        if let station = model.metadata.stations[stop.stationID] { model.selectStation(station) }
+                    } label: {
+                        HStack(spacing: 10) {
+                            Text("\(stop.sequence)").font(.caption).foregroundStyle(.secondary).frame(width: 26)
+                            Text(stop.name).font(.subheadline)
+                            Spacer(minLength: 8)
+                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)))
+                                .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        }.frame(minHeight: 50).contentShape(Rectangle())
+                    }.buttonStyle(.plain)
+                    Divider()
+                }
+            }
+        }
+    }
+}
+
+private struct VehicleDetails: View {
+    @ObservedObject var model: TransitAppModel
+    let vehicle: BusVehicle
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            Text("往 \(vehicle.destination)").font(.headline)
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                let fresh = vehicle.isFresh(at: timeline.date)
+                HStack(alignment: .top, spacing: 20) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(fresh ? "\(Int(vehicle.speed))" : "—").font(.system(.largeTitle, design: .rounded).weight(.semibold)).monospacedDigit()
+                        Text("GPS 回報 km/h").font(.caption).foregroundStyle(.secondary)
+                    }
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(fresh ? vehicle.statusLabel : "定位已延遲").font(.subheadline.weight(.semibold)).foregroundStyle(fresh ? Color.primary : Color.orange)
+                        Text("\(max(0, Int(timeline.date.timeIntervalSince(vehicle.observedAt)))) 秒前回報").font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        if vehicle.lowFloor { Label("低底盤", systemImage: "figure.roll").font(.caption) }
+                    }
+                }
+            }
+            if let provider = vehicle.provider { Text(provider).font(.subheadline).foregroundStyle(.secondary) }
+            Toggle("淡化建築、凸顯這輛車", isOn: $model.highlightVehicle).font(.subheadline)
+            HStack(spacing: 10) {
+                Button {
+                    model.following = true; model.focusMap(.vehicle(vehicle.id))
+                } label: { Label("跟隨公車", systemImage: "scope").frame(maxWidth: .infinity, minHeight: 36) }
+                    .buttonStyle(.borderedProminent)
+                Button {
+                    if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction) }
+                } label: { Text("查看路線").frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered)
+            }
+            if !vehicle.aligned { Text("目前顯示原始 GPS，尚未匹配道路軌跡").font(.caption).foregroundStyle(.secondary) }
+            let stops = model.metadata.orderedStops(routeID: vehicle.routeID, direction: vehicle.direction)
+                .sorted { $0.coordinate.distance(to: vehicle.rawCoordinate) < $1.coordinate.distance(to: vehicle.rawCoordinate) }
+            if let stop = stops.first {
+                Divider()
+                Text("鄰近站牌 · \(stop.name)").font(.subheadline.weight(.semibold))
+                Text("GPS 直線距離 \(distanceLabel(vehicle.rawCoordinate.distance(to: stop.coordinate)))")
+                    .font(.caption).foregroundStyle(.secondary)
+                Button {
+                    if let station = model.metadata.stations[stop.stationID] { model.selectStation(station) }
+                } label: { Label("查看此站到站預估", systemImage: "mappin.and.ellipse").frame(minHeight: 44) }
+            }
+        }
+    }
+}
+
+private struct VehicleRow: View {
+    let vehicle: BusVehicle
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: "bus.fill").foregroundStyle(.secondary).font(.title3).frame(width: 30)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(vehicle.plate).font(.body.weight(.semibold)).monospaced()
+                    Text("\(vehicle.routeName) · 往 \(vehicle.destination)").font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 6)
+                TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                    Text(vehicle.isFresh(at: timeline.date) ? "\(Int(vehicle.speed)) km/h" : "延遲")
+                        .font(.caption).foregroundStyle(vehicle.isFresh(at: timeline.date) ? Color.secondary : Color.orange).monospacedDigit()
+                }
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }.padding(.vertical, 14).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+    }
+}
+
+private struct RouteBadge: View {
+    let name: String
+    var body: some View {
+        Text(name).font(.subheadline.weight(.bold)).lineLimit(2)
+            .padding(.horizontal, 10).padding(.vertical, 8).frame(minWidth: 56)
+            .foregroundStyle(Color.accentColor)
+            .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 11))
+    }
+}
+
+private struct AppInformationView: View {
+    @ObservedObject var model: TransitAppModel
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section("即時資料") {
+                    Text("臺北市公共運輸處公開資料，每 15 秒重新取得。個別公車回報時間以車輛卡片為準。")
+                    if let error = model.snapshot.vehicleError { Label(error, systemImage: "wifi.exclamationmark") }
+                    if let error = model.snapshot.estimates.error { Text(error) }
+                    if let notice = model.metadataNotice { Text(notice) }
+                    Text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。")
+                    Text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。")
+                    Link("公開資料說明", destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
+                }
+                Section("地圖") {
+                    Toggle("選車時淡化建築", isOn: $model.highlightVehicle)
+                    Text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖。道路匹配受 GPS 與軌跡精度影響。")
+                    Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
+                    Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                    NavigationLink("開源授權") { LicenseView() }
+                }
+                Section("定位") {
+                    Text("定位只在使用期間尋找附近站牌，可直接手動搜尋；位置不會傳到公車資料來源。")
+                    Button("開啟系統設定") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                }
+            }
+            .navigationTitle("資訊與設定").navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() } } }
+        }
+    }
+}
+
+private struct LicenseView: View {
+    private var licenses: String {
+        guard let url = Bundle.main.url(forResource: "Licenses", withExtension: "txt") else { return "授權文件未載入" }
+        return (try? String(contentsOf: url, encoding: .utf8)) ?? "授權文件未載入"
+    }
+    var body: some View {
+        ScrollView { Text(licenses).font(.caption).textSelection(.enabled).padding() }
+            .navigationTitle("開源授權").navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private func distanceLabel(_ meters: Double) -> String {
+    meters >= 1_000 ? String(format: "%.1f km", meters / 1_000) : "\(Int(meters.rounded())) m"
+}

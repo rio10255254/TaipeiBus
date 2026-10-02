@@ -1,0 +1,127 @@
+name: iPhone app
+
+on:
+  push:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+    inputs:
+      sign_ipa:
+        description: 'Also export a signed IPA using configured Apple secrets'
+        type: boolean
+        default: false
+      bundle_id:
+        description: 'Existing app Bundle ID (required for signed IPA)'
+        type: string
+        default: 'com.example.TaipeiBus'
+      export_method:
+        description: 'Signed IPA distribution method'
+        type: choice
+        options: ['release-testing', 'debugging', 'app-store-connect']
+        default: 'release-testing'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode and core tests
+        run: |
+          xcodebuild -version
+          swift test --package-path ios/TransitCore
+      - name: Build native app
+        run: |
+          set -o pipefail
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
+      - name: iPhone 17 launch and screenshots
+        run: |
+          set -euo pipefail
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-iPhone17 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
+          xcrun simctl install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
+          xcrun simctl launch "$device" com.example.TaipeiBus
+          sleep 40
+          mkdir -p "$RUNNER_TEMP/phone-screenshots"
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-home.png"
+          xcrun simctl terminate "$device" com.example.TaipeiBus
+          xcrun simctl shutdown "$device"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: iPhone17-simulator
+          path: |
+            ${{ runner.temp }}/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app
+            ${{ runner.temp }}/phone-screenshots
+            ${{ runner.temp }}/ios-build.log
+          retention-days: 7
+
+  signed-ipa:
+    if: github.event_name == 'workflow_dispatch' && inputs.sign_ipa
+    needs: simulator
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      BUS_BUNDLE_ID: ${{ inputs.bundle_id }}
+      BUS_EXPORT_METHOD: ${{ inputs.export_method }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare automatic signing
+        run: |
+          set -euo pipefail
+          test -n "$APPLE_TEAM_ID" && test -n "$ASC_KEY_ID" && test -n "$ASC_ISSUER_ID" && test -n "$ASC_PRIVATE_KEY"
+          test "$BUS_BUNDLE_ID" != com.example.TaipeiBus
+          mkdir -p "$RUNNER_TEMP/bus-signing"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/bus-signing/AuthKey.p8"
+          chmod 600 "$RUNNER_TEMP/bus-signing/AuthKey.p8"
+          python3 - <<'PY'
+          import os, plistlib
+          with open(os.path.join(os.environ['RUNNER_TEMP'], 'bus-signing/ExportOptions.plist'), 'wb') as f:
+              plistlib.dump({'method': os.environ['BUS_EXPORT_METHOD'], 'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic', 'destination': 'export'}, f)
+          PY
+      - name: Archive and export signed IPA
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" archive
+          xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
+            -exportPath "$RUNNER_TEMP/BusIPA" \
+            -exportOptionsPlist "$RUNNER_TEMP/bus-signing/ExportOptions.plist" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TaipeiBus-signed-IPA
+          path: ${{ runner.temp }}/BusIPA/*.ipa
+          retention-days: 7
+      - name: Remove signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bus-signing/AuthKey.p8"

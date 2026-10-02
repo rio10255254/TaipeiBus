@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+work/
+TaipeiBus*-source.zip
+.DS_Store
+ios/**/xcuserdata/
+ios/**/.build/
+ios/**/.swiftpm/

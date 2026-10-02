@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#f7f8fa" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>台北公車 · 即時定位</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+</head>
+<body>
+  <div id="app">
+    <div id="map" aria-label="台北市公車即時 3D 地圖"></div>
+    <div id="mobile-scrim" hidden></div>
+    <header class="top-bar">
+      <a class="brand" href="/" aria-label="台北公車首頁"><span class="live-dot"></span><span>台北公車<small id="mobile-updated">正在取得資料</small></span></a>
+      <div class="live-indicator"><span class="live-dot"></span><span id="connection-status">正在連線</span><span class="city-tag">台北</span></div>
+      <button id="mobile-info" class="round-button" aria-label="資料來源與設定">i</button>
+    </header>
+    <button id="mobile-close-search" class="close-button sheet-close" aria-label="關閉搜尋" hidden>×</button>
+    <aside id="explorer" class="explorer" aria-label="搜尋與追蹤公車">
+      <div class="fleet-summary"><div><strong id="fleet-count">—</strong><span>近期回報車輛</span></div><p id="fleet-updated">正在取得 GPS 資料</p></div>
+      <label class="search-box"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜尋路線或車牌" autocomplete="off" aria-label="搜尋路線或車牌" /><kbd>/</kbd></label>
+      <div class="view-tabs" role="group" aria-label="查詢方式"><button id="view-routes" aria-pressed="true" class="active">路線</button><button id="view-stops" aria-pressed="false">站牌</button><button id="view-vehicles" aria-pressed="false">車牌</button><button id="locate-user" aria-label="取得我的位置並搜尋附近站牌" title="附近站牌">◎ 附近</button></div>
+      <div id="route-filter" class="selection-filter" hidden><span id="route-filter-name"></span><button id="clear-route" aria-label="顯示所有路線">×</button></div>
+      <div id="station-filter" class="selection-filter" hidden><span id="station-filter-name"></span><button id="clear-station">更換站牌</button></div>
+      <div class="source-tabs" role="group" aria-label="資料模式"><button id="live-mode" class="active" aria-pressed="true">即時公車</button><button id="demo-mode" aria-pressed="false">移動示範</button></div>
+      <div class="list-heading"><span id="list-title">附近正在行駛</span><span id="result-count">—</span></div>
+      <div id="bus-list" class="bus-list" aria-live="polite"><p class="empty-state">正在取得車輛定位…</p></div>
+      <p id="arrival-scope" class="arrival-scope" hidden>時間為官方路線到站預估；附近車牌依 GPS 距離顯示，未與預估時間綁定。</p>
+      <div class="collector-status"><span class="status-dot"></span><div id="feed-detail">資料來源：臺北市公共運輸處</div></div>
+      <div id="demo-notice" class="demo-notice" hidden>模擬車輛，未使用即時 GPS。</div>
+    </aside>
+    <div class="map-tools" aria-label="地圖控制">
+      <button id="perspective" class="map-button" aria-label="切換俯視與立體視角" aria-pressed="true">3D</button>
+      <button id="overview" class="map-button" aria-label="查看台北全市">↗</button>
+      <button id="zoom-in" class="map-button" aria-label="放大地圖">＋</button>
+      <button id="zoom-out" class="map-button" aria-label="縮小地圖">−</button>
+      <button id="north" class="map-button compass" aria-label="地圖朝北"><span>↑</span><small>N</small></button>
+    </div>
+    <section id="vehicle-detail" class="vehicle-detail" aria-label="目前追蹤車輛" hidden>
+      <div class="detail-top"><div class="detail-route" id="detail-route">—</div><div class="detail-heading"><span id="detail-provider" class="eyebrow">車牌</span><h2 id="detail-plate">—</h2><p id="detail-direction">—</p></div><button id="close-detail" class="close-button" aria-label="取消選取車輛">×</button></div>
+      <div class="detail-stats"><div><span>回報速度</span><strong id="detail-speed">—</strong></div><div><span>GPS 距現在</span><strong id="detail-age">—</strong></div><div><span>車輛狀態</span><strong id="detail-state">—</strong></div></div>
+      <div id="arrival-panel" class="arrival-panel" hidden><label for="arrival-stop" id="arrival-title">站點到站預估</label><select id="arrival-stop" aria-label="選擇此路線的站點"></select><div class="arrival-result"><strong id="arrival-time">—</strong><span id="arrival-distance"></span></div><p id="arrival-note"></p></div>
+      <div class="gps-clock"><span>GPS 時間</span><span id="detail-time">—</span></div>
+      <button id="vehicle-clarity" class="clarity-toggle" aria-pressed="true"><span>淡化建築，凸顯車輛</span><span class="toggle-track" aria-hidden="true"></span></button>
+      <button id="follow" class="follow-button" aria-pressed="false"><span>◎</span><span id="follow-label">跟著這輛公車</span></button>
+      <div id="detail-warning" class="detail-warning" hidden></div>
+    </section>
+    <svg id="world-connector" aria-hidden="true"><path></path></svg>
+    <section id="world-info" class="world-info" aria-label="地圖上的即時資訊" hidden>
+      <div class="world-heading"><div><strong id="world-title"></strong><span id="world-subtitle"></span></div><button id="world-more" class="round-button" aria-label="查看更多資訊">···</button></div>
+      <p id="world-meta"></p>
+      <div id="world-arrivals"></div>
+      <span id="world-caption"></span>
+    </section>
+    <button id="mobile-locate" class="round-button locate-button" aria-label="我的位置與附近站牌">⌖</button>
+    <nav class="mobile-dock" aria-label="公車查詢與地圖操作">
+      <button id="mobile-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><span>搜尋</span></button>
+      <button id="mobile-routes">路線 <span aria-hidden="true">↝</span></button>
+      <button id="mobile-follow" hidden aria-label="跟隨這輛公車">◎</button>
+      <button id="mobile-clear" hidden aria-label="取消選取">×</button>
+    </nav>
+    <div id="toast" class="toast" role="status" hidden></div>
+    <div id="fatal-error" class="fatal-error" role="alert" hidden><h2>地圖暫時無法開啟</h2><p></p><button onclick="location.reload()">重新載入</button></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
