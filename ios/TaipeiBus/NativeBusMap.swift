@@ -27,12 +27,12 @@ struct NativeBusMap: UIViewRepresentable {
         map.minimumZoomLevel = 11
         map.showsUserLocation = false // A single Core Location service owns permission and location requests.
         map.showsLogoView = false
-        map.attributionButtonPosition = .topLeft
-        map.attributionButtonMargins = CGPoint(x: 16, y: 104)
+        map.attributionButtonPosition = .bottomLeft
+        map.attributionButtonMargins = CGPoint(x: 16, y: 12)
         map.compassViewPosition = .topRight
-        map.compassViewMargins = CGPoint(x: 16, y: 104)
-        map.setCamera(MLNMapCamera(lookingAtCenter: Coordinate.taipei.locationCoordinate,
-                                 altitude: 650, pitch: 54, heading: 0), animated: false)
+        map.compassViewMargins = CGPoint(x: 16, y: 12)
+        // An altitude camera needs a laid-out viewport; zoom is safe before SwiftUI sizes the view.
+        map.setCenter(Coordinate.taipei.locationCoordinate, zoomLevel: 17.2, animated: false)
         context.coordinator.attach(map)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectBus(_:)))
         tap.delegate = context.coordinator
@@ -76,6 +76,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var nearbySource: MLNShapeSource?
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
+        private var positionedInitialCamera = false
 
         init(model: TransitAppModel, overlay: MapSelectionOverlay) { self.model = model; self.overlay = overlay }
         func attach(_ map: MLNMapView) {
@@ -150,7 +151,13 @@ struct NativeBusMap: UIViewRepresentable {
         func update(location: Coordinate?) {
             pendingLocation = location
             displayLink?.isPaused = !model.isActive
-            guard let map, let buses else { return }
+            guard let map else { return }
+            if !positionedInitialCamera, map.bounds.width > 0, map.bounds.height > 0 {
+                positionedInitialCamera = true
+                map.setCamera(MLNMapCamera(lookingAtCenter: Coordinate.taipei.locationCoordinate,
+                                          altitude: 650, pitch: 54, heading: 0), animated: false)
+            }
+            guard let buses else { return }
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(); lastMetadataCount = model.metadata.stations.count
             }
@@ -217,7 +224,15 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) { updateNearbyStations() }
-        func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) { updateStationAnchor() }
+        func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+            if !positionedInitialCamera, mapView.bounds.width > 0 {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    self.update(location: self.pendingLocation)
+                }
+            }
+            updateStationAnchor()
+        }
 
         private func point(_ coordinate: Coordinate?) -> MLNPointFeature? {
             guard let coordinate else { return nil }

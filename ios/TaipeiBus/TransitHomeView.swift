@@ -139,6 +139,8 @@ struct TransitHomeView: View {
 private struct SourceStatusView: View {
     let snapshot: TransitSnapshot
     let loading: Bool
+    private static let clockStyle = Date.FormatStyle(date: .omitted, time: .shortened,
+        locale: Locale(identifier: "zh_TW"), timeZone: TimeZone(identifier: "Asia/Taipei")!)
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -152,7 +154,7 @@ private struct SourceStatusView: View {
                 }
                 if let date = snapshot.sourceUpdatedAt {
                     HStack(spacing: 4) {
-                        Text("更新"); Text(date, style: .time)
+                        Text("更新"); Text(date.formatted(Self.clockStyle))
                         if let age, age >= 120 { Text("· \(Int(age / 60)) 分鐘前") }
                     }.font(.caption).foregroundStyle(.secondary).monospacedDigit()
                 } else { Text("定位與到站預估").font(.caption).foregroundStyle(.secondary) }
