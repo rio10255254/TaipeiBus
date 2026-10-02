@@ -41,6 +41,9 @@ jobs:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
       ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+      APPLE_DISTRIBUTION_P12: ${{ secrets.APPLE_DISTRIBUTION_P12 }}
+      APPLE_DISTRIBUTION_PASSWORD: ${{ secrets.APPLE_DISTRIBUTION_PASSWORD }}
+      APPLE_APP_STORE_PROFILE: ${{ secrets.APPLE_APP_STORE_PROFILE }}
       BUS_BUNDLE_ID: ${{ inputs.bundle_id || vars.BUS_BUNDLE_ID }}
       BUS_VERSION: ${{ inputs.version }}
       BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
@@ -54,6 +57,7 @@ jobs:
           set -euo pipefail
           python3 ios/release-check.py
           ruby ios/release/apple_client_test.rb
+          python3 ios/release/signing_test.py
           python3 - <<'PY'
           import os
           from pathlib import Path
@@ -73,6 +77,9 @@ jobs:
       - name: Verify app record and select exact build number
         if: inputs.operation == 'check-only' || inputs.operation == 'upload'
         run: ruby ios/apple-connect.rb preflight
+      - name: Install App Store distribution signing
+        if: inputs.operation == 'upload'
+        run: python3 ios/release/signing.py install
       - name: Test transit algorithms and compile signed iPhone archive
         if: inputs.operation == 'upload'
         run: |
@@ -87,7 +94,8 @@ jobs:
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
             MARKETING_VERSION="$BUS_VERSION" CURRENT_PROJECT_VERSION="$BUS_BUILD_NUMBER" \
-            CODE_SIGN_STYLE=Automatic archive | tee "$RUNNER_TEMP/testflight-archive.log"
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$BUS_SIGNING_CERTIFICATE_SHA1" \
+            PROVISIONING_PROFILE_SPECIFIER="$BUS_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
           ditto -c -k --sequesterRsrc --keepParent \
@@ -102,7 +110,9 @@ jobs:
           path = Path(os.environ['RUNNER_TEMP']) / 'bus-signing/ExportOptions.plist'
           with path.open('wb') as output:
               plistlib.dump({'method': 'app-store-connect', 'destination': 'upload',
-                            'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'automatic',
+                            'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'manual',
+                            'signingCertificate': os.environ['BUS_SIGNING_CERTIFICATE_SHA1'],
+                            'provisioningProfiles': {os.environ['BUS_BUNDLE_ID']: os.environ['BUS_PROFILE_UUID']},
                             'manageAppVersionAndBuildNumber': False}, output)
           PY
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
@@ -140,11 +150,7 @@ jobs:
             ${{ runner.temp }}/testflight-dSYMs.zip
           if-no-files-found: ignore
           retention-days: 14
-      - name: Remove temporary signing key
+      - name: Remove temporary signing files and keychain
         if: always()
         run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-          (Path(os.environ['RUNNER_TEMP']) / 'bus-signing/AuthKey.p8').unlink(missing_ok=True)
-          PY
+          python3 ios/release/signing.py cleanup
