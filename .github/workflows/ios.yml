@@ -523,6 +523,17 @@ jobs:
               print('Simulator shutdown timed out.', flush=True)
           PY
       - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.preview_scope == 'usability'
+        with:
+          name: usability-screenshots
+          path: |
+            ${{ runner.temp }}/usability-screenshots
+            ${{ runner.temp }}/usability-no-location-screenshots
+            ${{ runner.temp }}/usability-tests.log
+            ${{ runner.temp }}/usability-no-location.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: iPhone17-simulator

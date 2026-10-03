@@ -135,6 +135,7 @@ struct TransitHomeView: View {
                                 Spacer(minLength: 0)
                                 Image(systemName: "arrow.up.right").liveFont(.subheadline, weight: .semibold).foregroundStyle(Color(liveHex: live.appearance.accentColor))
                             }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 58)
+                                .contentShape(Capsule())
                         }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                     }
                     if !nearbyStations.isEmpty, let position = location.usableCoordinate {
@@ -363,7 +364,7 @@ struct PhonePressStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+        configuration.label.contentShape(Rectangle()).scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.78 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
     }
