@@ -23,6 +23,11 @@ on:
         description: 'For live-settings verification: current live content revision'
         type: string
         default: '1'
+      usability_scope:
+        description: 'For usability previews: all journeys, map/search controls, or routing data only'
+        type: choice
+        options: ['all', 'map-controls', 'routing-only']
+        default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
         type: string
@@ -55,6 +60,7 @@ jobs:
           python3 ios/release-check.py
           python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
+        if: inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -63,12 +69,13 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
       - name: Package simulator app for requested preview
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
+        if: inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -92,11 +99,11 @@ jobs:
           with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
               list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']))
           PY
-          swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant
-          swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections
-          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops
+          swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
+          swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
+          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
       - name: iPhone 17 launch and screenshots
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         timeout-minutes: 12
         run: |
           set -euo pipefail
@@ -108,7 +115,19 @@ jobs:
           command = sys.argv[1:]
           print('Simulator command:', ' '.join(command[1:]), file=sys.stderr, flush=True)
           timeout = 180 if command[1] in ('bootstatus', 'install', 'launch') else 60
-          subprocess.run(command, check=True, timeout=timeout)
+          try:
+              subprocess.run(command, check=True, timeout=timeout)
+          except subprocess.TimeoutExpired:
+              if command[1] != 'install':
+                  raise
+              # A freshly booted hosted simulator can stall its installation RPC.
+              # Restart only this disposable device, then retry the same app once.
+              print('Installation timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
+              simulator, device = command[0], command[2]
+              subprocess.run([simulator, 'shutdown', device], check=True, timeout=60)
+              subprocess.run([simulator, 'boot', device], check=True, timeout=60)
+              subprocess.run([simulator, 'bootstatus', device, '-b'], check=True, timeout=180)
+              subprocess.run(command, check=True, timeout=180)
           PY
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
@@ -121,7 +140,6 @@ jobs:
           subprocess.run(['open', '-a', sys.argv[1], '--args', '-CurrentDeviceUDID', sys.argv[2]], check=True, timeout=30)
           PY
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
-          sim status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
           container=$(sim get_app_container "$device" com.example.TaipeiBus data)
           launch_ready() {
             token="$RANDOM-$RANDOM"
@@ -350,21 +368,25 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           fi
       - name: Tap through native user journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
           gem install xcodeproj -v 1.27.0 --no-document --user-install
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
+          selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
-            -skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
+            "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify manual departure without location permission
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'all'
         run: |
           set -euo pipefail
           xcrun simctl privacy "$BUS_SIM_DEVICE" revoke location com.example.TaipeiBus
@@ -386,6 +408,29 @@ jobs:
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-no-location.xcresult" \
               --output-path "$RUNNER_TEMP/usability-no-location-screenshots"
           fi
+          python3 - <<'PY'
+          import json, os, re, shutil
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          names = set(re.findall(r'capture\("([^"]+)"\)', Path('ios/usability/JourneyUsabilityTests.swift').read_text()))
+          for folder in ['usability-screenshots', 'usability-no-location-screenshots']:
+              manifest = root / folder / 'manifest.json'
+              if not manifest.exists():
+                  continue
+              target = root / 'usability-preview' / folder
+              target.mkdir(parents=True, exist_ok=True)
+              records = json.loads(manifest.read_text())
+              for record in records:
+                  keep = []
+                  for item in record.get('attachments', []):
+                      label = item.get('suggestedHumanReadableName', '')
+                      if item.get('isAssociatedWithFailure') or any(label.startswith(name) for name in names):
+                          filename = Path(item['exportedFileName']).name
+                          shutil.copyfile(manifest.parent / filename, target / filename)
+                          keep.append(item)
+                  record['attachments'] = keep
+              (target / 'manifest.json').write_text(json.dumps(records))
+          PY
       - name: Capture live content before update
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'live-settings'
         timeout-minutes: 3
@@ -527,8 +572,7 @@ jobs:
         with:
           name: usability-screenshots
           path: |
-            ${{ runner.temp }}/usability-screenshots
-            ${{ runner.temp }}/usability-no-location-screenshots
+            ${{ runner.temp }}/usability-preview
             ${{ runner.temp }}/usability-tests.log
             ${{ runner.temp }}/usability-no-location.log
           if-no-files-found: ignore
@@ -543,6 +587,7 @@ jobs:
             ${{ runner.temp }}/ios-build.log
             ${{ runner.temp }}/ios-release-build.log
             ${{ runner.temp }}/ios-runtime.log
+            ${{ runner.temp }}/routing-audit.log
             ${{ runner.temp }}/iPhone17-live-follow.mp4
             ${{ runner.temp }}/video-record.log
             ${{ runner.temp }}/usability.xcresult

@@ -6,6 +6,17 @@ import TransitCore
 final class MapSelectionOverlay: ObservableObject {
     @Published private(set) var windowPoint: CGPoint?
     private var lastUpdate: CFTimeInterval = 0
+#if DEBUG
+    @Published private(set) var cameraState = ""
+    private var lastCameraUpdate: CFTimeInterval = 0
+    func recordCamera(_ state: [String: Any]) {
+        let time = CACurrentMediaTime()
+        guard time - lastCameraUpdate > 0.5, let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]),
+              let text = String(data: data, encoding: .utf8) else { return }
+        lastCameraUpdate = time
+        if cameraState != text { cameraState = text }
+    }
+#endif
     func update(_ point: CGPoint?) {
         let time = CACurrentMediaTime()
         guard point == nil || time - lastUpdate > 1.0 / 30 else { return }

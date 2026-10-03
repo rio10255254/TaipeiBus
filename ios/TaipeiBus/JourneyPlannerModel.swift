@@ -49,8 +49,13 @@ private actor TripNetwork {
         }
         let nearby = planner!.plan(from: from, to: to, maximumWalk: preferences.firstWalkMeters, limit: 18,
                                   preferences: preferences, estimates: estimates)
-        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18,
-                                             preferences: preferences, estimates: estimates) : nearby
+        if nearby.contains(where: { $0.transfers == 0 }) { return nearby }
+        let expanded = planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18,
+                                     preferences: preferences, estimates: estimates)
+        if nearby.isEmpty { return expanded }
+        let existing = Set(nearby.map(\.id))
+        return TripRanking.recommended(nearby + expanded.filter { $0.transfers == 0 && !existing.contains($0.id) },
+            estimates: estimates, at: Date(), preferences: preferences, limit: 18)
     }
 }
 
@@ -165,26 +170,9 @@ final class JourneyPlannerModel: ObservableObject {
                                               preferences: preferences, estimates: latestSnapshot.estimates)
             guard !Task.isCancelled, token == generation else { return }
             let estimates = latestSnapshot.estimates
-            let now = Date()
-            func availability(_ trip: TransitTrip) -> Int {
-                for ride in trip.rides {
-                    if let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now),
-                       [-2, -3, -4].contains(eta) { return 2 }
-                }
-                guard let ride = trip.rides.first,
-                      let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now) else { return 1 }
-                return eta >= 0 && trip.accessDistance / 1.2 <= Double(eta) + 45 ? 0 : 1
-            }
-            func waitingScore(_ trip: TransitTrip) -> Double {
-                guard let ride = trip.rides.first,
-                      let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now), eta >= 0 else { return trip.score }
-                return trip.score + max(0, Double(eta) - trip.accessDistance / 1.2) * preferences.waitingWeight
-            }
-            let ordered = trips.filter { availability($0) != 2 }.sorted {
-                let a = availability($0), b = availability($1)
-                return a == b ? waitingScore($0) < waitingScore($1) : a < b
-            }
-            var choices = ordered.prefix(3).map { trip -> JourneyOption in
+            let walkable = origin.coordinate.distance(to: destination.coordinate) <= preferences.walkingOnlyMeters
+            let ordered = TripRanking.recommended(trips, estimates: estimates, at: Date(), preferences: preferences, limit: walkable ? 2 : 3)
+            var choices = ordered.map { trip -> JourneyOption in
                 var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
                 if trip.rides.count > 1 {
                     for i in 1..<trip.rides.count {
@@ -194,7 +182,7 @@ final class JourneyPlannerModel: ObservableObject {
                 walks.append(WalkingLeg(from: trip.rides.last!.alighting.coordinate, to: destination.coordinate))
                 return JourneyOption(id: trip.id, trip: trip, walks: walks)
             }
-            if origin.coordinate.distance(to: destination.coordinate) <= preferences.walkingOnlyMeters {
+            if walkable {
                 choices.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
                 choices = Array(choices.prefix(3))
@@ -204,24 +192,34 @@ final class JourneyPlannerModel: ObservableObject {
                 message = "附近沒有合適公車"; return
             }
             checkingWalks = true
-            // Only calculate routes being presented to the user. Validate the recommended option first.
+            // Publish choices immediately, then verify each displayed walk. Selecting a choice
+            // cancels this background refinement and locks the passenger's chosen itinerary.
             for choice in choices {
                 do {
                     let verified = try await enrich(choice)
                     guard token == generation, !Task.isCancelled else { return }
                     if let index = options.firstIndex(where: { $0.id == choice.id }) { options[index] = verified }
-                    if verified.walkIssue == nil {
-                        selectedID = verified.id; mapRevision += 1; break
-                    }
+                    if selected?.walkIssue != nil, verified.walkIssue == nil { selectedID = verified.id }
+                    checkingWalks = selected?.verified == false
+                    mapRevision += 1
                 } catch { return }
             }
             guard token == generation else { return }
+            let valid = options.filter { $0.walkIssue == nil }
+            let ranked = TripRanking.recommended(valid.compactMap(\.trip), estimates: latestSnapshot.estimates,
+                at: Date(), preferences: preferences, limit: 3,
+                walkingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) }))
+            let walkChoices = valid.filter(\.walkingOnly)
+            options = walkChoices + ranked.compactMap { trip in valid.first { $0.id == trip.id } } + options.filter { $0.walkIssue != nil }
+            selectedID = options.first(where: { $0.walkIssue == nil })?.id ?? options.first?.id
             checkingWalks = false; mapRevision += 1
         }
     }
     func select(_ option: JourneyOption) {
         selectionConfirmed = true
-        guard selectedID != option.id || !option.verified else { return }
+        // The recommended option can already be verified while alternatives are
+        // still loading. Confirming it must stop that work from selecting another.
+        if selectedID == option.id, option.verified { cancelRequests(); return }
         cancelRequests(); selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
         guard !option.verified else { return }
         checkingWalks = true

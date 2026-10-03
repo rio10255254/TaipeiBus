@@ -6,6 +6,7 @@ public struct TransitRide: Identifiable, Sendable {
     public let direction: String
     public let stops: [BusStop]
     public let coordinates: [Coordinate]
+    public var fullRouteSeconds: Double = 0
     public var boarding: BusStop { stops.first! }
     public var alighting: BusStop { stops.last! }
     public var stopCount: Int { stops.count - 1 }
@@ -19,6 +20,7 @@ public struct TransitTrip: Identifiable, Sendable {
     public let egressDistance: Double
     public let transferDistance: Double
     public let score: Double
+    public let rideSeconds: [Double]
     public var transfers: Int { max(0, rides.count - 1) }
 }
 
@@ -33,6 +35,7 @@ public struct TripPlanner: Sendable {
     }
     private struct Occurrence: Sendable { let pattern: Int; let index: Int }
     private struct Segment: Sendable { let pattern: Int; let board: Int; let alight: Int }
+    private struct Exit { let index: Int; let walk: Double }
     private struct Candidate {
         let segments: [Segment]
         let access: Double
@@ -59,13 +62,22 @@ public struct TripPlanner: Sendable {
         var patterns: [Pattern] = [], occurrences: [String: [Occurrence]] = [:]
         var usedStations: [String: Station] = [:]
         for route in metadata.routes.values.sorted(by: { $0.id < $1.id }) {
+            // These have special tickets or a restricted trip purpose. They remain
+            // searchable, but are not interchangeable with ordinary city buses.
+            guard !route.name.contains("觀光巴士"), !route.name.hasPrefix("懷恩專車") else { continue }
             for direction in ["0", "1"] {
                 let stops = metadata.orderedStops(routeID: route.id, direction: direction)
                 guard stops.count >= 2 else { continue }
                 let index = patterns.count
                 var distances = [0.0]
+                let journey = metadata.journey(routeID: route.id, direction: direction)
+                let anchors = Dictionary((journey?.anchors ?? []).map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for i in 1..<stops.count {
-                    distances.append(distances[i - 1] + stops[i - 1].coordinate.distance(to: stops[i].coordinate))
+                    let distance: Double
+                    if let from = anchors[stops[i - 1].id], let to = anchors[stops[i].id] {
+                        distance = abs(to - from)
+                    } else { distance = stops[i - 1].coordinate.distance(to: stops[i].coordinate) * 1.25 }
+                    distances.append(distances[i - 1] + distance)
                 }
                 patterns.append(Pattern(route: route, direction: direction, stops: stops, distances: distances))
                 for (position, stop) in stops.enumerated() {
@@ -106,35 +118,67 @@ public struct TripPlanner: Sendable {
                 if distance <= maximumWalk { matches.append((station.id, distance)) }
             }
             matches.sort { a, b in a.distance == b.distance ? a.id < b.id : a.distance < b.distance }
-            return Array(matches.prefix(20))
+            return matches
         }
         let origins = nearby(origin), destinations = nearby(destination)
         guard !origins.isEmpty, !destinations.isEmpty else { return [] }
-        var exits: [Int: [(index: Int, walk: Double)]] = [:]
+        var exits: [Int: [Exit]] = [:]
         for station in destinations {
             for occurrence in occurrences[station.id] ?? [] {
-                exits[occurrence.pattern, default: []].append((occurrence.index, station.distance))
+                exits[occurrence.pattern, default: []].append(Exit(index: occurrence.index, walk: station.distance))
             }
+        }
+        // The final ride's best alighting stop is independent of when the passenger
+        // boards it. Cache that suffix once instead of enumerating every destination
+        // platform for every possible transfer. Keep a second distinct platform for
+        // the rule that rejects a loop back to the departure platform.
+        let bestExits: [[[Exit]]] = patterns.enumerated().map { patternIndex, pattern in
+            let byIndex = Dictionary(grouping: exits[patternIndex] ?? [], by: \.index)
+            func exitCost(_ exit: Exit) -> Double {
+                pattern.distances[exit.index] / 4.5 + Double(exit.index) * 20 + exit.walk * 1.25 / 1.2 * preferences.walkingWeight
+            }
+            var best: [Exit] = []
+            var result = Array(repeating: [Exit](), count: pattern.stops.count)
+            for index in pattern.stops.indices.reversed() {
+                result[index] = best
+                if let additions = byIndex[index] {
+                    let ordered = (best + additions).sorted {
+                        let a = exitCost($0), b = exitCost($1)
+                        return a == b ? $0.index < $1.index : a < b
+                    }
+                    var seen = Set<String>()
+                    best = Array(ordered.filter { seen.insert(pattern.stops[$0.index].stationID).inserted }.prefix(2))
+                }
+            }
+            return result
+        }
+        let arrivals = patterns.map { pattern in pattern.stops.map {
+            estimates?.value(routeID: pattern.route.parentID, stopID: $0.id, at: date)
+        } }
+        let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
+        let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
+        let serviceWaits = patterns.map { pattern in
+            pattern.route.minimumServiceWait(direction: pattern.direction, secondsOfDay: timeOfDay,
+                fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
         }
         var candidates: [String: Candidate] = [:]
         func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
             // Apply availability before ranking and limiting candidates: many cheap closed
             // routes must not crowd all usable alternatives out of the result window.
             for segment in segments {
-                let pattern = patterns[segment.pattern]
-                if let seconds = estimates?.value(routeID: pattern.route.parentID,
-                    stopID: pattern.stops[segment.board].id, at: date), [-2, -3, -4].contains(seconds) { return }
+                if let seconds = arrivals[segment.pattern][segment.board], [-2, -3, -4].contains(seconds) { return }
             }
-            let key = segments.map { segment in
-                let pattern = patterns[segment.pattern]
-                return "\(pattern.route.parentID):\(pattern.direction):\(pattern.stops[segment.board].stationID):\(pattern.stops[segment.alight].stationID)"
-            }.joined(separator: "|")
-            let riding = segments.reduce(0.0) { sum, segment in
+            // The UI presents one option per route family. Retain its best choice as
+            // we search, rather than storing and sorting all inferior platform pairs.
+            let key = segments.map { families[$0.pattern] }.joined(separator: "|")
+            let riding = segments.map { segment in
                 let p = patterns[segment.pattern]
-                return sum + (p.distances[segment.alight] - p.distances[segment.board]) / 5.2 + Double(segment.alight - segment.board) * 18
+                return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
             }
-            let score = (access + egress + transfer) / 1.2 * preferences.walkingWeight + riding +
-                Double(segments.count - 1) * preferences.transferPenaltySeconds
+            let walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
+            let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
+            let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
+                minimumServiceWaits: segments.map { serviceWaits[$0.pattern] }).score
             guard candidates[key].map({ $0.score <= score }) != true else { return }
             candidates[key] = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score)
         }
@@ -142,7 +186,7 @@ public struct TripPlanner: Sendable {
             for board in occurrences[start.id] ?? [] {
                 let first = patterns[board.pattern]
                 guard board.index < first.stops.count - 1 else { continue }
-                for exit in exits[board.pattern] ?? [] where exit.index > board.index {
+                if let exit = bestExits[board.pattern][board.index].first {
                     add([Segment(pattern: board.pattern, board: board.index, alight: exit.index)],
                         access: start.distance, egress: exit.walk, transfer: 0)
                 }
@@ -152,9 +196,7 @@ public struct TripPlanner: Sendable {
                         for next in occurrences[neighbor.id] ?? [] {
                             let second = patterns[next.pattern]
                             guard second.route.parentID != first.route.parentID else { continue }
-                            for exit in exits[next.pattern] ?? [] where exit.index > next.index {
-                                // Reject a transfer that only loops back through the departure platform.
-                                guard second.stops[exit.index].stationID != start.id else { continue }
+                            if let exit = bestExits[next.pattern][next.index].first(where: { second.stops[$0.index].stationID != start.id }) {
                                 add([Segment(pattern: board.pattern, board: board.index, alight: interchange),
                                      Segment(pattern: next.pattern, board: next.index, alight: exit.index)],
                                     access: start.distance, egress: exit.walk, transfer: neighbor.distance)
@@ -168,14 +210,12 @@ public struct TripPlanner: Sendable {
             let x = candidates[a]!, y = candidates[b]!
             return x.score == y.score ? a < b : x.score < y.score
         }
-        var seenFamilies = Set<String>()
-        let choices = ordered.filter { key in
-            let family = candidates[key]!.segments.map {
-                "\(patterns[$0.pattern].route.parentID):\(patterns[$0.pattern].direction)"
-            }.joined(separator: "|")
-            return seenFamilies.insert(family).inserted
+        let choices = ordered
+        var limited = Array(choices.prefix(limit))
+        if limit >= 2, let direct = choices.first(where: { candidates[$0]!.segments.count == 1 }), !limited.contains(direct) {
+            limited[limited.count - 1] = direct
         }
-        return choices.prefix(limit).map { key in
+        return limited.map { key in
             let candidate = candidates[key]!
             let rides = candidate.segments.map { segment -> TransitRide in
                 let pattern = patterns[segment.pattern]
@@ -188,10 +228,15 @@ public struct TripPlanner: Sendable {
                     coordinates = line.slice(from: from.match, to: to.match)
                 }
                 // Do not draw straight segments across buildings when the official road geometry is unavailable.
-                return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates)
+                return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates,
+                    fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
             }
             return TransitTrip(rides: rides, accessDistance: candidate.access, egressDistance: candidate.egress,
-                               transferDistance: candidate.transfer, score: candidate.score)
+                transferDistance: candidate.transfer, score: candidate.score,
+                rideSeconds: candidate.segments.map { segment in
+                    let p = patterns[segment.pattern]
+                    return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
+                })
         }
     }
 }

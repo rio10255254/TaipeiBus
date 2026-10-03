@@ -27,6 +27,129 @@ class JourneyUsabilityTestBase: XCTestCase {
     }
 }
 
+final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
+    func testInstalledAppIconOnTheHomeScreen() {
+        launch()
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let icon = springboard.icons.matching(NSPredicate(format: "label IN %@", ["台北公車", "臺北公車", "TaipeiBus"])).firstMatch
+        for _ in 0..<3 {
+            if icon.exists && icon.isHittable { break }
+            springboard.swipeLeft()
+        }
+        XCTAssertTrue(icon.isHittable)
+        capture("app-icon-on-home-screen")
+        icon.tap()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+    }
+    var nativeMap: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func camera() -> [String: Any] {
+        let probe = app.staticTexts["map-camera-state"]
+        let text = probe.exists ? probe.label : nativeMap.value as? String ?? ""
+        guard let data = text.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
+    func waitCamera(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 15), .completed, description + ": " + String(describing: camera()))
+    }
+    var nearest: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "nearby-station-")).firstMatch
+    }
+    var stationResult: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-result-")).firstMatch
+    }
+    func testNearestStopRecentersAfterZoomingAndPanning() {
+        launch(["--test-map-controls"])
+        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
+        nativeMap.pinch(withScale: 0.12, velocity: -2)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.24))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.40)))
+        capture("map-before-nearest-stop")
+        let id = String(nearest.identifier.dropFirst("nearby-station-".count))
+        nearest.tap()
+        waitCamera("Nearest station must be centered at street scale") { state in
+            state["station"] as? String == id && (state["stationDistance"] as? Double ?? 999) < 8 &&
+            (state["zoom"] as? Double ?? 0) > 16 && (state["zoom"] as? Double ?? 99) < 19
+        }
+        capture("nearest-stop-focused")
+        button("關閉選取").tap(); XCTAssertTrue(nearest.waitForExistence(timeout: 5)); nearest.tap()
+        waitCamera("Selecting the same station must work again") { ($0["stationDistance"] as? Double ?? 999) >= 0 && ($0["stationDistance"] as? Double ?? 999) < 8 }
+    }
+    func testNorthAndPhoneDirectionSwitching() {
+        launch(["--test-map-controls", "--test-device-heading"])
+        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
+        button("map-location").tap()
+        waitCamera("North up") { ($0["mode"] as? String) == "north" && abs($0["heading"] as? Double ?? 99) < 1 }
+        button("map-location").tap()
+        waitCamera("Controlled phone heading is east") { ($0["mode"] as? String) == "heading" && abs(($0["heading"] as? Double ?? 0) - 90) < 2 }
+        capture("phone-heading-view")
+        button("map-location").tap()
+        waitCamera("Return north up") { ($0["mode"] as? String) == "north" && abs($0["heading"] as? Double ?? 99) < 1 }
+        capture("north-up-view")
+        button("map-location").tap()
+        waitCamera("Phone direction before resetting the compass") { abs(($0["heading"] as? Double ?? 0) - 90) < 2 }
+        app.descendants(matching: .any).matching(identifier: "map-compass").firstMatch.tap()
+        waitCamera("Compass stops heading tracking and stays north") { ($0["mode"] as? String) == "free" && abs($0["heading"] as? Double ?? 99) < 1 }
+        button("map-location").tap()
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.24))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.34)))
+        XCTAssertEqual(button("map-location").value as? String, "自由瀏覽")
+        button("map-location").tap()
+        waitCamera("A free map first recenters north") { ($0["mode"] as? String) == "north" && abs($0["heading"] as? Double ?? 99) < 1 }
+    }
+    func testStationListAndMapStayTogether() {
+        launch(["--test-map-controls"])
+        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
+        button("站牌").tap()
+        XCTAssertTrue(stationResult.waitForExistence(timeout: 20))
+        XCTAssertTrue(button("station-results-map").isHittable)
+        capture("nearby-stations-and-map")
+        waitCamera("Visible rendered station marker") { ($0["markerID"] as? String) != nil }
+        let marker = camera()
+        nativeMap.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: marker["markerX"] as? Double ?? 0,
+            dy: marker["markerY"] as? Double ?? 0)).tap()
+        waitCamera("Station detail map center") { ($0["stationDistance"] as? Double ?? -1) >= 0 && ($0["stationDistance"] as? Double ?? 999) < 8 }
+        button("返回搜尋").tap()
+        XCTAssertTrue(stationResult.waitForExistence(timeout: 10))
+        let field = app.textFields["transit-search-field"]
+        field.tap(); field.typeText("內湖")
+        XCTAssertTrue(stationResult.waitForExistence(timeout: 20))
+        button("station-results-map").tap()
+        waitCamera("Search results are on the map") { ($0["browsing"] as? Bool) == true && ($0["queryMarkers"] as? Int ?? 0) > 0 }
+        capture("station-search-results-on-map")
+        stationResult.tap(); button("返回搜尋").tap()
+        XCTAssertEqual(app.textFields["transit-search-field"].value as? String, "內湖")
+    }
+    func testDedicatedRouteKeypadAndHistory() {
+        launch()
+        XCTAssertTrue(button("路線").waitForExistence(timeout: 15)); button("路線").tap()
+        XCTAssertTrue(button("route-key-藍").waitForExistence(timeout: 90))
+        button("route-key-藍").tap(); button("route-key-2").tap(); button("route-key-7").tap()
+        XCTAssertEqual(button("route-query").label, "藍27")
+        let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "藍27")).firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 10)); capture("route-keypad-blue-27")
+        route.tap(); button("返回搜尋").tap()
+        XCTAssertEqual(button("route-query").label, "藍27")
+        button("清除搜尋").tap(); capture("route-search-history")
+        XCTAssertTrue(app.staticTexts["最近查看"].exists)
+        button("內科").tap(); button("route-key-2").tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "內科通勤專車2")).firstMatch.waitForExistence(timeout: 5))
+        capture("route-keypad-commuter")
+        button("route-key-幹線").tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "幹線")).firstMatch.waitForExistence(timeout: 5))
+        button("route-key-⌫").tap(); XCTAssertEqual(button("route-query").label, "幹")
+        button("清除搜尋").tap(); button("route-text-keyboard").tap()
+        let field = app.textFields["transit-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("南京")
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "南京")).firstMatch.waitForExistence(timeout: 10))
+        capture("route-text-search")
+        button("路線專用鍵盤").tap()
+        XCTAssertTrue(button("route-key-3").isHittable)
+    }
+}
+
 final class JourneyUsabilityTests: JourneyUsabilityTestBase {
     func testWaitingTrackingAndCompleteTrip() throws {
         launch(["--preview-boarding-fixture", "--usability-fixture"])
@@ -72,7 +195,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 5))
     }
     func testSearchCompareCancelAndReturnFromWalkingMap() throws {
-        launch()
+        launch(["--test-journey-selection"])
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 10)); button("搜尋目的地").tap()
         chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
@@ -84,22 +207,27 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertFalse(options.element(boundBy: index).label.contains("今日未營運"))
         }
         capture("choose-a-route")
+        let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
         firstOption.tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-options").waitForExistence(timeout: 5))
         capture("selected-neihu-route")
+        XCTAssertEqual(app.staticTexts["journey-selected-state"].label, selectedID)
         button("journey-walk-to-stop").tap()
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(button("journey-board").isHittable); capture("walking-on-the-same-map")
         button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
-        let externalWalk = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "步行導航到")).firstMatch
-        XCTAssertTrue(externalWalk.waitForExistence(timeout: 5)); externalWalk.tap()
+        capture("full-itinerary")
+        XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
+        let externalWalk = button("journey-external-walk-0")
+        XCTAssertTrue(externalWalk.waitForExistence(timeout: 10)); externalWalk.tap()
         let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
         XCTAssertTrue(maps.wait(for: .runningForeground, timeout: 15))
         capture("walking-in-apple-maps")
         app.activate()
         button("返回地圖").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["journey-selected-state"].label, selectedID)
         button("journey-options").tap(); button("更改").tap()
         XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 5))
         app.textFields["journey-search-field"].tap(); app.textFields["journey-search-field"].typeText("xyzqzz")

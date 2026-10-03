@@ -10,10 +10,14 @@ enum BrowseMode: String, CaseIterable, Identifiable {
 
 enum MapFocus {
     case coordinate(Coordinate)
+    case station(String)
+    case userLocation
     case route(String)
     case vehicle(String)
     case journey([Coordinate])
 }
+
+enum UserMapMode: String { case free, north, heading }
 
 private actor StationLookup {
     private var results: [String: [Station]] = [:]
@@ -53,8 +57,15 @@ final class TransitAppModel: ObservableObject {
     @Published var selectionRevision = 0
     @Published var mapError: String?
     @Published var mapWasMoved = false
+    @Published private(set) var userMapMode: UserMapMode = .free
+    @Published var stationBrowsing = false
+    @Published private(set) var stationBrowseCenter: Coordinate?
+    @Published var stationMapResults: [Station] = []
+    private var browseQuery = ""
+    private(set) var mapCenter: Coordinate?
     @Published private(set) var favorites: Set<String>
     @Published private(set) var recentStationIDs: [String]
+    @Published private(set) var recentRouteIDs: [String]
     @Published private(set) var liveSettings = LiveSettings.defaults
     private(set) var vocabulary = SearchVocabulary()
 
@@ -75,6 +86,7 @@ final class TransitAppModel: ObservableObject {
     init() {
         favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? [])
         recentStationIDs = UserDefaults.standard.stringArray(forKey: "recentStations") ?? []
+        recentRouteIDs = UserDefaults.standard.stringArray(forKey: "recentRoutes") ?? []
         var source = LiveSettingsService.productionURL
 #if DEBUG
         let arguments = ProcessInfo.processInfo.arguments
@@ -198,7 +210,46 @@ final class TransitAppModel: ObservableObject {
 
     @Published private(set) var walkingMapIndex: Int?
     func clearWalkingMap() { walkingMapIndex = nil }
-    func focusMap(_ target: MapFocus) { mapWasMoved = false; focus = target; focusRevision += 1 }
+    func focusMap(_ target: MapFocus) {
+        if case .userLocation = target {} else { stopUserTracking() }
+        mapWasMoved = false; focus = target; focusRevision += 1
+    }
+    func stopUserTracking() { userMapMode = .free; location.setHeadingActive(false) }
+    func cycleUserTracking() {
+        let next: UserMapMode = userMapMode == .north ? .heading : .north
+        if planner.selected == nil { clearSelection() }
+        following = false; walkingMapIndex = nil
+        userMapMode = next; location.setHeadingActive(next == .heading)
+        location.request(); focusMap(.userLocation)
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    func beginStationBrowsing() {
+        stationBrowsing = true
+        let point = [location.usableCoordinate, mapCenter].compactMap { $0 }.first { $0.isInServiceArea } ?? .taipei
+        stationBrowseCenter = point
+        focusNearbyStations(around: point); sheetDetent = .height(390)
+    }
+    func focusNearbyStations(around point: Coordinate) {
+        let nearby = metadata.stations.values.filter { $0.coordinate.distance(to: point) <= 800 }
+            .sorted { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) }
+        focusMap(.journey([point] + nearby.prefix(8).map(\.coordinate)))
+    }
+    func mapCenterChanged(_ point: Coordinate) {
+        mapCenter = point
+        if stationBrowsing, stationBrowseCenter.map({ $0.distance(to: point) > 30 }) ?? true { stationBrowseCenter = point }
+    }
+    func browseNearMe() {
+        location.request()
+        if let point = location.displayCoordinate, point.isInServiceArea {
+            query = ""; stationBrowseCenter = point; focusNearbyStations(around: point)
+        }
+        sheetDetent = .height(390)
+    }
+    func returnToBrowse() {
+        clearSelection(); query = browseQuery
+        stationBrowsing = mode == .stops
+        sheetDetent = mode == .stops ? .height(390) : .large
+    }
     func showWalkOnMap(_ index: Int) {
         guard let option = planner.selected, option.walks.indices.contains(index) else { return }
         let walk = option.walks[index]
@@ -207,15 +258,21 @@ final class TransitAppModel: ObservableObject {
         focusMap(.journey(walk.coordinates.isEmpty ? [walk.from, walk.to] : walk.coordinates))
     }
     func selectStation(_ station: Station) {
+        if selectedStationID == nil { browseQuery = query }
+        stationBrowsing = false
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
         defaults.set(recentStationIDs, forKey: "recentStations")
         selectedStationID = station.id
         selectedRouteID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
-        focusMap(.coordinate(station.coordinate)); sheetDetent = .height(330)
+        focusMap(.station(station.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false) {
+        recentRouteIDs = [route.parentID] + Array(recentRouteIDs.filter { $0 != route.parentID }.prefix(7))
+        defaults.set(recentRouteIDs, forKey: "recentRoutes")
+        if selectedRouteID == nil { browseQuery = query }
+        stationBrowsing = false
         selectedRouteID = route.id; allRouteVariants = !variantOnly
         let available = metadata.directions(routeID: route.id, allVariants: !variantOnly)
         self.direction = available.contains(direction) ? direction : available.first ?? "0"
@@ -256,12 +313,17 @@ final class TransitAppModel: ObservableObject {
         return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs, vocabulary: vocabulary)
     }
     var stationSearchContextKey: String {
-        "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs)"
+        "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs):\(stationBrowsing):\(stationBrowseCenter?.latitude ?? 0):\(stationBrowseCenter?.longitude ?? 0)"
     }
     func findStations(query: String, limit: Int = 40) async -> [Station] {
-        let point = location.displayCoordinate?.isInServiceArea == true ? location.displayCoordinate! : .taipei
-        return await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
+        let userPoint = location.displayCoordinate.flatMap { $0.isInServiceArea ? $0 : nil } ?? .taipei
+        let point = stationBrowsing ? stationBrowseCenter ?? userPoint : userPoint
+        let results = await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
             recent: recentStationIDs, limit: limit, settingsRevision: liveSettings.revision, vocabulary: vocabulary)
+        if stationBrowsing, query.isEmpty {
+            return results.filter { favorites.contains($0.id) || recentStationIDs.contains($0.id) || $0.coordinate.distance(to: point) <= 1_000 }
+        }
+        return results
     }
 
     func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {
@@ -280,6 +342,12 @@ final class TransitAppModel: ObservableObject {
         var seen = Set<String>()
         let terms = [query] + (vocabulary.placeQueries(StationSearch.cleanQuery(query)) ?? [])
         return terms.flatMap { metadata.routeCatalog.search($0) }.filter { seen.insert($0.id).inserted }
+    }
+    var browsingRoutes: [RouteSearchResult] {
+        let results = routes(query: query)
+        guard query.isEmpty else { return results }
+        let recent = recentRouteIDs.compactMap { id in results.first { $0.id == id } }
+        return recent + results.filter { !recentRouteIDs.contains($0.id) }
     }
     var upcomingStops: [StopProgress] {
         guard let vehicle = selectedVehicle else { return [] }
