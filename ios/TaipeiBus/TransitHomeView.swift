@@ -256,7 +256,8 @@ struct TransitHomeView: View {
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
             lastJourneyOptionID = planner.selectedID; lastJourneyStep = planner.currentStep
-            if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
+            if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection),
+               userChangedJourney || model.userMapMode == .free {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
                 } ?? false
