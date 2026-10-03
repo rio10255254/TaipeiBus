@@ -3,6 +3,7 @@ import XCTest
 class JourneyUsabilityTestBase: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
     override func setUpWithError() throws { continueAfterFailure = false }
+    override func tearDownWithError() throws { capture("test-final-state") }
     func launch(_ args: [String] = []) {
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + args
         app.launch()
@@ -18,6 +19,10 @@ class JourneyUsabilityTestBase: XCTestCase {
     func button(_ id: String) -> XCUIElement { app.buttons[id] }
     func chooseNeihu() {
         let field = app.textFields["journey-search-field"]
+        if !field.waitForExistence(timeout: 10), button("搜尋目的地").isHittable {
+            capture("destination-entry-before-retry")
+            button("搜尋目的地").tap()
+        }
         XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("內湖站")
         let place = app.staticTexts["內湖站"].firstMatch
         XCTAssertTrue(place.waitForExistence(timeout: 20)); capture("search-neihu-with-keyboard"); place.tap()
