@@ -54,6 +54,7 @@ final class TransitAppModel: ObservableObject {
         let plate: String
     }
     @Published private(set) var boardedVehicle: BoardedVehicle?
+    private var boardedDuration: (optionID: String, duration: JourneyDuration)?
     @Published var direction = "0"
     @Published var following = false
     @Published var highlightVehicle = true
@@ -341,6 +342,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+        if planner.started, let boardedDuration, boardedDuration.optionID == option.id { return boardedDuration.duration }
         guard option.verified else { return nil }
         return JourneyDuration(riding: option.rides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) },
             walking: option.walks.compactMap(\.duration),
@@ -352,6 +354,9 @@ final class TransitAppModel: ObservableObject {
 
     func boardCurrentRide() {
         guard let ride = planner.activeRide else { return }
+        if !planner.started, let option = planner.selected, let duration = journeyDuration(option, at: Date()) {
+            boardedDuration = (option.id, duration)
+        }
         boardedVehicle = nil
         if let bus = selectedVehicle, bus.routeID == ride.route.id, bus.direction == ride.direction {
             confirmBoardedVehicle(bus, ride: ride)
@@ -374,9 +379,12 @@ final class TransitAppModel: ObservableObject {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
     }
 
-    func returnToWaiting() { boardedVehicle = nil; planner.returnToWaiting() }
+    func returnToWaiting() {
+        boardedVehicle = nil; planner.returnToWaiting()
+        if !planner.started { boardedDuration = nil }
+    }
     func alight() { boardedVehicle = nil; following = false; planner.advance() }
-    func finishJourney() { boardedVehicle = nil; planner.finish(); clearSelection() }
+    func finishJourney() { boardedVehicle = nil; boardedDuration = nil; planner.finish(); clearSelection() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {

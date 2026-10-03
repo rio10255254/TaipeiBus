@@ -78,7 +78,7 @@ struct JourneyPlanningView: View {
         .alert("推薦順序", isPresented: $showingRankingInfo) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("綜合步行、候車、車程與轉乘負擔，時間相近時優先直達。候車分鐘是第一班車到上車站的時間，並非整趟時間。缺少班距或路況時，以保守估計比較方案。")
+            Text("全程時間包含步行、候車與車程；到站分鐘是公車到上車站的時間。推薦也考慮轉乘負擔，時間相近時優先直達。缺少班次資料時，候車時間採估計。")
         }
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
@@ -804,7 +804,7 @@ struct JourneyGuideCard: View {
                             Text("往 " + ride.route.destination(direction: ride.direction)).liveFont(.caption).foregroundStyle(.secondary)
                             Spacer()
                             if let bus = model.onboardVehicle(for: ride) {
-                                Button { model.following = true; model.focusMap(.vehicle(bus.id)) } label: {
+                                Button { model.trackApproachingVehicle(bus) } label: {
                                     Image(systemName: "scope").frame(width: 44, height: 44)
                                 }.accessibilityLabel("追蹤 " + bus.plate)
                             }
