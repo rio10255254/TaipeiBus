@@ -136,10 +136,8 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
-          python3 - "$DEVELOPER_DIR/Applications/Simulator.app" "$device" <<'PY'
-          import subprocess, sys
-          subprocess.run(['open', '-a', sys.argv[1], '--args', '-CurrentDeviceUDID', sys.argv[2]], check=True, timeout=30)
-          PY
+          # CoreSimulator is already booted. simctl screenshots and XCTest do not
+          # need a desktop Simulator window, whose LaunchServices RPC can stall.
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
           container=$(sim get_app_container "$device" com.example.TaipeiBus data)
           launch_ready() {
