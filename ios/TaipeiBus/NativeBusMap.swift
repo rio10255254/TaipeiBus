@@ -215,7 +215,8 @@ struct NativeBusMap: UIViewRepresentable {
                                           altitude: 650, pitch: 54, heading: 0), animated: false)
             }
             // Finish an explicit focus even when panels resize during the animation or tiles are still loading.
-            let refit = viewportChanged && !model.mapWasMoved && model.selectedVehicleID == nil && model.focus != nil
+            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil &&
+                (model.selectedVehicleID == nil || model.following)
             if (lastFocusRevision != model.focusRevision || refit), map.bounds.width > 0, map.bounds.height > 0 {
                 focus(model.focus, map: map, animated: lastFocusRevision != model.focusRevision)
                 lastFocusRevision = model.focusRevision
@@ -406,10 +407,13 @@ struct NativeBusMap: UIViewRepresentable {
             case .vehicle(let id):
                 guard let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else { return }
                 let position = buses?.pose(id: id, time: CACurrentMediaTime(), now: Date())?.coordinate ?? bus.coordinate
-                followSuspendedUntil = CACurrentMediaTime() + (reduceMotion ? 0 : 0.7)
+                // A panel can resize during the initial camera animation. Reapply
+                // vehicle framing immediately once the new viewport is laid out.
+                let animate = animated && !reduceMotion
+                followSuspendedUntil = CACurrentMediaTime() + (animate ? 0.7 : 0)
                 map.setCamera(MLNMapCamera(lookingAtCenter: position.locationCoordinate,
                                           altitude: 245, pitch: 57, heading: map.direction),
-                              withDuration: reduceMotion ? 0 : 0.65,
+                              withDuration: animate ? 0.65 : 0,
                               animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut), completionHandler: nil)
             case .route(let id):
                 var coordinates = model.metadata.displayPaths(routeID: id, direction: model.direction,

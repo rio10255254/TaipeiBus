@@ -312,7 +312,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
 final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
     func waitRenderedMap(_ condition: @escaping ([String: Any]) -> Bool) {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let text = self.app.staticTexts["map-camera-state"].label
+            let probe = self.app.staticTexts["map-camera-state"]
+            guard probe.exists else { return false }
+            let text = probe.label
             guard let data = text.data(using: .utf8),
                   let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
             return condition(state)
@@ -325,6 +327,11 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
         waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
         capture("store-07-live-bus-in-3d")
+        // Opening vehicle details changes the map inset; 3D framing must remain.
+        button("車輛資訊").tap()
+        XCTAssertTrue(button("跟隨公車").waitForExistence(timeout: 10))
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        capture("store-07-live-bus-with-details")
     }
     var nearest: XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "nearby-station-")).firstMatch
