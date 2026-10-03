@@ -41,13 +41,16 @@ private actor TripNetwork {
     private var planner: TripPlanner?
     private var key = ""
     private var builtAt = Date.distantPast
-    func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning) -> [TransitTrip] {
+    func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning,
+                 estimates: EstimateFeed) -> [TransitTrip] {
         let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
-        let nearby = planner!.plan(from: from, to: to, maximumWalk: preferences.firstWalkMeters, limit: 18, preferences: preferences)
-        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18, preferences: preferences) : nearby
+        let nearby = planner!.plan(from: from, to: to, maximumWalk: preferences.firstWalkMeters, limit: 18,
+                                  preferences: preferences, estimates: estimates)
+        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18,
+                                             preferences: preferences, estimates: estimates) : nearby
     }
 }
 
@@ -158,7 +161,8 @@ final class JourneyPlannerModel: ObservableObject {
         let preferences = self.preferences
         task = Task { [weak self] in
             guard let self else { return }
-            let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate, preferences: preferences)
+            let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
+                                              preferences: preferences, estimates: latestSnapshot.estimates)
             guard !Task.isCancelled, token == generation else { return }
             let estimates = latestSnapshot.estimates
             let now = Date()

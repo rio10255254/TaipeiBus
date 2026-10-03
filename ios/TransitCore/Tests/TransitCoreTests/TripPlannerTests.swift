@@ -40,6 +40,20 @@ final class TripPlannerTests: XCTestCase {
         let source = metadata([("one", "1", "0", [a,b]), ("two", "1", "0", [b,c])])
         XCTAssertTrue(TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100).isEmpty)
     }
+    func testClosedRoutesCannotCrowdUsableTripsOutOfTheCandidateLimit() throws {
+        let closed = (0..<24).map { ("closed\($0)", "closed\($0)", "0", [a, c]) }
+        let source = metadata(closed + [("open", "open", "0", [a, b, c])])
+        let date = Date()
+        let unavailable = Dictionary(uniqueKeysWithValues: closed.map { ("\($0.1):\($0.0):0", -4) })
+        let estimates = EstimateFeed(seconds: unavailable, updatedAt: date)
+        let trips = TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100,
+            limit: 3, estimates: estimates, at: date)
+        XCTAssertEqual(trips.count, 1)
+        XCTAssertEqual(trips.first?.rides.first?.route.id, "open")
+        let unknown = TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100,
+            limit: 3, estimates: estimates, at: date.addingTimeInterval(180))
+        XCTAssertEqual(unknown.count, 3, "Expired arrival data must not declare routes closed")
+    }
 
     func testOneTransferConnectsRealRideSegments() throws {
         let source = metadata([("one", "1", "0", [a,b]), ("two", "2", "0", [b,c,d])])

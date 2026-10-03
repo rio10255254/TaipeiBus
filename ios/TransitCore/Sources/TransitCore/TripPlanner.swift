@@ -96,7 +96,8 @@ public struct TripPlanner: Sendable {
 
     public func plan(from origin: Coordinate, to destination: Coordinate,
                      maximumWalk: Double = 1_000, limit: Int = 6,
-                     preferences: LiveSettings.Planning = LiveSettings.Planning()) -> [TransitTrip] {
+                     preferences: LiveSettings.Planning = LiveSettings.Planning(),
+                     estimates: EstimateFeed? = nil, at date: Date = Date()) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
         func nearby(_ point: Coordinate) -> [(id: String, distance: Double)] {
             var matches: [(id: String, distance: Double)] = []
@@ -117,6 +118,13 @@ public struct TripPlanner: Sendable {
         }
         var candidates: [String: Candidate] = [:]
         func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
+            // Apply availability before ranking and limiting candidates: many cheap closed
+            // routes must not crowd all usable alternatives out of the result window.
+            for segment in segments {
+                let pattern = patterns[segment.pattern]
+                if let seconds = estimates?.value(routeID: pattern.route.parentID,
+                    stopID: pattern.stops[segment.board].id, at: date), [-2, -3, -4].contains(seconds) { return }
+            }
             let key = segments.map { segment in
                 let pattern = patterns[segment.pattern]
                 return "\(pattern.route.parentID):\(pattern.direction):\(pattern.stops[segment.board].stationID):\(pattern.stops[segment.alight].stationID)"
