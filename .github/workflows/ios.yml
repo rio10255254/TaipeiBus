@@ -115,7 +115,19 @@ jobs:
           command = sys.argv[1:]
           print('Simulator command:', ' '.join(command[1:]), file=sys.stderr, flush=True)
           timeout = 180 if command[1] in ('bootstatus', 'install', 'launch') else 60
-          subprocess.run(command, check=True, timeout=timeout)
+          try:
+              subprocess.run(command, check=True, timeout=timeout)
+          except subprocess.TimeoutExpired:
+              if command[1] != 'install':
+                  raise
+              # A freshly booted hosted simulator can stall its installation RPC.
+              # Restart only this disposable device, then retry the same app once.
+              print('Installation timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
+              simulator, device = command[0], command[2]
+              subprocess.run([simulator, 'shutdown', device], check=True, timeout=60)
+              subprocess.run([simulator, 'boot', device], check=True, timeout=60)
+              subprocess.run([simulator, 'bootstatus', device, '-b'], check=True, timeout=180)
+              subprocess.run(command, check=True, timeout=180)
           PY
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')

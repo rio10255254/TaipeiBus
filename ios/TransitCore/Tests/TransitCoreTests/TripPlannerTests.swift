@@ -81,6 +81,15 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertEqual(trip.rides[0].route.id, "right")
         XCTAssertGreaterThan(trip.accessDistance, 300)
     }
+    func testSpecialPurposeServicesRemainSearchableButAreNotCommuteShortcuts() {
+        let source = metadata([("tourist", "臺北觀光巴士紅線", "0", [a, c]),
+            ("special", "懷恩專車S31", "0", [a, c]), ("city", "一般公車", "0", [a, b, c])])
+        XCTAssertFalse(source.routeCatalog.search("觀光巴士").isEmpty)
+        XCTAssertFalse(source.routeCatalog.search("懷恩").isEmpty)
+        let trips = TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100)
+        XCTAssertEqual(trips.count, 1)
+        XCTAssertEqual(trips.first?.rides.first?.route.id, "city")
+    }
 
     func testDenseNearbyPlatformsDoNotHideADirectBoardingStop() throws {
         let crowded = (0..<30).map { index in

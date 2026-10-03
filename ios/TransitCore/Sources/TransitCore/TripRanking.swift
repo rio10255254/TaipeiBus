@@ -15,7 +15,7 @@ public enum TripRanking {
     /// Missing headways must carry a waiting cost instead of making a connection free.
     /// These fallback seconds are used for comparison only and never shown as official ETAs.
     public static func assess(riding: [Double], walking: [Double], arrivals: [Int?],
-                              preferences: LiveSettings.Planning = .init()) -> TripAssessment {
+                              preferences: LiveSettings.Planning = .init(), minimumServiceWaits: [Double] = []) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, waiting = 0.0, unknown = 0, missed = false
@@ -31,7 +31,8 @@ public enum TripRanking {
             } else {
                 if index == 0, let arrival, arrival >= 0 { missed = true }
                 unknown += 1
-                wait = arrival == -1 ? 900 : 480
+                let serviceWait = (arrival == nil || arrival! < 0) && minimumServiceWaits.indices.contains(index) ? max(0, minimumServiceWaits[index] - elapsed) : 0
+                wait = max(arrival == -1 ? 900 : 480, serviceWait)
             }
             elapsed += wait + max(0, riding[index]); waiting += wait
         }
@@ -55,7 +56,9 @@ public enum TripRanking {
         }
         return assess(riding: trip.rideSeconds, walking: walking,
             arrivals: trip.rides.map { estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
-            preferences: preferences)
+            preferences: preferences, minimumServiceWaits: trip.rides.map {
+                $0.route.minimumServiceWait(direction: $0.direction, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: $0.fullRouteSeconds)
+            })
     }
 
     /// Reserve one usable direct alternative, even when several transfers have lower scores.

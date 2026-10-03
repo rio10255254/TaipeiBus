@@ -2,6 +2,23 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testNightServiceDoesNotLookLikeAnEightMinuteWaitInTheAfternoon() throws {
+        let window = try XCTUnwrap(BusServiceWindow(first: "2100", last: "0100"))
+        let wait = window.waitBeforeOpening(secondsOfDay: 14 * 3_600, fullRouteSeconds: 3_600)
+        XCTAssertEqual(wait, 7 * 3_600)
+        let pending = TripRanking.assess(riding: [300], walking: [0, 0], arrivals: [-1], minimumServiceWaits: [wait])
+        XCTAssertEqual(pending.waitingSeconds, wait)
+        let reportedBus = TripRanking.assess(riding: [300], walking: [0, 0], arrivals: [120], minimumServiceWaits: [wait])
+        XCTAssertEqual(reportedBus.waitingSeconds, 120, "A live arriving bus overrides an outdated service window")
+    }
+    func testOvernightLastBusAndMissingWindowsArePreserved() throws {
+        let night = try XCTUnwrap(BusServiceWindow(first: "2100", last: "0100"))
+        XCTAssertEqual(night.waitBeforeOpening(secondsOfDay: 30 * 60, fullRouteSeconds: 3_600), 0)
+        let daytime = try XCTUnwrap(BusServiceWindow(first: "0530", last: "2330"))
+        XCTAssertEqual(daytime.waitBeforeOpening(secondsOfDay: 30 * 60, fullRouteSeconds: 7_200), 0)
+        XCTAssertNil(BusServiceWindow(first: "", last: "2330"))
+        XCTAssertNil(BusServiceWindow(first: "9900", last: "2330"))
+    }
     func testRouteKeypadShortNamesMatchTheOfficialCommuterName() {
         let catalog = RouteCatalog(routes: [
             BusRoute(id: "12", parentID: "12", name: "內科通勤專車12", variantName: "", departure: "甲", destination: "乙"),

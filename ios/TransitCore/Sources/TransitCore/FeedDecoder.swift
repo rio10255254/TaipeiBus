@@ -75,6 +75,12 @@ public enum FeedDecoder {
                     route.englishName = text(row["nameEn"])
                     route.englishVariantName = text(row["pathAttributeEname"])
                     route.aliasName = text(row["aliasName"])
+                    for (direction, prefix) in [("0", "go"), ("1", "back")] {
+                        let holiday = "holiday" + prefix.prefix(1).uppercased() + String(prefix.dropFirst())
+                        route.serviceWindows[direction] = [prefix, holiday].compactMap { key in
+                            BusServiceWindow(first: text(row[key + "FirstBusTime"]), last: text(row[key + "LastBusTime"]))
+                        }
+                    }
                     metadata.routes[id] = route
                 }
             case "GetStop":

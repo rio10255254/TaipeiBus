@@ -6,6 +6,7 @@ public struct TransitRide: Identifiable, Sendable {
     public let direction: String
     public let stops: [BusStop]
     public let coordinates: [Coordinate]
+    public var fullRouteSeconds: Double = 0
     public var boarding: BusStop { stops.first! }
     public var alighting: BusStop { stops.last! }
     public var stopCount: Int { stops.count - 1 }
@@ -61,6 +62,9 @@ public struct TripPlanner: Sendable {
         var patterns: [Pattern] = [], occurrences: [String: [Occurrence]] = [:]
         var usedStations: [String: Station] = [:]
         for route in metadata.routes.values.sorted(by: { $0.id < $1.id }) {
+            // These have special tickets or a restricted trip purpose. They remain
+            // searchable, but are not interchangeable with ordinary city buses.
+            guard !route.name.contains("觀光巴士"), !route.name.hasPrefix("懷恩專車") else { continue }
             for direction in ["0", "1"] {
                 let stops = metadata.orderedStops(routeID: route.id, direction: direction)
                 guard stops.count >= 2 else { continue }
@@ -152,6 +156,11 @@ public struct TripPlanner: Sendable {
             estimates?.value(routeID: pattern.route.parentID, stopID: $0.id, at: date)
         } }
         let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
+        let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
+        let serviceWaits = patterns.map { pattern in
+            pattern.route.minimumServiceWait(direction: pattern.direction, secondsOfDay: timeOfDay,
+                fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
+        }
         var candidates: [String: Candidate] = [:]
         func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
             // Apply availability before ranking and limiting candidates: many cheap closed
@@ -168,7 +177,8 @@ public struct TripPlanner: Sendable {
             }
             let walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
-            let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences).score
+            let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
+                minimumServiceWaits: segments.map { serviceWaits[$0.pattern] }).score
             guard candidates[key].map({ $0.score <= score }) != true else { return }
             candidates[key] = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score)
         }
@@ -218,7 +228,8 @@ public struct TripPlanner: Sendable {
                     coordinates = line.slice(from: from.match, to: to.match)
                 }
                 // Do not draw straight segments across buildings when the official road geometry is unavailable.
-                return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates)
+                return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates,
+                    fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
             }
             return TransitTrip(rides: rides, accessDistance: candidate.access, egressDistance: candidate.egress,
                 transferDistance: candidate.transfer, score: candidate.score,

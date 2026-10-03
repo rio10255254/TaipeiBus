@@ -10,6 +10,7 @@ public struct BusRoute: Identifiable, Sendable {
     public var englishName: String = ""
     public var englishVariantName: String = ""
     public var aliasName: String = ""
+    public var serviceWindows: [String: [BusServiceWindow]] = [:]
     public var displayName: String { variantName.isEmpty ? name : variantName }
     public func destination(direction: String) -> String {
         direction == "0" ? destination : direction == "1" ? departure : "方向未提供"
