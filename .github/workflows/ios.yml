@@ -126,7 +126,6 @@ jobs:
           subprocess.run(['open', '-a', sys.argv[1], '--args', '-CurrentDeviceUDID', sys.argv[2]], check=True, timeout=30)
           PY
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
-          sim status_bar "$device" override --time '9:41' --batteryState charged --batteryLevel 100
           container=$(sim get_app_container "$device" com.example.TaipeiBus data)
           launch_ready() {
             token="$RANDOM-$RANDOM"
