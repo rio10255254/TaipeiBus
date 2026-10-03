@@ -82,6 +82,11 @@ final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(nearest.waitForExistence(timeout: 90))
         button("map-location").tap()
         waitCamera("North up") { ($0["mode"] as? String) == "north" && abs($0["heading"] as? Double ?? 99) < 1 }
+        waitCamera("The device fan remains visible while the map faces north") {
+            ($0["userMarkerVisible"] as? Bool) == true && ($0["userHeadingVisible"] as? Bool) == true &&
+            ($0["stationSymbol"] as? Bool) == true && abs(($0["userFanAngle"] as? Double ?? 0) - .pi / 2) < 0.15
+        }
+        capture("blue-location-dot-and-direction-fan")
         button("map-location").tap()
         waitCamera("Controlled phone heading is east") { ($0["mode"] as? String) == "heading" && abs(($0["heading"] as? Double ?? 0) - 90) < 2 }
         capture("phone-heading-view")
@@ -171,6 +176,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(second.value as? String, "追蹤中"); capture("tracking-after-options-return")
         button("journey-board").tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 5)); capture("on-board")
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-02"))
         button("返回等車").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 5))
         button("journey-board").tap(); button("journey-alight").tap()
@@ -178,6 +184,33 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-arrive").tap(); capture("arrived")
         button("完成").tap()
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 5))
+    }
+    func testAllArrivingVehiclesAndOnboardStopsKeepTheConfirmedPlate() throws {
+        launch(["--preview-boarding-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
+        XCTAssertTrue(app.staticTexts["journey-total-duration"].label.contains("全程約"))
+        button("journey-all-vehicles").tap()
+        XCTAssertTrue(button("boarding-vehicle-TEST-04").waitForExistence(timeout: 10))
+        capture("all-departed-arriving-vehicles")
+        button("journey-vehicles-done").tap()
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("選擇搭乘車牌"))
+        button("journey-onboard-vehicle").tap()
+        let pick = button("onboard-choose-TEST-03")
+        XCTAssertTrue(pick.waitForExistence(timeout: 5)); pick.tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
+        XCTAssertTrue(app.staticTexts["journey-next-stop"].exists || app.otherElements["journey-next-stop"].exists)
+        capture("onboard-next-stop-and-alighting-time")
+        button("journey-ride-stops").tap()
+        XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 5))
+        XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, "TEST-03")
+        XCTAssertGreaterThan(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "onboard-stop-")).count, 1)
+        capture("confirmed-bus-times-at-upcoming-stops")
+        button("journey-stops-done").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
+        button("journey-options").tap(); button("返回地圖").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
+        XCTAssertTrue(button("journey-alight").isHittable)
     }
     func testTransferShowsTheNextBus() throws {
         launch(["--preview-boarding-fixture", "--preview-transfer-fixture", "--usability-fixture"])

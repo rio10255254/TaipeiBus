@@ -48,6 +48,12 @@ final class TransitAppModel: ObservableObject {
     @Published var selectedRouteID: String?
     @Published private(set) var allRouteVariants = true
     @Published var selectedVehicleID: String?
+    struct BoardedVehicle {
+        let rideID: String
+        let vehicleID: String
+        let plate: String
+    }
+    @Published private(set) var boardedVehicle: BoardedVehicle?
     @Published var direction = "0"
     @Published var following = false
     @Published var highlightVehicle = true
@@ -214,12 +220,12 @@ final class TransitAppModel: ObservableObject {
         if case .userLocation = target {} else { stopUserTracking() }
         mapWasMoved = false; focus = target; focusRevision += 1
     }
-    func stopUserTracking() { userMapMode = .free; location.setHeadingActive(false) }
+    func stopUserTracking() { userMapMode = .free }
     func cycleUserTracking() {
         let next: UserMapMode = userMapMode == .north ? .heading : .north
         if planner.selected == nil { clearSelection() }
         following = false; walkingMapIndex = nil
-        userMapMode = next; location.setHeadingActive(next == .heading)
+        userMapMode = next
         location.request(); focusMap(.userLocation)
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -329,6 +335,48 @@ final class TransitAppModel: ObservableObject {
     func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {
         arrivalForecast.estimate(approach, ride: ride, metadata: metadata, at: date)
     }
+
+    func arrivalPrediction(_ vehicle: BusVehicle, stopID: String, at date: Date, onboard: Bool = false) -> VehicleArrivalPrediction? {
+        arrivalForecast.prediction(vehicle, stopID: stopID, metadata: metadata, at: date, allowTypicalWhenStopped: onboard)
+    }
+
+    func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+        guard option.verified else { return nil }
+        return JourneyDuration(riding: option.rides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) },
+            walking: option.walks.compactMap(\.duration),
+            arrivals: option.rides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
+            minimumServiceWaits: option.rides.map {
+                $0.route.minimumServiceWait(direction: $0.direction, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: $0.fullRouteSeconds)
+            })
+    }
+
+    func boardCurrentRide() {
+        guard let ride = planner.activeRide else { return }
+        boardedVehicle = nil
+        if let bus = selectedVehicle, bus.routeID == ride.route.id, bus.direction == ride.direction {
+            confirmBoardedVehicle(bus, ride: ride)
+        }
+        planner.boardCurrentRide()
+    }
+
+    func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
+        guard bus.routeID == ride.route.id, bus.direction == ride.direction else { return }
+        boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
+        trackApproachingVehicle(bus)
+    }
+
+    func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
+        guard let boardedVehicle, boardedVehicle.rideID == ride.id else { return nil }
+        return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && $0.routeID == ride.route.id && $0.direction == ride.direction }
+    }
+
+    func onboardPlate(for ride: TransitRide) -> String? {
+        boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
+    }
+
+    func returnToWaiting() { boardedVehicle = nil; planner.returnToWaiting() }
+    func alight() { boardedVehicle = nil; following = false; planner.advance() }
+    func finishJourney() { boardedVehicle = nil; planner.finish(); clearSelection() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
@@ -557,7 +605,7 @@ final class TransitAppModel: ObservableObject {
         let date = Date()
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 28_800); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let rows = [100.0, 450, 900].enumerated().map { index, distance -> [String: Any] in
+        let rows = [100.0, 450, 900, 950].enumerated().map { index, distance -> [String: Any] in
             let sample = line.sample(fraction: (boarding.match.along - distance * Double(journey.direction)) / line.length)
             return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": ride.route.id,
                 "GoBack": ride.direction, "Latitude": sample.0.latitude, "Longitude": sample.0.longitude,
