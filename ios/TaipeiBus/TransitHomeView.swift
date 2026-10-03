@@ -302,7 +302,11 @@ struct TransitHomeView: View {
     private func restoreJourneyMap() {
         guard planner.selected != nil else { return }
         if let index = model.walkingMapIndex {
-            model.clearSelection(); model.showWalkOnMap(index); return
+            let relevantBus = model.selectedVehicle.map { bus in
+                planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+            } ?? false
+            if !relevantBus { model.clearSelection() }
+            model.showWalkOnMap(index); return
         }
         if let bus = model.selectedVehicle, let ride = planner.activeRide,
            bus.routeID == ride.route.id, bus.direction == ride.direction {
