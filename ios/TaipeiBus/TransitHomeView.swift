@@ -233,7 +233,7 @@ struct TransitHomeView: View {
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })
-                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(460)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }

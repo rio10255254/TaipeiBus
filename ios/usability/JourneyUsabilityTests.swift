@@ -80,6 +80,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
         XCTAssertEqual(options.count, 3)
         for index in 0..<options.count { XCTAssertTrue(options.element(boundBy: index).isHittable, "All options must fit without scrolling") }
+        for index in 0..<options.count {
+            XCTAssertFalse(options.element(boundBy: index).label.contains("今日未營運"))
+        }
         capture("choose-a-route")
         firstOption.tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))

@@ -509,7 +509,7 @@ struct JourneyOptionsView: View {
                         Text(option.walkingTimeLabel + (option.rides.count > 1 ? " · 轉乘 1 次" : ""))
                             .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                         if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
-                    }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityIdentifier("journey-option-" + option.id)
                 Divider()
             }

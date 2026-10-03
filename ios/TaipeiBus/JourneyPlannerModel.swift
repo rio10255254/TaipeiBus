@@ -71,6 +71,8 @@ final class JourneyPlannerModel: ObservableObject {
     private var directions: [MKDirections] = []
     private var latestSnapshot = TransitSnapshot()
     private var preferences = LiveSettings.Planning()
+    private var lastMetadata: TransitMetadata?
+    private var selectionConfirmed = false
 
     init() {
         if let data = UserDefaults.standard.data(forKey: "journeyRecentPlaces"),
@@ -96,7 +98,15 @@ final class JourneyPlannerModel: ObservableObject {
         if case .ride(let index) = currentStep { return option.rides[index] }
         return nil
     }
-    func updateSnapshot(_ snapshot: TransitSnapshot) { latestSnapshot = snapshot }
+    func updateSnapshot(_ snapshot: TransitSnapshot) {
+        latestSnapshot = snapshot
+        // Arrival data can complete after the first GPS response and route candidates.
+        // Replace provisional choices before the rider chooses one, without changing an active trip.
+        if !started, !planning, !selectionConfirmed, !options.isEmpty,
+           options.contains(where: { unavailableBoarding($0) != nil }), let metadata = lastMetadata {
+            plan(metadata: metadata)
+        }
+    }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
     var arrived: Bool { started && stepIndex >= steps.count }
     var mapCoordinates: [Coordinate] {
@@ -133,6 +143,7 @@ final class JourneyPlannerModel: ObservableObject {
         plan(metadata: metadata)
     }
     func plan(metadata: TransitMetadata) {
+        lastMetadata = metadata; selectionConfirmed = false
         cancelRequests()
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
@@ -205,6 +216,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func select(_ option: JourneyOption) {
+        selectionConfirmed = true
         guard selectedID != option.id || !option.verified else { return }
         cancelRequests(); selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
         guard !option.verified else { return }
