@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "revision": 1,
+  "minimumAppVersion": "0.4.2",
+  "copy": {},
+  "search": {
+    "aliases": [
+      {
+        "names": [
+          "內湖捷運站",
+          "內湖捷運",
+          "Neihu Station",
+          "MRT Neihu"
+        ],
+        "queries": [
+          "捷運內湖站"
+        ]
+      },
+      {
+        "names": [
+          "東湖捷運站",
+          "東湖捷運",
+          "Donghu Station"
+        ],
+        "queries": [
+          "捷運東湖站"
+        ]
+      },
+      {
+        "names": [
+          "港墘捷運站",
+          "港墘捷運",
+          "Gangqian Station"
+        ],
+        "queries": [
+          "捷運港墘站"
+        ]
+      },
+      {
+        "names": [
+          "西門捷運站",
+          "西門捷運",
+          "Ximen Station"
+        ],
+        "queries": [
+          "捷運西門站"
+        ]
+      },
+      {
+        "names": [
+          "七張捷運站",
+          "七張捷運",
+          "Qizhang Station"
+        ],
+        "queries": [
+          "捷運七張站"
+        ]
+      },
+      {
+        "names": [
+          "南港展覽館捷運站",
+          "Nangang Exhibition Center Station"
+        ],
+        "queries": [
+          "捷運南港展覽館站"
+        ]
+      },
+      {
+        "names": [
+          "北市府",
+          "台北市政府",
+          "臺北市政府"
+        ],
+        "queries": [
+          "臺北市政府"
+        ]
+      },
+      {
+        "names": [
+          "台北轉運站",
+          "臺北轉運站",
+          "Taipei Bus Station"
+        ],
+        "queries": [
+          "臺北轉運站"
+        ]
+      }
+    ],
+    "debounceMilliseconds": 180,
+    "resultLimit": 12
+  },
+  "appearance": {
+    "accentColor": "#007AFF",
+    "walkingColor": "#FF9500",
+    "waterColor": "#BADCE5",
+    "parkColor": "#D6E6C5",
+    "buildingColor": "#DCE2DB",
+    "textScale": 1.0,
+    "spacingScale": 1.0,
+    "cornerScale": 1.0,
+    "solidSurfaces": false
+  },
+  "planning": {
+    "firstWalkMeters": 800,
+    "expandedWalkMeters": 1200,
+    "walkingOnlyMeters": 900,
+    "walkingWeight": 1.0,
+    "waitingWeight": 1.0,
+    "transferPenaltySeconds": 420
+  },
+  "refresh": {
+    "vehicleSeconds": 15,
+    "metadataHours": 24,
+    "settingsSeconds": 300
+  },
+  "display": {
+    "nearbyStops": true,
+    "quickDestinations": true,
+    "stationShortcut": true,
+    "routeShortcut": true
+  },
+  "quickDestinations": [
+    "臺北車站",
+    "臺北101",
+    "西門町"
+  ]
+}
