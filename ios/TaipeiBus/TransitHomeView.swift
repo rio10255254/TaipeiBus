@@ -63,6 +63,10 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
 #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
+                    Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)
+                }
                 if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
                     Text(selectionOverlay.cameraState).font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1).accessibilityIdentifier("map-camera-state").allowsHitTesting(false)

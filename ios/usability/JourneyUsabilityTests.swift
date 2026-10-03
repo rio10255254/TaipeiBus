@@ -28,6 +28,20 @@ class JourneyUsabilityTestBase: XCTestCase {
 }
 
 final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
+    func testInstalledAppIconOnTheHomeScreen() {
+        launch()
+        XCUIDevice.shared.press(.home)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let icon = springboard.icons.matching(NSPredicate(format: "label IN %@", ["台北公車", "臺北公車", "TaipeiBus"])).firstMatch
+        for _ in 0..<3 {
+            if icon.exists && icon.isHittable { break }
+            springboard.swipeLeft()
+        }
+        XCTAssertTrue(icon.isHittable)
+        capture("app-icon-on-home-screen")
+        icon.tap()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+    }
     var nativeMap: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
     func camera() -> [String: Any] {
         let probe = app.staticTexts["map-camera-state"]
@@ -181,7 +195,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 5))
     }
     func testSearchCompareCancelAndReturnFromWalkingMap() throws {
-        launch()
+        launch(["--test-journey-selection"])
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 10)); button("搜尋目的地").tap()
         chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
@@ -193,10 +207,12 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertFalse(options.element(boundBy: index).label.contains("今日未營運"))
         }
         capture("choose-a-route")
+        let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
         firstOption.tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-options").waitForExistence(timeout: 5))
         capture("selected-neihu-route")
+        XCTAssertEqual(app.staticTexts["journey-selected-state"].label, selectedID)
         button("journey-walk-to-stop").tap()
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(button("journey-board").isHittable); capture("walking-on-the-same-map")
@@ -209,6 +225,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         app.activate()
         button("返回地圖").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["journey-selected-state"].label, selectedID)
         button("journey-options").tap(); button("更改").tap()
         XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 5))
         app.textFields["journey-search-field"].tap(); app.textFields["journey-search-field"].typeText("xyzqzz")

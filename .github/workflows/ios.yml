@@ -408,6 +408,29 @@ jobs:
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-no-location.xcresult" \
               --output-path "$RUNNER_TEMP/usability-no-location-screenshots"
           fi
+          python3 - <<'PY'
+          import json, os, re, shutil
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP'])
+          names = set(re.findall(r'capture\("([^"]+)"\)', Path('ios/usability/JourneyUsabilityTests.swift').read_text()))
+          for folder in ['usability-screenshots', 'usability-no-location-screenshots']:
+              manifest = root / folder / 'manifest.json'
+              if not manifest.exists():
+                  continue
+              target = root / 'usability-preview' / folder
+              target.mkdir(parents=True, exist_ok=True)
+              records = json.loads(manifest.read_text())
+              for record in records:
+                  keep = []
+                  for item in record.get('attachments', []):
+                      label = item.get('suggestedHumanReadableName', '')
+                      if any(label.startswith(name) for name in names):
+                          filename = Path(item['exportedFileName']).name
+                          shutil.copyfile(manifest.parent / filename, target / filename)
+                          keep.append(item)
+                  record['attachments'] = keep
+              (target / 'manifest.json').write_text(json.dumps(records))
+          PY
       - name: Capture live content before update
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'live-settings'
         timeout-minutes: 3
@@ -549,8 +572,7 @@ jobs:
         with:
           name: usability-screenshots
           path: |
-            ${{ runner.temp }}/usability-screenshots
-            ${{ runner.temp }}/usability-no-location-screenshots
+            ${{ runner.temp }}/usability-preview
             ${{ runner.temp }}/usability-tests.log
             ${{ runner.temp }}/usability-no-location.log
           if-no-files-found: ignore

@@ -217,7 +217,9 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func select(_ option: JourneyOption) {
         selectionConfirmed = true
-        guard selectedID != option.id || !option.verified else { return }
+        // The recommended option can already be verified while alternatives are
+        // still loading. Confirming it must stop that work from selecting another.
+        if selectedID == option.id, option.verified { cancelRequests(); return }
         cancelRequests(); selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
         guard !option.verified else { return }
         checkingWalks = true
