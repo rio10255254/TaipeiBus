@@ -981,6 +981,10 @@ private struct AppInformationView: View {
                 }
                 Section("隱私") {
                     NavigationLink("隱私權說明") { PrivacyExplanationView() }
+                    Link("完整隱私政策", destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!)
+                        .accessibilityIdentifier("app-privacy-policy")
+                    Link("支援與聯絡", destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!)
+                        .accessibilityIdentifier("app-support")
                 }
             }
             .navigationTitle("資訊與設定").navigationBarTitleDisplayMode(.inline)
@@ -1013,6 +1017,8 @@ private struct PrivacyExplanationView: View {
             }
             Section("管理權限") {
                 Text("可在 iPhone 系統設定關閉定位。刪除 App 可移除其本機收藏與偏好。")
+                Link("完整隱私政策", destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!)
+                Link("支援與聯絡", destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!)
             }
         }
         .navigationTitle("隱私權說明").navigationBarTitleDisplayMode(.inline)

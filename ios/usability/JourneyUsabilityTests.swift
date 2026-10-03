@@ -307,6 +307,55 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
     }
 }
 
+// Marketing images use the actual interface and official live data. No vehicle,
+// ETA or journey fixtures are permitted in this class.
+final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
+    var nearest: XCUIElement {
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "nearby-station-")).firstMatch
+    }
+    func testStoreHomeAndRouteSearch() {
+        launch()
+        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
+        capture("store-01-nearby-map")
+        button("路線").tap()
+        XCTAssertTrue(button("route-key-藍").waitForExistence(timeout: 15))
+        button("route-key-藍").tap(); button("route-key-2").tap(); button("route-key-7").tap()
+        let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "藍27")).firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 10))
+        capture("store-03-route-keypad")
+        route.tap()
+        XCTAssertTrue(button("返回搜尋").waitForExistence(timeout: 10))
+        capture("store-04-route-map")
+    }
+    func testStoreRealDestinationAndItinerary() {
+        launch()
+        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
+        button("搜尋目的地").tap(); chooseNeihu()
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
+        capture("store-02-trip-choices")
+        let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
+        button("journey-option-" + selectedID).tap()
+        XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
+        capture("store-05-boarding-map")
+        button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
+        XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
+        capture("store-06-full-itinerary")
+    }
+    func testPrivacyAndSupportAreAccessible() {
+        launch()
+        XCTAssertTrue(button("資料來源與地圖設定").waitForExistence(timeout: 20))
+        button("資料來源與地圖設定").tap()
+        XCTAssertTrue(app.navigationBars["資訊與設定"].waitForExistence(timeout: 10))
+        for _ in 0..<4 {
+            if button("app-privacy-policy").isHittable && button("app-support").isHittable { break }
+            app.swipeUp()
+        }
+        XCTAssertTrue(button("app-privacy-policy").isHittable)
+        XCTAssertTrue(button("app-support").isHittable)
+        capture("store-private-links-verification")
+    }
+}
+
 final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
     func testManualOriginStillWorksWhenLocationIsDenied() throws {
         launch()

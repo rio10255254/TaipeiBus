@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -132,7 +132,11 @@ jobs:
           PY
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
-          device=$(xcrun simctl create TaipeiBus-iPhone17 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17
+          if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
+            device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
+          fi
+          device=$(xcrun simctl create TaipeiBus-preview "$device_type" "$runtime")
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
@@ -379,6 +383,9 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'journey-selection' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests')
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
