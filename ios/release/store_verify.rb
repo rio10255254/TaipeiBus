@@ -25,12 +25,16 @@ end
 localization = client.all("/v1/appStoreVersions/#{version.fetch('id')}/appStoreVersionLocalizations").find { |l| l.dig('attributes', 'locale') == config.fetch('locale') }
 abort 'Traditional Chinese metadata missing.' unless localization
 sets = client.all("/v1/appStoreVersionLocalizations/#{localization.fetch('id')}/appScreenshotSets")
-set = sets.find { |s| s.dig('attributes', 'screenshotDisplayType') == 'APP_IPHONE_69' }
+# Apple's public API still names the current 6.9-inch media slot APP_IPHONE_67.
+set = sets.find { |s| s.dig('attributes', 'screenshotDisplayType') == 'APP_IPHONE_67' }
 abort '6.9-inch store screenshots missing.' unless set
 shots_path = "/v1/appScreenshotSets/#{set.fetch('id')}/appScreenshots"
 shots = client.all(shots_path)
 abort 'At least three real app screenshots are required.' unless shots.length.between?(3, 10)
 abort 'Screenshots are still processing or failed.' unless shots.all? { |s| s.dig('attributes', 'assetDeliveryState', 'state') == 'COMPLETE' }
+abort 'Screenshots must match the actual 6.9-inch simulator capture.' unless shots.all? do |s|
+  [s.dig('attributes', 'imageAsset', 'width'), s.dig('attributes', 'imageAsset', 'height')] == [1320, 2868]
+end
 if ENV['BUS_ORDER_SCREENSHOTS'] == 'true'
   desired = copy.fetch('screenshotOrder')
   names = shots.map { |s| s.dig('attributes', 'fileName') }
@@ -45,7 +49,10 @@ end
 report = { app_id: app_id, version: release.version, version_id: version.fetch('id'),
   state: version.dig('attributes', 'appStoreState'), enabled_territories: enabled,
   price: 0, currency: 'TWD', automatic_release: version.dig('attributes', 'releaseType') == 'AFTER_APPROVAL',
-  screenshot_set_id: set.fetch('id'), screenshots: shots.map { |s| s.slice('id', 'attributes') },
+  screenshot_set_id: set.fetch('id'), screenshots: shots.map { |s|
+    { id: s.fetch('id'), file_name: s.dig('attributes', 'fileName'), state: s.dig('attributes', 'assetDeliveryState', 'state'),
+      width: s.dig('attributes', 'imageAsset', 'width'), height: s.dig('attributes', 'imageAsset', 'height') }
+  },
   checked_at: Time.now.utc.iso8601 }
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-verification.json'), JSON.pretty_generate(report) + "\n")
 puts "Verified free Taiwan availability and #{shots.length} fully processed native screenshots; state #{report[:state]}."
