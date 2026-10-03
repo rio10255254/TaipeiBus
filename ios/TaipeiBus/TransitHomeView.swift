@@ -490,7 +490,7 @@ private struct TransitPanel: View {
             Picker("查詢類型", selection: $model.mode) {
                 ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented)
-            if let message = location.message, !hasSelection { Text(message).liveFont(.caption).foregroundStyle(.secondary) }
+            if let message = location.message { Text(message).liveFont(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 18 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
     }
 
