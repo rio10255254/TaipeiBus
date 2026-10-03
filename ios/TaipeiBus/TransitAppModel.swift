@@ -225,7 +225,7 @@ final class TransitAppModel: ObservableObject {
     }
     func beginStationBrowsing() {
         stationBrowsing = true
-        let point = location.usableCoordinate ?? mapCenter ?? .taipei
+        let point = [location.usableCoordinate, mapCenter].compactMap { $0 }.first { $0.isInServiceArea } ?? .taipei
         stationBrowseCenter = point
         focusMap(.coordinate(point)); sheetDetent = .height(390)
     }
@@ -308,12 +308,17 @@ final class TransitAppModel: ObservableObject {
         return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs, vocabulary: vocabulary)
     }
     var stationSearchContextKey: String {
-        "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs):\(stationBrowseCenter?.latitude ?? 0):\(stationBrowseCenter?.longitude ?? 0)"
+        "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs):\(stationBrowsing):\(stationBrowseCenter?.latitude ?? 0):\(stationBrowseCenter?.longitude ?? 0)"
     }
     func findStations(query: String, limit: Int = 40) async -> [Station] {
-        let point = stationBrowsing ? stationBrowseCenter ?? location.displayCoordinate ?? .taipei : location.displayCoordinate ?? .taipei
-        return await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
+        let userPoint = location.displayCoordinate.flatMap { $0.isInServiceArea ? $0 : nil } ?? .taipei
+        let point = stationBrowsing ? stationBrowseCenter ?? userPoint : userPoint
+        let results = await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
             recent: recentStationIDs, limit: limit, settingsRevision: liveSettings.revision, vocabulary: vocabulary)
+        if stationBrowsing, query.isEmpty {
+            return results.filter { favorites.contains($0.id) || recentStationIDs.contains($0.id) || $0.coordinate.distance(to: point) <= 1_000 }
+        }
+        return results
     }
 
     func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {

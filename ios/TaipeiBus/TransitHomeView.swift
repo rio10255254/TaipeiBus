@@ -423,11 +423,12 @@ private struct TransitPanel: View {
     @State private var stationResults: [Station] = []
     @State private var stationResultQuery = ""
     @State private var systemRouteKeyboard = false
-    private var isBrowsing: Bool { browseOnly || (model.selectedStationID == nil && model.selectedRouteID == nil) }
+    private var isBrowsing: Bool { model.selectedStationID == nil && model.selectedRouteID == nil }
+    private var stationRequestKey: String { model.mode.rawValue + ":" + model.query + ":" + model.stationSearchContextKey }
 
-    var body: some View {
+    private var panelContent: some View {
         VStack(spacing: 0) {
-            if !browseOnly && (model.selectedStationID != nil || model.selectedRouteID != nil) {
+            if !isBrowsing {
                 detailHeader
             } else {
                 browseHeader
@@ -443,7 +444,7 @@ private struct TransitPanel: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
-                        if browseOnly { browseResults }
+                        if isBrowsing { browseResults }
                         else if let station = model.selectedStation { StationDetails(model: model, station: station) }
                         else if let vehicle = model.selectedVehicle { VehicleDetails(model: model, vehicle: vehicle) }
                         else if let route = model.selectedRoute { RouteDetails(model: model, route: route) }
@@ -458,6 +459,10 @@ private struct TransitPanel: View {
             }
         }
         .padding(.top, 16 * CGFloat(live.appearance.spacingScale))
+    }
+
+    var body: some View {
+        panelContent
         .onAppear {
             if browseOnly {
                 searchFocused = false
@@ -476,14 +481,16 @@ private struct TransitPanel: View {
         .onChange(of: model.selectedStationID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedRouteID) { _, _ in searchFocused = false }
         .onChange(of: model.selectedVehicleID) { _, _ in searchFocused = false }
-        .task(id: model.mode.rawValue + ":" + model.query + ":" + model.stationSearchContextKey) {
-            guard model.mode == .stops else { return }
-            let query = model.query
-            let results = await model.findStations(query: query)
-            guard !Task.isCancelled else { return }
-            stationResults = results; stationResultQuery = query
-            model.stationMapResults = results
-        }
+        .task(id: stationRequestKey) { await refreshStationResults() }
+    }
+
+    @MainActor private func refreshStationResults() async {
+        guard model.mode == .stops else { return }
+        let query = model.query
+        let results = await model.findStations(query: query)
+        guard !Task.isCancelled else { return }
+        stationResults = results; stationResultQuery = query
+        model.stationMapResults = results
     }
 
     private var browseTitle: String {
@@ -624,7 +631,8 @@ private struct TransitPanel: View {
     }
 
     private var emptyResult: some View {
-        Text(live.text("找不到符合的資料，試試其他名稱")).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
+        Text(live.text(model.mode == .stops && model.query.isEmpty ? "這附近沒有站牌，試著移動地圖" : "找不到符合的資料，試試其他名稱"))
+            .liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
     }
 }
 

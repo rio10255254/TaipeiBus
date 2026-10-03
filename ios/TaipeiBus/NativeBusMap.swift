@@ -520,11 +520,19 @@ struct NativeBusMap: UIViewRepresentable {
         @objc func selectBus(_ gesture: UITapGestureRecognizer) {
             guard let map, let buses else { return }
             let point = gesture.location(in: map)
+            let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
+            let station = features.compactMap { feature -> Station? in
+                guard let id = feature.attribute(forKey: "stationID") as? String else { return nil }
+                return model.metadata.stations[id]
+            }.min { a, b in
+                let x = map.convert(a.coordinate.locationCoordinate, toPointTo: map)
+                let y = map.convert(b.coordinate.locationCoordinate, toPointTo: map)
+                return hypot(x.x - point.x, x.y - point.y) < hypot(y.x - point.x, y.y - point.y)
+            }
+            if model.stationBrowsing, let station { model.selectStation(station); return }
             guard let id = buses.hitTest(point), let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else {
-                let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
-                let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
-                if let stationID = features.first?.attribute(forKey: "stationID") as? String,
-                   let station = model.metadata.stations[stationID] { model.selectStation(station) }
+                if let station { model.selectStation(station) }
                 return
             }
             // Without highlight mode, don't select a mesh behind a rendered building.
