@@ -31,6 +31,7 @@ abort '6.9-inch store screenshots missing.' unless set
 shots_path = "/v1/appScreenshotSets/#{set.fetch('id')}/appScreenshots"
 shots = client.all(shots_path)
 abort 'At least three real app screenshots are required.' unless shots.length.between?(3, 10)
+shots.each { |s| puts "Screenshot #{s.dig('attributes', 'fileName')}: #{s.dig('attributes', 'assetDeliveryState', 'state')}" }
 abort 'Screenshots are still processing or failed.' unless shots.all? { |s| s.dig('attributes', 'assetDeliveryState', 'state') == 'COMPLETE' }
 abort 'Screenshots must match the actual 6.9-inch simulator capture.' unless shots.all? do |s|
   [s.dig('attributes', 'imageAsset', 'width'), s.dig('attributes', 'imageAsset', 'height')] == [1320, 2868]
