@@ -249,7 +249,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         }
         capture("choose-a-route")
         let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
-        firstOption.tap()
+        // Walking verification may reorder recommendations before confirmation.
+        // Select the captured itinerary, rather than whatever later occupies its old row.
+        button("journey-option-" + selectedID).tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-options").waitForExistence(timeout: 5))
         capture("selected-neihu-route")
