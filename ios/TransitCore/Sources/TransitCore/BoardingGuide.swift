@@ -19,13 +19,13 @@ public struct BoardingGuide: Sendable {
     public var arrivalLabel: String {
         guard let seconds = estimateSeconds else { return "目前沒有到站預估" }
         if seconds < 0 { return EstimateFeed.label(seconds) }
-        return seconds <= 60 ? "即將到上車站" : "約 \(Int(ceil(Double(seconds) / 60))) 分鐘到上車站"
+        return seconds <= 60 ? "即將到上車站" : "約 \(max(1, seconds / 60)) 分鐘到上車站"
     }
 
     public var arrivalShortLabel: String {
         guard let seconds = estimateSeconds else { return "—" }
         if seconds < 0 { return EstimateFeed.label(seconds) }
-        return seconds <= 60 ? "即將到站" : "\(Int(ceil(Double(seconds) / 60))) 分"
+        return seconds <= 60 ? "即將到站" : "\(max(1, seconds / 60)) 分"
     }
 
     public static func vehicles(ride: TransitRide, metadata: TransitMetadata, snapshot: TransitSnapshot,

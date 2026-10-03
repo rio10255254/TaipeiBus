@@ -17,8 +17,16 @@ on:
       preview_scope:
         description: 'Choose which iPhone screens to capture'
         type: choice
-        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation']
+        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings']
         default: 'all'
+      content_revision_before:
+        description: 'For live-settings verification: current live content revision'
+        type: string
+        default: '1'
+      content_revision_after:
+        description: 'For live-settings verification: next live content revision'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -29,6 +37,8 @@ concurrency:
 
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+  BUS_CONTENT_BEFORE: ${{ inputs.content_revision_before }}
+  BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
   simulator:
@@ -43,6 +53,7 @@ jobs:
           ruby -c ios/apple-connect.rb
           ruby ios/release/apple_client_test.rb
           python3 ios/release-check.py
+          python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
         run: |
           set -euo pipefail
@@ -232,7 +243,7 @@ jobs:
           sim terminate "$device" com.example.TaipeiBus
           fi
           if [ '${{ inputs.preview_scope }}' = 'navigation' ]; then
-          for group in transit landmarks addresses; do
+          for group in transit landmarks addresses expanded; do
           launch_ready --preview-place-audit --preview-audit-group "$group"
           python3 - "$container/Documents/place-search-audit.json" "$token" "$RUNNER_TEMP/phone-screenshots/place-search-$group.json" <<'PY'
           import json, sys
@@ -242,7 +253,10 @@ jobs:
           assert data['token'] == sys.argv[2] and not data['error'], data
           targets = {
               '內湖站': (25.08,25.09,121.59,121.60), '内湖站': (25.08,25.09,121.59,121.60),
-              '台北 內湖站': (25.08,25.09,121.59,121.60), '東湖站': (25.06,25.075,121.60,121.625),
+              '台北 內湖站': (25.08,25.09,121.59,121.60),
+              '內湖捷運站': (25.08,25.09,121.59,121.60), '我要去內湖站': (25.08,25.09,121.59,121.60),
+              'Neihu Station': (25.08,25.09,121.59,121.60), '七張站': (24.975,24.985,121.535,121.545),
+              '南港展覽館站': (25.05,25.06,121.61,121.625), '東湖站': (25.06,25.075,121.60,121.625),
               '港墘站': (25.075,25.085,121.57,121.585), '西門站': (25.038,25.047,121.503,121.514),
               '臺北車站': (25.042,25.052,121.51,121.525), '臺北101': (25.03,25.038,121.56,121.57),
               '台大': (25.008,25.025,121.528,121.552), '三總': (25.065,25.08,121.58,121.605),
@@ -270,7 +284,10 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-track-next-fixture.png"
           sim terminate "$device" com.example.TaipeiBus
           fi
-          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ]; then
+          if [ '${{ inputs.preview_scope }}' = 'live-settings' ]; then
+          launch_ready --preview-live-update --preview-journey-search --preview-search-query '內湖月台'
+          fi
+          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ] && [ '${{ inputs.preview_scope }}' != 'live-settings' ]; then
           if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready
           sleep 6
@@ -332,6 +349,67 @@ jobs:
           sleep 32
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           fi
+      - name: Capture live content before update
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'live-settings'
+        timeout-minutes: 3
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          from pathlib import Path
+          device = os.environ['BUS_SIM_DEVICE']
+          container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', device, 'com.example.TaipeiBus', 'data'], text=True).strip())
+          marker = container / 'Documents/live-settings-state.json'
+          output = Path(os.environ['RUNNER_TEMP']) / 'phone-screenshots'
+          deadline = time.monotonic() + 100
+          while time.monotonic() < deadline:
+              try:
+                  state = json.loads(marker.read_text())
+                  if state['content_revision'] == int(os.environ['BUS_CONTENT_BEFORE']) and state['location_ready']:
+                      assert state['version'] == json.loads(Path('ios/release/testflight.json').read_text())['version'], state
+                      assert 0 <= state['first_location_milliseconds'] < 15000, state
+                      (output / 'live-update-before.json').write_text(json.dumps(state, ensure_ascii=False, indent=2))
+                      time.sleep(2)
+                      subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', str(output / 'iPhone17-live-update-before.png')], check=True, timeout=60)
+                      print('BEFORE_LIVE_UPDATE_READY: same process will remain running.', flush=True)
+                      break
+              except (OSError, ValueError, KeyError):
+                  pass
+              time.sleep(1)
+          else:
+              raise RuntimeError('Initial location/content state did not become ready.')
+          PY
+      - name: Verify live update without rebuilding or reinstalling
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'live-settings'
+        timeout-minutes: 11
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, time
+          from pathlib import Path
+          device = os.environ['BUS_SIM_DEVICE']
+          container = Path(subprocess.check_output(['xcrun', 'simctl', 'get_app_container', device, 'com.example.TaipeiBus', 'data'], text=True).strip())
+          marker = container / 'Documents/live-settings-state.json'
+          output = Path(os.environ['RUNNER_TEMP']) / 'phone-screenshots'
+          before = json.loads((output / 'live-update-before.json').read_text())
+          deadline = time.monotonic() + 600
+          while time.monotonic() < deadline:
+              try:
+                  state = json.loads(marker.read_text())
+                  if state['content_revision'] == int(os.environ['BUS_CONTENT_AFTER']):
+                      assert state['pid'] == before['pid'] and state['token'] == before['token'], state
+                      assert state['version'] == before['version'] and state['accent'] == '#A83B80', state
+                      assert state['station_label'] == '候車站牌' and state['alias_stations'], state
+                      assert all(row['name'].startswith('捷運內湖站') for row in state['alias_stations']), state
+                      (output / 'live-update-after.json').write_text(json.dumps(state, ensure_ascii=False, indent=2))
+                      time.sleep(3)
+                      subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', str(output / 'iPhone17-live-update-after.png')], check=True, timeout=60)
+                      print('Real HTTPS content update verified on the same app process and version.', flush=True)
+                      break
+              except (OSError, ValueError, KeyError):
+                  pass
+              time.sleep(2)
+          else:
+              raise RuntimeError('Published revision 2 was not received by the running app.')
+          PY
       - name: Record optional native preview
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'all'
         # Recording is a preview artifact; it must not gate native checks or signing.

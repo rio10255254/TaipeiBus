@@ -41,13 +41,13 @@ private actor TripNetwork {
     private var planner: TripPlanner?
     private var key = ""
     private var builtAt = Date.distantPast
-    func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate) -> [TransitTrip] {
+    func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning) -> [TransitTrip] {
         let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
-        let nearby = planner!.plan(from: from, to: to, maximumWalk: 800, limit: 18)
-        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: 1_200, limit: 18) : nearby
+        let nearby = planner!.plan(from: from, to: to, maximumWalk: preferences.firstWalkMeters, limit: 18, preferences: preferences)
+        return nearby.isEmpty ? planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18, preferences: preferences) : nearby
     }
 }
 
@@ -70,6 +70,7 @@ final class JourneyPlannerModel: ObservableObject {
     private var generation = UUID()
     private var directions: [MKDirections] = []
     private var latestSnapshot = TransitSnapshot()
+    private var preferences = LiveSettings.Planning()
 
     init() {
         if let data = UserDefaults.standard.data(forKey: "journeyRecentPlaces"),
@@ -83,6 +84,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     var currentStep: JourneyStep? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
     func updateSnapshot(_ snapshot: TransitSnapshot) { latestSnapshot = snapshot }
+    func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
     var arrived: Bool { started && stepIndex >= steps.count }
     var mapCoordinates: [Coordinate] {
         guard let option = selected else { return [] }
@@ -128,9 +130,10 @@ final class JourneyPlannerModel: ObservableObject {
         guard !metadata.routes.isEmpty else { message = "路線資料載入後即可規劃。"; return }
         planning = true
         let token = generation
+        let preferences = self.preferences
         task = Task { [weak self] in
             guard let self else { return }
-            let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate)
+            let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate, preferences: preferences)
             guard !Task.isCancelled, token == generation else { return }
             let estimates = latestSnapshot.estimates
             let now = Date()
@@ -146,7 +149,7 @@ final class JourneyPlannerModel: ObservableObject {
             func waitingScore(_ trip: TransitTrip) -> Double {
                 guard let ride = trip.rides.first,
                       let eta = estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: now), eta >= 0 else { return trip.score }
-                return trip.score + max(0, Double(eta) - trip.accessDistance / 1.2)
+                return trip.score + max(0, Double(eta) - trip.accessDistance / 1.2) * preferences.waitingWeight
             }
             let ordered = trips.filter { availability($0) != 2 }.sorted {
                 let a = availability($0), b = availability($1)
@@ -162,7 +165,7 @@ final class JourneyPlannerModel: ObservableObject {
                 walks.append(WalkingLeg(from: trip.rides.last!.alighting.coordinate, to: destination.coordinate))
                 return JourneyOption(id: trip.id, trip: trip, walks: walks)
             }
-            if origin.coordinate.distance(to: destination.coordinate) <= 900 {
+            if origin.coordinate.distance(to: destination.coordinate) <= preferences.walkingOnlyMeters {
                 choices.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
                 choices = Array(choices.prefix(3))

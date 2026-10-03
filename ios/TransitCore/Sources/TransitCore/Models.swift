@@ -158,14 +158,18 @@ public struct EstimateFeed: Sendable {
     public func value(routeID: String, stopID: String, at date: Date) -> Int? {
         guard error == nil, let updatedAt,
               (-60...120).contains(date.timeIntervalSince(updatedAt)) else { return nil }
-        return seconds["\(routeID):\(stopID)"]
+        guard let value = seconds["\(routeID):\(stopID)"] else { return nil }
+        if value < 0 { return value }
+        // The published estimate belongs to the source timestamp, not the latest HTTP request.
+        let elapsed = max(0, Int(date.timeIntervalSince(updatedAt).rounded(.down)))
+        return max(0, value - elapsed)
     }
     public static func label(_ seconds: Int?) -> String {
         guard let seconds else { return "暫無預估" }
         if seconds < 0 {
             return [-1: "尚未發車", -2: "交管不停靠", -3: "末班已過", -4: "今日未營運"][seconds] ?? "暫無預估"
         }
-        return seconds <= 60 ? "1 分鐘內" : "\(Int(ceil(Double(seconds) / 60))) 分鐘"
+        return seconds <= 60 ? "1 分鐘內" : "\(max(1, seconds / 60)) 分鐘"
     }
 }
 
