@@ -117,14 +117,14 @@ struct TransitHomeView: View {
                         .accessibilityLabel(live.text("尋找我的位置與附近站牌"))
                     }
                     }
-                    if let message = location.message {
+                    if let message = location.message, !hasSelection {
                         Text(message).liveFont(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
                     if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
-                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
+                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .height(460); showJourney = true }
                     } else {
                         Button { journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
@@ -209,14 +209,14 @@ struct TransitHomeView: View {
         mapContent
         .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
-        .sheet(isPresented: $showSearch) {
+        .sheet(isPresented: $showSearch, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
                 .presentationDetents(hasTransitSelection ? [.height(330), .large] : [.large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
-        .sheet(isPresented: $showDetails) {
+        .sheet(isPresented: $showDetails, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
                 .presentationDetents([.height(330), .large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
@@ -289,6 +289,17 @@ struct TransitHomeView: View {
 #endif
     }
 
+    private func restoreJourneyMap() {
+        guard planner.selected != nil else { return }
+        if let bus = model.selectedVehicle, let ride = planner.activeRide,
+           bus.routeID == ride.route.id, bus.direction == ride.direction {
+            if model.following { model.focusMap(.vehicle(bus.id)) }
+        } else {
+            model.clearSelection()
+            let coordinates = planner.mapCoordinates
+            if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+        }
+    }
     private func openBrowse(_ mode: BrowseMode) {
         model.clearSelection(); model.mode = mode; model.sheetDetent = .large; showSearch = true
     }
@@ -479,7 +490,7 @@ private struct TransitPanel: View {
             Picker("查詢類型", selection: $model.mode) {
                 ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
             }.pickerStyle(.segmented)
-            if let message = location.message { Text(message).liveFont(.caption).foregroundStyle(.secondary) }
+            if let message = location.message, !hasSelection { Text(message).liveFont(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 18 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
     }
 

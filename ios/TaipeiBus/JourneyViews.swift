@@ -16,6 +16,7 @@ struct JourneyPlanningView: View {
     @State private var query = ""
     @State private var editingOrigin = false
     @State private var editingDestination = true
+    @State private var showingItinerary = false
     @State private var resolving = false
     @State private var searchError: String?
     @State private var resolveTask: Task<Void, Never>?
@@ -25,7 +26,6 @@ struct JourneyPlanningView: View {
     @State private var stationResultQuery = ""
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
-    private var showingPreview: Bool { compact && !searchingPlaces && !planner.started && planner.selected != nil }
     private var searchContext: Coordinate? {
         planner.usingLocation ? location.usableCoordinate ?? location.displayCoordinate : planner.origin?.coordinate
     }
@@ -33,39 +33,19 @@ struct JourneyPlanningView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if showingPreview { JourneyMapPreviewView(model: model, planner: planner) }
-                    else {
                     originButton
                     if searchingPlaces { placeSearch }
                     else {
-                        HStack(alignment: .top) {
-                            VStack(alignment: .leading, spacing: 5) {
-                                Text(planner.destination?.name ?? "目的地").liveFont(.title, weight: .bold).lineLimit(2)
-                                Text(planner.destination?.address ?? "").liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                            Spacer()
-                            Button(live.text("更改")) { edit(origin: false) }.frame(minHeight: 44)
-                        }
-                        if planner.started {
+                        if planner.started || showingItinerary {
                             JourneyItineraryView(model: model, planner: planner)
                         } else {
                             JourneyOptionsView(model: model, planner: planner, collapse: { dismiss() })
                         }
                     }
-                    }
                 }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 16 * CGFloat(live.appearance.spacingScale))
             }
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom) {
-                if showingPreview {
-                    JourneyStartButton(model: model, planner: planner) {
-                        if planner.selected?.walkingOnly == true { planner.begin(); dismiss() }
-                        else { planner.boardCurrentRide(); dismiss() }
-                    }
-                    .padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 12 * CGFloat(live.appearance.spacingScale)).background(.regularMaterial)
-                }
-            }
-            .navigationTitle(showingPreview ? planner.destination?.name ?? "目的地" : editingOrigin ? "出發地" : searchingPlaces ? "目的地" : planner.started ? "行程" : "搭車方案")
+            .navigationTitle(editingOrigin ? "出發地" : searchingPlaces ? "目的地" : planner.started || showingItinerary ? "行程" : planner.destination?.name ?? "路線")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -73,13 +53,23 @@ struct JourneyPlanningView: View {
                         if searchingPlaces, planner.destination != nil {
                             focused = false; resolveTask?.cancel(); search.cancel()
                             resolving = false; editingOrigin = false; editingDestination = false
+                            if !planner.started { collapse() }
                         } else { dismiss() }
                     }
                 }
-                if showingPreview {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(live.text("換路線")) { expand() }
-                }
+                if !searchingPlaces {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(live.text("更改")) { edit(origin: false) }
+                    }
+                    if !planner.started, !showingItinerary {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Menu {
+                                Button(live.text("查看行程")) { showingItinerary = true; expand() }
+                                Button(live.text("其他交通方式")) { planner.openAppleTransit() }
+                            } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                                .accessibilityLabel(live.text("更多行程選項"))
+                        }
+                    }
                 }
             }
         }
@@ -106,6 +96,9 @@ struct JourneyPlanningView: View {
                 resolveTask?.cancel(); resolveToken = UUID(); resolving = false; search.cancel()
             }
             searchError = nil; search.update(value)
+        }
+        .onChange(of: planner.options.count) { _, count in
+            if count > 0, !searchingPlaces, !planner.started, !showingItinerary { focused = false; collapse() }
         }
         .onChange(of: location.revision) { _, _ in search.setContext(searchContext) }
         .onChange(of: model.liveSettings.revision) { _, _ in
@@ -236,7 +229,7 @@ struct JourneyPlanningView: View {
     private func edit(origin: Bool) {
         expand()
         resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
-        editingOrigin = origin; editingDestination = !origin; query = ""; searchError = nil; focused = true
+        editingOrigin = origin; editingDestination = !origin; showingItinerary = false; query = ""; searchError = nil; focused = true
         search.setContext(searchContext)
     }
     private func resolve(text: String, completion: MKLocalSearchCompletion? = nil) {
@@ -263,24 +256,8 @@ struct JourneyPlanningView: View {
         else { planner.setDestination(place, metadata: model.metadata, currentLocation: location.usableCoordinate) }
         editingOrigin = false; editingDestination = planner.destination == nil; query = ""
         search.cancel()
+        if !planner.options.isEmpty, !editingDestination, !planner.started { collapse() }
         if planner.destination != nil, planner.origin == nil { edit(origin: true) }
-    }
-}
-
-private struct JourneyMapPreviewView: View {
-    @Environment(\.liveSettings) private var live
-    @ObservedObject var model: TransitAppModel
-    @ObservedObject var planner: JourneyPlannerModel
-    var body: some View {
-        if let option = planner.selected {
-            if let ride = option.rides.first { JourneyBoardingView(model: model, ride: ride) }
-            else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(live.text("步行即可抵達"), systemImage: "figure.walk").liveFont(.title3, weight: .semibold)
-                    Text(option.walkingTimeLabel).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
     }
 }
 
@@ -395,7 +372,7 @@ private struct BoardingVehicleRow: View {
                 Label(tracking ? "追蹤中" : "追蹤", systemImage: "scope").liveFont(.caption)
                     .foregroundStyle(tracking ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
             }.frame(minHeight: 48).padding(.vertical, 4 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityHint("點一下追蹤這輛公車")
+        }.buttonStyle(.plain).accessibilityHint(tracking ? "停止追蹤" : "點一下追蹤這輛公車")
             .accessibilityValue(tracking ? "追蹤中" : selected ? "已選擇" : "")
             .accessibilityIdentifier("boarding-vehicle-" + approach.vehicle.plate)
     }
@@ -500,72 +477,46 @@ struct JourneyOptionsView: View {
     @ObservedObject var planner: JourneyPlannerModel
     let collapse: () -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(alignment: .leading, spacing: 8) {
             if planner.planning || model.loading {
-                HStack(spacing: 12) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 16 * CGFloat(live.appearance.spacingScale))
+                HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message { Text(message).liveFont(.subheadline).foregroundStyle(.secondary) }
             ForEach(planner.options) { option in
                 Button { planner.select(option); collapse() } label: {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(spacing: 8) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 6) {
                             if option.walkingOnly { Label(live.text("步行即可"), systemImage: "figure.walk").liveFont(.headline) }
                             else {
-                                ForEach(option.rides) { ride in RouteBadge(name: ride.route.name) }
-                                Text(option.rides.count == 1 ? "直達" : "轉乘 1 次").liveFont(.subheadline, weight: .medium)
-                            }
-                            Spacer(minLength: 0)
-                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
-                        }
-                        if let first = option.rides.first, let last = option.rides.last {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text("上車 · \(first.boarding.name)").liveFont(.subheadline, weight: .semibold).lineLimit(2)
-                                Spacer()
-                                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                                    Text(BoardingGuide(ride: first, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).arrivalShortLabel)
-                                        .liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                                ForEach(Array(option.rides.enumerated()), id: \.element.id) { index, ride in
+                                    if index > 0 { Image(systemName: "arrow.right").liveFont(.caption).foregroundStyle(.secondary) }
+                                    RouteBadge(name: ride.route.name)
                                 }
                             }
-                            Text("下車 · \(last.alighting.name)").liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer(minLength: 4)
+                            if let first = option.rides.first {
+                                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                                    Text(BoardingGuide(ride: first, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).arrivalShortLabel)
+                                        .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                                }
+                            }
+                            Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
                         }
-                        HStack {
-                            Text(option.walkingTimeLabel).liveFont(.caption).foregroundStyle(.secondary)
-                            if option.id == planner.selectedID && planner.checkingWalks { ProgressView().controlSize(.small) }
+                        if let first = option.rides.first, let last = option.rides.last {
+                            Text(first.boarding.name + " → " + last.alighting.name)
+                                .liveFont(.subheadline).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange) }
-                    }.padding(.vertical, 16 * CGFloat(live.appearance.spacingScale)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text(option.walkingTimeLabel + (option.rides.count > 1 ? " · 轉乘 1 次" : ""))
+                            .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
+                    }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading)
                 }.buttonStyle(.plain).accessibilityIdentifier("journey-option-" + option.id)
                 Divider()
             }
-            if planner.selected != nil {
-                DisclosureGroup("查看步行與乘車詳情") {
-                    JourneyItineraryView(model: model, planner: planner)
-                }.liveFont(.subheadline)
-            }
-            if planner.destination != nil {
+            if planner.options.isEmpty, planner.destination != nil, !planner.planning {
                 Button { planner.openAppleTransit() } label: {
-                                    Label(live.text("其他交通方式"), systemImage: "map").liveFont(.subheadline).frame(minHeight: 44)
+                    Label(live.text("其他交通方式"), systemImage: "map").liveFont(.subheadline).frame(minHeight: 44)
                 }
-            }
-        }
-    }
-}
-
-private struct JourneyStartButton: View {
-    @Environment(\.liveSettings) private var live
-    @ObservedObject var model: TransitAppModel
-    @ObservedObject var planner: JourneyPlannerModel
-    let begin: () -> Void
-    var body: some View {
-        if let option = planner.selected {
-            if option.walkingOnly {
-                Button(action: begin) {
-                    Label(live.text("開始步行"), systemImage: "figure.walk")
-                        .liveFont(.body, weight: .semibold).frame(maxWidth: .infinity, minHeight: 48)
-                }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
-                    .disabled(planner.planning || planner.checkingWalks || option.walkIssue != nil)
-            } else {
-                JourneyWaitingActions(model: model, planner: planner, index: 0, board: begin)
             }
         }
     }

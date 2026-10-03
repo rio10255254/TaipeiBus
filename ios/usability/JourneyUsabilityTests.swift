@@ -40,6 +40,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(second.value as? String, "追蹤中"); capture("track-second")
         second.tap(); XCTAssertEqual(second.value as? String, "已選擇")
         second.tap(); XCTAssertEqual(second.value as? String, "追蹤中")
+        button("journey-options").tap(); button("返回地圖").tap()
+        XCTAssertEqual(second.value as? String, "追蹤中"); capture("tracking-after-options-return")
         button("journey-board").tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 5)); capture("on-board")
         button("返回等車").tap()
@@ -70,7 +72,10 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 10)); button("搜尋目的地").tap()
         chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
-        XCTAssertTrue(app.navigationBars["搭車方案"].exists)
+        XCTAssertTrue(app.navigationBars["內湖站"].exists)
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
+        XCTAssertEqual(options.count, 3)
+        for index in 0..<options.count { XCTAssertTrue(options.element(boundBy: index).isHittable, "All options must fit without scrolling") }
         capture("choose-a-route")
         firstOption.tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
@@ -87,15 +92,15 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         app.textFields["journey-search-field"].tap(); app.textFields["journey-search-field"].typeText("xyzqzz")
         capture("edit-destination")
         button("取消").tap()
-        XCTAssertTrue(app.navigationBars["搭車方案"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.staticTexts["內湖站"].exists)
+        XCTAssertTrue(app.navigationBars["內湖站"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.navigationBars["內湖站"].exists)
         button("更改").tap()
         let field = app.textFields["journey-search-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("西門町")
         let west = app.staticTexts["西門町"].firstMatch
         XCTAssertTrue(west.waitForExistence(timeout: 20)); west.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
-        XCTAssertTrue(app.staticTexts["西門町"].exists); capture("changed-destination")
+        XCTAssertTrue(app.navigationBars["西門町"].exists); capture("changed-destination")
     }
     func testLargerTextKeepsTheMainActionsVisible() throws {
         launch(["--preview-boarding-fixture", "--usability-fixture",

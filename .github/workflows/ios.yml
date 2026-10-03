@@ -361,7 +361,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
             -skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
@@ -373,7 +373,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability-no-location.xcresult" \
             -only-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
-            -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test-without-building \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-no-location.log"
       - name: Export native walkthrough screenshots
         if: always() && github.event_name == 'workflow_dispatch' && inputs.preview_scope == 'usability'
