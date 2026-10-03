@@ -1,23 +1,23 @@
 # TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
-更新：2026-10-03。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。私人儲存庫的製作時間與預覽檔案會計入 GitHub Actions 用量，與 GitHub Releases 的成品存放空間分開計算。
+更新：2026-10-03。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
 ## 目前進度
 
 | 項目 | 狀態／處理方式 |
 | --- | --- |
 | 原生 iPhone App | SwiftUI、CoreLocation、MapLibre Native／Metal；優先適配 iPhone 17，最低 iOS 17 |
-| 版本 | `0.4.1` 已通過原生編譯；最近確認成功加入內部群組的是 `0.4.0 (8.1.0)`；新版本尚未上傳 |
+| 版本 | `0.4.1 (10.1.0)` 已完成正式簽名、上傳及 Apple 處理，並加入既有內部測試群組 |
 | 建置工具 | 固定 Xcode 26.3；符合 2026-04-28 起 iOS 26 SDK 以上的上傳要求 |
 | App 圖示 | 已有 1024 × 1024 RGB 圖示，無透明背景 |
 | 定位／隱私 | 已有使用期間定位說明、Privacy Manifest、App 內隱私說明及政策 HTML 草稿 |
 | 網路與加密 | 使用 HTTPS；現有 Info.plist 宣告 `ITSAppUsesNonExemptEncryption=false`，若新增自訂加密須重新評估 |
 | 測試 | 49 項離線公車核心測試、3 項手動預覽時執行的官方資料測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
-| GitHub 儲存庫 | 私人 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；發布流程已獨立 |
+| GitHub 儲存庫 | 公開 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；公開前已檢查完整修改歷史、可取得的製作紀錄與歷史上傳項目，沒有發現私鑰外洩；發布流程已獨立 |
 | Apple 帳號授權 | 已設定 API 授權與發行憑證、描述檔；最近成功發佈已完成正式簽名及上傳 |
 | App 身分 | `com.rio10255254.TaipeiBus`；已建立 App Store Connect App 記錄並完成過發佈 |
-| 真機／TestFlight | `0.4.0 (8.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
-| 目前發佈阻礙 | `0.4.1` 發佈工作尚未開始製作，GitHub 提示付款失敗或支出上限；需查帳號帳務頁面 |
+| 真機／TestFlight | `0.4.1 (10.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
+| 最新發佈工作 | 改為公開後，`0.4.1` [發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37080324778)成功；已核對指定版本的回條、上傳確認及內部測試群組狀態 |
 
 SDK 要求見 [Apple 2026 上傳公告](https://developer.apple.com/news/?id=ueeok6yw)。模擬器 `.app` 和原始碼 ZIP 都不能直接安裝到 iPhone。
 
