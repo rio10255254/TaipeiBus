@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -386,6 +386,9 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'city-fleet' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/CityFleetUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')

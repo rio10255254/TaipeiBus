@@ -87,6 +87,8 @@ struct NativeBusMap: UIViewRepresentable {
         private var nearbySource: MLNShapeSource?
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
+        private var cityCamera: MLNMapCamera?
+        private var beforeCityCamera: MLNMapCamera?
         private var positionedInitialCamera = false
         private var lastAppearance: LiveSettings.Appearance?
 #if DEBUG
@@ -231,10 +233,11 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all")"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all")"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
-                if model.selectedRoute != nil { vehicles = model.routeVehicles() }
+                if model.cityFleetMode { vehicles = model.cityVehicles }
+                else if model.selectedRoute != nil { vehicles = model.routeVehicles() }
                 else if let trip = model.planner.selected {
                     let rides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : trip.rides
                     vehicles = vehicles.filter { bus in rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } }
@@ -350,6 +353,10 @@ struct NativeBusMap: UIViewRepresentable {
             updateNearbyStations()
             let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
             DispatchQueue.main.async { [weak self] in self?.model.mapCenterChanged(center) }
+            if model.cityFleetMode, model.selectedVehicleID == nil, model.selectedRouteID == nil, model.selectedStationID == nil,
+               lastFocusRevision == model.focusRevision {
+                cityCamera = savedCamera(mapView.camera)
+            }
         }
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
             if !positionedInitialCamera, mapView.bounds.width > 0 {
@@ -371,6 +378,16 @@ struct NativeBusMap: UIViewRepresentable {
                     "userMarkerX": locationMarker.center.x, "userMarkerY": locationMarker.center.y,
                     "userFanAngle": locationMarker.directionAngle,
                     "stationSymbol": mapView.style?.layer(withIdentifier: "nearby-station-dots") is MLNSymbolStyleLayer]
+                state["cityMode"] = model.cityFleetMode
+                state["fleetInput"] = buses?.inputVehicleCount ?? 0
+                state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
+                state["fleetSymbols"] = buses?.symbolVehicleCount ?? 0
+                state["fleetModels"] = buses?.modelVehicleCount ?? 0
+                state["fleetEncodeMs"] = buses?.lastEncodeMilliseconds ?? 0
+                state["vehicle"] = model.selectedVehicleID ?? ""
+                if let point = buses?.testVisiblePoint(in: mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 32, dy: 32)) {
+                    state["busHitID"] = point.id; state["busHitX"] = point.point.x; state["busHitY"] = point.point.y
+                }
                 if model.stationBrowsing {
                     let visible = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 24, dy: 24)
                     let markers = mapView.visibleFeatures(in: visible, styleLayerIdentifiers: Set(["nearby-station-dots"]))
@@ -407,6 +424,7 @@ struct NativeBusMap: UIViewRepresentable {
             case .vehicle(let id):
                 guard let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else { return }
                 let position = buses?.pose(id: id, time: CACurrentMediaTime(), now: Date())?.coordinate ?? bus.coordinate
+                if model.cityFleetMode, cityCamera == nil { cityCamera = savedCamera(map.camera) }
                 // A panel can resize during the initial camera animation. Reapply
                 // vehicle framing immediately once the new viewport is laid out.
                 let animate = animated && !reduceMotion
@@ -425,7 +443,24 @@ struct NativeBusMap: UIViewRepresentable {
                 if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
                 fit(coordinates, map: map)
             case .journey(let coordinates): fit(coordinates, map: map)
+            case .cityOverview:
+                if beforeCityCamera == nil { beforeCityCamera = savedCamera(map.camera) }
+                cityCamera = nil
+                let points = model.cityVehicles.map(\.coordinate)
+                let defaults = [Coordinate(latitude: 24.99, longitude: 121.43), Coordinate(latitude: 25.15, longitude: 121.68)]
+                fit(points.isEmpty ? defaults : points, map: map)
+                let camera = map.camera; camera.pitch = 0; camera.heading = 0
+                map.setCamera(camera, animated: false)
+                cityCamera = savedCamera(map.camera)
+            case .returnToCity:
+                if let cityCamera { map.setCamera(savedCamera(cityCamera), animated: false) }
+            case .leaveCity:
+                if let beforeCityCamera { map.setCamera(savedCamera(beforeCityCamera), animated: false) }
+                cityCamera = nil; beforeCityCamera = nil
             }
+        }
+        private func savedCamera(_ camera: MLNMapCamera) -> MLNMapCamera {
+            MLNMapCamera(lookingAtCenter: camera.centerCoordinate, altitude: camera.altitude, pitch: camera.pitch, heading: camera.heading)
         }
 
         private func showPoint(_ point: Coordinate, altitude: Double, heading: Double, pitch: Double,

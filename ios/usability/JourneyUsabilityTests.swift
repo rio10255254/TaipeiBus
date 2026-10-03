@@ -396,6 +396,65 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
     }
 }
 
+final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
+    var map: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func camera() -> [String: Any] {
+        let probe = app.staticTexts["map-camera-state"]
+        let text = probe.exists ? probe.label : map.value as? String ?? ""
+        guard let data = text.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
+    func wait(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 90), .completed, description + String(describing: camera()))
+    }
+    func testDenseFleetZoomTrackingAndReturn() {
+        launch(["--test-map-controls", "--city-fleet-fixture", "--usability-fixture"])
+        wait("Fixture was received") { ($0["fleetInput"] as? Int) == 2500 }
+        let local = camera()
+        button("city-fleet-toggle").tap()
+        wait("All 2500 vehicles fit without the old 240-vehicle cutoff") {
+            ($0["cityMode"] as? Bool) == true && ($0["fleetVisible"] as? Int) == 2500 &&
+            ($0["fleetSymbols"] as? Int) == 2500 && ($0["fleetModels"] as? Int) == 0
+        }
+        capture("city-2500-direction-symbols-stress")
+        XCTAssertLessThan(camera()["fleetEncodeMs"] as? Double ?? 1000, 50)
+        let overview = camera()
+        XCTAssertNotNil(overview["busHitID"])
+        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: overview["busHitX"] as? Double ?? -10,
+            dy: overview["busHitY"] as? Double ?? -10)).tap()
+        wait("Selecting a small symbol focuses a 3D bus while keeping the entire fleet available") {
+            !($0["vehicle"] as? String ?? "").isEmpty && ($0["pitch"] as? Double ?? 0) > 50 &&
+            ($0["fleetModels"] as? Int ?? 0) > 0 && ($0["fleetInput"] as? Int) == 2500
+        }
+        capture("city-selected-3d-bus-stress")
+        button("關閉選取").tap()
+        wait("Return to the exact previous city view") {
+            ($0["vehicle"] as? String ?? "") == "" &&
+            abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.1 &&
+            abs(($0["latitude"] as? Double ?? 99) - (overview["latitude"] as? Double ?? 0)) < 0.0001 &&
+            abs(($0["longitude"] as? Double ?? 99) - (overview["longitude"] as? Double ?? 0)) < 0.0001
+        }
+        capture("city-returned-to-overview-stress")
+        button("city-fleet-toggle").tap()
+        wait("Leaving the city restores the local viewport") {
+            ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.1
+        }
+    }
+    func testActualOfficialFleetInTheCityView() {
+        launch(["--test-map-controls"])
+        wait("Actual official fleet is ready") { ($0["fleetInput"] as? Int ?? 0) > 0 }
+        button("city-fleet-toggle").tap()
+        wait("Actual city fleet uses visible direction symbols") {
+            ($0["cityMode"] as? Bool) == true && ($0["fleetSymbols"] as? Int ?? 0) > 0 && ($0["zoom"] as? Double ?? 99) < 15
+        }
+        capture("city-official-live-fleet")
+        XCTAssertFalse(app.staticTexts["2500 輛壓力測試資料"].exists)
+        let details = XCTAttachment(string: String(describing: camera()))
+        details.name = "city-render-counts-and-encode-cost"; details.lifetime = .keepAlways; add(details)
+    }
+}
+
 final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
     func testManualOriginStillWorksWhenLocationIsDenied() throws {
         launch()

@@ -30,7 +30,7 @@ struct TransitHomeView: View {
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil }
     private var nearbyStations: [Station] {
-        guard live.display.nearbyStops, !hasSelection, let position = location.usableCoordinate, position.isInServiceArea else { return [] }
+        guard live.display.nearbyStops, !model.cityFleetMode, !hasSelection, let position = location.usableCoordinate, position.isInServiceArea else { return [] }
         return model.metadata.stations.values.filter { $0.coordinate.distance(to: position) <= 800 }
             .sorted { $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position) }.prefix(2).map { $0 }
     }
@@ -56,6 +56,15 @@ struct TransitHomeView: View {
                         else { Task { await model.refresh() } }
                     }
                     Spacer(minLength: 0)
+                    if planner.selected == nil {
+                        Button { model.toggleCityFleet() } label: {
+                            Label(model.cityFleetMode ? "全城 \(model.cityVehicles.count)" : "全城", systemImage: "globe.asia.australia.fill")
+                                .liveFont(.subheadline, weight: .medium).padding(.horizontal, 12).frame(minHeight: 46)
+                        }
+                        .phoneGlass(in: Capsule()).accessibilityIdentifier("city-fleet-toggle")
+                        .accessibilityLabel(model.cityFleetMode ? "離開全城公車" : "查看全城公車")
+                        .accessibilityValue(model.cityFleetMode ? "已開啟" : "已關閉")
+                    }
                     Button { showInformation = true } label: {
                         Image(systemName: "info.circle").liveFont(.title3).frame(width: 46, height: 46)
                     }
@@ -254,11 +263,12 @@ struct TransitHomeView: View {
                 lastLocationFocus = position; model.focusMap(.userLocation)
             }
             if let position = location.displayCoordinate, position.isInServiceArea, !hasSelection,
-               model.userMapMode == .free, !model.stationBrowsing, !model.mapWasMoved, lastLocationFocus != position {
+               model.userMapMode == .free, !model.cityFleetMode, !model.stationBrowsing, !model.mapWasMoved, lastLocationFocus != position {
                 lastLocationFocus = position; model.focusMap(.coordinate(position))
             }
         }
         .onChange(of: planner.mapRevision) { _, _ in
+            if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
             lastJourneyOptionID = planner.selectedID; lastJourneyStep = planner.currentStep

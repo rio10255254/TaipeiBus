@@ -15,6 +15,9 @@ enum MapFocus {
     case route(String)
     case vehicle(String)
     case journey([Coordinate])
+    case cityOverview
+    case returnToCity
+    case leaveCity
 }
 
 enum UserMapMode: String { case free, north, heading }
@@ -57,6 +60,7 @@ final class TransitAppModel: ObservableObject {
     private var boardedDuration: (optionID: String, duration: JourneyDuration)?
     @Published var direction = "0"
     @Published var following = false
+    @Published private(set) var cityFleetMode = false
     @Published var highlightVehicle = true
     @Published var sheetDetent: PresentationDetent = .height(330)
     @Published var focus: MapFocus?
@@ -87,6 +91,7 @@ final class TransitAppModel: ObservableObject {
     private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
     private var previewSelectionApplied = false
+    private var cityFixtureTask: Task<Void, Never>?
     @Published private(set) var previewNotice: String?
 #endif
 
@@ -223,6 +228,7 @@ final class TransitAppModel: ObservableObject {
     }
     func stopUserTracking() { userMapMode = .free }
     func cycleUserTracking() {
+        cityFleetMode = false
         let next: UserMapMode = userMapMode == .north ? .heading : .north
         if planner.selected == nil { clearSelection() }
         following = false; walkingMapIndex = nil
@@ -295,6 +301,20 @@ final class TransitAppModel: ObservableObject {
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
+    func toggleCityFleet() {
+        if cityFleetMode {
+            cityFleetMode = false; clearSelection(); focusMap(.leaveCity)
+        } else {
+            clearSelection(); stationBrowsing = false; cityFleetMode = true
+            focusMap(.cityOverview)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    func leaveCityForJourney() { cityFleetMode = false }
+    var cityVehicles: [BusVehicle] {
+        let now = Date()
+        return snapshot.vehicles.filter { $0.hasReliablePosition(at: now) }
+    }
     func changeRouteVariant(_ variant: BusRoute?) {
         guard let selected = selectedRoute else { return }
         let route = variant ?? metadata.parents[selected.parentID] ?? selected
@@ -306,8 +326,10 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
+        let returningToCity = cityFleetMode && (selectedVehicleID != nil || selectedRouteID != nil || selectedStationID != nil)
         selectedVehicleID = nil; selectedRouteID = nil; allRouteVariants = true; selectedStationID = nil; following = false
         sheetDetent = .height(330)
+        if returningToCity { focusMap(.returnToCity) }
     }
     func toggleFavorite(_ station: Station) {
         if favorites.contains(station.id) { favorites.remove(station.id) } else { favorites.insert(station.id) }
@@ -455,7 +477,19 @@ final class TransitAppModel: ObservableObject {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
         }
-        if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
+        if arguments.contains("--city-fleet-fixture") {
+            previewSelectionApplied = true
+            previewNotice = "2500 輛壓力測試資料"
+            updateCityFixture(tick: 0)
+            cityFixtureTask = Task { [weak self] in
+                var tick = 0
+                while !Task.isCancelled {
+                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                    guard let self, self.isActive else { return }
+                    tick += 1; self.updateCityFixture(tick: tick)
+                }
+            }
+        } else if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
             selectStation(station); previewSelectionApplied = true
         } else if let name = value(after: "--preview-route"), let result = metadata.routeCatalog.search(name).first {
             selectRoute(result.route, direction: value(after: "--preview-direction") ?? "0", variantOnly: result.matchedVariant != nil)
@@ -507,6 +541,25 @@ final class TransitAppModel: ObservableObject {
            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
         }
+    }
+
+    private func updateCityFixture(tick: Int) {
+        let now = Date()
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Taipei"); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let timestamp = formatter.string(from: now)
+        let rows: [[String: Any]] = (0..<2500).map { index in
+            let latitude = 25.015 + Double(index / 50) * 0.0015
+            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick % 25) * 0.000025
+            return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY", "GoBack": "0",
+                    "Latitude": latitude, "Longitude": longitude, "Azimuth": 90, "Speed": 5,
+                    "DutyStatus": "1", "BusStatus": "0", "CarType": "1", "DataTime": timestamp]
+        }
+        let payload: [String: Any] = ["EssentialInfo": ["UpdateTime": timestamp], "BusInfo": rows]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let decoded = try? FeedDecoder.vehicles(data, metadata: TransitMetadata(), previous: snapshot.vehicles, now: now) else { return }
+        snapshot = TransitSnapshot(vehicles: decoded.vehicles, sourceUpdatedAt: now, receivedAt: now,
+                                   estimates: EstimateFeed(), revision: snapshot.revision + 1)
     }
     func markJourneyPreviewReady() {
         let arguments = ProcessInfo.processInfo.arguments

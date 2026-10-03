@@ -4,6 +4,7 @@ require_relative 'apple_client'
 # repository secret and the Apple review record, never in logs or artifacts.
 abort 'Choose store-prepare explicitly.' unless ENV['BUS_PUBLISH_TESTFLIGHT'] == 'true'
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
+abort 'This is a TestFlight-only experiment; public App Store preparation is disabled.' if config['distribution'] == 'testflight-only'
 copy = JSON.parse(File.read(File.join(__dir__, 'app-store.zh-Hant.json')))
 contact = JSON.parse(ENV.fetch('APP_STORE_REVIEW_CONTACT'))
 fields = %w[contactFirstName contactLastName contactPhone contactEmail]
