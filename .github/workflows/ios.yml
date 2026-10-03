@@ -244,7 +244,7 @@ jobs:
           targets = {
               '內湖站': (25.08,25.09,121.59,121.60), '内湖站': (25.08,25.09,121.59,121.60),
               '台北 內湖站': (25.08,25.09,121.59,121.60),
-              '內湖捷運站': (25.08,25.09,121.59,121.60), '我要去內湖站': (25.08,25.09,121.59,121.60),
+              '內內湖月台運站': (25.08,25.09,121.59,121.60), '我要去內湖站': (25.08,25.09,121.59,121.60),
               'Neihu Station': (25.08,25.09,121.59,121.60), '七張站': (24.975,24.985,121.535,121.545),
               '南港展覽館站': (25.05,25.06,121.61,121.625), '東湖站': (25.06,25.075,121.60,121.625),
               '港墘站': (25.075,25.085,121.57,121.585), '西門站': (25.038,25.047,121.503,121.514),
@@ -275,7 +275,7 @@ jobs:
           sim terminate "$device" com.example.TaipeiBus
           fi
           if [ '${{ inputs.preview_scope }}' = 'live-settings' ]; then
-          launch_ready --preview-live-update --preview-journey-search --preview-search-query '湖捷'
+          launch_ready --preview-live-update --preview-journey-search --preview-search-query '內湖月台'
           fi
           if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ] && [ '${{ inputs.preview_scope }}' != 'live-settings' ]; then
           if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then

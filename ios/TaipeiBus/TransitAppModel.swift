@@ -288,7 +288,7 @@ final class TransitAppModel: ObservableObject {
         guard arguments.contains("--preview-live-update"), !metadata.stations.isEmpty, liveSettings.revision >= 1,
               let index = arguments.firstIndex(of: "--preview-capture"), arguments.indices.contains(index + 1),
               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        let aliases = metadata.stationSearch.search("湖捷", near: .taipei, vocabulary: vocabulary)
+        let aliases = metadata.stationSearch.search("內湖月台", near: .taipei, vocabulary: vocabulary)
         let data: [String: Any] = [
             "token": arguments[index + 1], "pid": ProcessInfo.processInfo.processIdentifier,
             "content_revision": liveSettings.revision, "accent": liveSettings.appearance.accentColor,
@@ -410,7 +410,7 @@ final class TransitAppModel: ObservableObject {
         var failure: String?
         let queries: [String]
         switch group {
-        case "expanded": queries = ["內湖捷運站", "我要去內湖站", "Neihu Station", "七張站", "南港展覽館站"]
+        case "expanded": queries = ["內內湖月台運站", "我要去內湖站", "Neihu Station", "七張站", "南港展覽館站"]
         case "landmarks": queries = ["臺北車站", "臺北101", "台大", "三總", "小巨蛋"]
         case "addresses": queries = ["忠孝東路四段100號", "内湖站", "台北 內湖站"]
         default: queries = ["內湖站", "東湖站", "港墘站", "西門站"]
