@@ -214,7 +214,7 @@ struct NativeBusMap: UIViewRepresentable {
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision)"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all")"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.selectedRoute != nil { vehicles = model.routeVehicles() }
@@ -236,7 +236,8 @@ struct NativeBusMap: UIViewRepresentable {
                 }
                 routeSource?.shape = features.isEmpty ? nil : MLNShapeCollectionFeature(shapes: features)
                 var displayedWalks = model.planner.selected?.walks ?? []
-                if model.planner.started {
+                if let index = model.walkingMapIndex, displayedWalks.indices.contains(index) { displayedWalks = [displayedWalks[index]] }
+                else if model.planner.started {
                     if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
                     else { displayedWalks = [] }
                 }
@@ -270,7 +271,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             // Opening a sheet changes the viewport and can cancel an in-flight bounds animation.
             // Refit a selected route after that change; keep ordinary updates from resetting the camera.
-            let refitRoute = viewportChanged && (model.selectedRoute != nil || model.planner.selected != nil) && model.selectedVehicleID == nil
+            let refitRoute = viewportChanged && !model.mapWasMoved && (model.selectedRoute != nil || model.planner.selected != nil) && model.selectedVehicleID == nil
             if (lastFocusRevision != model.focusRevision || refitRoute), map.bounds.width > 0 {
                 focus(model.focus, map: map)
                 lastFocusRevision = model.focusRevision

@@ -16,6 +16,8 @@ struct TransitHomeView: View {
     @State private var pendingJourneyDetail = false
     @State private var bottomControlsHeight: CGFloat = 210
     @State private var lastLocationFocus: Coordinate?
+    @State private var lastJourneyOptionID: String?
+    @State private var lastJourneyStep: JourneyStep?
     @StateObject private var selectionOverlay = MapSelectionOverlay()
 
     init(model: TransitAppModel) {
@@ -244,13 +246,21 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             let coordinates = planner.mapCoordinates
+            let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
+            lastJourneyOptionID = planner.selectedID; lastJourneyStep = planner.currentStep
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
                 } ?? false
-                if !sameVehicle {
+                if let index = model.walkingMapIndex, !userChangedJourney,
+                   planner.selected?.walks.indices.contains(index) == true {
+                    if !model.mapWasMoved { model.showWalkOnMap(index) }
+                } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
+                    model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
+                } else if !sameVehicle {
+                    model.clearWalkingMap()
                     model.clearSelection()
-                    if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                    if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
                 }
             }
 #if DEBUG
@@ -291,6 +301,9 @@ struct TransitHomeView: View {
 
     private func restoreJourneyMap() {
         guard planner.selected != nil else { return }
+        if let index = model.walkingMapIndex {
+            model.clearSelection(); model.showWalkOnMap(index); return
+        }
         if let bus = model.selectedVehicle, let ride = planner.activeRide,
            bus.routeID == ride.route.id, bus.direction == ride.direction {
             if model.following { model.focusMap(.vehicle(bus.id)) }

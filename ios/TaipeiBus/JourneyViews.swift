@@ -440,12 +440,12 @@ private struct JourneyWaitingActions: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 12) {
-                Button { planner.navigateWalk(index) } label: {
+                Button { model.showWalkOnMap(index) } label: {
                     Label(live.text("走到站牌"), systemImage: "figure.walk")
                         .liveFont(.subheadline, weight: .semibold).frame(maxWidth: .infinity, minHeight: 44)
                 }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                     .disabled(planner.selected?.walkIssue != nil)
-                    .accessibilityHint("開啟 Apple 地圖步行導航")
+                    .accessibilityHint("在目前地圖查看步行路線")
                     .accessibilityIdentifier("journey-walk-to-stop")
                 Button(action: board) {
                     Text(live.text("已上車")).liveFont(.subheadline, weight: .semibold)
@@ -641,10 +641,10 @@ struct JourneyGuideCard: View {
                             Text(option.walks[index].timeLabel).liveFont(.subheadline).foregroundStyle(.secondary)
                         }
                         HStack(spacing: 12) {
-                            Button { if !planner.started { planner.begin() }; planner.navigateWalk(index) } label: {
-                                Label(live.text("步行導航"), systemImage: "figure.walk")
+                            Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index) } label: {
+                                Label(live.text("看步行路線"), systemImage: "figure.walk")
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                            }.buttonStyle(.bordered).buttonBorderShape(.capsule).accessibilityHint("開啟 Apple 地圖步行導航")
+                            }.buttonStyle(.bordered).buttonBorderShape(.capsule).accessibilityHint("在目前地圖查看步行路線")
                             Button(live.text("已抵達")) { if !planner.started { planner.begin() }; planner.advance() }
                                 .frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
                                 .accessibilityIdentifier("journey-arrive")

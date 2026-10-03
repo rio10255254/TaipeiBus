@@ -26,7 +26,7 @@ struct JourneyOption: Identifiable, Sendable {
     var walkingTimeLabel: String {
         guard verified else { return "步行路線待確認" }
         let minutes = Int(ceil(walks.compactMap(\.duration).reduce(0, +) / 60))
-        return "步行共 \(max(1, minutes)) 分"
+        return "步行 \(max(1, minutes)) 分"
     }
     var coordinates: [Coordinate] {
         rides.flatMap(\.coordinates) + walks.flatMap(\.coordinates) + walks.flatMap { [$0.from, $0.to] }

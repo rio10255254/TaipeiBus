@@ -196,7 +196,16 @@ final class TransitAppModel: ObservableObject {
         if direction != bus.direction { direction = bus.direction }
     }
 
+    @Published private(set) var walkingMapIndex: Int?
+    func clearWalkingMap() { walkingMapIndex = nil }
     func focusMap(_ target: MapFocus) { mapWasMoved = false; focus = target; focusRevision += 1 }
+    func showWalkOnMap(_ index: Int) {
+        guard let option = planner.selected, option.walks.indices.contains(index) else { return }
+        let walk = option.walks[index]
+        walkingMapIndex = index
+        following = false
+        focusMap(.journey(walk.coordinates.isEmpty ? [walk.from, walk.to] : walk.coordinates))
+    }
     func selectStation(_ station: Station) {
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
         defaults.set(recentStationIDs, forKey: "recentStations")
@@ -261,6 +270,7 @@ final class TransitAppModel: ObservableObject {
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
+        walkingMapIndex = nil
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
         selectedStationID = nil; direction = vehicle.direction; following = true
         focusMap(.vehicle(vehicle.id))
