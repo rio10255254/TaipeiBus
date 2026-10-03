@@ -261,7 +261,7 @@ struct NativeBusMap: UIViewRepresentable {
             // Station dots remain tappable; their names must not cover the vehicle's anchored information.
             let hasVehicle = model.selectedVehicle != nil
             if lastStationBrowsing != model.stationBrowsing {
-                let minimumZoom = model.stationBrowsing ? 9.0 : 15.7
+                let minimumZoom: Float = model.stationBrowsing ? 9.0 : 15.7
                 map.style?.layer(withIdentifier: "nearby-station-dots")?.minimumZoomLevel = minimumZoom
                 map.style?.layer(withIdentifier: "nearby-station-names")?.minimumZoomLevel = minimumZoom
                 (map.style?.layer(withIdentifier: "nearby-station-dots") as? MLNCircleStyleLayer)?.circleRadius =
