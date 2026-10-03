@@ -362,7 +362,7 @@ jobs:
           gem install xcodeproj -v 1.27.0 --no-document --user-install
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
-          selection=()
+          selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
           if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
           fi
@@ -370,7 +370,6 @@ jobs:
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
-            -skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
             "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
