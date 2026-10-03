@@ -191,6 +191,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["journey-total-duration"].label.contains("全程約"))
         button("journey-all-vehicles").tap()
         XCTAssertTrue(button("boarding-vehicle-TEST-04").waitForExistence(timeout: 10))
+        if !button("boarding-vehicle-TEST-04").isHittable { app.swipeUp() }
+        XCTAssertTrue(button("boarding-vehicle-TEST-04").isHittable)
         capture("all-departed-arriving-vehicles")
         button("journey-vehicles-done").tap()
         button("journey-board").tap()
@@ -199,7 +201,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         let pick = button("onboard-choose-TEST-03")
         XCTAssertTrue(pick.waitForExistence(timeout: 5)); pick.tap()
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
-        XCTAssertTrue(app.staticTexts["journey-next-stop"].exists || app.otherElements["journey-next-stop"].exists)
+        XCTAssertTrue(app.staticTexts["journey-next-stop"].label.contains("下一站"))
+        XCTAssertTrue(app.staticTexts["journey-alighting-time"].label.contains("約"))
         capture("onboard-next-stop-and-alighting-time")
         button("journey-ride-stops").tap()
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 5))
@@ -284,6 +287,11 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-walk-to-stop").isHittable)
         XCTAssertTrue(button("boarding-vehicle-TEST-03").isHittable)
         capture("waiting-larger-text")
+        button("boarding-vehicle-TEST-01").tap(); button("journey-board").tap()
+        XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 5))
+        XCTAssertTrue(button("journey-alight").isHittable)
+        XCTAssertTrue(button("journey-ride-stops").isHittable)
+        capture("onboard-larger-text")
     }
 }
 

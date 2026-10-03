@@ -495,7 +495,10 @@ private struct OnboardStopsView: View {
                                     .liveFont(.subheadline, weight: .semibold).monospacedDigit().fixedSize()
                             }.frame(minHeight: 40).accessibilityIdentifier("onboard-stop-" + stop.id)
                         }
-                    } header: { Text("這輛車的沿途預估") } footer: { Text("時間依行駛情況更新，塞車與停靠可能影響預估。") }
+                    } header: { Text("這輛車的沿途預估") } footer: {
+                        Text(bus.flatMap { model.arrivalPrediction($0, stopID: ride.alighting.id, at: timeline.date, onboard: true) }?.evidenceLabel
+                             ?? "時間依行駛情況更新，塞車與停靠可能影響預估。")
+                    }
                 }.listStyle(.insetGrouped)
             }
             .navigationTitle("沿途站牌").navigationBarTitleDisplayMode(.inline)
