@@ -340,7 +340,7 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) {
-            updateNearbyStations(force: true)
+            updateNearbyStations()
             let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
             DispatchQueue.main.async { [weak self] in self?.model.mapCenterChanged(center) }
         }

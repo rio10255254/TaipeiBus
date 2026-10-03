@@ -217,8 +217,10 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(button("journey-board").isHittable); capture("walking-on-the-same-map")
         button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
-        let externalWalk = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "步行導航到")).firstMatch
-        XCTAssertTrue(externalWalk.waitForExistence(timeout: 5)); externalWalk.tap()
+        capture("full-itinerary")
+        XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
+        let externalWalk = button("journey-external-walk-0")
+        XCTAssertTrue(externalWalk.waitForExistence(timeout: 10)); externalWalk.tap()
         let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
         XCTAssertTrue(maps.wait(for: .runningForeground, timeout: 15))
         capture("walking-in-apple-maps")

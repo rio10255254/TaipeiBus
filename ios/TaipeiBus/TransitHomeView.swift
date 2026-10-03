@@ -12,6 +12,7 @@ struct TransitHomeView: View {
     @State private var showDetails = false
     @State private var showInformation = false
     @State private var showJourney = false
+    @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
     @State private var pendingJourneyDetail = false
     @State private var bottomControlsHeight: CGFloat = 210
@@ -131,11 +132,11 @@ struct TransitHomeView: View {
                             .background(.regularMaterial, in: Capsule())
                     }
                     if planner.started || planner.selected?.walkingOnly == true {
-                        JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
+                        JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
-                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .height(460); showJourney = true }
+                        JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .height(460); showJourney = true }
                     } else {
-                        Button { journeyDetent = .large; showJourney = true } label: {
+                        Button { showJourneyItinerary = false; journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "magnifyingglass").foregroundStyle(Color(liveHex: live.appearance.accentColor))
                                 Text(live.text("搜尋目的地")).liveFont(.body, weight: .semibold)
@@ -238,6 +239,7 @@ struct TransitHomeView: View {
             if pendingJourneyDetail { pendingJourneyDetail = false; showDetails = true }
         }) {
             JourneyPlanningView(model: model, planner: planner, location: location,
+                                showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })

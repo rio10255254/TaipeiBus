@@ -7,6 +7,7 @@ struct JourneyPlanningView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     @ObservedObject var location: LocationService
+    @Binding var showingItinerary: Bool
     let compact: Bool
     let expand: () -> Void
     let collapse: () -> Void
@@ -16,7 +17,6 @@ struct JourneyPlanningView: View {
     @State private var query = ""
     @State private var editingOrigin = false
     @State private var editingDestination = true
-    @State private var showingItinerary = false
     @State private var resolving = false
     @State private var searchError: String?
     @State private var resolveTask: Task<Void, Never>?
@@ -552,6 +552,7 @@ struct JourneyItineraryView: View {
                         Spacer(minLength: 0)
                         Button { planner.navigateWalk(index) } label: { Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44) }
                             .accessibilityLabel("步行導航到\(index < option.rides.count ? option.rides[index].boarding.name : planner.destination?.name ?? "目的地")")
+                            .accessibilityIdentifier("journey-external-walk-\(index)")
                     }
                     if index < option.rides.count {
                         let ride = option.rides[index]
