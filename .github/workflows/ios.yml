@@ -17,7 +17,7 @@ on:
       preview_scope:
         description: 'Choose which iPhone screens to capture'
         type: choice
-        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings']
+        options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings', 'usability']
         default: 'all'
       content_revision_before:
         description: 'For live-settings verification: current live content revision'
@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.sha || 'checks' }}
   cancel-in-progress: true
 
 env:
@@ -287,7 +287,7 @@ jobs:
           if [ '${{ inputs.preview_scope }}' = 'live-settings' ]; then
           launch_ready --preview-live-update --preview-journey-search --preview-search-query '內湖月台'
           fi
-          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ] && [ '${{ inputs.preview_scope }}' != 'live-settings' ]; then
+          if [ '${{ inputs.preview_scope }}' != 'routes' ] && [ '${{ inputs.preview_scope }}' != 'navigation' ] && [ '${{ inputs.preview_scope }}' != 'live-settings' ] && [ '${{ inputs.preview_scope }}' != 'usability' ]; then
           if [ '${{ inputs.preview_scope }}' != 'journey-layout' ]; then
           launch_ready
           sleep 6
@@ -348,6 +348,43 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-follow-start.png"
           sleep 32
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
+          fi
+      - name: Tap through native user journeys
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/usability/setup.rb
+          xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
+            -skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/usability-tests.log"
+      - name: Verify manual departure without location permission
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
+        run: |
+          set -euo pipefail
+          xcrun simctl privacy "$BUS_SIM_DEVICE" revoke location com.example.TaipeiBus
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            -resultBundlePath "$RUNNER_TEMP/usability-no-location.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/usability-no-location.log"
+      - name: Export native walkthrough screenshots
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.preview_scope == 'usability'
+        run: |
+          if [ -d "$RUNNER_TEMP/usability.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability.xcresult" \
+              --output-path "$RUNNER_TEMP/usability-screenshots"
+          fi
+          if [ -d "$RUNNER_TEMP/usability-no-location.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-no-location.xcresult" \
+              --output-path "$RUNNER_TEMP/usability-no-location-screenshots"
           fi
       - name: Capture live content before update
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'live-settings'
@@ -486,6 +523,17 @@ jobs:
               print('Simulator shutdown timed out.', flush=True)
           PY
       - uses: actions/upload-artifact@v4
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.preview_scope == 'usability'
+        with:
+          name: usability-screenshots
+          path: |
+            ${{ runner.temp }}/usability-screenshots
+            ${{ runner.temp }}/usability-no-location-screenshots
+            ${{ runner.temp }}/usability-tests.log
+            ${{ runner.temp }}/usability-no-location.log
+          if-no-files-found: ignore
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: iPhone17-simulator
@@ -497,5 +545,11 @@ jobs:
             ${{ runner.temp }}/ios-runtime.log
             ${{ runner.temp }}/iPhone17-live-follow.mp4
             ${{ runner.temp }}/video-record.log
+            ${{ runner.temp }}/usability.xcresult
+            ${{ runner.temp }}/usability-screenshots
+            ${{ runner.temp }}/usability-tests.log
+            ${{ runner.temp }}/usability-no-location.xcresult
+            ${{ runner.temp }}/usability-no-location-screenshots
+            ${{ runner.temp }}/usability-no-location.log
           if-no-files-found: ignore
           retention-days: 7

@@ -214,12 +214,13 @@ struct NativeBusMap: UIViewRepresentable {
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision)"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all")"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.selectedRoute != nil { vehicles = model.routeVehicles() }
-                else if let trip = model.planner.selected, !trip.walkingOnly {
-                    vehicles = vehicles.filter { bus in trip.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } }
+                else if let trip = model.planner.selected {
+                    let rides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : trip.rides
+                    vehicles = vehicles.filter { bus in rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } }
                 }
                 if reduceMotion { vehicles = vehicles.map { var bus = $0; bus.path = [bus.coordinate]; return bus } }
                 buses.ingest(vehicles, time: CACurrentMediaTime())
@@ -227,13 +228,20 @@ struct NativeBusMap: UIViewRepresentable {
                 lastMotionSetting = reduceMotion
             }
             if routeKey != lastRouteKey {
-                let paths: [[Coordinate]] = model.selectedRouteID != nil ? model.routePaths : model.planner.selected?.rides.map(\.coordinates).filter { $0.count >= 2 } ?? []
+                let tripRides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : model.planner.selected?.rides ?? []
+                let paths: [[Coordinate]] = model.selectedRouteID != nil ? model.routePaths : tripRides.map(\.coordinates).filter { $0.count >= 2 }
                 let features = paths.map { path -> MLNPolylineFeature in
                     var coordinates = path.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 routeSource?.shape = features.isEmpty ? nil : MLNShapeCollectionFeature(shapes: features)
-                let walks = (model.planner.selected?.walks ?? []).filter { $0.coordinates.count >= 2 }.map { walk -> MLNPolylineFeature in
+                var displayedWalks = model.planner.selected?.walks ?? []
+                if let index = model.walkingMapIndex, displayedWalks.indices.contains(index) { displayedWalks = [displayedWalks[index]] }
+                else if model.planner.started {
+                    if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
+                    else { displayedWalks = [] }
+                }
+                let walks = displayedWalks.filter { $0.coordinates.count >= 2 }.map { walk -> MLNPolylineFeature in
                     var coordinates = walk.coordinates.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
@@ -263,7 +271,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             // Opening a sheet changes the viewport and can cancel an in-flight bounds animation.
             // Refit a selected route after that change; keep ordinary updates from resetting the camera.
-            let refitRoute = viewportChanged && (model.selectedRoute != nil || model.planner.selected != nil) && model.selectedVehicleID == nil
+            let refitRoute = viewportChanged && !model.mapWasMoved && (model.selectedRoute != nil || model.planner.selected != nil) && model.selectedVehicleID == nil
             if (lastFocusRevision != model.focusRevision || refitRoute), map.bounds.width > 0 {
                 focus(model.focus, map: map)
                 lastFocusRevision = model.focusRevision
@@ -279,12 +287,18 @@ struct NativeBusMap: UIViewRepresentable {
                 let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
                 feature.attributes = ["name": title, "stationID": id]; features[id] = feature
             }
-            for (index, ride) in option.rides.enumerated() {
+            let visibleRides = option.rides.enumerated().filter { _, ride in
+                !model.planner.started || model.planner.activeRide?.id == ride.id
+            }
+            for (index, ride) in visibleRides {
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: "\(index == 0 ? "上車" : "轉乘") · \(ride.boarding.name)")
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
                     title: "\(index == option.rides.count - 1 ? "下車" : "轉乘") · \(ride.alighting.name)")
             }
-            if let destination = model.planner.destination { add(destination.coordinate, id: "destination", title: destination.name) }
+            if let destination = model.planner.destination,
+               model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
+                add(destination.coordinate, id: "destination", title: destination.name)
+            }
             tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: features.keys.sorted().compactMap { features[$0] })
         }
 

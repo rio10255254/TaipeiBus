@@ -16,6 +16,8 @@ struct TransitHomeView: View {
     @State private var pendingJourneyDetail = false
     @State private var bottomControlsHeight: CGFloat = 210
     @State private var lastLocationFocus: Coordinate?
+    @State private var lastJourneyOptionID: String?
+    @State private var lastJourneyStep: JourneyStep?
     @StateObject private var selectionOverlay = MapSelectionOverlay()
 
     init(model: TransitAppModel) {
@@ -117,14 +119,14 @@ struct TransitHomeView: View {
                         .accessibilityLabel(live.text("尋找我的位置與附近站牌"))
                     }
                     }
-                    if let message = location.message {
+                    if let message = location.message, !hasSelection {
                         Text(message).liveFont(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
-                    if planner.started {
+                    if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
-                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
+                        JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .height(460); showJourney = true }
                     } else {
                         Button { journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
@@ -133,6 +135,7 @@ struct TransitHomeView: View {
                                 Spacer(minLength: 0)
                                 Image(systemName: "arrow.up.right").liveFont(.subheadline, weight: .semibold).foregroundStyle(Color(liveHex: live.appearance.accentColor))
                             }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 58)
+                                .contentShape(Capsule())
                         }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                     }
                     if !nearbyStations.isEmpty, let position = location.usableCoordinate {
@@ -207,16 +210,16 @@ struct TransitHomeView: View {
 
     var body: some View {
         mapContent
-        .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
+        .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
-        .sheet(isPresented: $showSearch) {
+        .sheet(isPresented: $showSearch, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
                 .presentationDetents(hasTransitSelection ? [.height(330), .large] : [.large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
-        .sheet(isPresented: $showDetails) {
+        .sheet(isPresented: $showDetails, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
                 .presentationDetents([.height(330), .large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
@@ -230,7 +233,7 @@ struct TransitHomeView: View {
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })
-                .presentationDetents(planner.selected == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(460)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }
@@ -244,13 +247,21 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             let coordinates = planner.mapCoordinates
+            let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
+            lastJourneyOptionID = planner.selectedID; lastJourneyStep = planner.currentStep
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
                 let sameVehicle = model.selectedVehicle.map { bus in
-                    planner.selected?.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                    planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
                 } ?? false
-                if !sameVehicle {
+                if let index = model.walkingMapIndex, !userChangedJourney,
+                   planner.selected?.walks.indices.contains(index) == true {
+                    if !model.mapWasMoved { model.showWalkOnMap(index) }
+                } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
+                    model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
+                } else if !sameVehicle {
+                    model.clearWalkingMap()
                     model.clearSelection()
-                    if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+                    if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
                 }
             }
 #if DEBUG
@@ -289,6 +300,24 @@ struct TransitHomeView: View {
 #endif
     }
 
+    private func restoreJourneyMap() {
+        guard planner.selected != nil else { return }
+        if let index = model.walkingMapIndex {
+            let relevantBus = model.selectedVehicle.map { bus in
+                planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+            } ?? false
+            if !relevantBus { model.clearSelection() }
+            model.showWalkOnMap(index); return
+        }
+        if let bus = model.selectedVehicle, let ride = planner.activeRide,
+           bus.routeID == ride.route.id, bus.direction == ride.direction {
+            if model.following { model.focusMap(.vehicle(bus.id)) }
+        } else {
+            model.clearSelection()
+            let coordinates = planner.mapCoordinates
+            if !coordinates.isEmpty { model.focusMap(.journey(coordinates)) }
+        }
+    }
     private func openBrowse(_ mode: BrowseMode) {
         model.clearSelection(); model.mode = mode; model.sheetDetent = .large; showSearch = true
     }
@@ -335,7 +364,7 @@ struct PhonePressStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label.scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+        configuration.label.contentShape(Rectangle()).scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.78 : 1)
             .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
     }
