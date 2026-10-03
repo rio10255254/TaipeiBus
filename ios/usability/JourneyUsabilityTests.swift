@@ -74,7 +74,6 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         capture("choose-a-route")
         firstOption.tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
-        button("返回地圖").tap()
         XCTAssertTrue(button("journey-options").waitForExistence(timeout: 5))
         capture("selected-neihu-route")
         button("journey-walk-to-stop").tap()
@@ -121,7 +120,7 @@ final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
         let station = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "臺北車站", "台北車站")).firstMatch
         XCTAssertTrue(station.waitForExistence(timeout: 20)); station.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60)); capture("manual-origin-routes")
-        firstOption.tap(); button("返回地圖").tap()
+        firstOption.tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 5))
     }
 }

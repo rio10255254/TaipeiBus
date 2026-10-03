@@ -26,6 +26,9 @@ struct JourneyPlanningView: View {
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
     private var showingPreview: Bool { compact && !searchingPlaces && !planner.started && planner.selected != nil }
+    private var searchContext: Coordinate? {
+        planner.usingLocation ? location.usableCoordinate ?? location.displayCoordinate : planner.origin?.coordinate
+    }
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -46,7 +49,7 @@ struct JourneyPlanningView: View {
                         if planner.started {
                             JourneyItineraryView(model: model, planner: planner)
                         } else {
-                            JourneyOptionsView(model: model, planner: planner, collapse: collapse)
+                            JourneyOptionsView(model: model, planner: planner, collapse: { dismiss() })
                         }
                     }
                     }
@@ -82,7 +85,7 @@ struct JourneyPlanningView: View {
         }
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
-            search.setContext(planner.origin?.coordinate ?? location.usableCoordinate)
+            search.setContext(searchContext)
             editingDestination = planner.destination == nil
             if planner.origin == nil && planner.usingLocation {
                 planner.useLocation(location.usableCoordinate, metadata: model.metadata)
@@ -104,7 +107,7 @@ struct JourneyPlanningView: View {
             }
             searchError = nil; search.update(value)
         }
-        .onChange(of: location.revision) { _, _ in search.setContext(planner.origin?.coordinate ?? location.displayCoordinate) }
+        .onChange(of: location.revision) { _, _ in search.setContext(searchContext) }
         .onChange(of: model.liveSettings.revision) { _, _ in
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
         }
@@ -234,7 +237,7 @@ struct JourneyPlanningView: View {
         expand()
         resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
         editingOrigin = origin; editingDestination = !origin; query = ""; searchError = nil; focused = true
-        search.setContext(planner.origin?.coordinate ?? location.usableCoordinate)
+        search.setContext(searchContext)
     }
     private func resolve(text: String, completion: MKLocalSearchCompletion? = nil) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -512,8 +515,7 @@ struct JourneyOptionsView: View {
                                 Text(option.rides.count == 1 ? "直達" : "轉乘 1 次").liveFont(.subheadline, weight: .medium)
                             }
                             Spacer(minLength: 0)
-                            Image(systemName: option.id == planner.selectedID ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(option.id == planner.selectedID ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
+                            Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }
                         if let first = option.rides.first, let last = option.rides.last {
                             HStack(alignment: .firstTextBaseline) {

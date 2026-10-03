@@ -101,6 +101,7 @@ final class JourneyPlannerModel: ObservableObject {
     var arrived: Bool { started && stepIndex >= steps.count }
     var mapCoordinates: [Coordinate] {
         guard let option = selected else { return [] }
+        if arrived { return destination.map { [$0.coordinate] } ?? [] }
         guard started, let currentStep else { return option.coordinates }
         switch currentStep {
         case .walk(let index):
