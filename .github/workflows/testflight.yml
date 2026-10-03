@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'register-app-id', 'upload', 'finish-processing']
+        options: ['check-only', 'store-audit', 'store-prepare', 'store-verify', 'register-app-id', 'upload', 'finish-processing']
         default: 'check-only'
       bundle_id:
         description: 'Leave empty to use BUS_BUNDLE_ID repository variable / release config'
@@ -20,6 +20,10 @@ on:
         description: 'Exact build number from the receipt; required for finish-processing'
         type: string
         default: ''
+      order_screenshots:
+        description: 'For store-verify: put the verified feature screenshots first'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -49,7 +53,9 @@ jobs:
       BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
       BUS_FEEDBACK_EMAIL: ${{ vars.BUS_FEEDBACK_EMAIL }}
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
-      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' }}
+      APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
+      BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release source and Apple configuration
@@ -71,6 +77,40 @@ jobs:
           key.write_text(os.environ['ASC_PRIVATE_KEY'].lstrip('\ufeff').strip() + '\n')
           key.chmod(0o600)
           PY
+      - name: Read-only App Store readiness audit
+        if: inputs.operation == 'store-audit'
+        run: ruby ios/release/store_audit.rb
+      - name: Preserve redacted App Store readiness audit
+        if: inputs.operation == 'store-audit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-audit.json
+          retention-days: 7
+      - name: Prepare public App Store metadata and exact valid build
+        if: inputs.operation == 'store-prepare'
+        run: |
+          ruby -c ios/release/store_prepare.rb
+          ruby ios/release/store_prepare.rb
+      - name: Preserve public release preparation receipt
+        if: inputs.operation == 'store-prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-prepared-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-receipt.json
+          retention-days: 30
+      - name: Verify Taiwan free availability and processed store screenshots
+        if: inputs.operation == 'store-verify'
+        run: |
+          ruby -c ios/release/store_verify.rb
+          ruby ios/release/store_verify.rb
+      - name: Preserve public store verification
+        if: inputs.operation == 'store-verify'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-verified-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-verification.json
+          retention-days: 30
       - name: Register App ID only
         if: inputs.operation == 'register-app-id'
         run: ruby ios/apple-connect.rb register-app-id

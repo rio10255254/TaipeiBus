@@ -1,8 +1,21 @@
 # TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
-更新：2026-10-03。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+更新：2026-10-04。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
-## 目前進度
+## 公開 App Store 發佈
+
+正式版 `1.0.0 (23.1.0)` 已簽名上傳並完成 Apple 處理，加入既有 TestFlight 內部群組，且上架資料已指定此版本；仍需完成商店截圖及送審，才能公開下載。已設定免費、僅台灣、審核後自動發佈。公開支援及隱私頁由 GitHub Pages 的 `docs` 目錄提供：
+
+- [支援與聯絡](https://rio10255254.github.io/TaipeiBus/support.html)
+- [隱私政策](https://rio10255254.github.io/TaipeiBus/privacy.html)
+- [1.0.0 發佈回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37136630816)
+- [實際原生操作與商店截圖檢查](https://github.com/rio10255254/TaipeiBus/actions/runs/37133870399)
+
+`TestFlight` 工作流程支援 `store-audit`（唯讀）、`store-prepare`（將文案及指定有效 build 寫入可編輯版本）、`store-verify`（驗證台灣零元供應及完成處理的截圖）。`store-prepare` 必須提供 `resume_build`，審查聯絡資料來自 `APP_STORE_REVIEW_CONTACT` Secret；回條及製作紀錄不輸出私人聯絡內容。Apple 的 App 隱私權問卷仍需網站操作。
+
+商店圖片以 iPhone 17 Pro Max 真正執行 App 拍攝，1320 × 2868 RGB；公車位置和時間使用官方即時資料，僅乘客定位由模擬器提供。`app-store-features` 拍攝實際公車的 3D 跟車、搭車引導及沿途到站預估；不使用測試公車或編造到站資料。沒有即時營運車輛時應等待有效資料，不以測試資料替代。Apple API 的 `APP_IPHONE_67` 對應目前網站的 6.9 吋截圖欄位。
+
+## 先前 TestFlight 0.4.4 驗證紀錄
 
 | 項目 | 狀態／處理方式 |
 | --- | --- |
