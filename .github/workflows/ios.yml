@@ -417,6 +417,7 @@ jobs:
           PY
             )
             test -n "$BUS_STORE_VEHICLE_ROUTE"
+            export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE="$BUS_STORE_VEHICLE_ROUTE"
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
