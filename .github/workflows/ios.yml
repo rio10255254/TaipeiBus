@@ -97,11 +97,12 @@ jobs:
                   data = response.read()
               (root / f'{name}.json').write_bytes(gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data)
           with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-              list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']))
+              list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape', 'GetBusData', 'GetEstimateTime']))
           PY
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
+          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         timeout-minutes: 12

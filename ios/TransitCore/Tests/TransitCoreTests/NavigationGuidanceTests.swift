@@ -266,4 +266,34 @@ final class NavigationGuidanceTests: XCTestCase {
         for _ in 0..<3 { _ = metadata.stationSearch.search("內湖站", near: .taipei) }
         print("Cached station search: \(Date().timeIntervalSince(start) / 3) seconds per query across \(metadata.stations.count) platforms.")
     }
+
+    func testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry() throws {
+        guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Requires current public feeds") }
+        let root = URL(fileURLWithPath: directory)
+        var feeds: [String: Data] = [:]
+        for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape"] {
+            feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
+        }
+        let metadata = try FeedDecoder.metadata(feeds: feeds), date = Date()
+        let data = try Data(contentsOf: root.appendingPathComponent("GetBusData.json"))
+        let vehicles = try FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date).vehicles
+        var forecast = VehicleArrivalForecast(); forecast.ingest(vehicles, metadata: metadata, at: date)
+        var buses = 0, predictions = 0
+        for bus in vehicles {
+            guard let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction) else { continue }
+            let stops = journey.upcoming(vehicle: bus, at: date)
+            var previous = -1.0
+            for stop in stops {
+                guard let prediction = forecast.prediction(bus, stopID: stop.stop.id, metadata: metadata, at: date) else { continue }
+                XCTAssertTrue(prediction.seconds.isFinite && prediction.seconds >= 0, bus.plate)
+                XCTAssertGreaterThanOrEqual(prediction.seconds, previous, bus.plate + " " + stop.stop.name)
+                XCTAssertNil(forecast.prediction(bus, stopID: stop.stop.id, metadata: metadata, at: date.addingTimeInterval(121)))
+                previous = prediction.seconds; predictions += 1
+            }
+            if previous >= 0 { buses += 1 }
+        }
+        // Nightly service can be sparse, but this audit must exercise actual vehicles, not just load files.
+        XCTAssertGreaterThan(buses, 0)
+        print("Live vehicle forecast audit: \(buses) buses, \(predictions) ordered stop predictions from \(vehicles.count) official vehicle reports.")
+    }
 }
