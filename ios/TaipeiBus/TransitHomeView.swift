@@ -67,7 +67,7 @@ struct TransitHomeView: View {
                 if !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
                     VStack(alignment: .leading, spacing: 5) {
                         Text(model.selectedRouteName ?? route.name).liveFont(.largeTitle, weight: .bold, design: .rounded)
-                            .foregroundStyle(Color.accentColor).lineLimit(2)
+                            .foregroundStyle(Color(liveHex: live.appearance.accentColor)).lineLimit(2)
                         HStack(spacing: 10) {
                             Text("往 \(route.destination(direction: model.direction))").liveFont(.subheadline)
                             if model.routeDirections.count > 1 {
@@ -128,10 +128,10 @@ struct TransitHomeView: View {
                     } else {
                         Button { journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {
-                                Image(systemName: "magnifyingglass").foregroundStyle(Color.accentColor)
+                                Image(systemName: "magnifyingglass").foregroundStyle(Color(liveHex: live.appearance.accentColor))
                                 Text(live.text("搜尋目的地")).liveFont(.body, weight: .semibold)
                                 Spacer(minLength: 0)
-                                Image(systemName: "arrow.up.right").liveFont(.subheadline, weight: .semibold).foregroundStyle(Color.accentColor)
+                                Image(systemName: "arrow.up.right").liveFont(.subheadline, weight: .semibold).foregroundStyle(Color(liveHex: live.appearance.accentColor))
                             }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 58)
                         }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                     }
@@ -167,7 +167,7 @@ struct TransitHomeView: View {
                             } label: {
                                 Image(systemName: model.following ? "scope" : "bus.fill")
                                     .liveFont(.title3).frame(width: 50, height: 50)
-                                    .foregroundStyle(model.following ? Color.accentColor : Color.primary)
+                                    .foregroundStyle(model.following ? Color(liveHex: live.appearance.accentColor) : Color.primary)
                                     .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                             }.accessibilityLabel(model.following ? "停止跟車" : "跟車")
                         } else if live.display.routeShortcut || hasSelection {
@@ -512,7 +512,7 @@ private struct TransitPanel: View {
                 Button { model.selectStation(station) } label: {
                     HStack(alignment: .center, spacing: 12) {
                         Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : "mappin.circle.fill")
-                            .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color.accentColor)
+                            .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color(liveHex: live.appearance.accentColor))
                             .liveFont(.title2).frame(width: 30)
                         VStack(alignment: .leading, spacing: 5) {
                             HStack { Text(station.name).liveFont(.body, weight: .semibold); Text(station.bearingLabel).liveFont(.caption).foregroundStyle(.secondary) }
@@ -601,7 +601,7 @@ private struct StationDetails: View {
                                 Spacer(minLength: 4)
                                 Text(EstimateFeed.label(row.estimateSeconds))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
-                                    .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color.accentColor : Color.secondary)
+                                    .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).frame(minHeight: 44)
                         if !row.approaches.isEmpty {
@@ -799,8 +799,8 @@ struct RouteBadge: View {
     var body: some View {
         Text(name).liveFont(.subheadline, weight: .bold).lineLimit(2)
             .padding(.horizontal, 10 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale)).frame(minWidth: 56)
-            .foregroundStyle(Color.accentColor)
-            .background(Color.accentColor.opacity(0.09), in: RoundedRectangle(cornerRadius: 11 * CGFloat(live.appearance.cornerScale)))
+            .foregroundStyle(Color(liveHex: live.appearance.accentColor))
+            .background(Color(liveHex: live.appearance.accentColor).opacity(0.09), in: RoundedRectangle(cornerRadius: 11 * CGFloat(live.appearance.cornerScale)))
     }
 }
 

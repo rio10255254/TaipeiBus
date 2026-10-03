@@ -19,6 +19,14 @@ on:
         type: choice
         options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings']
         default: 'all'
+      content_revision_before:
+        description: 'For live-settings verification: current live content revision'
+        type: string
+        default: '1'
+      content_revision_after:
+        description: 'For live-settings verification: next live content revision'
+        type: string
+        default: '2'
 
 permissions:
   contents: read
@@ -29,6 +37,8 @@ concurrency:
 
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+  BUS_CONTENT_BEFORE: ${{ inputs.content_revision_before }}
+  BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
   simulator:
@@ -354,13 +364,13 @@ jobs:
           while time.monotonic() < deadline:
               try:
                   state = json.loads(marker.read_text())
-                  if state['content_revision'] == 1 and state['location_ready']:
-                      assert state['version'] == '0.4.2' and not state['alias_stations'], state
+                  if state['content_revision'] == int(os.environ['BUS_CONTENT_BEFORE']) and state['location_ready']:
+                      assert state['version'] == json.loads(Path('ios/release/testflight.json').read_text())['version'], state
                       assert 0 <= state['first_location_milliseconds'] < 15000, state
                       (output / 'live-update-before.json').write_text(json.dumps(state, ensure_ascii=False, indent=2))
                       time.sleep(2)
                       subprocess.run(['xcrun', 'simctl', 'io', device, 'screenshot', str(output / 'iPhone17-live-update-before.png')], check=True, timeout=60)
-                      print('BEFORE_LIVE_UPDATE_READY: revision 1, same process will remain running.', flush=True)
+                      print('BEFORE_LIVE_UPDATE_READY: same process will remain running.', flush=True)
                       break
               except (OSError, ValueError, KeyError):
                   pass
@@ -384,7 +394,7 @@ jobs:
           while time.monotonic() < deadline:
               try:
                   state = json.loads(marker.read_text())
-                  if state['content_revision'] >= 2:
+                  if state['content_revision'] == int(os.environ['BUS_CONTENT_AFTER']):
                       assert state['pid'] == before['pid'] and state['token'] == before['token'], state
                       assert state['version'] == before['version'] and state['accent'] == '#A83B80', state
                       assert state['station_label'] == '候車站牌' and state['alias_stations'], state

@@ -113,7 +113,7 @@ struct JourneyPlanningView: View {
     }
     private var originButton: some View {
         HStack(spacing: 10) {
-            Image(systemName: planner.usingLocation ? "location.fill" : "circle.fill").foregroundStyle(Color.accentColor)
+            Image(systemName: planner.usingLocation ? "location.fill" : "circle.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor))
             Button { edit(origin: true) } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(planner.origin?.name ?? (location.requesting ? "取得位置中" : "選擇出發地"))
@@ -157,7 +157,7 @@ struct JourneyPlanningView: View {
                         ForEach(live.quickDestinations, id: \.self) { name in
                             Button(name) { query = name; resolve(text: name) }.liveFont(.subheadline)
                                 .padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 44)
-                                .background(Color.accentColor.opacity(0.08), in: Capsule())
+                                .background(Color(liveHex: live.appearance.accentColor).opacity(0.08), in: Capsule())
                         }
                     }.padding(.top, 8 * CGFloat(live.appearance.spacingScale))
                 }
@@ -170,7 +170,7 @@ struct JourneyPlanningView: View {
             ForEach(Array((search.places.isEmpty ? Array(search.suggestions.prefix(6)) : []).enumerated()), id: \.offset) { _, completion in
                 Button { resolve(text: completion.title, completion: completion) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "mappin.circle").liveFont(.title2).foregroundStyle(Color.accentColor)
+                        Image(systemName: "mappin.circle").liveFont(.title2).foregroundStyle(Color(liveHex: live.appearance.accentColor))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(completion.title).liveFont(.body, weight: .medium)
                             Text(completion.subtitle).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -189,7 +189,7 @@ struct JourneyPlanningView: View {
                         choose(TravelPlace(name: station.name, address: "\(station.bearingLabel) · \(station.address)", coordinate: station.coordinate))
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "bus.fill").foregroundStyle(Color.accentColor).frame(width: 22)
+                            Image(systemName: "bus.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(station.bearingLabel.isEmpty ? station.name : station.bearingLabel).liveFont(.subheadline, weight: .medium)
                                 Text(station.address.isEmpty ? station.name : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -312,7 +312,7 @@ private struct JourneyBoardingContent: View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(ride.route.name).liveFont(.largeTitle, weight: .bold, design: .rounded)
-                    .foregroundStyle(Color.accentColor).lineLimit(1).minimumScaleFactor(0.65)
+                    .foregroundStyle(Color(liveHex: live.appearance.accentColor)).lineLimit(1).minimumScaleFactor(0.65)
                 Text(live.text("往 ") + ride.route.destination(direction: ride.direction)).liveFont(.subheadline).lineLimit(1)
                 if ride.route.displayName != ride.route.name { Text(ride.route.displayName).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1) }
             }
@@ -327,7 +327,7 @@ private struct JourneyBoardingContent: View {
     private var platform: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
-                Image(systemName: "mappin.circle.fill").foregroundStyle(Color.accentColor)
+                Image(systemName: "mappin.circle.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor))
                 Text(live.text("上車 · ") + ride.boarding.name).liveFont(.body, weight: .semibold).lineLimit(2)
                 if let station = guide.station { Text(station.bearingLabel).liveFont(.caption).foregroundStyle(.secondary) }
             }
@@ -351,7 +351,7 @@ private struct BoardingVehicleRow: View {
     var body: some View {
         Button { model.trackApproachingVehicle(approach.vehicle) } label: {
             HStack(spacing: 12) {
-                Circle().fill(selected ? Color.accentColor : Color.secondary.opacity(0.35)).frame(width: 6, height: 6)
+                Circle().fill(selected ? Color(liveHex: live.appearance.accentColor) : Color.secondary.opacity(0.35)).frame(width: 6, height: 6)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(approach.vehicle.plate).liveFont(.subheadline, weight: .semibold).monospaced()
                     Text(nextStop ?? "位置待確認").liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -359,7 +359,7 @@ private struct BoardingVehicleRow: View {
                 Spacer(minLength: 4)
                 Text(model.arrivalEstimate(approach, ride: ride, at: date).label)
                     .liveFont(.title3, weight: .semibold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                Image(systemName: "scope").liveFont(.body).foregroundStyle(selected ? Color.accentColor : Color.secondary)
+                Image(systemName: "scope").liveFont(.body).foregroundStyle(selected ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
             }.frame(minHeight: 48).padding(.vertical, 4 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityHint("點一下追蹤這輛公車")
             .accessibilityValue(selected ? "追蹤中" : "")
@@ -426,7 +426,7 @@ struct JourneyOptionsView: View {
                             }
                             Spacer(minLength: 0)
                             Image(systemName: option.id == planner.selectedID ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(option.id == planner.selectedID ? Color.accentColor : Color.secondary)
+                                .foregroundStyle(option.id == planner.selectedID ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                         }
                         if let first = option.rides.first, let last = option.rides.last {
                             Text("在「\(first.boarding.name)」上車").liveFont(.subheadline, weight: .semibold).lineLimit(2)

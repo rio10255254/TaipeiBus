@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 1,
+  "revision": 3,
   "minimumAppVersion": "0.4.2",
   "copy": {},
   "search": {
@@ -10,7 +10,8 @@
           "內湖捷運站",
           "內湖捷運",
           "Neihu Station",
-          "MRT Neihu"
+          "MRT Neihu",
+          "內湖月台"
         ],
         "queries": [
           "捷運內湖站"
