@@ -74,6 +74,11 @@ final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
         button("map-location").tap()
         waitCamera("Return north up") { ($0["mode"] as? String) == "north" && abs($0["heading"] as? Double ?? 99) < 1 }
         capture("north-up-view")
+        button("map-location").tap()
+        waitCamera("Phone direction before resetting the compass") { abs(($0["heading"] as? Double ?? 0) - 90) < 2 }
+        app.descendants(matching: .any).matching(identifier: "map-compass").firstMatch.tap()
+        waitCamera("Compass stops heading tracking and stays north") { ($0["mode"] as? String) == "free" && abs($0["heading"] as? Double ?? 99) < 1 }
+        button("map-location").tap()
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.24))
             .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.34)))
         XCTAssertEqual(button("map-location").value as? String, "自由瀏覽")
