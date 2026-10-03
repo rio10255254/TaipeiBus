@@ -72,6 +72,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastNearbyUpdate: CFTimeInterval = 0
         private var lastNearbyCenter: Coordinate?
         private var lastStationSearchKey = ""
+        private var lastStationBrowsing: Bool?
         private var buildingOpacity = 1.0
         private var buildingOpacityTarget = 1.0
         private var buildingLayer: MLNFillExtrusionStyleLayer?
@@ -175,6 +176,7 @@ struct NativeBusMap: UIViewRepresentable {
             names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
             style.addLayer(names)
             lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1
+            lastStationBrowsing = nil
             lastStationID = nil; lastLocation = nil
             update(location: pendingLocation)
             updateNearbyStations(force: true)
@@ -258,7 +260,15 @@ struct NativeBusMap: UIViewRepresentable {
             buses.reduceMotion = reduceMotion
             // Station dots remain tappable; their names must not cover the vehicle's anchored information.
             let hasVehicle = model.selectedVehicle != nil
-            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = !hasVehicle && model.planner.selected == nil
+            if lastStationBrowsing != model.stationBrowsing {
+                let minimumZoom = model.stationBrowsing ? 9.0 : 15.7
+                map.style?.layer(withIdentifier: "nearby-station-dots")?.minimumZoomLevel = minimumZoom
+                map.style?.layer(withIdentifier: "nearby-station-names")?.minimumZoomLevel = minimumZoom
+                (map.style?.layer(withIdentifier: "nearby-station-dots") as? MLNCircleStyleLayer)?.circleRadius =
+                    NSExpression(forConstantValue: model.stationBrowsing ? 4.5 : 3.0)
+                lastStationBrowsing = model.stationBrowsing
+            }
+            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.stationBrowsing || (!hasVehicle && model.planner.selected == nil)
             buildingOpacityTarget = model.highlightVehicle && hasVehicle ? 0.26 : 1
             if reduceMotion {
                 buildingOpacity = buildingOpacityTarget
