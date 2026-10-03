@@ -389,7 +389,7 @@ private struct VehicleArrivalsView: View {
             }
             .navigationTitle("到站車輛").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.accessibilityIdentifier("journey-vehicles-done") } }
-        }.presentationDetents([.medium, .large])
+        }.presentationDetents([.large])
     }
 }
 
@@ -503,7 +503,7 @@ private struct OnboardStopsView: View {
             }
             .navigationTitle("沿途站牌").navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("完成") { dismiss() }.accessibilityIdentifier("journey-stops-done") } }
-        }.presentationDetents([.medium, .large])
+        }.presentationDetents([.large])
     }
 }
 
@@ -645,14 +645,14 @@ struct JourneyOptionsView: View {
     @ObservedObject var planner: JourneyPlannerModel
     let collapse: () -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             if planner.planning || model.loading {
                 HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message { Text(message).liveFont(.subheadline).foregroundStyle(.secondary) }
             ForEach(planner.options) { option in
                 Button { planner.select(option); collapse() } label: {
-                    VStack(alignment: .leading, spacing: 5) {
+                    VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
                             if option.walkingOnly { Label(live.text("步行即可"), systemImage: "figure.walk").liveFont(.headline) }
                             else {
@@ -682,7 +682,7 @@ struct JourneyOptionsView: View {
                             }
                         }.liveFont(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
                         if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
-                    }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityIdentifier("journey-option-" + option.id)
                 Divider()
             }

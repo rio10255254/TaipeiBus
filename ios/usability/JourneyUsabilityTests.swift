@@ -190,6 +190,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
         XCTAssertTrue(app.staticTexts["journey-total-duration"].label.contains("全程約"))
         button("journey-all-vehicles").tap()
+        XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 5))
+        capture("all-departed-before-scroll")
+        if !button("boarding-vehicle-TEST-04").exists { app.swipeUp() }
         XCTAssertTrue(button("boarding-vehicle-TEST-04").waitForExistence(timeout: 10))
         if !button("boarding-vehicle-TEST-04").isHittable { app.swipeUp() }
         XCTAssertTrue(button("boarding-vehicle-TEST-04").isHittable)
@@ -238,6 +241,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.navigationBars["內湖站"].exists)
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
         XCTAssertEqual(options.count, 3)
+        capture("choose-a-route-before-fit-check")
         for index in 0..<options.count { XCTAssertTrue(options.element(boundBy: index).isHittable, "All options must fit without scrolling") }
         for index in 0..<options.count {
             XCTAssertFalse(options.element(boundBy: index).label.contains("今日未營運"))
