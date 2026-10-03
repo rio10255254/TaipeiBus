@@ -64,7 +64,7 @@ client.request(:patch, "/v1/appStoreVersions/#{version_id}", {}, data: {
 
 saved_app = client.request(:get, "/v1/apps/#{app_id}").fetch('data')
 saved_info = client.request(:get, "/v1/appInfoLocalizations/#{local_info.fetch('id')}").fetch('data')
-saved_version = client.request(:get, "/v1/appStoreVersions/#{version_id}").fetch('data')
+saved_version = client.request(:get, "/v1/appStoreVersions/#{version_id}", { include: 'build' }).fetch('data')
 saved_review = client.request(:get, "/v1/appStoreVersions/#{version_id}/appStoreReviewDetail").fetch('data')
 abort 'Saved content rights mismatch.' unless saved_app.dig('attributes', 'contentRightsDeclaration') == 'USES_THIRD_PARTY_CONTENT'
 abort 'Saved privacy URL mismatch.' unless saved_info.dig('attributes', 'privacyPolicyUrl') == copy.fetch('privacyPolicyUrl')
