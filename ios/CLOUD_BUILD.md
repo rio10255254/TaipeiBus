@@ -7,19 +7,23 @@
 | 項目 | 狀態／處理方式 |
 | --- | --- |
 | 原生 iPhone App | SwiftUI、CoreLocation、MapLibre Native／Metal；優先適配 iPhone 17，最低 iOS 17 |
-| 版本 | `0.4.1 (10.1.0)` 已完成正式簽名、上傳及 Apple 處理，並加入既有內部測試群組 |
+| 版本 | `0.4.2 (11.1.0)` 已完成正式簽名、上傳及 Apple 處理，並加入既有內部測試群組 |
 | 建置工具 | 固定 Xcode 26.3；符合 2026-04-28 起 iOS 26 SDK 以上的上傳要求 |
 | App 圖示 | 已有 1024 × 1024 RGB 圖示，無透明背景 |
 | 定位／隱私 | 已有使用期間定位說明、Privacy Manifest、App 內隱私說明及政策 HTML 草稿 |
 | 網路與加密 | 使用 HTTPS；現有 Info.plist 宣告 `ITSAppUsesNonExemptEncryption=false`，若新增自訂加密須重新評估 |
-| 測試 | 49 項離線公車核心測試、3 項手動預覽時執行的官方資料測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
+| 測試 | 64 項離線公車核心測試、3 項手動預覽時執行的官方資料測試；發布腳本另有無網路測試；CI 編譯 Simulator Debug 與 iPhone Release |
 | GitHub 儲存庫 | 公開 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；公開前已檢查完整修改歷史、可取得的製作紀錄與歷史上傳項目，沒有發現私鑰外洩；發布流程已獨立 |
 | Apple 帳號授權 | 已設定 API 授權與發行憑證、描述檔；最近成功發佈已完成正式簽名及上傳 |
 | App 身分 | `com.rio10255254.TaipeiBus`；已建立 App Store Connect App 記錄並完成過發佈 |
-| 真機／TestFlight | `0.4.1 (10.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
-| 最新發佈工作 | 改為公開後，`0.4.1` [發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37080324778)成功；已核對指定版本的回條、上傳確認及內部測試群組狀態 |
+| 真機／TestFlight | `0.4.2 (11.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
+| 最新發佈工作 | 改為公開後，`0.4.2` [發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37089884155)成功；已核對指定版本的回條、上傳確認及內部測試群組狀態 |
 
 SDK 要求見 [Apple 2026 上傳公告](https://developer.apple.com/news/?id=ueeok6yw)。模擬器 `.app` 和原始碼 ZIP 都不能直接安裝到 iPhone。
+
+## 日常小改動
+
+0.4.2 已包含搜尋與外觀內容更新。[內容更新手冊](LIVE_UPDATES.md)列出支援的文字、別名、配色及搭車偏好與回復方式；這些修改不需重新製作 App。新功能、定位程式與計算方法仍走 TestFlight 新版。已實測同一個 App 程序收到真正的 GitHub 更新，發布與回復入口亦均成功。
 
 ## 第一次上傳：你需完成的帳號設定
 
@@ -99,7 +103,7 @@ App 記錄建立完成後，執行 `operation=check-only`。這只讀取帳號�
 
 1. 檢查圖示、隱私 Manifest、定位文案、版本、平台與測試說明。
 2. 驗證 App ID／App 記錄，查現有 build，選出唯一 `major.attempt.0` build number。
-3. 執行發布腳本測試與 49 項離線 Swift 核心測試。
+3. 執行發布腳本測試與 64 項離線 Swift 核心測試。
 4. 使用 Release、iPhoneOS SDK、正確 Team／Bundle ID／版本與發行簽名 archive。
 5. 驗證實際 archive 的簽名、SDK、圖示、Manifest、dSYM 與版本，確認沒有 Debug 預覽入口。
 6. 使用 Xcode 直接上傳 App Store Connect。禁止 Xcode 自動改寫 build number，以便可靠核對。
