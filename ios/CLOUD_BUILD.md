@@ -4,11 +4,11 @@
 
 ## 公開 App Store 發佈
 
-正式版 `1.0.0 (16.1.0)` 已簽名上傳並完成 Apple 處理；仍需完成商店截圖及送審，才能公開下載。已設定免費、僅台灣、審核後自動發佈。公開支援及隱私頁由 GitHub Pages 的 `docs` 目錄提供：
+正式版 `1.0.0 (23.1.0)` 已簽名上傳並完成 Apple 處理，加入既有 TestFlight 內部群組，且上架資料已指定此版本；仍需完成商店截圖及送審，才能公開下載。已設定免費、僅台灣、審核後自動發佈。公開支援及隱私頁由 GitHub Pages 的 `docs` 目錄提供：
 
 - [支援與聯絡](https://rio10255254.github.io/TaipeiBus/support.html)
 - [隱私政策](https://rio10255254.github.io/TaipeiBus/privacy.html)
-- [1.0.0 發佈回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37133872466)
+- [1.0.0 發佈回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37136630816)
 - [實際原生操作與商店截圖檢查](https://github.com/rio10255254/TaipeiBus/actions/runs/37133870399)
 
 `TestFlight` 工作流程支援 `store-audit`（唯讀）、`store-prepare`（將文案及指定有效 build 寫入可編輯版本）、`store-verify`（驗證台灣零元供應及完成處理的截圖）。`store-prepare` 必須提供 `resume_build`，審查聯絡資料來自 `APP_STORE_REVIEW_CONTACT` Secret；回條及製作紀錄不輸出私人聯絡內容。Apple 的 App 隱私權問卷仍需網站操作。
