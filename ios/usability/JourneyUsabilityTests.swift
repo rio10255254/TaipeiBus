@@ -211,6 +211,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 5))
         XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, "TEST-03")
         XCTAssertGreaterThan(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "onboard-stop-")).count, 1)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "暫時裁撤")).firstMatch.exists)
         capture("confirmed-bus-times-at-upcoming-stops")
         button("journey-stops-done").tap()
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
