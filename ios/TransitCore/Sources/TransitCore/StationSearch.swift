@@ -153,7 +153,8 @@ fileprivate struct SearchQuery: Sendable {
             names.formUnion(StationSearch.aliases(String(text.dropFirst(city.count))))
         }
         aliases = vocabulary.expand(names)
-        partial = aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= (text.count == 1 ? 1 : 2) }.sorted()
+        let minimumLength = text.count == 1 ? 1 : 2
+        partial = aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= minimumLength }.sorted()
         addressLike = query.contains(where: { "路街段巷弄號号".contains($0) })
         hasDigits = query.contains(where: \.isNumber)
         transit = StationSearch.isTransitQuery(query) || (vocabulary.placeQueries(query)?.contains { StationSearch.isTransitQuery($0) } ?? false)
