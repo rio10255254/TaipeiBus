@@ -32,7 +32,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ios-${{ github.ref }}
+  group: ios-${{ github.ref }}-${{ github.event_name == 'workflow_dispatch' && github.sha || 'checks' }}
   cancel-in-progress: true
 
 env:

@@ -180,17 +180,17 @@ struct JourneyPlanningView: View {
                         Image(systemName: "mappin.circle").liveFont(.title2).foregroundStyle(Color(liveHex: live.appearance.accentColor))
                         VStack(alignment: .leading, spacing: 4) {
                             Text(completion.title).liveFont(.body, weight: .medium)
-                            Text(completion.subtitle).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(completion.subtitle).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                         Spacer(minLength: 0); Image(systemName: "arrow.up.left").liveFont(.caption).foregroundStyle(.tertiary)
-                    }.frame(maxWidth: .infinity, minHeight: 64, alignment: .leading).contentShape(Rectangle())
+                    }.frame(maxWidth: .infinity, minHeight: 52, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(resolving)
                 Divider()
             }
             let stations = stationResultQuery == query ? stationResults : []
             if !stations.isEmpty { Text(live.text("公車站牌")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale)) }
             ForEach(StationSearch.groups(stations)) { group in
-                Text(group.name).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
+                DisclosureGroup {
                 ForEach(group.stations) { station in
                     Button {
                         choose(TravelPlace(name: station.name, address: "\(station.bearingLabel) · \(station.address)", coordinate: station.coordinate))
@@ -206,6 +206,14 @@ struct JourneyPlanningView: View {
                         }.frame(minHeight: 52).contentShape(Rectangle())
                     }.buttonStyle(.plain).disabled(resolving)
                 }
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "bus.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
+                        Text(group.name).liveFont(.body, weight: .medium)
+                        Spacer(minLength: 4)
+                        Text("\(group.stations.count) 處").liveFont(.caption).foregroundStyle(.secondary)
+                    }.frame(minHeight: 44)
+                }.accessibilityIdentifier("journey-stations-" + group.name)
             }
         }
     }

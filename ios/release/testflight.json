@@ -1,7 +1,7 @@
 {
   "app_name": "台北公車",
   "bundle_id": "com.rio10255254.TaipeiBus",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "sku": "TaipeiBus-iOS",
   "locale": "zh-Hant",
   "internal_group": "TaipeiBus Internal",
