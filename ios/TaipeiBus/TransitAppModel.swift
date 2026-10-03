@@ -557,7 +557,8 @@ final class TransitAppModel: ObservableObject {
         }
         let payload: [String: Any] = ["EssentialInfo": ["UpdateTime": timestamp], "BusInfo": rows]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let decoded = try? FeedDecoder.vehicles(data, metadata: TransitMetadata(), previous: snapshot.vehicles, now: now) else { return }
+              let decoded = try? FeedDecoder.vehicles(data, metadata: TransitMetadata(),
+                    previous: snapshot.vehicles.filter { $0.plate.hasPrefix("CITY-") }, now: now) else { return }
         snapshot = TransitSnapshot(vehicles: decoded.vehicles, sourceUpdatedAt: now, receivedAt: now,
                                    estimates: EstimateFeed(), revision: snapshot.revision + 1)
     }
