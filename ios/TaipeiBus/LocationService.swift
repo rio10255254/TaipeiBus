@@ -10,9 +10,9 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var accuracy: Double?
     @Published private(set) var updatedAt: Date?
     @Published private(set) var revision = 0
-    @Published private(set) var heading: Double?
+    private(set) var heading: Double?
+    private(set) var headingAccuracy: Double?
     private var headingTime = Date.distantPast
-    private var headingEnabled = false
     private let manager = CLLocationManager()
     private var sample: LocationSample?
     private var active = false
@@ -37,16 +37,20 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         guard authorized, let sample, sample.canPlan(at: Date()) else { return nil }
         return sample.coordinate
     }
-    var currentHeading: Double? { Date().timeIntervalSince(headingTime) <= 15 ? heading : nil }
-    func setHeadingActive(_ enabled: Bool) {
-        headingEnabled = enabled
+    var currentHeading: Double? {
+#if DEBUG
+        if active, authorized, ProcessInfo.processInfo.arguments.contains("--test-device-heading") { return 90 }
+#endif
+        return active && authorized && Date().timeIntervalSince(headingTime) <= 60 ? heading : nil
+    }
+    private func updateHeadingActivity() {
         manager.headingOrientation = .portrait
         manager.headingFilter = 3
-        if enabled, active, authorized, CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
+        if active, authorized, CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
         else { manager.stopUpdatingHeading() }
 #if DEBUG
-        if enabled, ProcessInfo.processInfo.arguments.contains("--test-device-heading") {
-            heading = 90; headingTime = Date()
+        if active, authorized, ProcessInfo.processInfo.arguments.contains("--test-device-heading") {
+            heading = 90; headingAccuracy = 5; headingTime = Date()
         }
 #endif
     }
@@ -62,7 +66,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }
     func setActive(_ active: Bool) {
         self.active = active
-        if active { requestIfAuthorized(); setHeadingActive(headingEnabled) }
+        if active { requestIfAuthorized(); updateHeadingActivity() }
         else {
             timeoutTask?.cancel(); timeoutTask = nil
             manager.stopUpdatingLocation(); updating = false; requesting = false
@@ -96,7 +100,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             lastRestart = Date()
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
             manager.startUpdatingLocation()
-            setHeadingActive(headingEnabled)
+            updateHeadingActivity()
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
@@ -130,11 +134,12 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateHeading value: CLHeading) {
-        guard headingEnabled, active, value.headingAccuracy >= 0, value.headingAccuracy <= 45,
-              abs(value.timestamp.timeIntervalSinceNow) <= 10 else { return }
+        guard active, authorized else { return }
+        guard value.headingAccuracy >= 0, value.headingAccuracy <= 45,
+              abs(value.timestamp.timeIntervalSinceNow) <= 10 else { heading = nil; headingAccuracy = nil; return }
         let direction = value.trueHeading >= 0 ? value.trueHeading : value.magneticHeading
         guard direction.isFinite, direction >= 0 else { return }
-        heading = direction.truncatingRemainder(dividingBy: 360); headingTime = value.timestamp
+        heading = direction.truncatingRemainder(dividingBy: 360); headingTime = value.timestamp; headingAccuracy = value.headingAccuracy
     }
     private static func sample(_ location: CLLocation) -> LocationSample {
         LocationSample(coordinate: Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),

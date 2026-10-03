@@ -89,9 +89,13 @@ public enum FeedDecoder {
                     guard !id.isEmpty, let lat = number(row["latitude"]), let lon = number(row["longitude"]) else { continue }
                     let coordinate = Coordinate(latitude: lat, longitude: lon)
                     guard coordinate.isInServiceArea else { continue }
+                    let name = text(row["nameZh"])
+                    // Published path references can retain explicitly withdrawn platforms.
+                    // Exclude that route's stop, while other active stops at the physical station remain available.
+                    guard !["裁撤", "停用", "暫停使用", "暂停使用"].contains(where: name.contains) else { continue }
                     let stationID = text(row["stopLocationId"]).isEmpty ? id : text(row["stopLocationId"])
                     let stop = BusStop(id: id, routeID: text(row["routeId"]), stationID: stationID,
-                                       name: text(row["nameZh"]), direction: text(row["goBack"]),
+                                       name: name, direction: text(row["goBack"]),
                                        sequence: Int(number(row["seqNo"]) ?? 0), coordinate: coordinate)
                     metadata.stops[id] = stop
                     if metadata.stations[stationID] == nil {

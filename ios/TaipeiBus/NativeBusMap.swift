@@ -77,13 +77,13 @@ struct NativeBusMap: UIViewRepresentable {
         private var buildingOpacityTarget = 1.0
         private var buildingLayer: MLNFillExtrusionStyleLayer?
         private var lastStationID: String?
-        private var lastLocation: Coordinate?
         private var pendingLocation: Coordinate?
         private var routeSource: MLNShapeSource?
         private var walkingSource: MLNShapeSource?
         private var tripStopsSource: MLNShapeSource?
         private var stationSource: MLNShapeSource?
-        private var locationSource: MLNShapeSource?
+        private let locationMarker = DeviceLocationMarker()
+        private var locationMotion = DeviceLocationMotion()
         private var nearbySource: MLNShapeSource?
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
@@ -96,6 +96,7 @@ struct NativeBusMap: UIViewRepresentable {
         init(model: TransitAppModel, overlay: MapSelectionOverlay) { self.model = model; self.overlay = overlay }
         func attach(_ map: MLNMapView) {
             self.map = map
+            map.addSubview(locationMarker)
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
             let rate = Float(map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: rate, preferred: rate)
@@ -128,11 +129,12 @@ struct NativeBusMap: UIViewRepresentable {
             else { style.addLayer(walkingLine) }
             let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
             style.addSource(tripStops); tripStopsSource = tripStops
-            let tripDots = MLNCircleStyleLayer(identifier: "journey-stop-dots", source: tripStops)
-            tripDots.circleColor = NSExpression(forConstantValue: UIColor.systemBlue)
-            tripDots.circleRadius = NSExpression(forConstantValue: 6)
-            tripDots.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
-            tripDots.circleStrokeWidth = NSExpression(forConstantValue: 2)
+            style.setImage(stationIcon(size: 20), forName: "station-marker")
+            style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
+            style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
+            let tripDots = MLNSymbolStyleLayer(identifier: "journey-stop-dots", source: tripStops)
+            tripDots.iconImageName = NSExpression(forKeyPath: "icon")
+            tripDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
             tripNames.text = NSExpression(forKeyPath: "name")
@@ -154,16 +156,14 @@ struct NativeBusMap: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in self?.overlay.update(global) }
             }
             style.addLayer(layer); buses = layer
-            stationSource = addPointLayer(id: "selected-station", color: .systemBlue, radius: 7, style: style)
-            locationSource = addPointLayer(id: "device-location", color: .systemBlue, radius: 5, style: style)
+            stationSource = addStationLayer(id: "selected-station", style: style)
             let nearby = MLNShapeSource(identifier: "nearby-stations", shape: nil, options: nil)
             style.addSource(nearby); nearbySource = nearby
-            let dots = MLNCircleStyleLayer(identifier: "nearby-station-dots", source: nearby)
+            let dots = MLNSymbolStyleLayer(identifier: "nearby-station-dots", source: nearby)
             dots.minimumZoomLevel = 15.7
-            dots.circleColor = NSExpression(forConstantValue: UIColor.systemBlue)
-            dots.circleRadius = NSExpression(forConstantValue: 3)
-            dots.circleStrokeWidth = NSExpression(forConstantValue: 1.5)
-            dots.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+            dots.iconImageName = NSExpression(forConstantValue: "station-marker")
+            dots.iconScale = NSExpression(forConstantValue: 0.85)
+            dots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(dots)
             let names = MLNSymbolStyleLayer(identifier: "nearby-station-names", source: nearby)
             names.minimumZoomLevel = 15.7
@@ -177,21 +177,31 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(names)
             lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1
             lastStationBrowsing = nil
-            lastStationID = nil; lastLocation = nil
+            lastStationID = nil
             update(location: pendingLocation)
             updateNearbyStations(force: true)
         }
 
-        private func addPointLayer(id: String, color: UIColor, radius: Double, style: MLNStyle) -> MLNShapeSource {
+        private func addStationLayer(id: String, style: MLNStyle) -> MLNShapeSource {
             let source = MLNShapeSource(identifier: id, shape: nil, options: nil)
             style.addSource(source)
-            let layer = MLNCircleStyleLayer(identifier: "\(id)-dot", source: source)
-            layer.circleColor = NSExpression(forConstantValue: color)
-            layer.circleRadius = NSExpression(forConstantValue: radius)
-            layer.circleStrokeWidth = NSExpression(forConstantValue: 3)
-            layer.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+            let layer = MLNSymbolStyleLayer(identifier: "\(id)-dot", source: source)
+            layer.iconImageName = NSExpression(forConstantValue: "selected-station-marker")
+            layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(layer)
             return source
+        }
+
+        private func stationIcon(size: CGFloat, symbol: String = "bus.fill") -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: size + 4, height: size + 4)).image { _ in
+                let rect = CGRect(x: 2, y: 2, width: size, height: size)
+                let shape = UIBezierPath(roundedRect: rect, cornerRadius: size * 0.25)
+                UIColor.white.setFill(); shape.fill()
+                UIColor(red: 0.36, green: 0.46, blue: 0.57, alpha: 0.55).setStroke(); shape.lineWidth = 1; shape.stroke()
+                let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.57, weight: .medium))?
+                    .withTintColor(UIColor(red: 0.28, green: 0.40, blue: 0.53, alpha: 1), renderingMode: .alwaysOriginal)
+                glyph?.draw(in: rect.insetBy(dx: size * 0.23, dy: size * 0.23))
+            }
         }
 
         func update(location: Coordinate?, viewportChanged: Bool = false) {
@@ -264,8 +274,8 @@ struct NativeBusMap: UIViewRepresentable {
                 let minimumZoom: Float = model.stationBrowsing ? 9.0 : 15.7
                 map.style?.layer(withIdentifier: "nearby-station-dots")?.minimumZoomLevel = minimumZoom
                 map.style?.layer(withIdentifier: "nearby-station-names")?.minimumZoomLevel = minimumZoom
-                (map.style?.layer(withIdentifier: "nearby-station-dots") as? MLNCircleStyleLayer)?.circleRadius =
-                    NSExpression(forConstantValue: model.stationBrowsing ? 4.5 : 3.0)
+                (map.style?.layer(withIdentifier: "nearby-station-dots") as? MLNSymbolStyleLayer)?.iconScale =
+                    NSExpression(forConstantValue: model.stationBrowsing ? 1.0 : 0.85)
                 lastStationBrowsing = model.stationBrowsing
             }
             map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.stationBrowsing || (!hasVehicle && model.planner.selected == nil)
@@ -279,10 +289,6 @@ struct NativeBusMap: UIViewRepresentable {
                 lastStationID = model.selectedStationID
             }
             if model.selectedVehicleID == nil && model.selectedStationID == nil { overlay.update(nil) }
-            if lastLocation != location {
-                locationSource?.shape = point(location)
-                lastLocation = location
-            }
             buses.setNeedsDisplay()
             updateStationAnchor()
         }
@@ -292,7 +298,7 @@ struct NativeBusMap: UIViewRepresentable {
             var features: [String: MLNPointFeature] = [:]
             func add(_ coordinate: Coordinate, id: String, title: String) {
                 let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
-                feature.attributes = ["name": title, "stationID": id]; features[id] = feature
+                feature.attributes = ["name": title, "stationID": id, "icon": id == "destination" ? "destination-marker" : "station-marker"]; features[id] = feature
             }
             let visibleRides = option.rides.enumerated().filter { _, ride in
                 !model.planner.started || model.planner.activeRide?.id == ride.id
@@ -359,7 +365,11 @@ struct NativeBusMap: UIViewRepresentable {
                 var state: [String: Any] = ["latitude": center.latitude, "longitude": center.longitude, "zoom": mapView.zoomLevel,
                     "heading": mapView.direction, "pitch": mapView.camera.pitch, "mode": model.userMapMode.rawValue,
                     "station": model.selectedStationID ?? "", "stationDistance": model.selectedStation.map { center.distance(to: $0.coordinate) } ?? -1,
-                    "queryMarkers": model.stationMapResults.count, "browsing": model.stationBrowsing]
+                    "queryMarkers": model.stationMapResults.count, "browsing": model.stationBrowsing,
+                    "userMarkerVisible": !locationMarker.isHidden, "userHeadingVisible": locationMarker.headingVisible,
+                    "userMarkerX": locationMarker.center.x, "userMarkerY": locationMarker.center.y,
+                    "userFanAngle": locationMarker.directionAngle,
+                    "stationSymbol": mapView.style?.layer(withIdentifier: "nearby-station-dots") is MLNSymbolStyleLayer]
                 if model.stationBrowsing {
                     let visible = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 24, dy: 24)
                     let markers = mapView.visibleFeatures(in: visible, styleLayerIdentifiers: Set(["nearby-station-dots"]))
@@ -459,10 +469,12 @@ struct NativeBusMap: UIViewRepresentable {
 #endif
 
         @objc private func tick(_ link: CADisplayLink) {
-            guard model.isActive, let map, let buses else { return }
+            guard model.isActive, let map else { return }
             let now = CACurrentMediaTime(), date = Date()
             let dt = lastTickTime > 0 ? min(0.1, max(0.001, now - lastTickTime)) : 1 / 60
             lastTickTime = now
+            updateLocationMarker(map, elapsed: dt)
+            guard let buses else { return }
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
                 let maximum = map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60
@@ -504,6 +516,25 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        private func updateLocationMarker(_ map: MLNMapView, elapsed: Double) {
+            locationMotion.update(coordinate: model.location.displayCoordinate, heading: model.location.currentHeading,
+                                  elapsed: elapsed, reduceMotion: reduceMotion)
+            guard let point = locationMotion.coordinate else { locationMarker.isHidden = true; return }
+            let screen = map.convert(point.locationCoordinate, toPointTo: map)
+            guard screen.x.isFinite, screen.y.isFinite else { locationMarker.isHidden = true; return }
+            locationMarker.isHidden = !map.bounds.insetBy(dx: -48, dy: -48).contains(screen)
+            locationMarker.center = screen
+            var angle: Double?
+            if let bearing = locationMotion.heading {
+                let radians = bearing * .pi / 180
+                let ahead = Coordinate(latitude: point.latitude + cos(radians) * 30 / 111_320,
+                                       longitude: point.longitude + sin(radians) * 30 / (111_320 * cos(point.latitude * .pi / 180)))
+                let target = map.convert(ahead.locationCoordinate, toPointTo: map)
+                angle = atan2(Double(target.x - screen.x), Double(screen.y - target.y))
+            }
+            locationMarker.update(direction: angle, accuracy: model.location.headingAccuracy ?? 20)
+        }
+
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
@@ -519,8 +550,6 @@ struct NativeBusMap: UIViewRepresentable {
             let theme = model.liveSettings.appearance
             let accent = NSExpression(forConstantValue: UIColor(liveHex: theme.accentColor))
             (style.layer(withIdentifier: "selected-route-line") as? MLNLineStyleLayer)?.lineColor = accent
-            (style.layer(withIdentifier: "journey-stop-dots") as? MLNCircleStyleLayer)?.circleColor = accent
-            (style.layer(withIdentifier: "selected-station-dot") as? MLNCircleStyleLayer)?.circleColor = accent
             (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: theme.walkingColor))
             (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: theme.waterColor))
             if let park = style.layer(withIdentifier: "park") as? MLNFillStyleLayer {
@@ -560,5 +589,51 @@ struct NativeBusMap: UIViewRepresentable {
             model.selectVehicle(bus)
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
+    }
+}
+
+/// A device dot is circular; every bus stop uses a bus symbol. This view does not intercept map gestures.
+private final class DeviceLocationMarker: UIView {
+    private let fan = CALayer()
+    private var bands: [CAShapeLayer] = []
+    private var lastAccuracy = -1.0
+    private(set) var headingVisible = false
+    private(set) var directionAngle = 0.0
+
+    init() {
+        super.init(frame: CGRect(x: 0, y: 0, width: 96, height: 96))
+        isUserInteractionEnabled = false; isAccessibilityElement = false; isHidden = true
+        backgroundColor = .clear
+        fan.frame = bounds; layer.addSublayer(fan)
+        for opacity in [0.05, 0.08, 0.12] {
+            let band = CAShapeLayer(); band.frame = bounds
+            band.fillColor = UIColor.systemBlue.withAlphaComponent(opacity).cgColor
+            fan.addSublayer(band); bands.append(band)
+        }
+        let halo = CAShapeLayer()
+        halo.path = UIBezierPath(ovalIn: CGRect(x: 34, y: 34, width: 28, height: 28)).cgPath
+        halo.fillColor = UIColor.systemBlue.withAlphaComponent(0.1).cgColor; layer.addSublayer(halo)
+        let dot = CAShapeLayer()
+        dot.path = UIBezierPath(ovalIn: CGRect(x: 41, y: 41, width: 14, height: 14)).cgPath
+        dot.fillColor = UIColor.systemBlue.cgColor; dot.strokeColor = UIColor.white.cgColor; dot.lineWidth = 3
+        dot.shadowColor = UIColor.black.cgColor; dot.shadowOpacity = 0.18; dot.shadowRadius = 3; dot.shadowOffset = CGSize(width: 0, height: 1)
+        layer.addSublayer(dot)
+    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func update(direction: Double?, accuracy: Double) {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        headingVisible = direction != nil; fan.isHidden = !headingVisible
+        if let direction { directionAngle = direction; fan.setAffineTransform(CGAffineTransform(rotationAngle: CGFloat(direction))) }
+        if abs(accuracy - lastAccuracy) > 1 {
+            let halfAngle = CGFloat(min(48, max(25, accuracy + 20))) * .pi / 180
+            for (index, band) in bands.enumerated() {
+                let path = UIBezierPath(); path.move(to: CGPoint(x: 48, y: 48))
+                path.addArc(withCenter: CGPoint(x: 48, y: 48), radius: CGFloat(46 - index * 11),
+                            startAngle: -.pi / 2 - halfAngle, endAngle: -.pi / 2 + halfAngle, clockwise: true)
+                path.close(); band.path = path.cgPath
+            }
+            lastAccuracy = accuracy
+        }
+        CATransaction.commit()
     }
 }

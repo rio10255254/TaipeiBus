@@ -191,6 +191,61 @@ final class NavigationGuidanceTests: XCTestCase {
         }
     }
 
+    func testAlongTheSameVehicleStopsIncreaseAndOldGPSDoesNotRestartTheCountdown() throws {
+        let (metadata, ride) = source()
+        let vehicle = bus("same-plate", longitude: 121.595, metadata: metadata)
+        var forecast = VehicleArrivalForecast(); forecast.ingest([vehicle], metadata: metadata, at: now)
+        let predictions = try ride.stops.map { try XCTUnwrap(forecast.prediction(vehicle, stopID: $0.id, metadata: metadata, at: now)) }
+        XCTAssertLessThan(predictions[0].seconds, predictions[1].seconds)
+        XCTAssertLessThan(predictions[1].seconds, predictions[2].seconds)
+        XCTAssertFalse(predictions[2].label.contains("–"))
+        let later = try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(30)))
+        XCTAssertEqual(later.seconds, predictions[2].seconds - 30, accuracy: 0.01)
+        XCTAssertGreaterThan(later.uncertaintySeconds, predictions[2].uncertaintySeconds)
+        XCTAssertNil(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(91)))
+        XCTAssertNil(forecast.prediction(vehicle, stopID: "stop-1", metadata: metadata, at: now))
+    }
+
+    func testStoppedObservationsRemainInRecentTravelTime() throws {
+        let (metadata, ride) = source()
+        var slow = VehicleArrivalForecast(), quick = VehicleArrivalForecast()
+        for (forecastTime, longitude) in [(60.0, 121.591), (30.0, 121.593), (0.0, 121.593)] {
+            slow.ingest([bus("one", longitude: longitude, metadata: metadata, age: forecastTime, speed: 0)], metadata: metadata, at: now)
+        }
+        for (forecastTime, longitude) in [(30.0, 121.591), (0.0, 121.593)] {
+            quick.ingest([bus("one", longitude: longitude, metadata: metadata, age: forecastTime, speed: 0)], metadata: metadata, at: now)
+        }
+        let vehicle = bus("one", longitude: 121.593, metadata: metadata, speed: 0)
+        let a = try XCTUnwrap(slow.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now))
+        let b = try XCTUnwrap(quick.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now))
+        XCTAssertEqual(a.evidence, .recentMovement)
+        XCTAssertGreaterThan(a.seconds, b.seconds * 1.8)
+    }
+
+    func testThreeRealSegmentPassagesCanEstimateAStoppedBusAndCannotCrossDirections() throws {
+        let (metadata, ride) = source()
+        var forecast = VehicleArrivalForecast()
+        // Three distinct buses pass each anchor in one minute; interpolation measures road segments.
+        for index in 0...5 {
+            let date = now.addingTimeInterval(Double(index - 5) * 60)
+            let vehicles = (1...3).map { id -> BusVehicle in
+                let point = Coordinate(latitude: 25.08, longitude: 121.59 + Double(index) * 0.002 + 0.0001)
+                let raw = BusVehicle(id: "learn-\(id)", plate: "learn-\(id)", routeID: "branch", parentRouteID: "main",
+                    routeName: "287", direction: "0", destination: "終點", coordinate: point, rawCoordinate: point,
+                    heading: 90, speed: 12, observedAt: date, status: "0", lowFloor: true, provider: nil)
+                return VehicleTracker.accept(raw, previous: nil, metadata: metadata, now: date)
+            }
+            forecast.ingest(vehicles, metadata: metadata, at: date)
+        }
+        let stopped = bus("stopped", longitude: 121.5945, metadata: metadata, speed: 0)
+        let result = try XCTUnwrap(forecast.prediction(stopped, stopID: ride.boarding.id, metadata: metadata, at: now))
+        XCTAssertEqual(result.evidence, .roadHistory)
+        XCTAssertGreaterThan(result.seconds, 90); XCTAssertLessThan(result.seconds, 150)
+        XCTAssertLessThan(result.uncertaintySeconds, result.seconds * 0.5)
+        let opposite = bus("opposite", longitude: 121.5945, metadata: metadata, direction: "1", speed: 0)
+        XCTAssertNil(forecast.prediction(opposite, stopID: ride.boarding.id, metadata: metadata, at: now))
+    }
+
     func testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops() throws {
         guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Live feeds are checked during native preview capture") }
         let root = URL(fileURLWithPath: directory)
@@ -210,5 +265,35 @@ final class NavigationGuidanceTests: XCTestCase {
         let start = Date()
         for _ in 0..<3 { _ = metadata.stationSearch.search("內湖站", near: .taipei) }
         print("Cached station search: \(Date().timeIntervalSince(start) / 3) seconds per query across \(metadata.stations.count) platforms.")
+    }
+
+    func testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry() throws {
+        guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Requires current public feeds") }
+        let root = URL(fileURLWithPath: directory)
+        var feeds: [String: Data] = [:]
+        for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape"] {
+            feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
+        }
+        let metadata = try FeedDecoder.metadata(feeds: feeds), date = Date()
+        let data = try Data(contentsOf: root.appendingPathComponent("GetBusData.json"))
+        let vehicles = try FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date).vehicles
+        var forecast = VehicleArrivalForecast(); forecast.ingest(vehicles, metadata: metadata, at: date)
+        var buses = 0, predictions = 0
+        for bus in vehicles {
+            guard let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction) else { continue }
+            let stops = journey.upcoming(vehicle: bus, at: date)
+            var previous = -1.0
+            for stop in stops {
+                guard let prediction = forecast.prediction(bus, stopID: stop.stop.id, metadata: metadata, at: date) else { continue }
+                XCTAssertTrue(prediction.seconds.isFinite && prediction.seconds >= 0, bus.plate)
+                XCTAssertGreaterThanOrEqual(prediction.seconds, previous, bus.plate + " " + stop.stop.name)
+                XCTAssertNil(forecast.prediction(bus, stopID: stop.stop.id, metadata: metadata, at: date.addingTimeInterval(121)))
+                previous = prediction.seconds; predictions += 1
+            }
+            if previous >= 0 { buses += 1 }
+        }
+        // Nightly service can be sparse, but this audit must exercise actual vehicles, not just load files.
+        XCTAssertGreaterThan(buses, 0)
+        print("Live vehicle forecast audit: \(buses) buses, \(predictions) ordered stop predictions from \(vehicles.count) official vehicle reports.")
     }
 }

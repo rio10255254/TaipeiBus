@@ -316,6 +316,10 @@ struct TransitHomeView: View {
 
     private func restoreJourneyMap() {
         guard planner.selected != nil else { return }
+        if planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
+           let bus = model.onboardVehicle(for: ride), model.selectedVehicleID != bus.id {
+            model.trackApproachingVehicle(bus); return
+        }
         if let index = model.walkingMapIndex {
             let relevantBus = model.selectedVehicle.map { bus in
                 planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true

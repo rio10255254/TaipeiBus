@@ -44,6 +44,26 @@ final class TransitCoreTests: XCTestCase {
         XCTAssertTrue(metadata.orderedStops(routeID: "10", direction: "1").isEmpty)
     }
 
+    func testWithdrawnStopsDoNotEnterSearchPlanningOrUpcomingStopOrder() throws {
+        let names = ["國父紀念館", "國父紀念館（暫時裁撤）", "停用站（停用）", "正常下車站"]
+        let stations = [6922, 6922, 6921, 6923]
+        let rows = names.enumerated().map { index, name -> [String: Any] in
+            ["Id": 100 + index, "routeId": 100, "stopLocationId": stations[index], "nameZh": name,
+             "goBack": "0", "seqNo": index, "latitude": 25.04, "longitude": 121.55 + Double(index) * 0.001]
+        }
+        let metadata = try FeedDecoder.metadata(feeds: [
+            "GetRoute": feed([["Id": 100, "pathAttributeId": 10, "nameZh": "284", "departureZh": "起點", "destinationZh": "終點"]]),
+            "GetStop": feed(rows),
+            "GetPathDetail": feed((0..<4).map { ["pathAttributeId": 10, "stopId": 100 + $0, "sequenceNo": $0, "type": "0"] })
+        ])
+        XCTAssertEqual(Set(metadata.stops.keys), Set(["100", "103"]))
+        XCTAssertEqual(metadata.stations["6922"]?.stopIDs, ["100"])
+        XCTAssertNil(metadata.stations["6921"])
+        XCTAssertEqual(metadata.orderedStops(routeID: "10", direction: "0").map(\.id), ["100", "103"])
+        XCTAssertTrue(metadata.stationSearch.search("停用站", near: .taipei).isEmpty)
+        XCTAssertTrue(metadata.orderedStops(routeID: "10", direction: "0").allSatisfy { !$0.name.contains("裁撤") })
+    }
+
     func testUnavailableOptionalGeometryNeverDisablesStationArrivals() throws {
         let metadata = try FeedDecoder.metadata(feeds: [
             "GetRoute": feed([["Id": 100, "pathAttributeId": 10, "nameZh": "284"]]),

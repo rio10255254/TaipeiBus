@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'routing-only']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -97,11 +97,12 @@ jobs:
                   data = response.read()
               (root / f'{name}.json').write_bytes(gzip.decompress(data) if data[:2] == b'\x1f\x8b' else data)
           with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-              list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']))
+              list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape', 'GetBusData', 'GetEstimateTime']))
           PY
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
+          swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         timeout-minutes: 12
@@ -135,10 +136,8 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
-          python3 - "$DEVELOPER_DIR/Applications/Simulator.app" "$device" <<'PY'
-          import subprocess, sys
-          subprocess.run(['open', '-a', sys.argv[1], '--args', '-CurrentDeviceUDID', sys.argv[2]], check=True, timeout=30)
-          PY
+          # CoreSimulator is already booted. simctl screenshots and XCTest do not
+          # need a desktop Simulator window, whose LaunchServices RPC can stall.
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
           container=$(sim get_app_container "$device" com.example.TaipeiBus data)
           launch_ready() {
@@ -378,6 +377,9 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'journey-selection' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
@@ -386,7 +388,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify manual departure without location permission
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'all'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')
         run: |
           set -euo pipefail
           xcrun simctl privacy "$BUS_SIM_DEVICE" revoke location com.example.TaipeiBus
