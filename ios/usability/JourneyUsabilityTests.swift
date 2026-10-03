@@ -135,7 +135,9 @@ final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
         capture("no-location-choose-origin")
         let field = app.textFields["journey-search-field"]
         field.tap(); field.typeText("臺北車站")
-        let station = app.staticTexts.matching(NSPredicate(format: "label == %@ OR label == %@", "臺北車站", "台北車站")).firstMatch
+        let station = app.buttons.matching(NSPredicate(format:
+            "(label BEGINSWITH %@ OR label BEGINSWITH %@) AND NOT (identifier BEGINSWITH %@)",
+            "臺北車站", "台北車站", "journey-stations-")).firstMatch
         XCTAssertTrue(station.waitForExistence(timeout: 20)); station.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60)); capture("manual-origin-routes")
         firstOption.tap()
