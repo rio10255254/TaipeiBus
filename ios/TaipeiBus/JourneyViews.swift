@@ -443,7 +443,7 @@ private struct OnboardSummary: View {
                     if let next, let prediction = model.arrivalPrediction(bus, stopID: next.stop.id, at: date, onboard: true) {
                         Text(prediction.label).monospacedDigit()
                     }
-                }.liveFont(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("journey-next-stop")
+                }.liveFont(.subheadline).foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")
                 let progress = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date)
                 HStack(alignment: .firstTextBaseline) {
                     Text((progress?.distance ?? 0) < -20 ? "已通過「\(ride.alighting.name)」" : "在「\(ride.alighting.name)」下車")
@@ -452,7 +452,7 @@ private struct OnboardSummary: View {
                     if let prediction = model.arrivalPrediction(bus, stopID: ride.alighting.id, at: date, onboard: true) {
                         Text(prediction.label).liveFont(.title3, weight: .bold).monospacedDigit().fixedSize()
                     }
-                }.accessibilityIdentifier("journey-alighting-time")
+                }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             } else {
                 Text("在「\(ride.alighting.name)」下車").liveFont(.title3, weight: .bold).lineLimit(2)
                 Text(model.onboardPlate(for: ride) == nil ? "選擇車牌即可看沿途時間" : "車輛位置更新中")
@@ -812,10 +812,10 @@ struct JourneyGuideCard: View {
                         HStack {
                             Button { chooseVehicle = true } label: {
                                 Label(model.onboardPlate(for: ride) ?? "選擇搭乘車牌", systemImage: "bus")
-                                    .liveFont(.caption).monospaced()
+                                    .liveFont(.caption).monospaced().frame(minHeight: 44)
                             }.accessibilityIdentifier("journey-onboard-vehicle")
                             Spacer()
-                            Button("沿途站牌") { showRideStops = true }.liveFont(.subheadline)
+                            Button { showRideStops = true } label: { Text("沿途站牌").liveFont(.subheadline).frame(minHeight: 44) }
                                 .accessibilityIdentifier("journey-ride-stops")
                         }
                         TimelineView(.periodic(from: .now, by: 1)) { timeline in
