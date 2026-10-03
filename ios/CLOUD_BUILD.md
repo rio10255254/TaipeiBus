@@ -7,17 +7,21 @@
 | 項目 | 狀態／處理方式 |
 | --- | --- |
 | 原生 iPhone App | SwiftUI、CoreLocation、MapLibre Native／Metal；優先適配 iPhone 17，最低 iOS 17 |
-| 版本 | `0.4.3 (12.1.0)` 已完成正式簽名、上傳及 Apple 處理，並加入既有內部測試群組 |
+| 版本 | `0.4.4 (13.1.0)` 已完成正式簽名、上傳及 Apple 處理，並加入既有內部測試群組 |
 | 建置工具 | 固定 Xcode 26.3；符合 2026-04-28 起 iOS 26 SDK 以上的上傳要求 |
 | App 圖示 | 已有 1024 × 1024 RGB 圖示，無透明背景 |
 | 定位／隱私 | 已有使用期間定位說明、Privacy Manifest、App 內隱私說明及政策 HTML 草稿 |
 | 網路與加密 | 使用 HTTPS；現有 Info.plist 宣告 `ITSAppUsesNonExemptEncryption=false`，若新增自訂加密須重新評估 |
-| 測試 | 65 項離線公車核心測試、3 項官方資料測試，以及 5 項原生操作測試已通過；已檢視實際截圖；發布腳本另有無網路測試，CI 編譯 Simulator Debug 與 iPhone Release |
+| 測試 | 78 項離線公車核心測試、3 項官方資料測試，以及 10 項原生操作測試已通過；已檢視實際截圖及桌面圖標；發布腳本另有無網路測試，CI 編譯 Simulator Debug 與 iPhone Release |
 | GitHub 儲存庫 | 公開 [rio10255254/TaipeiBus](https://github.com/rio10255254/TaipeiBus)；公開前已檢查完整修改歷史、可取得的製作紀錄與歷史上傳項目，沒有發現私鑰外洩；發布流程已獨立 |
 | Apple 帳號授權 | 已設定 API 授權與發行憑證、描述檔；最近成功發佈已完成正式簽名及上傳 |
 | App 身分 | `com.rio10255254.TaipeiBus`；已建立 App Store Connect App 記錄並完成過發佈 |
-| 真機／TestFlight | `0.4.3 (12.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
-| 最新發佈工作 | `0.4.3` [發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37104010069)成功；已核對版本、build、來源 commit、上傳確認及既有內部測試群組狀態 |
+| 真機／TestFlight | `0.4.4 (13.1.0)` 的發佈回條確認已加入內部測試群組；實機安裝結果需由測試者確認 |
+| 最新發佈工作 | `0.4.4` [發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37113621917)成功；已核對版本、build、來源 commit、上傳確認及既有內部測試群組狀態 |
+
+0.4.4 加入站牌與地圖聯動、最近站牌重新定位、手機方向切換、路線專用按鍵及紀錄、完整行程切換修正與霧白／藍灰色新圖標。推薦綜合步行、車程、等待及轉乘，納入首班時間，排除普通通勤不適合的特殊服務並保留直達備選。[十項原生操作測試](https://github.com/rio10255254/TaipeiBus/actions/runs/37111958479)全部通過，已檢視實際畫面；發佈來源為 `9db9b12c9828c203ea4efb89b571b2313dc837c2`，回條確認 `upload_confirmed=true`、`status=internal_group_assigned`。
+
+上一版 `0.4.3 (12.1.0)` 的[發佈工作](https://github.com/rio10255254/TaipeiBus/actions/runs/37104010069)成功。
 
 0.4.3 縮短候車資訊、讓三個路線選項同屏顯示，步行留在同一張地圖，並補齊上下車、轉乘及抵達操作。[五項原生操作測試與截圖](https://github.com/rio10255254/TaipeiBus/actions/runs/37099237594)均已通過；發佈來源為 `535556d7eca01bd17e18822fa449b429f2be21d1`，回條確認 `upload_confirmed=true`、`status=internal_group_assigned`。
 
