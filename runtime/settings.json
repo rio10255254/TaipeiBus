@@ -1,11 +1,8 @@
 {
   "schemaVersion": 1,
-  "revision": 2,
+  "revision": 3,
   "minimumAppVersion": "0.4.2",
-  "copy": {
-    "公車站牌": "候車站牌",
-    "搜尋目的地": "找個地方"
-  },
+  "copy": {},
   "search": {
     "aliases": [
       {
@@ -94,7 +91,7 @@
     "resultLimit": 12
   },
   "appearance": {
-    "accentColor": "#A83B80",
+    "accentColor": "#007AFF",
     "walkingColor": "#FF9500",
     "waterColor": "#BADCE5",
     "parkColor": "#D6E6C5",
