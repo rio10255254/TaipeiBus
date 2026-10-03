@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'register-app-id', 'upload', 'finish-processing']
+        options: ['check-only', 'store-audit', 'register-app-id', 'upload', 'finish-processing']
         default: 'check-only'
       bundle_id:
         description: 'Leave empty to use BUS_BUNDLE_ID repository variable / release config'
@@ -49,7 +49,7 @@ jobs:
       BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
       BUS_FEEDBACK_EMAIL: ${{ vars.BUS_FEEDBACK_EMAIL }}
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
-      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release source and Apple configuration
@@ -71,6 +71,16 @@ jobs:
           key.write_text(os.environ['ASC_PRIVATE_KEY'].lstrip('\ufeff').strip() + '\n')
           key.chmod(0o600)
           PY
+      - name: Read-only App Store readiness audit
+        if: inputs.operation == 'store-audit'
+        run: ruby ios/release/store_audit.rb
+      - name: Preserve redacted App Store readiness audit
+        if: inputs.operation == 'store-audit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-audit-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-audit.json
+          retention-days: 7
       - name: Register App ID only
         if: inputs.operation == 'register-app-id'
         run: ruby ios/apple-connect.rb register-app-id
