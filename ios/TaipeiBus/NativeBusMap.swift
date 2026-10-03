@@ -417,7 +417,7 @@ struct NativeBusMap: UIViewRepresentable {
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
                 viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return }
             map.setCamera(MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate,
-                                      altitude: 1000, pitch: 35, heading: 0), animated: false)
+                                      altitude: 1000, pitch: model.stationBrowsing ? 0 : 35, heading: 0), animated: false)
             map.setCenter(overview.center.locationCoordinate, zoomLevel: overview.zoom, animated: false)
         }
 

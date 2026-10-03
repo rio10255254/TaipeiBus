@@ -3,6 +3,8 @@ import XCTest
 
 final class TripRankingTests: XCTestCase {
     func testNightServiceDoesNotLookLikeAnEightMinuteWaitInTheAfternoon() throws {
+        let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-03T06:00:00Z"))
+        XCTAssertEqual(BusServiceWindow.secondsOfDay(at: date), 14 * 3_600)
         let window = try XCTUnwrap(BusServiceWindow(first: "2100", last: "0100"))
         let wait = window.waitBeforeOpening(secondsOfDay: 14 * 3_600, fullRouteSeconds: 3_600)
         XCTAssertEqual(wait, 7 * 3_600)

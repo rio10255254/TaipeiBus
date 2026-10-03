@@ -17,7 +17,10 @@ public struct BusServiceWindow: Sendable {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
         let parts = calendar.dateComponents([.hour, .minute, .second], from: date)
-        return Double((parts.hour ?? 0) * 3_600 + (parts.minute ?? 0) * 60 + (parts.second ?? 0))
+        let hour = Double(parts.hour ?? 0)
+        let minute = Double(parts.minute ?? 0)
+        let second = Double(parts.second ?? 0)
+        return hour * 3_600 + minute * 60 + second
     }
     /// Only a lower bound before the first departure. It never declares a route
     /// closed after its last terminal departure, when buses may still be on the road.

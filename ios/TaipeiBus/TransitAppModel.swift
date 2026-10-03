@@ -227,7 +227,12 @@ final class TransitAppModel: ObservableObject {
         stationBrowsing = true
         let point = [location.usableCoordinate, mapCenter].compactMap { $0 }.first { $0.isInServiceArea } ?? .taipei
         stationBrowseCenter = point
-        focusMap(.coordinate(point)); sheetDetent = .height(390)
+        focusNearbyStations(around: point); sheetDetent = .height(390)
+    }
+    func focusNearbyStations(around point: Coordinate) {
+        let nearby = metadata.stations.values.filter { $0.coordinate.distance(to: point) <= 800 }
+            .sorted { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) }
+        focusMap(.journey([point] + nearby.prefix(8).map(\.coordinate)))
     }
     func mapCenterChanged(_ point: Coordinate) {
         mapCenter = point
@@ -236,7 +241,7 @@ final class TransitAppModel: ObservableObject {
     func browseNearMe() {
         location.request()
         if let point = location.displayCoordinate, point.isInServiceArea {
-            stationBrowseCenter = point; focusMap(.coordinate(point))
+            query = ""; stationBrowseCenter = point; focusNearbyStations(around: point)
         }
         sheetDetent = .height(390)
     }

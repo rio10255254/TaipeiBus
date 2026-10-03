@@ -494,8 +494,10 @@ private struct TransitPanel: View {
         let query = model.query
         let results = await model.findStations(query: query)
         guard !Task.isCancelled else { return }
+        let firstNearbyResults = stationResults.isEmpty && query.isEmpty && !results.isEmpty && model.stationBrowsing && !model.mapWasMoved
         stationResults = results; stationResultQuery = query
         model.stationMapResults = results
+        if firstNearbyResults, let point = model.stationBrowseCenter { model.focusNearbyStations(around: point) }
     }
 
     private var browseTitle: String {
@@ -520,6 +522,7 @@ private struct TransitPanel: View {
                         if !model.query.isEmpty { model.focusMap(.journey(stationResults.map(\.coordinate))) }
                     } label: { Image(systemName: "map") }.frame(width: 44, height: 44)
                         .accessibilityLabel("在地圖查看站牌").accessibilityIdentifier("station-results-map")
+                        .disabled(stationResultQuery != model.query || stationResults.isEmpty)
                 }
                 Button { dismiss() } label: { Image(systemName: "xmark") }.frame(width: 36, height: 44)
                     .accessibilityLabel("返回地圖")
