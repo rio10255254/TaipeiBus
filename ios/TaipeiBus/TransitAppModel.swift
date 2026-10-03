@@ -124,7 +124,7 @@ final class TransitAppModel: ObservableObject {
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
                 async let prepared = service.prepare()
                 if !metadata.routes.isEmpty {
-                    let current = await service.refresh()
+                    let current = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     applySnapshot(current)
                 }
@@ -133,7 +133,7 @@ final class TransitAppModel: ObservableObject {
                 loading = false; loadError = nil
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
-                    let result = await service.refresh()
+                    let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     applySnapshot(result)
 #if DEBUG
@@ -167,13 +167,18 @@ final class TransitAppModel: ObservableObject {
         refreshing = true
         defer { refreshing = false }
         async let packet = liveService.refresh(current: liveSettings)
-        let result = await service.refresh()
+        let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
         if !Task.isCancelled, isActive { applySnapshot(result) }
         if let update = await packet, !Task.isCancelled, isActive { await applyLiveSettings(update) }
     }
 
+    private func receivePartialSnapshot(_ result: TransitSnapshot) {
+        guard isActive else { return }
+        applySnapshot(result)
+    }
+
     private func applySnapshot(_ result: TransitSnapshot) {
-        guard result.revision >= snapshot.revision else { return }
+        guard result.revision > snapshot.revision else { return }
         snapshot = result
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
         planner.updateSnapshot(result)
@@ -410,7 +415,7 @@ final class TransitAppModel: ObservableObject {
         var failure: String?
         let queries: [String]
         switch group {
-        case "expanded": queries = ["內內湖月台運站", "我要去內湖站", "Neihu Station", "七張站", "南港展覽館站"]
+        case "expanded": queries = ["內湖捷運站", "我要去內湖站", "Neihu Station", "七張站", "南港展覽館站"]
         case "landmarks": queries = ["臺北車站", "臺北101", "台大", "三總", "小巨蛋"]
         case "addresses": queries = ["忠孝東路四段100號", "内湖站", "台北 內湖站"]
         default: queries = ["內湖站", "東湖站", "港墘站", "西門站"]

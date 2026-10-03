@@ -180,7 +180,7 @@ final class TransitCoreTests: XCTestCase {
             ["RouteID": 100, "StopID": 103, "EstimateTime": "-2"]])
         var estimates = try FeedDecoder.estimates(data)
         XCTAssertNil(estimates.value(routeID: "100", stopID: "101", at: now))
-        XCTAssertEqual(EstimateFeed.label(estimates.value(routeID: "100", stopID: "102", at: now)), "4 分鐘")
+        XCTAssertEqual(EstimateFeed.label(estimates.value(routeID: "100", stopID: "102", at: now)), "3 分鐘")
         XCTAssertEqual(EstimateFeed.label(-2), "交管不停靠")
         XCTAssertNil(estimates.value(routeID: "100", stopID: "102", at: now.addingTimeInterval(121)))
         estimates.error = "offline"

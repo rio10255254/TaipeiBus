@@ -41,7 +41,7 @@ final class LiveSettingsTests: XCTestCase {
         let hospital = Station(id: "hospital", name: "三總內湖站", coordinate: point, address: "成功路", bearing: "", stopIDs: [])
         let index = StationSearchIndex(stations: [north, south, hospital])
         XCTAssertTrue(index.search("內湖月台", near: point).isEmpty)
-        let aliases = [["names": ["內湖月台", "內內湖月台運站"], "queries": ["捷運內湖站"]]]
+        let aliases = [["names": ["內湖月台", "內湖捷運站"], "queries": ["捷運內湖站"]]]
         let value = try LiveSettings.decode(document(extra: ["search": ["aliases": aliases]]), appVersion: "0.4.2")
         let vocabulary = SearchVocabulary(aliases: value.search.aliases)
         let updated = index.search("內湖月台", near: point, vocabulary: vocabulary)
@@ -49,7 +49,7 @@ final class LiveSettingsTests: XCTestCase {
         XCTAssertEqual(StationSearch.placeQueries("內湖月台", vocabulary: vocabulary).first, "捷運內湖站")
         XCTAssertEqual(updated.first?.address, "成功路北側")
         XCTAssertEqual(index.search("Neihu Station", near: point).first?.id, "north")
-        XCTAssertEqual(index.search("我要去內內湖月台運站", near: point).first?.id, "north")
+        XCTAssertEqual(index.search("我要去內湖捷運站", near: point).first?.id, "north")
         XCTAssertEqual(index.search("內胡站", near: point).first?.id, "north")
         XCTAssertFalse(index.search("內", near: point).isEmpty)
         XCTAssertTrue(index.search("完全不存在的地方", near: point).isEmpty)
