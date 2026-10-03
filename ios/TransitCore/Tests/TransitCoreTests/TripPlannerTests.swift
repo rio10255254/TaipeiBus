@@ -158,10 +158,17 @@ final class TripPlannerTests: XCTestCase {
         let planner = TripPlanner(metadata: metadata)
         let destinations = [Coordinate(latitude: 25.0478, longitude: 121.5172),
                             Coordinate(latitude: 25.0339, longitude: 121.5645),
-                            Coordinate(latitude: 25.0421, longitude: 121.5083)]
+                            Coordinate(latitude: 25.0421, longitude: 121.5083),
+                            Coordinate(latitude: 25.0838, longitude: 121.5942),
+                            Coordinate(latitude: 25.0174, longitude: 121.5404),
+                            Coordinate(latitude: 25.0496, longitude: 121.5779)]
         for destination in destinations {
             let trips = planner.plan(from: .taipei, to: destination, maximumWalk: 1_200)
             XCTAssertFalse(trips.isEmpty, "No public-bus trip to \(destination)")
+            print("Destination comparison \(destination): " + trips.prefix(3).map { trip in
+                trip.rides.map { $0.route.name }.joined(separator: " → ") +
+                    " [\(trip.transfers) transfer, \(Int(trip.accessDistance + trip.egressDistance + trip.transferDistance)) m access]"
+            }.joined(separator: "; "))
             for trip in trips {
                 XCTAssertTrue((1...2).contains(trip.rides.count))
                 XCTAssertLessThanOrEqual(trip.accessDistance, 1_200)
@@ -175,6 +182,13 @@ final class TripPlannerTests: XCTestCase {
                     XCTAssertEqual(ride.stops.map(\.id), Array(stops[board...alight]).map(\.id))
                 }
             }
+        }
+        for name in ["藍27", "南京幹線", "307"] {
+            let route = try XCTUnwrap(metadata.routeCatalog.search(name).first?.route)
+            let stops = metadata.orderedStops(routeID: route.id, direction: "0")
+            let first = try XCTUnwrap(stops.first), last = try XCTUnwrap(stops.last)
+            let trips = planner.plan(from: first.coordinate, to: last.coordinate, maximumWalk: 150, limit: 3)
+            XCTAssertTrue(trips.contains { $0.transfers == 0 }, "An official direct route must remain visible: \(name)")
         }
         print("Official destination routing: \(destinations.count) locations verified in \(Date().timeIntervalSince(start)) seconds.")
     }

@@ -2,6 +2,15 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testRouteKeypadShortNamesMatchTheOfficialCommuterName() {
+        let catalog = RouteCatalog(routes: [
+            BusRoute(id: "12", parentID: "12", name: "內科通勤專車12", variantName: "", departure: "甲", destination: "乙"),
+            BusRoute(id: "2", parentID: "2", name: "內科通勤專車2", variantName: "", departure: "甲", destination: "乙")
+        ])
+        XCTAssertEqual(catalog.search("內科2").first?.route.id, "2")
+        XCTAssertEqual(catalog.search("內科12").first?.route.id, "12")
+        XCTAssertEqual(catalog.search("通勤").count, 2)
+    }
     func testNearbyTimesFavorDirectOverAnExtraConnection() {
         let direct = TripRanking.assess(riding: [1_200], walking: [60, 60], arrivals: [300])
         let transfer = TripRanking.assess(riding: [450, 450], walking: [60, 90, 60], arrivals: [90, 780])

@@ -345,10 +345,18 @@ struct NativeBusMap: UIViewRepresentable {
             recordPreviewCamera(mapView, fullyRendered: fullyRendered)
             if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), fullyRendered {
                 let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
-                let state: [String: Any] = ["latitude": center.latitude, "longitude": center.longitude, "zoom": mapView.zoomLevel,
+                var state: [String: Any] = ["latitude": center.latitude, "longitude": center.longitude, "zoom": mapView.zoomLevel,
                     "heading": mapView.direction, "pitch": mapView.camera.pitch, "mode": model.userMapMode.rawValue,
                     "station": model.selectedStationID ?? "", "stationDistance": model.selectedStation.map { center.distance(to: $0.coordinate) } ?? -1,
                     "queryMarkers": model.stationMapResults.count, "browsing": model.stationBrowsing]
+                if model.stationBrowsing {
+                    let visible = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 24, dy: 24)
+                    let markers = mapView.visibleFeatures(in: visible, styleLayerIdentifiers: Set(["nearby-station-dots"]))
+                    if let id = markers.first?.attribute(forKey: "stationID") as? String, let station = model.metadata.stations[id] {
+                        let pixel = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)
+                        state["markerX"] = pixel.x; state["markerY"] = pixel.y; state["markerID"] = id
+                    }
+                }
                 DispatchQueue.main.async { [weak self] in self?.overlay.recordCamera(state) }
             }
 #endif

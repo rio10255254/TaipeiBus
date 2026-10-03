@@ -47,11 +47,11 @@ public struct RouteCatalog: Sendable {
         entries = orderedGroups.map { group in
             Entry(group: group,
                   names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName] }
-                    .map(Self.normalize).filter { !$0.isEmpty })),
+                    .flatMap(Self.searchNames).filter { !$0.isEmpty })),
                   destinations: Array(Set(group.variants.flatMap { [$0.departure, $0.destination] }
                     .map(Self.normalize).filter { !$0.isEmpty })),
                   variants: group.variants.map { ($0, [$0.displayName, $0.englishVariantName]
-                    .map(Self.normalize).filter { !$0.isEmpty }) })
+                    .flatMap(Self.searchNames).filter { !$0.isEmpty }) })
         }
     }
 
@@ -79,6 +79,11 @@ public struct RouteCatalog: Sendable {
                       locale: Locale(identifier: "zh_TW"))
             .replacingOccurrences(of: "臺", with: "台")
             .filter { !$0.isWhitespace }
+    }
+    private static func searchNames(_ value: String) -> [String] {
+        let name = normalize(value)
+        let compact = name.replacingOccurrences(of: "通勤專車", with: "").replacingOccurrences(of: "專車", with: "")
+        return compact == name ? [name] : [name, compact]
     }
 }
 

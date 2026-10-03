@@ -63,6 +63,10 @@ struct TransitHomeView: View {
                 }
                 .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
 #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
+                    Text(selectionOverlay.cameraState).font(.system(size: 1)).foregroundStyle(.clear)
+                        .frame(width: 1, height: 1).accessibilityIdentifier("map-camera-state").allowsHitTesting(false)
+                }
                 if let notice = model.previewNotice {
                     Text(notice).liveFont(.caption, weight: .semibold).padding(8)
                         .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80 * CGFloat(live.appearance.spacingScale))

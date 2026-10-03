@@ -23,6 +23,11 @@ on:
         description: 'For live-settings verification: current live content revision'
         type: string
         default: '1'
+      usability_scope:
+        description: 'For usability previews: all journeys or map/search controls only'
+        type: choice
+        options: ['all', 'map-controls']
+        default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
         type: string
@@ -356,15 +361,20 @@ jobs:
           gem install xcodeproj -v 1.27.0 --no-document --user-install
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
+          selection=()
+          if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
             -skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests \
+            "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify manual departure without location permission
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'map-controls'
         run: |
           set -euo pipefail
           xcrun simctl privacy "$BUS_SIM_DEVICE" revoke location com.example.TaipeiBus

@@ -30,7 +30,9 @@ class JourneyUsabilityTestBase: XCTestCase {
 final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
     var nativeMap: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
     func camera() -> [String: Any] {
-        guard let text = nativeMap.value as? String, let data = text.data(using: .utf8),
+        let probe = app.staticTexts["map-camera-state"]
+        let text = probe.exists ? probe.label : nativeMap.value as? String ?? ""
+        guard let data = text.data(using: .utf8),
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
         return value
     }
@@ -85,7 +87,10 @@ final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(stationResult.waitForExistence(timeout: 20))
         XCTAssertTrue(button("station-results-map").isHittable)
         capture("nearby-stations-and-map")
-        stationResult.tap()
+        waitCamera("Visible rendered station marker") { ($0["markerID"] as? String) != nil }
+        let marker = camera()
+        nativeMap.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: marker["markerX"] as? Double ?? 0,
+            dy: marker["markerY"] as? Double ?? 0)).tap()
         waitCamera("Station detail map center") { ($0["stationDistance"] as? Double ?? -1) >= 0 && ($0["stationDistance"] as? Double ?? 999) < 8 }
         button("返回搜尋").tap()
         XCTAssertTrue(stationResult.waitForExistence(timeout: 10))
@@ -110,6 +115,9 @@ final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(button("route-query").label, "藍27")
         button("清除搜尋").tap(); capture("route-search-history")
         XCTAssertTrue(app.staticTexts["最近查看"].exists)
+        button("內科").tap(); button("route-key-2").tap()
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "內科通勤專車2")).firstMatch.waitForExistence(timeout: 5))
+        capture("route-keypad-commuter")
         button("route-key-幹線").tap()
         XCTAssertTrue(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "幹線")).firstMatch.waitForExistence(timeout: 5))
         button("route-key-⌫").tap(); XCTAssertEqual(button("route-query").label, "幹")
