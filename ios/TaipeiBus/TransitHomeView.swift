@@ -121,7 +121,7 @@ struct TransitHomeView: View {
                         Text(message).liveFont(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
-                    if planner.started {
+                    if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
                         JourneyArrivalDock(model: model, planner: planner) { journeyDetent = .large; showJourney = true }
@@ -207,7 +207,7 @@ struct TransitHomeView: View {
 
     var body: some View {
         mapContent
-        .tint(Color(red: 0.12, green: 0.39, blue: 0.90))
+        .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .sheet(isPresented: $showSearch) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
@@ -246,7 +246,7 @@ struct TransitHomeView: View {
             let coordinates = planner.mapCoordinates
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection) {
                 let sameVehicle = model.selectedVehicle.map { bus in
-                    planner.selected?.rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                    planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
                 } ?? false
                 if !sameVehicle {
                     model.clearSelection()

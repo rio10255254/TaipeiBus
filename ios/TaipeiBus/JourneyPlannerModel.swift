@@ -83,6 +83,19 @@ final class JourneyPlannerModel: ObservableObject {
         return option.rides.indices.flatMap { [JourneyStep.walk($0), .ride($0)] } + [.walk(option.walks.count - 1)]
     }
     var currentStep: JourneyStep? { steps.indices.contains(stepIndex) ? steps[stepIndex] : nil }
+    /// Waiting is the default state; the rider confirms boarding rather than the GPS guessing it.
+    var boardingRideIndex: Int? {
+        guard let option = selected, !option.rides.isEmpty else { return nil }
+        if !started { return 0 }
+        if case .walk(let index) = currentStep, option.rides.indices.contains(index) { return index }
+        return nil
+    }
+    var activeRide: TransitRide? {
+        guard let option = selected else { return nil }
+        if let index = boardingRideIndex { return option.rides[index] }
+        if case .ride(let index) = currentStep { return option.rides[index] }
+        return nil
+    }
     func updateSnapshot(_ snapshot: TransitSnapshot) { latestSnapshot = snapshot }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
     var arrived: Bool { started && stepIndex >= steps.count }
@@ -258,6 +271,17 @@ final class JourneyPlannerModel: ObservableObject {
         stepIndex += 1; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
+    func boardCurrentRide() {
+        guard let index = boardingRideIndex,
+              let target = steps.firstIndex(of: .ride(index)) else { return }
+        started = true; stepIndex = target; mapRevision += 1
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    func returnToWaiting() {
+        guard case .ride(let index) = currentStep,
+              let target = steps.firstIndex(of: .walk(index)) else { return }
+        started = index > 0; stepIndex = target; mapRevision += 1
+    }
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
     }
@@ -294,8 +318,13 @@ final class JourneyPlannerModel: ObservableObject {
         origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate)
         destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate)
         usingLocation = false; started = false; stepIndex = 0
-        let walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0),
-                     WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0)]
+        var walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0)]
+        for index in trip.rides.indices.dropFirst() {
+            let from = trip.rides[index - 1].alighting.coordinate, to = trip.rides[index].boarding.coordinate
+            let distance = from.distance(to: to)
+            walks.append(WalkingLeg(from: from, to: to, distance: distance, duration: distance / 1.2))
+        }
+        walks.append(WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0))
         options = [JourneyOption(id: trip.id, trip: trip, walks: walks)]
         selectedID = trip.id; message = nil; mapRevision += 1
     }
