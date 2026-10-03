@@ -19,6 +19,7 @@ public struct TransitTrip: Identifiable, Sendable {
     public let egressDistance: Double
     public let transferDistance: Double
     public let score: Double
+    public let rideSeconds: [Double]
     public var transfers: Int { max(0, rides.count - 1) }
 }
 
@@ -64,8 +65,14 @@ public struct TripPlanner: Sendable {
                 guard stops.count >= 2 else { continue }
                 let index = patterns.count
                 var distances = [0.0]
+                let journey = metadata.journey(routeID: route.id, direction: direction)
+                let anchors = Dictionary((journey?.anchors ?? []).map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for i in 1..<stops.count {
-                    distances.append(distances[i - 1] + stops[i - 1].coordinate.distance(to: stops[i].coordinate))
+                    let distance: Double
+                    if let from = anchors[stops[i - 1].id], let to = anchors[stops[i].id] {
+                        distance = abs(to - from)
+                    } else { distance = stops[i - 1].coordinate.distance(to: stops[i].coordinate) * 1.25 }
+                    distances.append(distances[i - 1] + distance)
                 }
                 patterns.append(Pattern(route: route, direction: direction, stops: stops, distances: distances))
                 for (position, stop) in stops.enumerated() {
@@ -106,7 +113,7 @@ public struct TripPlanner: Sendable {
                 if distance <= maximumWalk { matches.append((station.id, distance)) }
             }
             matches.sort { a, b in a.distance == b.distance ? a.id < b.id : a.distance < b.distance }
-            return Array(matches.prefix(20))
+            return matches
         }
         let origins = nearby(origin), destinations = nearby(destination)
         guard !origins.isEmpty, !destinations.isEmpty else { return [] }
@@ -129,12 +136,16 @@ public struct TripPlanner: Sendable {
                 let pattern = patterns[segment.pattern]
                 return "\(pattern.route.parentID):\(pattern.direction):\(pattern.stops[segment.board].stationID):\(pattern.stops[segment.alight].stationID)"
             }.joined(separator: "|")
-            let riding = segments.reduce(0.0) { sum, segment in
+            let riding = segments.map { segment in
                 let p = patterns[segment.pattern]
-                return sum + (p.distances[segment.alight] - p.distances[segment.board]) / 5.2 + Double(segment.alight - segment.board) * 18
+                return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
             }
-            let score = (access + egress + transfer) / 1.2 * preferences.walkingWeight + riding +
-                Double(segments.count - 1) * preferences.transferPenaltySeconds
+            let walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
+            let arrivals = segments.map { segment in
+                let p = patterns[segment.pattern]
+                return estimates?.value(routeID: p.route.parentID, stopID: p.stops[segment.board].id, at: date)
+            }
+            let score = TripRanking.assess(riding: riding, walking: walking, arrivals: arrivals, preferences: preferences).score
             guard candidates[key].map({ $0.score <= score }) != true else { return }
             candidates[key] = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score)
         }
@@ -175,7 +186,11 @@ public struct TripPlanner: Sendable {
             }.joined(separator: "|")
             return seenFamilies.insert(family).inserted
         }
-        return choices.prefix(limit).map { key in
+        var limited = Array(choices.prefix(limit))
+        if limit >= 2, let direct = choices.first(where: { candidates[$0]!.segments.count == 1 }), !limited.contains(direct) {
+            limited[limited.count - 1] = direct
+        }
+        return limited.map { key in
             let candidate = candidates[key]!
             let rides = candidate.segments.map { segment -> TransitRide in
                 let pattern = patterns[segment.pattern]
@@ -191,7 +206,11 @@ public struct TripPlanner: Sendable {
                 return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates)
             }
             return TransitTrip(rides: rides, accessDistance: candidate.access, egressDistance: candidate.egress,
-                               transferDistance: candidate.transfer, score: candidate.score)
+                transferDistance: candidate.transfer, score: candidate.score,
+                rideSeconds: candidate.segments.map { segment in
+                    let p = patterns[segment.pattern]
+                    return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
+                })
         }
     }
 }

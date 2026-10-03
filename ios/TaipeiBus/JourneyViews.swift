@@ -24,6 +24,7 @@ struct JourneyPlanningView: View {
     @State private var resolvingQuery = ""
     @State private var stationResults: [Station] = []
     @State private var stationResultQuery = ""
+    @State private var showingRankingInfo = false
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
     private var searchContext: Coordinate? {
@@ -65,6 +66,7 @@ struct JourneyPlanningView: View {
                         ToolbarItem(placement: .topBarTrailing) {
                             Menu {
                                 Button(live.text("查看行程")) { showingItinerary = true; expand() }
+                                Button("推薦順序說明") { showingRankingInfo = true }
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
                             } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                                 .accessibilityLabel(live.text("更多行程選項"))
@@ -72,6 +74,11 @@ struct JourneyPlanningView: View {
                     }
                 }
             }
+        }
+        .alert("推薦順序", isPresented: $showingRankingInfo) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text("綜合步行、候車、車程與轉乘負擔，時間相近時優先直達。候車分鐘是第一班車到上車站的時間，並非整趟時間。缺少班距或路況時，以保守估計比較方案。")
         }
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
@@ -496,8 +503,11 @@ struct JourneyOptionsView: View {
                             Spacer(minLength: 4)
                             if let first = option.rides.first {
                                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                                    Text(BoardingGuide(ride: first, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).arrivalShortLabel)
-                                        .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                                    HStack(spacing: 3) {
+                                        Text("候車").liveFont(.caption).foregroundStyle(.secondary)
+                                        Text(BoardingGuide(ride: first, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date).arrivalShortLabel)
+                                            .liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                                    }.lineLimit(1).minimumScaleFactor(0.8)
                                 }
                             }
                             Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
@@ -506,7 +516,7 @@ struct JourneyOptionsView: View {
                             Text(first.boarding.name + " → " + last.alighting.name)
                                 .liveFont(.subheadline).lineLimit(1).minimumScaleFactor(0.8)
                         }
-                        Text(option.walkingTimeLabel + (option.rides.count > 1 ? " · 轉乘 1 次" : ""))
+                        Text((option.walkingOnly ? "" : option.rides.count > 1 ? "轉乘 1 次 · " : "直達 · ") + option.walkingTimeLabel)
                             .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                         if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
                     }.padding(.vertical, 8).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())

@@ -82,6 +82,46 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertGreaterThan(trip.accessDistance, 300)
     }
 
+    func testDenseNearbyPlatformsDoNotHideADirectBoardingStop() throws {
+        let crowded = (0..<30).map { index in
+            ("other\(index)", "other\(index)", "0", [Coordinate(latitude: a.latitude + Double(index) * 0.00001, longitude: a.longitude), b])
+        }
+        let directStop = Coordinate(latitude: a.latitude + 0.003, longitude: a.longitude)
+        let source = metadata(crowded + [("direct", "direct", "0", [directStop, d])])
+        let trips = TripPlanner(metadata: source).plan(from: a, to: d, maximumWalk: 500)
+        XCTAssertTrue(trips.contains { $0.rides.count == 1 && $0.rides[0].route.id == "direct" })
+    }
+
+    func testDirectAlternativeSurvivesFasterTransferCandidates() {
+        let detour = Coordinate(latitude: 25.17, longitude: 121.68)
+        let source = metadata([("direct", "direct", "0", [a, detour, c]), ("first", "first", "0", [a, b])] +
+            (0..<4).map { ("connection\($0)", "connection\($0)", "0", [b, c]) })
+        let planner = TripPlanner(metadata: source)
+        let trips = planner.plan(from: a, to: c, maximumWalk: 100, limit: 3)
+        XCTAssertEqual(trips.count, 3)
+        XCTAssertEqual(trips.first?.transfers, 1, "A huge direct detour should not be preferred")
+        XCTAssertTrue(trips.contains { $0.transfers == 0 })
+        let all = planner.plan(from: a, to: c, maximumWalk: 100, limit: 18)
+        let ranked = TripRanking.recommended(all, estimates: EstimateFeed(), at: Date(), limit: 3)
+        XCTAssertEqual(ranked.first?.transfers, 1)
+        XCTAssertTrue(ranked.contains { $0.transfers == 0 })
+    }
+
+    func testRankingUsesRoadGeometryAndVerifiedWalkingTime() throws {
+        var source = metadata([("direct", "direct", "0", [a, c])])
+        source.lines["sub:direct"] = RouteLine(coordinates: [a, d, c])
+        source.rebuildJourneys()
+        let trip = try XCTUnwrap(TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100).first)
+        XCTAssertGreaterThan(trip.rideSeconds[0], a.distance(to: c) / 4.5 + 20)
+        let date = Date()
+        let estimates = EstimateFeed(seconds: ["direct:direct:0": 120], updatedAt: date)
+        let quickWalk = TripRanking.assessment(trip, estimates: estimates, at: date, walkingDurations: [30, 30])
+        let actualDetour = TripRanking.assessment(trip, estimates: estimates, at: date, walkingDurations: [600, 30])
+        XCTAssertFalse(quickWalk.missedFirstArrival)
+        XCTAssertTrue(actualDetour.missedFirstArrival)
+        XCTAssertGreaterThan(actualDetour.score, quickWalk.score)
+    }
+
     func testMissingGeometryDoesNotInventAWalkingOrBusPolyline() throws {
         let trip = try XCTUnwrap(TripPlanner(metadata: metadata([("go", "1", "0", [a,c])]))
             .plan(from: a, to: c, maximumWalk: 100).first)

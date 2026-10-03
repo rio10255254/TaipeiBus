@@ -10,6 +10,9 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var accuracy: Double?
     @Published private(set) var updatedAt: Date?
     @Published private(set) var revision = 0
+    @Published private(set) var heading: Double?
+    private var headingTime = Date.distantPast
+    private var headingEnabled = false
     private let manager = CLLocationManager()
     private var sample: LocationSample?
     private var active = false
@@ -34,6 +37,19 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         guard authorized, let sample, sample.canPlan(at: Date()) else { return nil }
         return sample.coordinate
     }
+    var currentHeading: Double? { Date().timeIntervalSince(headingTime) <= 15 ? heading : nil }
+    func setHeadingActive(_ enabled: Bool) {
+        headingEnabled = enabled
+        manager.headingOrientation = .portrait
+        manager.headingFilter = 3
+        if enabled, active, authorized, CLLocationManager.headingAvailable() { manager.startUpdatingHeading() }
+        else { manager.stopUpdatingHeading() }
+#if DEBUG
+        if enabled, ProcessInfo.processInfo.arguments.contains("--test-device-heading") {
+            heading = 90; headingTime = Date()
+        }
+#endif
+    }
 
     override init() {
         super.init()
@@ -46,10 +62,11 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }
     func setActive(_ active: Bool) {
         self.active = active
-        if active { requestIfAuthorized() }
+        if active { requestIfAuthorized(); setHeadingActive(headingEnabled) }
         else {
             timeoutTask?.cancel(); timeoutTask = nil
             manager.stopUpdatingLocation(); updating = false; requesting = false
+            manager.stopUpdatingHeading()
         }
     }
     func request() {
@@ -79,6 +96,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             lastRestart = Date()
             manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
             manager.startUpdatingLocation()
+            setHeadingActive(headingEnabled)
             timeoutTask?.cancel()
             timeoutTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(10))
@@ -90,6 +108,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         case .restricted, .denied:
             permissionRequested = false; requesting = false; updating = false
             manager.stopUpdatingLocation(); timeoutTask?.cancel()
+            manager.stopUpdatingHeading(); heading = nil
             sample = nil; coordinate = nil; accuracy = nil; updatedAt = nil; revision += 1
             message = settings.text("定位未開啟，可手動選擇出發地")
         @unknown default:
@@ -109,6 +128,13 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             // Refinement happens after publishing the first useful position.
             manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
         }
+    }
+    func locationManager(_ manager: CLLocationManager, didUpdateHeading value: CLHeading) {
+        guard headingEnabled, active, value.headingAccuracy >= 0, value.headingAccuracy <= 45,
+              abs(value.timestamp.timeIntervalSinceNow) <= 10 else { return }
+        let direction = value.trueHeading >= 0 ? value.trueHeading : value.magneticHeading
+        guard direction.isFinite, direction >= 0 else { return }
+        heading = direction.truncatingRemainder(dividingBy: 360); headingTime = value.timestamp
     }
     private static func sample(_ location: CLLocation) -> LocationSample {
         LocationSample(coordinate: Coordinate(latitude: location.coordinate.latitude, longitude: location.coordinate.longitude),
