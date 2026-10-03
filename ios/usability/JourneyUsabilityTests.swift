@@ -310,6 +310,22 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
 // Marketing images use the actual interface and official live data. No vehicle,
 // ETA or journey fixtures are permitted in this class.
 final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
+    func waitRenderedMap(_ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let text = self.app.staticTexts["map-camera-state"].label
+            guard let data = text.data(using: .utf8),
+                  let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            return condition(state)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 60), .completed)
+    }
+    func testStoreLiveBusIn3D() {
+        let route = ProcessInfo.processInfo.environment["BUS_STORE_VEHICLE_ROUTE"] ?? "307"
+        launch(["--preview-vehicle-route", route, "--test-map-controls"])
+        XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        capture("store-07-live-bus-in-3d")
+    }
     var nearest: XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "nearby-station-")).firstMatch
     }
@@ -328,7 +344,7 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         capture("store-04-route-map")
     }
     func testStoreRealDestinationAndItinerary() {
-        launch()
+        launch(["--test-map-controls"])
         XCTAssertTrue(nearest.waitForExistence(timeout: 90))
         button("搜尋目的地").tap(); chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
@@ -336,10 +352,27 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
         button("journey-option-" + selectedID).tap()
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
+        waitRenderedMap { ($0["zoom"] as? Double ?? 0) >= 10 && ($0["zoom"] as? Double ?? 99) < 16 }
         capture("store-05-boarding-map")
         button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
         capture("store-06-full-itinerary")
+        button("返回地圖").tap()
+        let approach = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "boarding-vehicle-")).firstMatch
+        XCTAssertTrue(approach.waitForExistence(timeout: 30), "A real, already-departed bus is required for the screenshot")
+        let plate = String(approach.identifier.dropFirst("boarding-vehicle-".count))
+        button("boarding-vehicle-" + plate).tap()
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        capture("store-08-bus-first-navigation")
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-ride-stops").waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains(plate))
+        capture("store-09-onboard-live-guidance")
+        button("journey-ride-stops").tap()
+        XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, plate)
+        XCTAssertGreaterThan(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "onboard-stop-")).count, 1)
+        capture("store-10-time-at-each-stop")
     }
     func testPrivacyAndSupportAreAccessible() {
         launch()

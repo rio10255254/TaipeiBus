@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -133,7 +133,7 @@ jobs:
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17
-          if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
+          if [ '${{ inputs.usability_scope }}' = 'app-store' ] || [ '${{ inputs.usability_scope }}' = 'app-store-features' ]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
           fi
           device=$(xcrun simctl create TaipeiBus-preview "$device_type" "$runtime")
@@ -386,6 +386,37 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-features' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealDestinationAndItinerary')
+            # Pick a currently moving public-feed bus near buildings in Taipei.
+            # Only simulator passenger location is controlled; bus GPS/ETAs remain live.
+            export BUS_STORE_VEHICLE_ROUTE=$(python3 - <<'PY'
+          import concurrent.futures, gzip, json, math
+          from urllib.request import urlopen
+          def fetch(name):
+              raw = urlopen(f'https://tcgbusfs.blob.core.windows.net/blobbus/{name}.gz', timeout=30).read()
+              return json.loads(gzip.decompress(raw))['BusInfo']
+          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+              vehicles, routes = list(pool.map(fetch, ['GetBusData', 'GetRoute']))
+          catalog = {str(route['pathAttributeId']): route for route in routes}
+          choices = []
+          for bus in vehicles:
+              route = catalog.get(str(bus.get('RouteID')))
+              if not route or str(bus.get('DutyStatus')) != '1' or float(bus.get('Speed') or 0) < 8:
+                  continue
+              lat, lon = float(bus['Latitude']), float(bus['Longitude'])
+              if not (25.025 < lat < 25.07 and 121.53 < lon < 121.59):
+                  continue
+              distance = math.hypot(lat - 25.038, (lon - 121.56) * 0.9)
+              choices.append((distance, route['nameZh']))
+          if not choices:
+              raise RuntimeError('No actual moving city-centre bus is available for this capture.')
+          print(min(choices)[1])
+          PY
+            )
+            test -n "$BUS_STORE_VEHICLE_ROUTE"
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
