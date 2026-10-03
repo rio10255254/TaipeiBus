@@ -1,8 +1,11 @@
 {
   "schemaVersion": 1,
-  "revision": 1,
+  "revision": 2,
   "minimumAppVersion": "0.4.2",
-  "copy": {},
+  "copy": {
+    "公車站牌": "候車站牌",
+    "搜尋目的地": "找個地方"
+  },
   "search": {
     "aliases": [
       {
@@ -10,7 +13,8 @@
           "內湖捷運站",
           "內湖捷運",
           "Neihu Station",
-          "MRT Neihu"
+          "MRT Neihu",
+          "內湖月台"
         ],
         "queries": [
           "捷運內湖站"
@@ -90,7 +94,7 @@
     "resultLimit": 12
   },
   "appearance": {
-    "accentColor": "#007AFF",
+    "accentColor": "#A83B80",
     "walkingColor": "#FF9500",
     "waterColor": "#BADCE5",
     "parkColor": "#D6E6C5",
