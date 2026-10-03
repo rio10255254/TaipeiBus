@@ -9,6 +9,7 @@ actor TransitService {
     private var snapshot = TransitSnapshot()
     private var refreshTask: Task<TransitSnapshot, Never>?
     private var metadataLoadedAt: Date?
+    private var settings = LiveSettings.defaults
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
 
@@ -22,9 +23,30 @@ actor TransitService {
         cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }
+    func updateSettings(_ settings: LiveSettings) { self.settings = settings }
+    func cachedMetadata() -> TransitMetadata? {
+        var feeds: [String: Data] = [:]
+        let essentials: Set<String> = ["GetRoute", "GetStop", "GetPathDetail"]
+        for name in Self.metadataNames {
+            let file = cacheDirectory.appendingPathComponent("\(name).json")
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+                  let modified = attributes[.modificationDate] as? Date,
+                  Date().timeIntervalSince(modified) < settings.refresh.metadataHours * 3_600,
+                  ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 32 * 1_024 * 1_024,
+                  let bytes = try? Data(contentsOf: file),
+                  (try? FeedDecoder.validateMetadataFeed(bytes)) != nil else {
+                if essentials.contains(name) { return nil }
+                continue
+            }
+            feeds[name] = bytes
+        }
+        guard let value = try? FeedDecoder.metadata(feeds: feeds), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
+        metadata = value
+        return value
+    }
 
     func prepare(force: Bool = false) async throws -> TransitMetadata {
-        let refreshInterval: TimeInterval = metadataNotice == nil ? 86_400 : 300
+        let refreshInterval: TimeInterval = metadataNotice == nil ? settings.refresh.metadataHours * 3_600 : 300
         if !force, let date = metadataLoadedAt, Date().timeIntervalSince(date) < refreshInterval { return metadata }
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         var feeds: [String: Data] = [:]
@@ -52,7 +74,7 @@ actor TransitService {
         let url = cacheDirectory.appendingPathComponent("\(name).json")
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         let modified = attributes?[.modificationDate] as? Date
-        if !force, let modified, Date().timeIntervalSince(modified) < 86_400,
+        if !force, let modified, Date().timeIntervalSince(modified) < settings.refresh.metadataHours * 3_600,
            let bytes = try? Data(contentsOf: url) {
             do { try FeedDecoder.validateMetadataFeed(bytes); return (name, bytes, nil) }
             catch { /* Treat an empty or malformed cache as a cache miss. */ }

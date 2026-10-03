@@ -1,0 +1,68 @@
+name: Quick update content
+
+on:
+  push:
+    branches: ['main']
+    paths: ['runtime/**', 'ios/live-update.py', '.github/workflows/quick-update.yml']
+  pull_request:
+    paths: ['runtime/**', 'ios/live-update.py', '.github/workflows/quick-update.yml']
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Validate current content, publish changes, or restore earlier content'
+        type: choice
+        options: ['validate', 'publish', 'rollback']
+        default: 'validate'
+      document:
+        description: 'For publish: full JSON or a partial update (no secrets)'
+        type: string
+        default: ''
+      restore_revision:
+        description: 'For rollback: previous content revision to restore'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: live-content-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate downloaded content
+        run: python3 ios/live-update.py validate runtime/settings.json
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.operation != 'validate' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      BUS_LIVE_DOCUMENT: ${{ inputs.document }}
+      BUS_RESTORE_REVISION: ${{ inputs.restore_revision }}
+      BUS_LIVE_OPERATION: ${{ inputs.operation }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Publish validated content or restore earlier content
+        run: |
+          python3 - <<'PY'
+          import os, subprocess
+          if os.environ['BUS_LIVE_OPERATION'] == 'publish':
+              command = ['python3', 'ios/live-update.py', 'publish']
+          else:
+              value = os.environ['BUS_RESTORE_REVISION']
+              if not value.isdecimal() or int(value) <= 0:
+                  raise SystemExit('Specify the earlier positive content revision to restore.')
+              command = ['python3', 'ios/live-update.py', 'rollback', value]
+          subprocess.run(command, check=True)
+          PY

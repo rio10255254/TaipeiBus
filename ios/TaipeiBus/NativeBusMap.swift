@@ -85,6 +85,7 @@ struct NativeBusMap: UIViewRepresentable {
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
         private var positionedInitialCamera = false
+        private var lastAppearance: LiveSettings.Appearance?
 #if DEBUG
         private var lastPreviewCameraSignature = ""
 #endif
@@ -103,6 +104,7 @@ struct NativeBusMap: UIViewRepresentable {
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            lastAppearance = nil
             buildingLayer = style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer
             buildingOpacity = 1; buildingOpacityTarget = 1
             let route = MLNShapeSource(identifier: "selected-route", shape: nil, options: nil)
@@ -194,8 +196,19 @@ struct NativeBusMap: UIViewRepresentable {
             guard let map else { return }
             if !positionedInitialCamera, map.bounds.width > 0, map.bounds.height > 0 {
                 positionedInitialCamera = true
-                map.setCamera(MLNMapCamera(lookingAtCenter: Coordinate.taipei.locationCoordinate,
+                let first = location?.isInServiceArea == true ? location! : Coordinate.taipei
+                map.setCamera(MLNMapCamera(lookingAtCenter: first.locationCoordinate,
                                           altitude: 650, pitch: 54, heading: 0), animated: false)
+            }
+            // Camera positioning does not depend on downloading the map style or creating the bus layer.
+            if buses == nil {
+                if lastFocusRevision != model.focusRevision, case .some(.coordinate(let point)) = model.focus {
+                    map.setCenter(point.locationCoordinate, animated: false); lastFocusRevision = model.focusRevision
+                }
+                return
+            }
+            if let style = map.style, lastAppearance != model.liveSettings.appearance {
+                applyAppearance(style); lastAppearance = model.liveSettings.appearance
             }
             guard let buses else { return }
             if lastMetadataCount != model.metadata.stations.count {
@@ -419,9 +432,29 @@ struct NativeBusMap: UIViewRepresentable {
 
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom]
-            if !reason.intersection(gestures).isEmpty, model.following {
-                DispatchQueue.main.async { [weak self] in self?.model.following = false }
+            if !reason.intersection(gestures).isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.model.mapWasMoved = true
+                    self?.model.following = false
+                }
             }
+        }
+
+        private func applyAppearance(_ style: MLNStyle) {
+            let theme = model.liveSettings.appearance
+            let accent = NSExpression(forConstantValue: UIColor(liveHex: theme.accentColor))
+            (style.layer(withIdentifier: "selected-route-line") as? MLNLineStyleLayer)?.lineColor = accent
+            (style.layer(withIdentifier: "journey-stop-dots") as? MLNCircleStyleLayer)?.circleColor = accent
+            (style.layer(withIdentifier: "selected-station-dot") as? MLNCircleStyleLayer)?.circleColor = accent
+            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: theme.walkingColor))
+            (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: theme.waterColor))
+            if let park = style.layer(withIdentifier: "park") as? MLNFillStyleLayer {
+                let color = NSExpression(forConstantValue: UIColor(liveHex: theme.parkColor))
+                park.fillColor = color; park.fillOutlineColor = color
+            }
+            let building = NSExpression(forConstantValue: UIColor(liveHex: theme.buildingColor))
+            (style.layer(withIdentifier: "building") as? MLNFillStyleLayer)?.fillColor = building
+            (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = building
         }
 
         func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {

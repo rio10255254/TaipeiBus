@@ -95,7 +95,8 @@ public struct TripPlanner: Sendable {
     }
 
     public func plan(from origin: Coordinate, to destination: Coordinate,
-                     maximumWalk: Double = 1_000, limit: Int = 6) -> [TransitTrip] {
+                     maximumWalk: Double = 1_000, limit: Int = 6,
+                     preferences: LiveSettings.Planning = LiveSettings.Planning()) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
         func nearby(_ point: Coordinate) -> [(id: String, distance: Double)] {
             var matches: [(id: String, distance: Double)] = []
@@ -124,7 +125,8 @@ public struct TripPlanner: Sendable {
                 let p = patterns[segment.pattern]
                 return sum + (p.distances[segment.alight] - p.distances[segment.board]) / 5.2 + Double(segment.alight - segment.board) * 18
             }
-            let score = (access + egress + transfer) / 1.2 + riding + Double(segments.count - 1) * 420
+            let score = (access + egress + transfer) / 1.2 * preferences.walkingWeight + riding +
+                Double(segments.count - 1) * preferences.transferPenaltySeconds
             guard candidates[key].map({ $0.score <= score }) != true else { return }
             candidates[key] = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score)
         }

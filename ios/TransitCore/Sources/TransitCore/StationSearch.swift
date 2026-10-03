@@ -6,7 +6,7 @@ public struct StationResultGroup: Identifiable, Sendable {
     public var id: String { name }
 }
 
-/// Shared text matching for station names and native place results. Proximity only breaks relevance ties.
+/// Shared matching for official platforms and native place results.
 public enum StationSearch {
     private static let familiarNames = [
         ["台北車站", "台北站", "北車", "Taipei Main Station"],
@@ -16,16 +16,25 @@ public enum StationSearch {
         ["三總", "三軍總醫院", "Tri-Service General Hospital"],
         ["小巨蛋", "台北小巨蛋", "Taipei Arena"],
         ["榮總", "台北榮總", "台北榮民總醫院"],
-        ["松山機場", "台北松山機場", "Taipei Songshan Airport"]
+        ["松山機場", "台北松山機場", "Taipei Songshan Airport"],
+        ["台北市政府", "北市府", "臺北市政府"],
+        ["台北轉運站", "臺北轉運站", "Taipei Bus Station"]
     ]
     private static let queryNames: [String: [String]] = [
         "台北101": ["Taipei 101", "台北101"], "101": ["Taipei 101", "台北101"],
         "台大": ["國立台灣大學", "National Taiwan University"], "ntu": ["National Taiwan University", "國立台灣大學"],
         "北車": ["台北車站", "Taipei Main Station"], "三總": ["三軍總醫院", "Tri-Service General Hospital"],
-        "小巨蛋": ["台北小巨蛋", "Taipei Arena"], "榮總": ["台北榮民總醫院"]
+        "小巨蛋": ["台北小巨蛋", "Taipei Arena"], "榮總": ["台北榮民總醫院"],
+        "北市府": ["臺北市政府"], "台北轉運站": ["臺北轉運站"]
     ]
     private static let familiarAliases = familiarNames.map { Set($0.map(normalize)) }
-
+    public static func cleanQuery(_ text: String) -> String {
+        let trimmed = String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160))
+        for prefix in ["我要去", "我想去", "想去", "前往", "去", "到"] where trimmed.hasPrefix(prefix) && trimmed.count > prefix.count + 2 {
+            return String(trimmed.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return trimmed
+    }
     public static func normalize(_ text: String) -> String {
         let traditional = text.applyingTransform(StringTransform(rawValue: "Simplified-Traditional"), reverse: false) ?? text
         var value = traditional.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: Locale(identifier: "zh_TW"))
@@ -38,8 +47,10 @@ public enum StationSearch {
     fileprivate static func baseName(_ text: String) -> String {
         text.components(separatedBy: CharacterSet(charactersIn: "(（")).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? text
     }
-    fileprivate static func aliases(_ text: String) -> Set<String> {
-        let full = normalize(text), base = normalize(baseName(text))
+    fileprivate static func aliases(_ text: String, normalized: String? = nil) -> Set<String> {
+        let full = normalized ?? normalize(text)
+        let baseText = baseName(text)
+        let base = baseText == text ? full : normalize(baseText)
         var values: Set<String> = [full, base]
         var metro: String?
         if base.hasPrefix("捷運站"), base.count > 3 { metro = String(base.dropFirst(3)) }
@@ -51,34 +62,36 @@ public enum StationSearch {
             values.formUnion([core, core + "站", "捷運" + core + "站", core + "捷運站", core + "捷運"])
         }
         if base.hasSuffix("站"), !base.hasSuffix("車站") { values.insert(String(base.dropLast())) }
-        if base.hasPrefix("mrt") {
-            var english = String(base.dropFirst(3))
-            if english.hasSuffix("station") { english = String(english.dropLast(7)) }
-            else if english.hasSuffix("sta") { english = String(english.dropLast(3)) }
-            values.insert(english)
-        }
-        for names in familiarAliases {
-            if !values.isDisjoint(with: names) { values.formUnion(names) }
-        }
+        var english = base.hasPrefix("mrt") ? String(base.dropFirst(3)) : base
+        if english.hasSuffix("station") { english = String(english.dropLast(7)) }
+        else if english.hasSuffix("sta") { english = String(english.dropLast(3)) }
+        if english != base, !english.isEmpty { values.insert(english) }
+        for names in familiarAliases where !values.isDisjoint(with: names) { values.formUnion(names) }
         values.remove("")
         return values
     }
-    public static func rank(name: String, query: String) -> Int? {
-        IndexedName(name).rank(SearchQuery(query))
+    public static func rank(name: String, query: String, vocabulary: SearchVocabulary = SearchVocabulary()) -> Int? {
+        let input = SearchQuery(query, vocabulary: vocabulary)
+        let indexed = IndexedName(name)
+        return indexed.simpleRank(input) ?? indexed.fuzzyRank(input)
     }
-    public static func placeRank(name: String, address: String, query: String) -> Int? {
-        let input = SearchQuery(query)
-        if let rank = IndexedName(name).rank(input) { return rank }
+    public static func placeRank(name: String, address: String, query: String, vocabulary: SearchVocabulary = SearchVocabulary()) -> Int? {
+        PlaceMatcher(query: query, vocabulary: vocabulary).rank(name: name, address: address)
+    }
+    fileprivate static func placeRank(name: String, address: String, input: SearchQuery) -> Int? {
+        let indexed = IndexedName(name)
+        if let rank = indexed.simpleRank(input) ?? indexed.fuzzyRank(input) { return rank }
         guard input.addressLike || !input.hasDigits else { return nil }
         let address = normalize(address)
         if input.aliases.contains(where: { $0.count >= 2 && address.contains($0) }), input.addressLike { return 4 }
         if address.contains(input.text), !input.text.isEmpty { return 4 }
-        if input.tokens.count > 1, input.tokens.allSatisfy({ normalize(name).contains($0) || address.contains($0) }) { return 4 }
-        return nil
+        if input.tokens.count > 1, input.tokens.allSatisfy({ indexed.full.contains($0) || address.contains($0) }) { return 4 }
+        return indexed.fuzzyRank(input)
     }
     public static func search(_ query: String, metadata: TransitMetadata, near position: Coordinate,
-                              favorites: Set<String> = [], recent: [String] = [], limit: Int = 40) -> [Station] {
-        StationSearchIndex(stations: Array(metadata.stations.values)).search(query, near: position, favorites: favorites, recent: recent, limit: limit)
+                              favorites: Set<String> = [], recent: [String] = [], limit: Int = 40,
+                              vocabulary: SearchVocabulary = SearchVocabulary()) -> [Station] {
+        StationSearchIndex(stations: Array(metadata.stations.values)).search(query, near: position, favorites: favorites, recent: recent, limit: limit, vocabulary: vocabulary)
     }
     public static func groups(_ stations: [Station]) -> [StationResultGroup] {
         var names: [String] = [], groups: [String: [Station]] = [:]
@@ -89,45 +102,61 @@ public enum StationSearch {
         }
         return names.map { StationResultGroup(name: $0, stations: groups[$0] ?? []) }
     }
-    public static func placeQueries(_ query: String) -> [String] {
-        let text = query.trimmingCharacters(in: .whitespacesAndNewlines)
+    public static func placeQueries(_ query: String, vocabulary: SearchVocabulary = SearchVocabulary()) -> [String] {
+        let text = cleanQuery(query)
         guard !text.isEmpty else { return [] }
+        if let queries = vocabulary.placeQueries(text) { return queries + (queries.contains(text) ? [] : [text]) }
         let normalized = normalize(text)
         if let aliases = queryNames[normalized] { return Array((aliases + [text]).prefix(3)) }
         let traditional = text.applyingTransform(StringTransform(rawValue: "Simplified-Traditional"), reverse: false) ?? text
         let standard = traditional.replacingOccurrences(of: "臺", with: "台")
         if normalized.hasSuffix("站"), !normalized.hasPrefix("捷運"), !normalized.hasSuffix("車站"), !normalized.hasSuffix("捷運站") {
+            for city in ["台北市", "新北市", "台北", "新北"] where normalized.hasPrefix(city) && normalized.count > city.count + 2 {
+                return [city + " 捷運" + String(normalized.dropFirst(city.count)), standard]
+            }
+            // Facility stops keep their actual name instead of becoming an invented metro station.
+            if ["醫院", "三總", "榮總", "轉運", "公車", "總站"].contains(where: normalized.contains) { return [standard] }
             return ["捷運" + standard, standard]
         }
         return standard == text ? [text] : [standard, text]
     }
     public static func isAddressQuery(_ query: String) -> Bool { SearchQuery(query).addressLike }
     public static func isTransitQuery(_ query: String) -> Bool {
-        let text = normalize(query)
+        let text = normalize(cleanQuery(query))
         if text.contains("捷運") || text.hasPrefix("mrt") { return true }
+        if text.hasSuffix("station") {
+            return !["gasstation", "workstation", "weatherstation", "policestation", "chargingstation"].contains(where: text.hasSuffix)
+        }
         return text.hasSuffix("站") && !["加油站", "工作站", "氣象站", "天文站"].contains(where: text.hasSuffix)
     }
 }
 
-fileprivate struct SearchQuery {
+public struct PlaceMatcher: Sendable {
+    private let input: SearchQuery
+    public init(query: String, vocabulary: SearchVocabulary = SearchVocabulary()) { input = SearchQuery(query, vocabulary: vocabulary) }
+    public func rank(name: String, address: String = "") -> Int? { StationSearch.placeRank(name: name, address: address, input: input) }
+}
+
+fileprivate struct SearchQuery: Sendable {
     let text: String
     let aliases: Set<String>
+    let partial: [String]
     let tokens: [String]
     let addressLike: Bool
     let hasDigits: Bool
-    let latin: String
     let transit: Bool
-    init(_ query: String) {
+    init(_ original: String, vocabulary: SearchVocabulary = SearchVocabulary()) {
+        let query = StationSearch.cleanQuery(original)
         text = StationSearch.normalize(query)
-        var names = StationSearch.aliases(query)
+        var names = StationSearch.aliases(query, normalized: text)
         for city in ["台北市", "新北市", "台北", "新北"] where text.hasPrefix(city) && text.count > city.count + 1 {
             names.formUnion(StationSearch.aliases(String(text.dropFirst(city.count))))
         }
-        aliases = names
+        aliases = vocabulary.expand(names)
+        partial = aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= (text.count == 1 ? 1 : 2) }.sorted()
         addressLike = query.contains(where: { "路街段巷弄號号".contains($0) })
         hasDigits = query.contains(where: \.isNumber)
-        latin = StationSearch.normalize(query.applyingTransform(.toLatin, reverse: false) ?? query)
-        transit = StationSearch.isTransitQuery(query)
+        transit = StationSearch.isTransitQuery(query) || (vocabulary.placeQueries(query)?.contains { StationSearch.isTransitQuery($0) } ?? false)
         let pieces = query.components(separatedBy: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ",，·")))
             .map(StationSearch.normalize).filter { !$0.isEmpty && !["捷運", "mrt", "站牌", "公車", "台北", "台北市", "新北市"].contains($0) }
         tokens = Array(Set(pieces))
@@ -139,27 +168,32 @@ fileprivate struct IndexedName: Sendable {
     let aliases: Set<String>
     let metro: Bool
     init(_ name: String) {
-        full = StationSearch.normalize(name); aliases = StationSearch.aliases(name)
+        full = StationSearch.normalize(name)
+        aliases = StationSearch.aliases(name, normalized: full)
         metro = full.hasPrefix("捷運") || full.hasPrefix("mrt")
     }
-    func rank(_ query: SearchQuery) -> Int? {
+    func simpleRank(_ query: SearchQuery) -> Int? {
         guard !query.text.isEmpty else { return 0 }
         if full == query.text { return 0 }
         if !aliases.isDisjoint(with: query.aliases) { return query.transit && metro ? 0 : 1 }
-        let partial = query.aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= 2 }
-        if partial.contains(where: { part in aliases.contains { $0.hasPrefix(part) } }) { return query.transit && !metro ? 3 : 2 }
-        if partial.contains(where: { part in aliases.contains { $0.contains(part) } }) { return query.transit && !metro ? 4 : 3 }
+        if query.partial.contains(where: { part in aliases.contains { $0.hasPrefix(part) } }) { return query.transit && !metro ? 3 : 2 }
+        if query.partial.contains(where: { part in part.count >= 2 && aliases.contains { $0.contains(part) } }) { return query.transit && !metro ? 4 : 3 }
         if query.tokens.count > 1, query.tokens.allSatisfy({ part in aliases.contains { $0.contains(part) } }) { return 4 }
-        // One-character mistakes and abbreviated Chinese names are lower-priority alternatives, never promoted above exact names.
+        return nil
+    }
+    func fuzzyRank(_ query: SearchQuery) -> Int? {
         var fuzzy: Int?
-        for part in partial where part.count >= 3 {
-            for value in aliases where value.count >= part.count - 1 && value.count <= part.count + 6 {
-                let small = Array(part), large = Array(value)
+        for part in query.partial where (3...32).contains(part.count) {
+            let small = Array(part)
+            for value in aliases where value.count >= small.count - 1 && value.count <= small.count + 6 {
+                let large = Array(value)
                 var index = 0
                 for letter in large where index < small.count { if small[index] == letter { index += 1 } }
-                if index == small.count && small.count >= 3 { fuzzy = min(fuzzy ?? 5, 5) }
+                if index == small.count { fuzzy = min(fuzzy ?? 5, 5) }
                 if abs(small.count - large.count) <= 1 && Self.oneEdit(small, large) {
-                    if StationSearch.normalize(value.applyingTransform(.toLatin, reverse: false) ?? value) == query.latin { return 4 }
+                    let a = StationSearch.normalize(value.applyingTransform(.toLatin, reverse: false) ?? value)
+                    let b = StationSearch.normalize(query.text.applyingTransform(.toLatin, reverse: false) ?? query.text)
+                    if a == b { return 4 }
                     fuzzy = min(fuzzy ?? 6, 6)
                 }
             }
@@ -179,36 +213,57 @@ fileprivate struct IndexedName: Sendable {
     }
 }
 
-/// Build once with metadata, off the UI actor, instead of converting every station name on every keystroke.
+/// Build off the UI actor. Common names and addresses are normalized only once.
 public struct StationSearchIndex: Sendable {
     private struct Entry: Sendable {
         let station: Station
         let names: [IndexedName]
         let address: String
+        let metro: Bool
     }
     private let entries: [Entry]
     public init(stations: [Station] = []) {
-        entries = stations.map { Entry(station: $0, names: ([$0.name] + $0.searchNames).map(IndexedName.init), address: StationSearch.normalize($0.address)) }
+        var names: [String: IndexedName] = [:], addresses: [String: String] = [:]
+        entries = stations.map { station in
+            let indexed = Array(Set([station.name] + station.searchNames)).sorted().map { text -> IndexedName in
+                if let existing = names[text] { return existing }
+                let value = IndexedName(text); names[text] = value; return value
+            }
+            let address = addresses[station.address] ?? StationSearch.normalize(station.address)
+            addresses[station.address] = address
+            return Entry(station: station, names: indexed, address: address, metro: indexed.contains { $0.metro })
+        }
     }
-    public func search(_ query: String, near position: Coordinate, favorites: Set<String> = [], recent: [String] = [], limit: Int = 40) -> [Station] {
+    public func search(_ query: String, near position: Coordinate, favorites: Set<String> = [], recent: [String] = [], limit: Int = 40,
+                       vocabulary: SearchVocabulary = SearchVocabulary()) -> [Station] {
         guard limit > 0 else { return [] }
-        let input = SearchQuery(query)
-        return entries.compactMap { entry -> (Station, Int, Bool)? in
-            let metro = entry.names.contains { $0.metro }
-            if let rank = entry.names.compactMap({ $0.rank(input) }).min() { return (entry.station, rank, metro) }
-            if !input.text.isEmpty, entry.address.contains(input.text) { return (entry.station, 4, metro) }
-            if input.addressLike, input.aliases.contains(where: { $0.count >= 2 && entry.address.contains($0) }) { return (entry.station, 4, metro) }
-            if input.tokens.count > 1, input.tokens.allSatisfy({ token in entry.address.contains(token) || entry.names.contains { $0.aliases.contains { $0.contains(token) } } }) { return (entry.station, 4, metro) }
-            return nil
-        }.sorted { a, b in
+        let input = SearchQuery(query, vocabulary: vocabulary)
+        var matches: [(station: Station, rank: Int, metro: Bool, distance: Double)] = []
+        for entry in entries {
+            var rank = entry.names.compactMap { $0.simpleRank(input) }.min()
+            if rank == nil, !input.text.isEmpty, entry.address.contains(input.text) { rank = 4 }
+            if rank == nil, input.addressLike, input.aliases.contains(where: { $0.count >= 2 && entry.address.contains($0) }) { rank = 4 }
+            if rank == nil, input.tokens.count > 1, input.tokens.allSatisfy({ token in entry.address.contains(token) || entry.names.contains { $0.aliases.contains { $0.contains(token) } } }) { rank = 4 }
+            if let rank { matches.append((entry.station, rank, entry.metro, entry.station.coordinate.distance(to: position))) }
+        }
+        // Exact/partial matches need no expensive phonetic matching against thousands of unrelated names.
+        if matches.isEmpty, !input.text.isEmpty {
+            for entry in entries {
+                if let rank = entry.names.compactMap({ $0.fuzzyRank(input) }).min() {
+                    matches.append((entry.station, rank, entry.metro, entry.station.coordinate.distance(to: position)))
+                }
+            }
+        }
+        var recentOrder: [String: Int] = [:]
+        for (index, id) in recent.enumerated() where recentOrder[id] == nil { recentOrder[id] = index }
+        return matches.sorted { a, b in
             if input.text.isEmpty {
-                if favorites.contains(a.0.id) != favorites.contains(b.0.id) { return favorites.contains(a.0.id) }
-                let ar = recent.firstIndex(of: a.0.id) ?? Int.max, br = recent.firstIndex(of: b.0.id) ?? Int.max
+                if favorites.contains(a.station.id) != favorites.contains(b.station.id) { return favorites.contains(a.station.id) }
+                let ar = recentOrder[a.station.id] ?? Int.max, br = recentOrder[b.station.id] ?? Int.max
                 if ar != br { return ar < br }
-            } else if a.1 != b.1 { return a.1 < b.1 }
-            if input.transit, a.2 != b.2 { return a.2 }
-            let ad = a.0.coordinate.distance(to: position), bd = b.0.coordinate.distance(to: position)
-            return ad == bd ? a.0.id < b.0.id : ad < bd
-        }.prefix(limit).map { $0.0 }
+            } else if a.rank != b.rank { return a.rank < b.rank }
+            if input.transit, a.metro != b.metro { return a.metro }
+            return a.distance == b.distance ? a.station.id < b.station.id : a.distance < b.distance
+        }.prefix(limit).map { $0.station }
     }
 }

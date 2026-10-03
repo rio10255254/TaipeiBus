@@ -15,6 +15,20 @@ enum MapFocus {
     case journey([Coordinate])
 }
 
+private actor StationLookup {
+    private var results: [String: [Station]] = [:]
+    private var order: [String] = []
+    func search(metadata: TransitMetadata, query: String, near point: Coordinate, favorites: Set<String>, recent: [String],
+                limit: Int, settingsRevision: Int, vocabulary: SearchVocabulary) -> [Station] {
+        let key = "\(metadata.revision):\(settingsRevision):\(query):\(point.latitude):\(point.longitude):\(favorites.sorted()):\(recent):\(limit)"
+        if let value = results[key] { return value }
+        let value = metadata.stationSearch.search(query, near: point, favorites: favorites, recent: recent, limit: limit, vocabulary: vocabulary)
+        results[key] = value; order.append(key)
+        if order.count > 24 { results.removeValue(forKey: order.removeFirst()) }
+        return value
+    }
+}
+
 @MainActor
 final class TransitAppModel: ObservableObject {
     @Published private(set) var metadata = TransitMetadata()
@@ -38,13 +52,19 @@ final class TransitAppModel: ObservableObject {
     @Published var focusRevision = 0
     @Published var selectionRevision = 0
     @Published var mapError: String?
+    @Published var mapWasMoved = false
     @Published private(set) var favorites: Set<String>
     @Published private(set) var recentStationIDs: [String]
+    @Published private(set) var liveSettings = LiveSettings.defaults
+    private(set) var vocabulary = SearchVocabulary()
 
     let location = LocationService()
     let planner = JourneyPlannerModel()
     private let service = TransitService()
     private var updateTask: Task<Void, Never>?
+    private var settingsTask: Task<Void, Never>?
+    private let liveService: LiveSettingsService
+    private let stationLookup = StationLookup()
     private let defaults = UserDefaults.standard
     private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
@@ -55,6 +75,16 @@ final class TransitAppModel: ObservableObject {
     init() {
         favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? [])
         recentStationIDs = UserDefaults.standard.stringArray(forKey: "recentStations") ?? []
+        var source = LiveSettingsService.productionURL
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        if let index = arguments.firstIndex(of: "--preview-config-url"), arguments.indices.contains(index + 1),
+           let url = URL(string: arguments[index + 1]),
+           url.absoluteString.hasPrefix("https://raw.githubusercontent.com/rio10255254/TaipeiBus/") { source = url }
+#endif
+        liveService = LiveSettingsService(url: source,
+            appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.2",
+            cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LiveSettings"))
     }
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
@@ -74,22 +104,42 @@ final class TransitAppModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
-        if !active { updateTask?.cancel(); updateTask = nil; return }
-        location.requestIfAuthorized()
+        location.setActive(active)
+        if !active { updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil; return }
+        settingsTask = Task { [weak self] in
+            guard let self else { return }
+            if let cached = await liveService.cached() { await applyLiveSettings(cached) }
+            while !Task.isCancelled {
+                if let packet = await liveService.refresh(current: liveSettings), !Task.isCancelled { await applyLiveSettings(packet) }
+                var interval = liveSettings.refresh.settingsSeconds
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--preview-live-update") { interval = 5 }
+#endif
+                do { try await Task.sleep(for: .seconds(interval)) } catch { return }
+            }
+        }
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
-                metadata = try await service.prepare()
+                if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
+                async let prepared = service.prepare()
+                if !metadata.routes.isEmpty {
+                    let current = await service.refresh()
+                    guard !Task.isCancelled else { return }
+                    applySnapshot(current)
+                }
+                metadata = try await prepared
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
                 while !Task.isCancelled {
+                    location.requestIfAuthorized()
                     let result = await service.refresh()
                     guard !Task.isCancelled else { return }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    try await Task.sleep(for: .seconds(15))
+                    try await Task.sleep(for: .seconds(liveSettings.refresh.vehicleSeconds))
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
                     metadataNotice = await service.metadataNotice
@@ -101,12 +151,25 @@ final class TransitAppModel: ObservableObject {
     }
 
     func retry() { setActive(false); setActive(true) }
+    private func applyLiveSettings(_ packet: LiveSettingsPacket) async {
+        guard packet.settings.revision >= liveSettings.revision else { return }
+        vocabulary = packet.vocabulary
+        liveSettings = packet.settings
+        location.updateSettings(packet.settings)
+        planner.updateSettings(packet.settings)
+        await service.updateSettings(packet.settings)
+#if DEBUG
+        markLiveSettingsPreview()
+#endif
+    }
     func refresh() async {
         guard !loading, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }
+        async let packet = liveService.refresh(current: liveSettings)
         let result = await service.refresh()
         if !Task.isCancelled, isActive { applySnapshot(result) }
+        if let update = await packet, !Task.isCancelled, isActive { await applyLiveSettings(update) }
     }
 
     private func applySnapshot(_ result: TransitSnapshot) {
@@ -114,6 +177,9 @@ final class TransitAppModel: ObservableObject {
         snapshot = result
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
         planner.updateSnapshot(result)
+#if DEBUG
+        markLiveSettingsPreview()
+#endif
         guard let id = selectedVehicleID else { return }
         guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
@@ -122,7 +188,7 @@ final class TransitAppModel: ObservableObject {
         if direction != bus.direction { direction = bus.direction }
     }
 
-    func focusMap(_ target: MapFocus) { focus = target; focusRevision += 1 }
+    func focusMap(_ target: MapFocus) { mapWasMoved = false; focus = target; focusRevision += 1 }
     func selectStation(_ station: Station) {
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
         defaults.set(recentStationIDs, forKey: "recentStations")
@@ -170,7 +236,15 @@ final class TransitAppModel: ObservableObject {
 
     func stations(query: String) -> [Station] {
         let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .taipei
-        return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs)
+        return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs, vocabulary: vocabulary)
+    }
+    var stationSearchContextKey: String {
+        "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs)"
+    }
+    func findStations(query: String, limit: Int = 40) async -> [Station] {
+        let point = location.displayCoordinate?.isInServiceArea == true ? location.displayCoordinate! : .taipei
+        return await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
+            recent: recentStationIDs, limit: limit, settingsRevision: liveSettings.revision, vocabulary: vocabulary)
     }
 
     func arrivalEstimate(_ approach: VehicleApproach, ride: TransitRide, at date: Date) -> VehicleArrivalEstimate {
@@ -184,7 +258,11 @@ final class TransitAppModel: ObservableObject {
         focusMap(.vehicle(vehicle.id))
         UISelectionFeedbackGenerator().selectionChanged()
     }
-    func routes(query: String) -> [RouteSearchResult] { metadata.routeCatalog.search(query) }
+    func routes(query: String) -> [RouteSearchResult] {
+        var seen = Set<String>()
+        let terms = [query] + (vocabulary.placeQueries(StationSearch.cleanQuery(query)) ?? [])
+        return terms.flatMap { metadata.routeCatalog.search($0) }.filter { seen.insert($0.id).inserted }
+    }
     var upcomingStops: [StopProgress] {
         guard let vehicle = selectedVehicle else { return [] }
         return metadata.journey(routeID: vehicle.routeID, direction: vehicle.direction)?.upcoming(vehicle: vehicle, at: Date()) ?? []
@@ -205,6 +283,27 @@ final class TransitAppModel: ObservableObject {
     }
 
 #if DEBUG
+    private func markLiveSettingsPreview() {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--preview-live-update"), !metadata.stations.isEmpty, liveSettings.revision >= 1,
+              let index = arguments.firstIndex(of: "--preview-capture"), arguments.indices.contains(index + 1),
+              let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let aliases = metadata.stationSearch.search("湖捷", near: .taipei, vocabulary: vocabulary)
+        let data: [String: Any] = [
+            "token": arguments[index + 1], "pid": ProcessInfo.processInfo.processIdentifier,
+            "content_revision": liveSettings.revision, "accent": liveSettings.appearance.accentColor,
+            "search_label": liveSettings.text("搜尋目的地"), "station_label": liveSettings.text("公車站牌"),
+            "alias_stations": aliases.map { ["id": $0.id, "name": $0.name] },
+            "location_ready": location.usableCoordinate != nil,
+            "first_location_milliseconds": location.firstUsableMilliseconds ?? -1,
+            "version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            "fixture": true
+        ]
+        if let bytes = try? JSONSerialization.data(withJSONObject: data, options: [.prettyPrinted, .sortedKeys]) {
+            try? bytes.write(to: directory.appendingPathComponent("live-settings-state.json"), options: .atomic)
+        }
+    }
+
     // Simulator-only launch arguments let cloud builds capture real-data map states.
     // Release builds have no preview selection behavior.
     private func applyPreviewSelection() {
@@ -306,16 +405,20 @@ final class TransitAppModel: ObservableObject {
     private func auditPlaces(token: String, group: String) async {
         guard let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let search = PlaceSearch()
+        search.setRules(vocabulary: vocabulary, settings: liveSettings.search, revision: liveSettings.revision)
         var results: [[String: Any]] = []
         var failure: String?
         let queries: [String]
         switch group {
+        case "expanded": queries = ["內湖捷運站", "我要去內湖站", "Neihu Station", "七張站", "南港展覽館站"]
         case "landmarks": queries = ["臺北車站", "臺北101", "台大", "三總", "小巨蛋"]
         case "addresses": queries = ["忠孝東路四段100號", "内湖站", "台北 內湖站"]
         default: queries = ["內湖站", "東湖站", "港墘站", "西門站"]
         }
         for query in queries {
             do {
+                let hints = metadata.stationSearch.search(query, near: .taipei, limit: 4, vocabulary: vocabulary)
+                search.setStationHints(hints)
                 let places = try await search.find(text: query)
                 let stations = metadata.stationSearch.search(query, near: .taipei, limit: 4)
                 results.append(["query": query, "places": places.map { ["name": $0.name, "address": $0.address, "transit": $0.isTransitPlace ?? false, "latitude": $0.coordinate.latitude,
