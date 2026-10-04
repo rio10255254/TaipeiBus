@@ -89,6 +89,9 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastMetadataCount = -1
         private var cityCamera: MLNMapCamera?
         private var beforeCityCamera: MLNMapCamera?
+#if DEBUG
+        private var lastTestCameraAt: CFTimeInterval = 0
+#endif
         private var positionedInitialCamera = false
         private var lastAppearance: LiveSettings.Appearance?
 #if DEBUG
@@ -368,7 +371,9 @@ struct NativeBusMap: UIViewRepresentable {
             updateStationAnchor()
 #if DEBUG
             recordPreviewCamera(mapView, fullyRendered: fullyRendered)
-            if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), fullyRendered {
+            if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), fullyRendered,
+               CACurrentMediaTime() - lastTestCameraAt >= 0.25 {
+                lastTestCameraAt = CACurrentMediaTime()
                 let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
                 var state: [String: Any] = ["latitude": center.latitude, "longitude": center.longitude, "zoom": mapView.zoomLevel,
                     "heading": mapView.direction, "pitch": mapView.camera.pitch, "mode": model.userMapMode.rawValue,
@@ -381,9 +386,17 @@ struct NativeBusMap: UIViewRepresentable {
                 state["cityMode"] = model.cityFleetMode
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
-                state["fleetSymbols"] = buses?.symbolVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
+                state["fleetCompactModels"] = buses?.compactVehicleCount ?? 0
+                state["fleetDetailedModels"] = buses?.detailedVehicleCount ?? 0
                 state["fleetEncodeMs"] = buses?.lastEncodeMilliseconds ?? 0
+                state["fleetDenseFrames"] = buses?.denseFrameCount ?? 0
+                state["fleetEncodeP95Ms"] = buses?.denseEncodeP95 ?? 0
+                state["fleetFrameMedianMs"] = buses?.denseFrameMedian ?? 0
+                state["fleetFrameP95Ms"] = buses?.denseFrameP95 ?? 0
+                if let pose = buses?.testMotionPose() {
+                    state["fleetProbeID"] = pose.id; state["fleetProbeLongitude"] = pose.coordinate.longitude
+                }
                 state["vehicle"] = model.selectedVehicleID ?? ""
                 if let point = buses?.testVisiblePoint(in: mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 32, dy: 32)) {
                     state["busHitID"] = point.id; state["busHitX"] = point.point.x; state["busHitY"] = point.point.y

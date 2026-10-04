@@ -415,15 +415,26 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
         button("city-fleet-toggle").tap()
         wait("All 2500 vehicles fit without the old 240-vehicle cutoff") {
             ($0["cityMode"] as? Bool) == true && ($0["fleetVisible"] as? Int) == 2500 &&
-            ($0["fleetSymbols"] as? Int) == 2500 && ($0["fleetModels"] as? Int) == 0
+            ($0["fleetCompactModels"] as? Int) == 2500 && ($0["fleetModels"] as? Int) == 2500 &&
+            ($0["fleetDetailedModels"] as? Int) == 0
         }
-        capture("city-2500-direction-symbols-stress")
-        XCTAssertLessThan(camera()["fleetEncodeMs"] as? Double ?? 1000, 50)
+        capture("city-2500-gray-buses-stress")
+        let firstMotion = camera()
+        wait("The dense fleet continues rendering fresh GPS positions") {
+            ($0["fleetDenseFrames"] as? Int ?? 0) >= 120 &&
+            $0["fleetProbeID"] as? String == firstMotion["fleetProbeID"] as? String &&
+            ($0["fleetProbeLongitude"] as? Double ?? 0) - (firstMotion["fleetProbeLongitude"] as? Double ?? 0) > 0.00002
+        }
+        capture("city-2500-gray-buses-moving")
+        let profile = camera()
+        XCTAssertLessThan(profile["fleetEncodeP95Ms"] as? Double ?? 1000, 25)
+        let performance = XCTAttachment(string: String(describing: profile))
+        performance.name = "city-2500-gray-buses-performance"; performance.lifetime = .keepAlways; add(performance)
         let overview = camera()
         XCTAssertNotNil(overview["busHitID"])
         map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: overview["busHitX"] as? Double ?? -10,
             dy: overview["busHitY"] as? Double ?? -10)).tap()
-        wait("Selecting a small symbol focuses a 3D bus while keeping the entire fleet available") {
+        wait("Selecting a gray bus focuses the same 3D body while keeping the entire fleet available") {
             !($0["vehicle"] as? String ?? "").isEmpty && ($0["pitch"] as? Double ?? 0) > 50 &&
             ($0["fleetModels"] as? Int ?? 0) > 0 && ($0["fleetInput"] as? Int) == 2500
         }
@@ -445,13 +456,32 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
         launch(["--test-map-controls"])
         wait("Actual official fleet is ready") { ($0["fleetInput"] as? Int ?? 0) > 0 }
         button("city-fleet-toggle").tap()
-        wait("Actual city fleet uses visible direction symbols") {
-            ($0["cityMode"] as? Bool) == true && ($0["fleetSymbols"] as? Int ?? 0) > 0 && ($0["zoom"] as? Double ?? 99) < 15
+        wait("Actual city fleet retains gray bus bodies") {
+            ($0["cityMode"] as? Bool) == true && ($0["fleetCompactModels"] as? Int ?? 0) > 0 && ($0["zoom"] as? Double ?? 99) < 15
         }
         capture("city-official-live-fleet")
         XCTAssertFalse(app.staticTexts["2500 輛壓力測試資料"].exists)
         let details = XCTAttachment(string: String(describing: camera()))
         details.name = "city-render-counts-and-encode-cost"; details.lifetime = .keepAlways; add(details)
+    }
+    func testGrayBusBodiesRemainVisibleAcrossZoomAndPan() {
+        launch(["--test-map-controls", "--city-fleet-fixture", "--usability-fixture"])
+        wait("Dense fixture is ready") { ($0["fleetInput"] as? Int) == 2500 }
+        button("city-fleet-toggle").tap()
+        wait("Gray overview models are visible") { ($0["fleetCompactModels"] as? Int) == 2500 }
+        let wideZoom = camera()["zoom"] as? Double ?? 0
+        map.pinch(withScale: 8, velocity: 2)
+        wait("Zooming keeps every visible bus a bus model") {
+            ($0["zoom"] as? Double ?? 0) > wideZoom + 1.5 && ($0["fleetCompactModels"] as? Int ?? 0) > 0 &&
+            ($0["fleetVisible"] as? Int ?? 0) == ($0["fleetModels"] as? Int ?? -1)
+        }
+        capture("city-gray-buses-mid-distance")
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.7, dy: 0.3))
+            .press(forDuration: 0.1, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.4)))
+        wait("Panning keeps the received fleet and visible bodies") {
+            ($0["fleetInput"] as? Int) == 2500 && ($0["fleetModels"] as? Int ?? 0) > 0
+        }
+        capture("city-gray-buses-after-pan")
     }
 }
 

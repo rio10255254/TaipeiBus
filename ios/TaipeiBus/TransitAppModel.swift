@@ -550,7 +550,7 @@ final class TransitAppModel: ObservableObject {
         let timestamp = formatter.string(from: now)
         let rows: [[String: Any]] = (0..<2500).map { index in
             let latitude = 25.015 + Double(index / 50) * 0.0015
-            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick % 25) * 0.000025
+            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick) * 0.000025
             return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY", "GoBack": "0",
                     "Latitude": latitude, "Longitude": longitude, "Azimuth": 90, "Speed": 5,
                     "DutyStatus": "1", "BusStatus": "0", "CarType": "1", "DataTime": timestamp]

@@ -13,6 +13,15 @@ struct BusFragment {
     float selection;
 };
 
+// Keep the original 3D bus readable at city scale. Only its projected footprint
+// grows; depth remains tied to the real road, rather than becoming a giant bus.
+inline float4 readableBus(float4 clip, float4 center, float scale) {
+    if (scale <= 1.001) { return clip; }
+    const float2 anchor = center.xy * (clip.w / center.w);
+    clip.xy = anchor + (clip.xy - anchor) * scale;
+    return clip;
+}
+
 vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
                             constant BusVertex *vertices [[buffer(0)]],
                             constant BusUniforms &uniforms [[buffer(1)]],
@@ -32,7 +41,8 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     // Local east/north/up, clockwise bearing. Camera handles pitch, rotation and scale.
     float3 p = float3(c * local.x + s * local.y, -s * local.x + c * local.y, local.z) + bus.position.xyz;
     BusFragment out;
-    out.position = uniforms.matrix * float4(p, 1);
+    out.position = readableBus(uniforms.matrix * float4(p, 1),
+                               uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.color = v.color;
     if (uniforms.mode.x == 0) { out.color.a *= max(uniforms.mode.z, bus.style.y); }
     out.normal = float3(c * normal.x + s * normal.y, -s * normal.x + c * normal.y, normal.z);
@@ -71,7 +81,8 @@ vertex BusFragment busShadowVertex(uint vertexID [[vertex_id]], uint instanceID 
     const float c = cos(bus.style.x), s = sin(bus.style.x);
     float3 p = float3(c * v.position.x + s * v.position.y, -s * v.position.x + c * v.position.y, 0.035) + bus.position.xyz;
     BusFragment out;
-    out.position = uniforms.matrix * float4(p, 1);
+    out.position = readableBus(uniforms.matrix * float4(p, 1),
+                               uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.uv = v.normal.xy;
     out.color = float4(0.10, 0.12, 0.15, bus.style.z > 0 ? 0.10 : 0.22);
     out.color.a *= max(uniforms.mode.z, bus.style.y);
@@ -88,35 +99,4 @@ fragment float4 busShadowFragment(BusFragment in [[stage_in]]) {
     const float contact = 1.0 - smoothstep(-0.18, 0.12, distance);
     const float3 color = mix(in.color.rgb, float3(0.12, 0.36, 0.77), in.selection * 0.12);
     return float4(color, in.color.a * softness * (0.55 + 0.45 * contact));
-}
-
-// Screen-sized direction silhouettes remain legible at city scale. Geometry
-// comes from the same received GPS poses as the close-up 3D vehicle bodies.
-vertex BusFragment busSymbolVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
-                                  constant BusUniforms &uniforms [[buffer(1)]],
-                                  constant BusInstance *instances [[buffer(2)]]) {
-    const float2 corners[6] = {float2(-1,-1),float2(1,-1),float2(1,1),float2(-1,-1),float2(1,1),float2(-1,1)};
-    const BusInstance bus = instances[instanceID];
-    const float2 uv = corners[vertexID];
-    float4 center = uniforms.matrix * float4(bus.position.xy, 1.75, 1);
-    float4 ahead = uniforms.matrix * float4(bus.position.xy + float2(sin(bus.style.x),cos(bus.style.x)) * 12, 1.75, 1);
-    const float2 viewport = max(float2(1), uniforms.viewDirection.xy);
-    float2 direction = (ahead.xy / ahead.w - center.xy / center.w) * viewport;
-    direction = length(direction) > 0.001 ? normalize(direction) : float2(0,1);
-    const float2 side = float2(direction.y,-direction.x);
-    const float2 offset = side * uv.x * 2.0 + direction * uv.y * 4.8;
-    center.xy += offset * 2 / viewport * center.w;
-    BusFragment out;
-    out.position = center; out.uv = uv; out.normal = float3(0,0,1); out.material = 0; out.selection = bus.style.y;
-    out.color = float4(0.27,0.40,0.48,bus.style.w * uniforms.viewDirection.z * (bus.style.z > 0 ? 0.4 : 0.88));
-    return out;
-}
-
-fragment float4 busSymbolFragment(BusFragment in [[stage_in]]) {
-    const float halfWidth = mix(0.82,0.08,smoothstep(0.42,0.98,in.uv.y));
-    const float edge = max(abs(in.uv.x)-halfWidth,abs(in.uv.y)-0.95);
-    const float alpha = 1-smoothstep(-0.08,0.08,edge);
-    float3 color = mix(in.color.rgb,float3(0.97),smoothstep(-0.27,-0.03,edge));
-    if (abs(in.uv.x) < 0.44 && in.uv.y > 0.05 && in.uv.y < 0.27) { color = float3(0.84,0.93,0.98); }
-    return float4(color,in.color.a*alpha);
 }

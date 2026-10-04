@@ -27,26 +27,43 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private var pipeline: MTLRenderPipelineState?
     private var outlinePipeline: MTLRenderPipelineState?
     private var shadowPipeline: MTLRenderPipelineState?
-    private var symbolPipeline: MTLRenderPipelineState?
     private var normalDepth: MTLDepthStencilState?
     private var highlightDepth: MTLDepthStencilState?
     private var shadowDepth: MTLDepthStencilState?
     private var vertexBuffer: MTLBuffer?
+    private var compactVertexBuffer: MTLBuffer?
     private var outlineBuffer: MTLBuffer?
     private var shadowBuffer: MTLBuffer?
     private var instanceBuffers: [MTLBuffer] = []
     private var bufferBusy = [false, false, false]
     private let bufferLock = NSLock()
     private var vertexCount = 0
+    private var compactVertexCount = 0
     private var outlineCount = 0
     private var drawableSize = CGSize.zero
     private var hitPoints: [(id: String, point: CGPoint, size: CGFloat)] = []
     private static let maximumDetailed = 240
     private(set) var inputVehicleCount = 0
     private(set) var renderedVehicleCount = 0
-    private(set) var symbolVehicleCount = 0
     private(set) var modelVehicleCount = 0
+    private(set) var compactVehicleCount = 0
+    private(set) var detailedVehicleCount = 0
     private(set) var lastEncodeMilliseconds = 0.0
+#if DEBUG
+    private var denseEncodeSamples: [Double] = []
+    private var denseFrameSamples: [Double] = []
+    private var lastDenseFrameAt: CFTimeInterval = 0
+    private var motionProbeID: String?
+    private(set) var denseFrameCount = 0
+    var denseEncodeP95: Double { percentile(denseEncodeSamples, 0.95) }
+    var denseFrameP95: Double { percentile(denseFrameSamples, 0.95) }
+    var denseFrameMedian: Double { percentile(denseFrameSamples, 0.5) }
+    private func percentile(_ samples: [Double], _ fraction: Double) -> Double {
+        guard !samples.isEmpty else { return 0 }
+        let ordered = samples.sorted()
+        return ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * fraction))]
+    }
+#endif
     private static let origin = Coordinate(latitude: 25.04, longitude: 121.55)
     private static let circumference = 40_075_016.68557849
 
@@ -58,6 +75,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     func ingest(_ vehicles: [BusVehicle], time: TimeInterval) {
         inputVehicleCount = vehicles.count
         motion.ingest(vehicles, time: time, now: Date())
+#if DEBUG
+        if !vehicles.contains(where: { $0.id == motionProbeID }) { motionProbeID = vehicles.first?.id }
+#endif
         setNeedsDisplay()
     }
     func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
@@ -93,10 +113,6 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             descriptor.fragmentFunction = library.makeFunction(name: "busShadowFragment")
             descriptor.label = "Soft road contact shadows"
             shadowPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
-            descriptor.vertexFunction = library.makeFunction(name: "busSymbolVertex")
-            descriptor.fragmentFunction = library.makeFunction(name: "busSymbolFragment")
-            descriptor.label = "All received city buses"
-            symbolPipeline = try device.makeRenderPipelineState(descriptor: descriptor)
             let depth = MTLDepthStencilDescriptor()
             depth.depthCompareFunction = .lessEqual
             depth.isDepthWriteEnabled = true
@@ -110,6 +126,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let vertices = mesh()
             vertexCount = vertices.count
             vertexBuffer = vertices.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
+            let compact = mesh(compact: true)
+            compactVertexCount = compact.count
+            compactVertexBuffer = compact.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
             let edges = outline()
             outlineCount = edges.count
             outlineBuffer = edges.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
@@ -120,7 +139,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             }
             shadowBuffer = shadow.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
             instanceBuffers = (0..<3).compactMap { _ in device.makeBuffer(length: MemoryLayout<Instance>.stride * 512, options: .storageModeShared) }
-            guard instanceBuffers.count == 3, vertexBuffer != nil, outlineBuffer != nil, shadowBuffer != nil else { throw FeedError.invalid("Metal 記憶體") }
+            guard instanceBuffers.count == 3, vertexBuffer != nil, compactVertexBuffer != nil,
+                  outlineBuffer != nil, shadowBuffer != nil else { throw FeedError.invalid("Metal 記憶體") }
             drawableSize = resource.mtkView.drawableSize
         } catch {
             onError?("公車 3D 圖層載入失敗；仍可使用路線與站牌查詢")
@@ -128,15 +148,15 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     override func willMove(from mapView: MLNMapView) {
-        pipeline = nil; outlinePipeline = nil; shadowPipeline = nil; symbolPipeline = nil
-        vertexBuffer = nil; outlineBuffer = nil; shadowBuffer = nil
+        pipeline = nil; outlinePipeline = nil; shadowPipeline = nil
+        vertexBuffer = nil; compactVertexBuffer = nil; outlineBuffer = nil; shadowBuffer = nil
         instanceBuffers = []; hitPoints = []
     }
 
     override func draw(in mapView: MLNMapView, with context: MLNStyleLayerDrawingContext) {
         let encodingStarted = CACurrentMediaTime()
-        guard let encoder = renderEncoder, let commandBuffer, let pipeline, let outlinePipeline, let shadowPipeline, let symbolPipeline,
-              let vertexBuffer, let outlineBuffer, let shadowBuffer, instanceBuffers.count == 3,
+        guard let encoder = renderEncoder, let commandBuffer, let pipeline, let outlinePipeline, let shadowPipeline,
+              let vertexBuffer, let compactVertexBuffer, let outlineBuffer, let shadowBuffer, instanceBuffers.count == 3,
               let normalDepth, let highlightDepth, let shadowDepth else { return }
         bufferLock.lock()
         let slot = bufferBusy.firstIndex(of: false)
@@ -164,14 +184,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let gpuProjection = simd_float4x4(columns: (floatColumn(projection.columns.0), floatColumn(projection.columns.1),
                                                   floatColumn(projection.columns.2), floatColumn(projection.columns.3)))
         let heading = Float(mapView.camera.heading * .pi / 180), pitch = Float(mapView.camera.pitch * .pi / 180)
-        let detailOpacity = Float(min(1, max(0, (context.zoomLevel - 15.0) / 1.0)))
-        var uniforms = Uniforms(matrix: gpuProjection, mode: SIMD4(0, 0, detailOpacity, 0),
+        var uniforms = Uniforms(matrix: gpuProjection, mode: SIMD4(0, 0, 1, 0),
                                 viewDirection: SIMD4(-sin(heading) * sin(pitch), -cos(heading) * sin(pitch), cos(pitch), 0))
         let time = CACurrentMediaTime()
         let selection = reduceMotion ? 1 : min(1, max(0, (time - selectionStartedAt) / 0.45))
         let selectionStrength = Float(selection * selection * (3 - 2 * selection))
         let poses = motion.poses(time: time, now: Date())
-        var candidates: [(pose: VehiclePose, instance: Instance, point: CGPoint, size: CGFloat, score: Double)] = []
+        typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
+        var candidates: [Candidate] = []
+        candidates.reserveCapacity(poses.count)
+        let minimumLength = 5.5 + min(1, max(0, (context.zoomLevel - 11) / 3)) * 1.5
         for pose in poses {
             let mercator = pose.coordinate.mercator
             let east = (mercator.x - origin.x) * metersPerWorld
@@ -183,31 +205,28 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let screen = CGPoint(x: (ndc.x + 1) * context.size.width / 2,
                                  y: (1 - ndc.y) * context.size.height / 2)
             let selected = pose.id == selectedID
-            let instance = Instance(position: SIMD4(Float(east), Float(north), 0, 1),
-                                    style: SIMD4(Float(pose.heading * .pi / 180), selected ? selectionStrength : 0,
-                                                 pose.stale ? 1 : 0, Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
             let angle = pose.heading * .pi / 180
             let front = projection * SIMD4(east + sin(angle) * 6, north + cos(angle) * 6, 1.75, 1)
             let screenLength = hypot((front.x / front.w - ndc.x) * context.size.width / 2,
                                      (front.y / front.w - ndc.y) * context.size.height / 2)
-            candidates.append((pose, instance, screen, max(22, min(38, screenLength + 8)), selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y))
+            let naturalLength = max(0.01, screenLength * 2)
+            let scale = Float(max(1, minimumLength / naturalLength))
+            let instance = Instance(position: SIMD4(Float(east), Float(north), 0, scale),
+                                    style: SIMD4(Float(angle), selected ? selectionStrength : 0,
+                                                 pose.stale ? 1 : 0, Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
+            candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
+                               selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))
         }
-        // Every received bus in the viewport remains visible. Only the expensive
-        // wheel/window mesh is limited; overflow keeps its small direction symbol.
-        let detailed: [(pose: VehiclePose, instance: Instance, point: CGPoint, size: CGFloat, score: Double)]
-        if detailOpacity > 0.001 {
-            detailed = Array(candidates.sorted { $0.score < $1.score }.prefix(Self.maximumDetailed))
-        } else { detailed = candidates.filter { $0.pose.id == selectedID } }
-        let detailedIDs = Set(detailed.map { $0.pose.id })
-        let symbols = candidates.compactMap { item -> Instance? in
-            let opacity: Float = item.pose.id == selectedID ? 0 : detailedIDs.contains(item.pose.id) ? 1 - detailOpacity : 1
-            guard opacity > 0.001 else { return nil }
-            var instance = item.instance; instance.style.w = opacity
-            return instance
-        }
-        hitPoints = candidates.map { ($0.pose.id, $0.point, $0.size) }
-        var instances = symbols + detailed.map(\.instance)
-        let selected = candidates.first { $0.pose.id == selectedID }
+        // Both batches use the same gray body, roof, glazing and lighting. At city
+        // scale we omit tiny wheel spokes, never replace a bus with an arrow.
+        let eligible = candidates.filter(\.detailed)
+        let detailed = eligible.count <= Self.maximumDetailed ? eligible :
+            Array(eligible.sorted { $0.score < $1.score }.prefix(Self.maximumDetailed))
+        let detailedIDs = Set(detailed.map(\.id))
+        let compact = candidates.filter { !detailedIDs.contains($0.id) }.map(\.instance)
+        hitPoints = candidates.map { ($0.id, $0.point, $0.size) }
+        var instances = compact + detailed.map(\.instance)
+        let selected = candidates.first { $0.id == selectedID }
         onSelectedPoint?(selected?.point)
         let selectedOffset = instances.count * MemoryLayout<Instance>.stride
         if let selected { instances.append(selected.instance) }
@@ -227,16 +246,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         // Custom layers inherit a 2D sublayer depth range. Restore the native 3D viewport.
         encoder.setViewport(MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1))
         encoder.setCullMode(.none)
-        if !symbols.isEmpty {
-            var symbolUniforms = uniforms
-            symbolUniforms.viewDirection = SIMD4(Float(context.size.width), Float(context.size.height), selectedID == nil ? 1 : 0.52, 0)
-            encoder.setRenderPipelineState(symbolPipeline)
-            encoder.setDepthStencilState(highlightDepth)
-            encoder.setVertexBytes(&symbolUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+        if !compact.isEmpty {
+            encoder.setRenderPipelineState(pipeline)
+            encoder.setDepthStencilState(normalDepth)
+            encoder.setVertexBuffer(compactVertexBuffer, offset: 0, index: 0)
+            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setVertexBuffer(buffer, offset: 0, index: 2)
-            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6, instanceCount: symbols.count)
+            encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: compactVertexCount, instanceCount: compact.count)
         }
-        let modelOffset = symbols.count * MemoryLayout<Instance>.stride
+        let modelOffset = compact.count * MemoryLayout<Instance>.stride
         encoder.setRenderPipelineState(shadowPipeline)
         encoder.setDepthStencilState(shadowDepth)
         encoder.setVertexBuffer(shadowBuffer, offset: 0, index: 0)
@@ -268,9 +287,22 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             encoder.drawPrimitives(type: .line, vertexStart: 0, vertexCount: outlineCount, instanceCount: 1)
         }
         renderedVehicleCount = candidates.count
-        symbolVehicleCount = symbols.count
-        modelVehicleCount = detailed.count
+        compactVehicleCount = compact.count
+        detailedVehicleCount = detailed.count
+        modelVehicleCount = compact.count + detailed.count
         lastEncodeMilliseconds = (CACurrentMediaTime() - encodingStarted) * 1000
+#if DEBUG
+        if compact.count >= 2000, selectedID == nil {
+            denseFrameCount += 1
+            if denseEncodeSamples.count == 360 { denseEncodeSamples.removeFirst() }
+            denseEncodeSamples.append(lastEncodeMilliseconds)
+            if lastDenseFrameAt > 0, encodingStarted - lastDenseFrameAt < 2.5 {
+                if denseFrameSamples.count == 360 { denseFrameSamples.removeFirst() }
+                denseFrameSamples.append((encodingStarted - lastDenseFrameAt) * 1000)
+            }
+            lastDenseFrameAt = encodingStarted
+        } else { lastDenseFrameAt = 0 }
+#endif
     }
 
     func hitTest(_ point: CGPoint) -> String? {
@@ -278,6 +310,10 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             .min { hypot($0.point.x - point.x, $0.point.y - point.y) < hypot($1.point.x - point.x, $1.point.y - point.y) }?.id
     }
 #if DEBUG
+    func testMotionPose() -> VehiclePose? {
+        guard let motionProbeID else { return nil }
+        return motion.pose(id: motionProbeID, time: CACurrentMediaTime(), now: Date())
+    }
     func testVisiblePoint(in bounds: CGRect) -> (id: String, point: CGPoint)? {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)
         return hitPoints.filter { bounds.contains($0.point) }
@@ -292,7 +328,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                                 SIMD4(m.m20, m.m21, m.m22, m.m23), SIMD4(m.m30, m.m31, m.m32, m.m33)))
     }
 
-    private func mesh() -> [Vertex] {
+    private func mesh(compact: Bool = false) -> [Vertex] {
         var vertices: [Vertex] = []
         func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, color: SIMD3<Float>,
                       normal: SIMD3<Float>? = nil, material: Float = 0, wheelY: Float = 0) {
@@ -318,8 +354,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             for i in 0..<8 { triangle(center,roof[i],roof[(i+1)%8],color:SIMD3(repeating: shade + 0.06),normal:SIMD3(0,0,1)) }
         }
         // Chamfered corners and a bevel into the roof retain the simple gray silhouette.
-        shell([bodyRing(width:2.42,length:11.66,z:0.42),bodyRing(width:2.55,length:11.8,z:0.64),
-               bodyRing(width:2.55,length:11.8,z:3.15),bodyRing(width:2.30,length:11.54,z:3.40)],shade:0.73)
+        let body = [bodyRing(width:2.42,length:11.66,z:0.42),bodyRing(width:2.55,length:11.8,z:0.64),
+                    bodyRing(width:2.55,length:11.8,z:3.15),bodyRing(width:2.30,length:11.54,z:3.40)]
+        shell(compact ? [body[0], body[2], body[3]] : body, shade:0.73)
         shell([bodyRing(width:1.65,length:3.8,z:3.40,y:-0.45),bodyRing(width:1.53,length:3.68,z:3.55,y:-0.45)],shade:0.77)
         let glass = SIMD3<Float>(0.33,0.36,0.38)
         quad(SIMD3(-1.04,5.91,1.99),SIMD3(1.04,5.91,1.99),SIMD3(1.04,5.91,3.05),SIMD3(-1.04,5.91,3.05),
@@ -333,6 +370,14 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                      color:glass,normal:SIMD3(side,0,0),material:1)
             }
             for wheelY: Float in [-3.55,3.65] {
+                if compact {
+                    // The same four tire silhouettes, without subpixel cylinders/spokes.
+                    let tireX = side * 1.38
+                    quad(SIMD3(tireX,wheelY-0.43,0.12),SIMD3(tireX,wheelY+0.43,0.12),
+                         SIMD3(tireX,wheelY+0.43,0.90),SIMD3(tireX,wheelY-0.43,0.90),
+                         color:SIMD3(repeating:0.22),normal:SIMD3(side,0,0),material:2)
+                    continue
+                }
                 let inner = side * 1.18, outer = side * 1.38, radius: Float = 0.49
                 let hub = SIMD3<Float>(outer,wheelY,0.51)
                 for i in 0..<20 {

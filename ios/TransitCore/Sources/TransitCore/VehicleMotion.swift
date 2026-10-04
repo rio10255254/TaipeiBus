@@ -119,7 +119,7 @@ public struct VehicleMotion {
     }
 
     public func poses(time: TimeInterval, now: Date) -> [VehiclePose] {
-        states.keys.compactMap { pose(id: $0, time: time, now: now) }
+        states.values.map { pose(state: $0, time: time, now: now) }
     }
 
     /// Accessibility changes can end an in-flight transition without waiting for a new GPS timestamp.
