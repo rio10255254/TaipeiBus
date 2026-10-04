@@ -92,6 +92,9 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastMetadataCount = -1
         private var cityCamera: MLNMapCamera?
         private var beforeCityCamera: MLNMapCamera?
+        private var lastCameraTarget: MLNMapCamera?
+        private var lastCameraTargetRevision = -1
+        private var lastFocusWasLeavingCity = false
         private var insetWork: DispatchWorkItem?
         private var pendingInset: UIEdgeInsets?
 #if DEBUG
@@ -498,6 +501,9 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func focus(_ focus: MapFocus?, map: MLNMapView, duration: Double = 0.65) {
             guard let focus else { return }
+            let wasLeavingCity = lastFocusWasLeavingCity
+            if case .leaveCity = focus { lastFocusWasLeavingCity = true }
+            else { lastFocusWasLeavingCity = false }
             switch focus {
             case .coordinate(let position):
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
@@ -528,7 +534,9 @@ struct NativeBusMap: UIViewRepresentable {
             case .journey(let coordinates):
                 if let camera = fittedCamera(coordinates, map: map) { moveCamera(camera, map: map, duration: duration) }
             case .cityOverview:
-                if beforeCityCamera == nil { beforeCityCamera = savedCamera(map.camera) }
+                if beforeCityCamera == nil {
+                    beforeCityCamera = savedCamera(wasLeavingCity ? lastCameraTarget ?? map.camera : map.camera)
+                }
                 cityCamera = nil
                 let points = model.cityVehicles.map(\.coordinate)
                 let defaults = [Coordinate(latitude: 24.99, longitude: 121.43), Coordinate(latitude: 25.15, longitude: 121.68)]
@@ -537,9 +545,13 @@ struct NativeBusMap: UIViewRepresentable {
                     moveCamera(camera, map: map, duration: duration)
                 }
             case .returnToCity:
-                if let cityCamera { moveCamera(savedCamera(cityCamera), map: map, duration: duration) }
+                let target = lastCameraTargetRevision == model.focusRevision ? lastCameraTarget : cityCamera
+                if let target { moveCamera(savedCamera(target), map: map, duration: duration) }
             case .leaveCity:
-                if let beforeCityCamera { moveCamera(savedCamera(beforeCityCamera), map: map, duration: duration) }
+                // A panel can finish resizing after restoration has started. Keep
+                // its target even after clearing the city browsing session.
+                let target = lastCameraTargetRevision == model.focusRevision ? lastCameraTarget : beforeCityCamera
+                if let target { moveCamera(savedCamera(target), map: map, duration: duration) }
                 cityCamera = nil; beforeCityCamera = nil
             }
         }
@@ -554,6 +566,7 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func moveCamera(_ camera: MLNMapCamera, map: MLNMapView, duration: Double) {
+            lastCameraTarget = savedCamera(camera); lastCameraTargetRevision = model.focusRevision
             let seconds = reduceMotion ? 0 : duration
             followSuspendedUntil = CACurrentMediaTime() + seconds + (seconds > 0 ? 0.04 : 0)
 #if DEBUG
@@ -694,6 +707,7 @@ struct NativeBusMap: UIViewRepresentable {
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
+                lastFocusWasLeavingCity = false
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false

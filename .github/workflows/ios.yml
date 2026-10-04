@@ -430,9 +430,7 @@ jobs:
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBoardingWithoutSelectedPlateKeepsChineseAlightingName'
-              '-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests/testNearestStopRecentersAfterZoomingAndPanning'
-              '-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests/testNorthAndPhoneDirectionSwitching')
+            selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
@@ -485,17 +483,6 @@ jobs:
             "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
-      - name: Record and verify continuous camera transitions and Reduce Motion
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'english-motion'
-        run: |
-          set -euo pipefail
-          BUS_INTERACTION_RECORDING_NAME=iPhone17-camera-transitions.mp4 python3 ios/usability/record-run.py xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
-            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
-            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
-            -resultBundlePath "$RUNNER_TEMP/usability-motion.xcresult" \
-            -only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests \
-            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
-            | tee "$RUNNER_TEMP/usability-motion.log"
       - name: Verify system dark appearance with native journeys
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion')
         run: |
