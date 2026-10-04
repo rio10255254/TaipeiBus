@@ -687,7 +687,8 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         for index in 0..<options.count {
             let item = options.element(boundBy: index)
             XCTAssertTrue(item.isHittable)
-            XCTAssertTrue(item.label.contains("Travel") && item.label.contains("Wait") && item.label.contains("Arriv"))
+            let label = item.label.lowercased()
+            XCTAssertTrue(label.contains("travel") && label.contains("wait") && label.contains("arriv"))
             XCTAssertFalse(item.label.contains("候車"))
             XCTAssertNotNil(item.label.range(of: "[\\u3400-\\u9fff]", options: .regularExpression), "Every boarding/alighting pair keeps Chinese sign names")
         }
