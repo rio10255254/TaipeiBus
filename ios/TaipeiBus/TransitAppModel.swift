@@ -456,8 +456,12 @@ final class TransitAppModel: ObservableObject {
         guard let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
               journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil else { return planned }
-        let upcoming = Set(journey.upcoming(vehicle: bus, at: date).map { $0.stop.id })
-        return planned.filter { upcoming.contains($0.id) }
+        // Keep unmapped intermediate platforms in the list until a later known
+        // platform is passed. Missing geometry must not silently remove a stop.
+        let passed = planned.indices.filter { index in
+            journey.progress(stopID: planned[index].id, vehicle: bus, at: date).map { $0.distance < -20 } == true
+        }
+        return Array(planned.dropFirst((passed.max() ?? -1) + 1))
     }
     func onboardTimeLabel(_ bus: BusVehicle, ride: TransitRide, stopID: String, at date: Date) -> String {
         let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
