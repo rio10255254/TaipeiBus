@@ -448,8 +448,9 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         button("city-fleet-toggle").tap()
         wait("City framing settles") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
+            let samples = trace?["samples"] as? [[String: Double]] ?? []
             return state["cityMode"] as? Bool == true && abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03 &&
-                ((trace?["samples"] as? [[String: Double]])?.count ?? 0) > 10
+                samples.count >= 3 && (samples.last?["t"] ?? 0) >= (trace?["duration"] as? Double ?? 99)
         }
         let overview = camera(); assertContinuousCamera(overview); capture("continuous-city-camera-and-subtle-controls")
         XCTAssertNotNil(overview["busHitID"])

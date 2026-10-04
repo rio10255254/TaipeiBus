@@ -48,8 +48,7 @@ struct NativeBusMap: UIViewRepresentable {
         context.coordinator.reduceMotion = reduceMotion
         context.coordinator.darkMode = colorScheme == .dark
         let inset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
-        let viewportChanged = map.contentInset != inset
-        if viewportChanged { map.setContentInset(inset, animated: !reduceMotion) }
+        let viewportChanged = context.coordinator.requestInset(inset, map: map)
         context.coordinator.update(location: location, viewportChanged: viewportChanged)
     }
 
@@ -93,12 +92,15 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastMetadataCount = -1
         private var cityCamera: MLNMapCamera?
         private var beforeCityCamera: MLNMapCamera?
+        private var insetWork: DispatchWorkItem?
+        private var pendingInset: UIEdgeInsets?
 #if DEBUG
         private var lastTestCameraAt: CFTimeInterval = 0
         private struct CameraTransitionTrace {
             let started: CFTimeInterval
-            let duration: Double
-            let targetZoom: Double
+            let revision: Int
+            var duration: Double
+            var targetZoom: Double
             var samples: [[String: Double]] = []
         }
         private var cameraTransitions: [CameraTransitionTrace] = []
@@ -123,7 +125,10 @@ struct NativeBusMap: UIViewRepresentable {
             link.add(to: .main, forMode: .common)
             displayLink = link
         }
-        func stop() { displayLink?.invalidate(); displayLink = nil }
+        func stop() {
+            insetWork?.cancel(); insetWork = nil; pendingInset = nil
+            displayLink?.invalidate(); displayLink = nil
+        }
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
@@ -222,6 +227,28 @@ struct NativeBusMap: UIViewRepresentable {
                     .withTintColor(darkMode ? UIColor(liveHex: "#B4C5DB") : UIColor(red: 0.28, green: 0.40, blue: 0.53, alpha: 1), renderingMode: .alwaysOriginal)
                 glyph?.draw(in: rect.insetBy(dx: size * 0.23, dy: size * 0.23))
             }
+        }
+
+        func requestInset(_ inset: UIEdgeInsets, map: MLNMapView) -> Bool {
+            if pendingInset == inset, !reduceMotion { return false }
+            insetWork?.cancel(); insetWork = nil; pendingInset = nil
+            guard map.contentInset != inset else { return false }
+            if map.contentInset == .zero || reduceMotion {
+                map.setContentInset(inset, animated: false)
+                return true
+            }
+            // Geometry reports every frame while a panel animates. Apply the final
+            // viewport once, so those updates cannot continually cancel camera motion.
+            pendingInset = inset
+            let work = DispatchWorkItem { [weak self, weak map] in
+                guard let self, let map, self.pendingInset == inset else { return }
+                self.pendingInset = nil; self.insetWork = nil
+                map.setContentInset(inset, animated: !self.reduceMotion)
+                self.update(location: self.pendingLocation, viewportChanged: true)
+            }
+            insetWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: work)
+            return false
         }
 
         func update(location: Coordinate?, viewportChanged: Bool = false) {
@@ -531,8 +558,14 @@ struct NativeBusMap: UIViewRepresentable {
             followSuspendedUntil = CACurrentMediaTime() + seconds + (seconds > 0 ? 0.04 : 0)
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
-                cameraTransitions.append(CameraTransitionTrace(started: CACurrentMediaTime(), duration: seconds,
-                    targetZoom: MLNZoomLevelForAltitude(camera.altitude, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)))
+                let targetZoom = MLNZoomLevelForAltitude(camera.altitude, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)
+                if let index = cameraTransitions.indices.last, cameraTransitions[index].revision == model.focusRevision {
+                    cameraTransitions[index].duration = reduceMotion ? 0 : CACurrentMediaTime() - cameraTransitions[index].started + seconds
+                    cameraTransitions[index].targetZoom = targetZoom
+                } else {
+                    cameraTransitions.append(CameraTransitionTrace(started: CACurrentMediaTime(), revision: model.focusRevision,
+                        duration: seconds, targetZoom: targetZoom))
+                }
                 if cameraTransitions.count > 8 { cameraTransitions.removeFirst() }
                 recordCameraSample(map)
             }

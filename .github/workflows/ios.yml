@@ -430,7 +430,9 @@ jobs:
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBoardingWithoutSelectedPlateKeepsChineseAlightingName')
+            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBoardingWithoutSelectedPlateKeepsChineseAlightingName'
+              '-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests/testNearestStopRecentersAfterZoomingAndPanning'
+              '-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests/testNorthAndPhoneDirectionSwitching')
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
