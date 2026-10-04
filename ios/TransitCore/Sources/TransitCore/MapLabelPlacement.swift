@@ -1,4 +1,5 @@
 import Foundation
+import CoreGraphics
 
 /// Keep a small map label near its pin without covering controls or the pin itself.
 public enum MapLabelPlacement {

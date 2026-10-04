@@ -1,4 +1,5 @@
 import XCTest
+import CoreGraphics
 @testable import TransitCore
 
 final class RouteBoardingVehiclesTests: XCTestCase {
