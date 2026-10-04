@@ -167,6 +167,8 @@ public struct TripPlanner: Sendable {
             estimates?.value(routeID: pattern.route.parentID, stopID: $0.id, at: date)
         } }
         let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
+        let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
+        let services = patterns.map { $0.route.servicePlans[$0.direction]?.service(at: date) }
         let serviceWaits = patterns.map { pattern in
             pattern.route.minimumServiceWait(direction: pattern.direction, at: date,
                 fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
@@ -189,8 +191,9 @@ public struct TripPlanner: Sendable {
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
             let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
                 minimumServiceWaits: segments.map { serviceWaits[$0.pattern] },
-                services: segments.map { patterns[$0.pattern].route.servicePlans[patterns[$0.pattern].direction]?.service(at: date) },
-                boardingOffsets: segments.map { patterns[$0.pattern].distances[$0.board] / 4.5 + Double($0.board) * 20 }, at: date).score
+                services: segments.map { services[$0.pattern] },
+                boardingOffsets: segments.map { patterns[$0.pattern].distances[$0.board] / 4.5 + Double($0.board) * 20 }, at: date,
+                serviceTimeOfDay: timeOfDay).score
             if !preservePlatforms {
                 if let best = candidates[key]?.first, best.score <= score { return }
                 candidates[key] = [Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score,

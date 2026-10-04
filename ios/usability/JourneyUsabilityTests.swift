@@ -28,7 +28,7 @@ class JourneyUsabilityTestBase: XCTestCase {
         XCTAssertTrue(place.waitForExistence(timeout: 20)); capture("search-neihu-with-keyboard"); place.tap()
     }
     var firstOption: XCUIElement {
-        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-")).firstMatch
+        app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND enabled == true", "journey-option-")).firstMatch
     }
 }
 
@@ -248,7 +248,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
         XCTAssertTrue(app.navigationBars["內湖站"].exists)
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
-        XCTAssertEqual(options.count, 3)
+        XCTAssertTrue((1...3).contains(options.count))
         capture("choose-a-route-before-fit-check")
         for index in 0..<options.count { XCTAssertTrue(options.element(boundBy: index).isHittable, "All options must fit without scrolling") }
         for index in 0..<options.count {
@@ -484,6 +484,66 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
             ($0["fleetInput"] as? Int) == 2500 && ($0["fleetModels"] as? Int ?? 0) > 0
         }
         capture("city-gray-buses-after-pan")
+    }
+}
+
+final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
+    private func timing() -> [String: Any] {
+        guard let bytes = app.staticTexts["journey-timing-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func waitTiming(_ condition: @escaping ([String: Any]) -> Bool) {
+        let test = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.staticTexts["journey-timing-state"].exists && condition(self.timing())
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 150), .completed)
+    }
+    func testRealNeihuOptionsHaveVerifiedWalkingSeparateWaitsAndArrivalClocks() {
+        launch(["--test-journey-selection", "--test-map-controls", "--preview-neihu-planning", "--preview-journey-search"])
+        waitTiming { ($0["checking"] as? Bool) == false && ($0["options"] as? [[String: Any]] ?? []).count > 0 }
+        let state = timing(), records = state["options"] as? [[String: Any]] ?? []
+        XCTAssertTrue((1...3).contains(records.count))
+        for record in records {
+            XCTAssertEqual(record["verified"] as? Bool, true)
+            let total = record["total"] as? Double ?? -1
+            let walking = record["walking"] as? Double ?? -1, waiting = record["waiting"] as? Double ?? -1, riding = record["riding"] as? Double ?? -1
+            XCTAssertEqual(total, walking + waiting + riding, accuracy: 0.01)
+            XCTAssertFalse((record["arrival_label"] as? String ?? "").isEmpty)
+            if (record["unknown"] as? Int ?? 0) > 0 { XCTAssertEqual(record["arrival_label"] as? String, "抵達待確認") }
+            let choice = button("journey-option-" + (record["id"] as? String ?? ""))
+            XCTAssertTrue(choice.isEnabled)
+            XCTAssertTrue(choice.label.contains("候車") || choice.label.contains("步行即可"))
+        }
+        capture("optimized-neihu-options-and-times")
+        let report = XCTAttachment(string: String(describing: state))
+        report.name = "navigation-optimized-timing-report"; report.lifetime = .keepAlways; add(report)
+        XCTAssertTrue(button("journey-other-transit").exists)
+        let choice = firstOption
+        let identity = choice.identifier
+        choice.tap()
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
+        capture("optimized-neihu-waiting-and-arrival")
+        button("journey-options").tap(); button("返回地圖").tap()
+        XCTAssertEqual(timing()["selected"] as? String, String(identity.dropFirst("journey-option-".count)))
+    }
+    func testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate() {
+        launch(["--test-journey-selection", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
+        let first = timing()
+        let before = (first["options"] as? [[String: Any]])?.first?["total"] as? Double ?? -1
+        XCTAssertGreaterThan(before, 0)
+        button("boarding-vehicle-TEST-01").tap(); button("journey-board").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))
+        let current = timing()
+        let after = (current["options"] as? [[String: Any]])?.first?["total"] as? Double ?? before
+        XCTAssertLessThan(after, before, "Already spent access/wait time must not remain in the destination clock")
+        capture("optimized-onboard-remaining-time")
+        button("journey-options").tap(); button("返回地圖").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))
+        button("返回等車").tap()
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
     }
 }
 

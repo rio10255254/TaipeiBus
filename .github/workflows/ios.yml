@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -404,6 +404,14 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-optimization' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testLargerTextKeepsTheMainActionsVisible')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
@@ -448,7 +456,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify system dark appearance with native journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps')
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -456,6 +464,10 @@ jobs:
           selection=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
           if [ '${{ inputs.usability_scope }}' = 'continuous-gps' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-optimization' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests'
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
@@ -466,7 +478,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps')
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization')
         run: python3 ios/usability/verify-appearance.py
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')
@@ -511,7 +523,7 @@ jobs:
                   keep = []
                   for item in record.get('attachments', []):
                       label = item.get('suggestedHumanReadableName', '')
-                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-', 'continuous-')) or any(label.startswith(name) for name in names):
+                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-', 'continuous-', 'navigation-')) or any(label.startswith(name) for name in names):
                           filename = Path(item['exportedFileName']).name
                           shutil.copyfile(manifest.parent / filename, target / filename)
                           keep.append(item)

@@ -552,6 +552,11 @@ final class TransitAppModel: ObservableObject {
             previewSelectionApplied = true
             Task { await auditPlaces(token: value(after: "--preview-capture") ?? "", group: value(after: "--preview-audit-group") ?? "transit") }
             return
+        } else if arguments.contains("--preview-neihu-planning") {
+            guard let station = metadata.stationSearch.search("內湖站", near: Coordinate(latitude: 25.0837, longitude: 121.5947)).first else { return }
+            planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate), metadata: metadata)
+            planner.setDestination(TravelPlace(name: "忠孝復興站", address: "", coordinate: Coordinate(latitude: 25.0416, longitude: 121.5438)), metadata: metadata, currentLocation: nil)
+            previewSelectionApplied = true
         } else if arguments.contains("--preview-boarding-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
                 transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"))

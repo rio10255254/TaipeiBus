@@ -77,6 +77,22 @@ struct TransitHomeView: View {
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
                     Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                        let records: [[String: Any]] = planner.options.map { option in
+                            let timing = model.journeyDuration(option, at: timeline.date)
+                            return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
+                                "total": timing?.totalSeconds ?? -1, "travel": timing?.travelSeconds ?? -1,
+                                "walking": timing?.walkingSeconds ?? -1, "waiting": timing?.waitingSeconds ?? -1,
+                                "riding": timing?.ridingSeconds ?? -1, "unknown": timing?.unknownWaits ?? -1,
+                                "duration_label": timing?.label ?? "", "waiting_label": timing?.waitingLabel ?? "",
+                                "arrival_label": timing?.arrivalLabel ?? ""]
+                        }
+                        let value: [String: Any] = ["checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "options": records]
+                        let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+                        Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
+                            .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
+                            .accessibilityIdentifier("journey-timing-state").allowsHitTesting(false)
+                    }
                 }
                 if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
                     DebugMapCameraText(overlay: selectionOverlay)

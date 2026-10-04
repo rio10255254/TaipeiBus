@@ -23,11 +23,12 @@ public enum TripRanking {
     public static func assess(riding: [Double], walking: [Double], arrivals: [Int?],
                               preferences: LiveSettings.Planning = .init(), minimumServiceWaits: [Double] = [],
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
-                              at date: Date = Date()) -> TripAssessment {
+                              at date: Date = Date(), serviceTimeOfDay: Double? = nil) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false
         var waits: [BoardingWait] = []
+        let timeOfDay = serviceTimeOfDay ?? BusServiceWindow.secondsOfDay(at: date)
         let unavailable = arrivals.contains { value in value.map { [-2, -3, -4].contains($0) } ?? false }
         for index in riding.indices {
             elapsed += walks[index]
@@ -37,7 +38,7 @@ public enum TripRanking {
             let ready = index > 0 && upper - lower > 120 ? upper : elapsed
             let result = BoardingTime.wait(official: arrival, readyAt: ready, buffer: buffer,
                 service: services.indices.contains(index) ? services[index] : nil,
-                secondsOfDay: BusServiceWindow.secondsOfDay(at: date),
+                secondsOfDay: timeOfDay,
                 boardingOffset: boardingOffsets.indices.contains(index) ? boardingOffsets[index] : 0,
                 minimumServiceWait: minimumServiceWaits.indices.contains(index) ? minimumServiceWaits[index] : 0)
             if index == 0 && result.missedNext { missed = true }
