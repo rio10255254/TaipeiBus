@@ -130,7 +130,7 @@ struct BilingualName: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(live.language == .english && !english.isEmpty ? english : chinese)
             if live.language == .english, !english.isEmpty, english != chinese {
-                Text(chinese).liveFont(.caption).foregroundStyle(.secondary)
+                Text(chinese).liveFont(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
             }
         }.accessibilityElement(children: .combine).smoothChanges(live.language)
     }

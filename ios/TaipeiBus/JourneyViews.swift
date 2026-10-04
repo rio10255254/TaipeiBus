@@ -362,10 +362,10 @@ private struct JourneyBoardingContent: View {
             HStack(spacing: 6) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("上車 · ") + ride.boarding.localizedName).liveFont(.title3, weight: .bold).lineLimit(2)
-                    if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(.secondary) }
+                    if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)) }
                 }
                 Spacer(minLength: 4)
-                if let station = guide.station { Text(station.localizedBearing).liveFont(.caption).foregroundStyle(.secondary) }
+                if let station = guide.station { Text(station.localizedBearing).liveFont(.caption).foregroundStyle(Color(uiColor: .secondaryLabel)) }
             }
         }.accessibilityIdentifier("boarding-stop-details")
     }
