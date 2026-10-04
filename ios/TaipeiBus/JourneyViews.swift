@@ -440,7 +440,8 @@ private struct OnboardSummary: View {
         VStack(alignment: .leading, spacing: 6) {
             if let bus = model.onboardVehicle(for: ride) {
                 let journey = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)
-                let next = model.onboardStops(for: ride, at: date).first
+                let next = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil
+                    ? model.onboardStops(for: ride, at: date).first : nil
                 HStack {
                     Text(next.map { "下一站 · " + $0.name } ?? "位置更新中").lineLimit(1)
                     Spacer()
