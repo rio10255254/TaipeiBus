@@ -377,6 +377,7 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           fi
       - name: Tap through native user journeys
+        id: native_journeys
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
@@ -488,7 +489,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify system dark appearance with native journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -523,7 +524,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity')
         run: python3 ios/usability/verify-appearance.py
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')

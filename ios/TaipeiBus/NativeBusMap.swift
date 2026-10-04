@@ -639,11 +639,15 @@ struct NativeBusMap: UIViewRepresentable {
         private func recordCameraSample(_ map: MLNMapView) {
             guard let index = cameraTransitions.indices.last else { return }
             let elapsed = CACurrentMediaTime() - cameraTransitions[index].started
-            let hasCompletion = (cameraTransitions[index].samples.last?["t"] ?? -1) >= cameraTransitions[index].duration
-            guard (elapsed <= cameraTransitions[index].duration + 0.3 || !hasCompletion), cameraTransitions[index].samples.count < 240 else { return }
-            cameraTransitions[index].samples.append(["t": elapsed, "zoom": map.zoomLevel,
+            let last = cameraTransitions[index].samples.last
+            let hasCompletion = (last?["t"] ?? -1) >= cameraTransitions[index].duration &&
+                abs((last?["zoom"] ?? -100) - cameraTransitions[index].targetZoom) < 0.01
+            guard elapsed <= cameraTransitions[index].duration + 0.3 || !hasCompletion else { return }
+            let sample = ["t": elapsed, "zoom": map.zoomLevel,
                 "latitude": map.centerCoordinate.latitude, "longitude": map.centerCoordinate.longitude,
-                "pitch": map.camera.pitch])
+                "pitch": map.camera.pitch]
+            if cameraTransitions[index].samples.count >= 240 { cameraTransitions[index].samples.removeLast() }
+            cameraTransitions[index].samples.append(sample)
         }
 
         private func recordPreviewCamera(_ map: MLNMapView, fullyRendered: Bool) {
