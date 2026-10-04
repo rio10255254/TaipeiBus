@@ -296,7 +296,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             denseFrameCount += 1
             if denseEncodeSamples.count == 360 { denseEncodeSamples.removeFirst() }
             denseEncodeSamples.append(lastEncodeMilliseconds)
-            if lastDenseFrameAt > 0, encodingStarted - lastDenseFrameAt < 2.5 {
+            if lastDenseFrameAt > 0 {
                 if denseFrameSamples.count == 360 { denseFrameSamples.removeFirst() }
                 denseFrameSamples.append((encodingStarted - lastDenseFrameAt) * 1000)
             }

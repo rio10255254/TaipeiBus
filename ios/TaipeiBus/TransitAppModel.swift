@@ -548,16 +548,22 @@ final class TransitAppModel: ObservableObject {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "Asia/Taipei"); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let timestamp = formatter.string(from: now)
+        var fixtureMetadata = TransitMetadata()
+        for row in 0..<50 {
+            let latitude = 25.015 + Double(row) * 0.0015
+            fixtureMetadata.lines["route:CITY-\(row)"] = RouteLine(coordinates: [
+                Coordinate(latitude: latitude, longitude: 121.44), Coordinate(latitude: latitude, longitude: 121.64)])
+        }
         let rows: [[String: Any]] = (0..<2500).map { index in
             let latitude = 25.015 + Double(index / 50) * 0.0015
             let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick) * 0.000025
-            return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY", "GoBack": "0",
+            return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY-\(index / 50)", "GoBack": "0",
                     "Latitude": latitude, "Longitude": longitude, "Azimuth": 90, "Speed": 5,
                     "DutyStatus": "1", "BusStatus": "0", "CarType": "1", "DataTime": timestamp]
         }
         let payload: [String: Any] = ["EssentialInfo": ["UpdateTime": timestamp], "BusInfo": rows]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
-              let decoded = try? FeedDecoder.vehicles(data, metadata: TransitMetadata(),
+              let decoded = try? FeedDecoder.vehicles(data, metadata: fixtureMetadata,
                     previous: snapshot.vehicles.filter { $0.plate.hasPrefix("CITY-") }, now: now) else { return }
         snapshot = TransitSnapshot(vehicles: decoded.vehicles, sourceUpdatedAt: now, receivedAt: now,
                                    estimates: EstimateFeed(), revision: snapshot.revision + 1)
