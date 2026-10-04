@@ -104,6 +104,9 @@ jobs:
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter CooperatedRouteTests.testLiveAllPublishedRoutesAndCooperatedVehicleCoverage | tee -a "$RUNNER_TEMP/routing-audit.log"
+          if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
+            swift test --package-path ios/TransitCore --filter RouteRecommendationAuditTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+          fi
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         timeout-minutes: 12
