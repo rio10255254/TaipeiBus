@@ -225,9 +225,9 @@ struct TransitHomeView: View {
                             }
                         }
                         if model.selectedRouteID != nil || model.selectedStationID != nil {
-                            Button { model.clearSelection() } label: {
+                            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { model.clearSelection() } } label: {
                                 Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 50, height: 50)
-                            }.accessibilityLabel(live.text("關閉選取"))
+                            }.accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("關閉選取"))
                         }
                     }
                     .padding(.horizontal, 6 * CGFloat(live.appearance.spacingScale))
@@ -642,8 +642,8 @@ private struct TransitPanel: View {
 
     private var detailHeader: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else { model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
-                .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : live.text("返回搜尋"))
+            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
+                .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("返回搜尋"))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.selectedStation?.localizedName ?? model.selectedVehicle?.localizedRouteName ?? model.selectedRouteName ?? AppText.text("公車動態"))
                     .liveFont(.title2, weight: .bold).lineLimit(2)

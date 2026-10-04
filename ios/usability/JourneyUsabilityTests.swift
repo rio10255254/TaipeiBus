@@ -585,6 +585,9 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         map.pinch(withScale: 0.2, velocity: -2)
         wait("Zooming out keeps the station label compact") { ($0["stationLabelCompact"] as? Bool) == true }
         capture("route-map-with-emphasized-physical-buses")
+        button("返回站牌").press(forDuration: 0.15)
+        wait("Leaving the route restores the original physical station") { ($0["station"] as? String) == station }
+        capture("station-restored-after-route-and-vehicle-tracking")
     }
     func testStationWalkingStaysInTheAppAndReturnsToTheSamePlatform() {
         launch(["--test-language", "en", "--test-map-controls", "--preview-station-walk-fixture"])

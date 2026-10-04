@@ -51,7 +51,13 @@ final class TransitAppModel: ObservableObject {
     @Published var selectedRouteID: String?
     @Published private(set) var routeBoardingStopID: String?
     private var routeOverviewReturn: (route: String, direction: String, variants: Bool, stop: String?)?
+    private var routeOriginStationID: String?
     var canReturnToRouteOverview: Bool { selectedVehicleID != nil && routeOverviewReturn != nil }
+    var canReturnToRouteStation: Bool { selectedVehicleID == nil && selectedRouteID != nil && routeOriginStationID != nil }
+    func returnToRouteStation() {
+        guard let id = routeOriginStationID, let station = metadata.stations[id] else { return }
+        selectStation(station)
+    }
     func returnToRouteOverview() {
         guard let saved = routeOverviewReturn, let route = metadata.route(saved.route) else { return }
         selectRoute(route, direction: saved.direction, variantOnly: !saved.variants, boardingStopID: saved.stop)
@@ -107,13 +113,15 @@ final class TransitAppModel: ObservableObject {
     private struct WalkReturnSelection {
         let station: String?, route: String?, vehicle: String?, boarding: String?
         let direction: String, variants: Bool, following: Bool, focus: MapFocus?
+        let originStation: String?, walkingIndex: Int?, detent: PresentationDetent
     }
     private var walkReturnSelection: WalkReturnSelection?
     func startStationWalk(_ station: Station) {
         guard !stationWalk.isActive else { return }
         walkReturnSelection = WalkReturnSelection(station: selectedStationID, route: selectedRouteID,
             vehicle: selectedVehicleID, boarding: routeBoardingStopID, direction: direction,
-            variants: allRouteVariants, following: following, focus: focus)
+            variants: allRouteVariants, following: following, focus: focus,
+            originStation: routeOriginStationID, walkingIndex: walkingMapIndex, detent: sheetDetent)
         following = false; stopUserTracking()
         location.setWalkingNavigation(true); location.request()
         stationWalk.begin(station, location: location)
@@ -128,6 +136,7 @@ final class TransitAppModel: ObservableObject {
             selectedStationID = saved.station; selectedRouteID = saved.route; selectedVehicleID = saved.vehicle
             routeBoardingStopID = saved.boarding; direction = saved.direction; allRouteVariants = saved.variants
             following = saved.following
+            routeOriginStationID = saved.originStation; walkingMapIndex = saved.walkingIndex; sheetDetent = saved.detent
             if let focus = saved.focus { focusMap(focus) }
         }
         walkReturnSelection = nil; updateWalkingLocation()
@@ -382,7 +391,7 @@ final class TransitAppModel: ObservableObject {
         focusMap(.journey(points.isEmpty ? [walk.from, walk.to] : points))
     }
     func selectStation(_ station: Station) {
-        routeOverviewReturn = nil
+        routeOverviewReturn = nil; routeOriginStationID = nil
         if selectedStationID == nil { browseQuery = query }
         stationBrowsing = false
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
@@ -394,6 +403,8 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
+        if let station = selectedStationID { routeOriginStationID = station }
+        else if selectedRoute?.parentID != route.parentID { routeOriginStationID = nil }
         let context = boardingStopID ?? selectedStation?.stopIDs.first {
             metadata.stops[$0].map { $0.routeID == route.parentID && $0.direction == direction } == true
         } ?? (selectedRoute?.parentID == route.parentID ? routeBoardingStopID : nil)
@@ -448,7 +459,7 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
-        routeOverviewReturn = nil
+        routeOverviewReturn = nil; routeOriginStationID = nil
 #if DEBUG
         debugActions.append("clear-selection")
 #endif
