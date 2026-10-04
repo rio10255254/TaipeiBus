@@ -985,7 +985,6 @@ final class TransitAppModel: ObservableObject {
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"
         if ProcessInfo.processInfo.arguments.contains("--preview-route-stop-fixture") {
-            planner.finish()
             if let station = metadata.stations[ride.boarding.stationID] { selectStation(station) }
             return selectedStation != nil
         }
