@@ -13,6 +13,11 @@ public struct LiveSettings: Codable, Equatable, Sendable {
     public var refresh = Refresh()
     public var display = Display()
     public var quickDestinations = ["臺北車站", "臺北101", "西門町"]
+    public var language = AppLanguage.current
+    // Presentation language belongs to this phone, not the shared download.
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, revision, minimumAppVersion, copy, search, appearance, planning, refresh, display, quickDestinations
+    }
     public init() {}
     public static let defaults = LiveSettings()
 
@@ -63,7 +68,11 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public init() {}
     }
 
-    public func text(_ original: String) -> String { copy[original] ?? original }
+    public func text(_ original: String) -> String {
+        let key = AppText.canonical(original)
+        if language == .english { return copy["en:" + key] ?? AppText.text(key, language: .english) }
+        return copy[key] ?? key
+    }
     public func supports(appVersion: String) -> Bool {
         guard let minimum = Self.version(minimumAppVersion), let current = Self.version(appVersion) else { return false }
         return !current.lexicographicallyPrecedes(minimum)

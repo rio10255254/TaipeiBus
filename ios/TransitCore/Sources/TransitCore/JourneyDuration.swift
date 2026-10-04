@@ -15,26 +15,30 @@ public struct JourneyDuration: Equatable, Sendable {
     public var travelSeconds: Double { walkingSeconds + ridingSeconds }
     public var totalSeconds: Double { walkingSeconds + waitingSeconds + ridingSeconds }
     public var label: String {
-        unknownWaits > 0 ? "行程約 \(minutes(travelSeconds)) 分" : "全程約 \(minutes(totalSeconds)) 分"
+        summaryLabel()
     }
-    public var comparisonLabel: String { unknownWaits > 0 ? "全程待確認" : label }
-    public var breakdownLabel: String { "步行 \(minutes(walkingSeconds)) 分 · 搭車 \(minutes(ridingSeconds)) 分" }
+    public func summaryLabel(remaining: Bool = false) -> String {
+        let key = unknownWaits > 0 ? (remaining ? "剩餘行程約 %@ 分" : "行程約 %@ 分") : (remaining ? "剩餘約 %@ 分" : "全程約 %@ 分")
+        return AppText.text(key, minutes(unknownWaits > 0 ? travelSeconds : totalSeconds))
+    }
+    public var comparisonLabel: String { unknownWaits > 0 ? AppText.text("全程待確認") : label }
+    public var breakdownLabel: String { AppText.text("步行 %@ 分 · 搭車 %@ 分", minutes(walkingSeconds), minutes(ridingSeconds)) }
     public var waitingLabel: String {
-        if waits.isEmpty { return "步行即可" }
-        if unknownWaits > 0 { return waits.dropFirst().contains(where: { $0.evidence == .unknown }) ? "轉乘候車待確認" : "候車待確認" }
+        if waits.isEmpty { return AppText.text("步行即可") }
+        if unknownWaits > 0 { return AppText.text(waits.dropFirst().contains(where: { $0.evidence == .unknown }) ? "轉乘候車待確認" : "候車待確認") }
         // Transfer waits can be correlated: arriving earlier means waiting longer
         // for the same reachable departure. Use the whole-journey bounds.
         let lower = max(0, lowerTotalSeconds - travelSeconds), upper = max(lower, upperTotalSeconds - travelSeconds)
-        if upper < 30 { return "即將可搭" }
-        return minutes(upper) - minutes(lower) >= 2 ? "候車約 \(minutes(lower))–\(minutes(upper)) 分" : "候車約 \(minutes(waitingSeconds)) 分"
+        if upper < 30 { return AppText.text("即將可搭") }
+        return minutes(upper) - minutes(lower) >= 2 ? AppText.text("候車約 %@–%@ 分", minutes(lower), minutes(upper)) : AppText.text("候車約 %@ 分", minutes(waitingSeconds))
     }
     public var missedNext: Bool { waits.first?.missedNext == true }
     public var arrivalLabel: String {
-        if unknownWaits > 0 || positionUncertain { return "抵達待確認" }
+        if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
         if upperTotalSeconds - lowerTotalSeconds >= 120 {
-            return "約 \(clock(referenceDate.addingTimeInterval(lowerTotalSeconds)))–\(clock(referenceDate.addingTimeInterval(upperTotalSeconds))) 抵達"
+            return AppText.text("約 %@–%@ 抵達", clock(referenceDate.addingTimeInterval(lowerTotalSeconds)), clock(referenceDate.addingTimeInterval(upperTotalSeconds)))
         }
-        return "約 \(clock(referenceDate.addingTimeInterval(totalSeconds))) 抵達"
+        return AppText.text("約 %@ 抵達", clock(referenceDate.addingTimeInterval(totalSeconds)))
     }
     private func minutes(_ seconds: Double) -> Int { max(seconds > 0 ? 1 : 0, Int(ceil(max(0, seconds) / 60))) }
     private func clock(_ date: Date) -> String {

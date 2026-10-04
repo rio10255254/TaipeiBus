@@ -72,21 +72,21 @@ struct MapContextLabels: View {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     Button(action: showDetails) {
-                        Text(station.name).font(.headline).foregroundStyle(.primary)
+                        BilingualName(station).font(.headline).foregroundStyle(.primary)
                             .shadow(color: .white, radius: 4)
                     }.buttonStyle(.plain).frame(minHeight: 44)
                         .contextMenu {
                             Button { model.toggleFavorite(station) } label: {
-                                Label(model.favorites.contains(station.id) ? "移除收藏" : "收藏站牌", systemImage: "star")
+                                Label(model.favorites.contains(station.id) ? AppText.text("移除收藏") : AppText.text("收藏站牌"), systemImage: "star")
                             }
                             ForEach(model.oppositeStations(to: station)) { opposite in
-                                Button("改看\(opposite.bearingLabel)站牌") { model.selectStation(opposite) }
+                                Button(AppText.text("改看%@站牌", opposite.localizedBearing)) { model.selectStation(opposite) }
                             }
                         }
-                    Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
+                    Text(station.localizedBearing).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
                     Spacer(minLength: 0)
                     Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .phoneGlass(in: Circle()).accessibilityLabel("此站所有路線與到站預估")
+                        .phoneGlass(in: Circle()).accessibilityLabel(AppText.text("此站所有路線與到站預估"))
                 }
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
                     let arrivals = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
@@ -96,7 +96,7 @@ struct MapContextLabels: View {
                                 if let route = arrival.route { model.selectRoute(route, direction: arrival.stop.direction) }
                             } label: {
                                 VStack(alignment: .leading, spacing: 3) {
-                                    Text(arrival.route?.name ?? arrival.stop.routeID).font(.caption.weight(.semibold))
+                                    Text(arrival.route?.localizedName ?? arrival.stop.routeID).font(.caption.weight(.semibold))
                                     Text(EstimateFeed.label(arrival.estimateSeconds)).font(.body.weight(.bold)).monospacedDigit()
                                         .contentTransition(reduceMotion ? .identity : .numericText())
                                         .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: arrival.estimateSeconds)
@@ -106,21 +106,21 @@ struct MapContextLabels: View {
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
                             }.buttonStyle(PhonePressStyle())
                         }
-                        if arrivals.isEmpty { Text("暫無到站資訊").font(.subheadline).shadow(color: .white, radius: 3) }
+                        if arrivals.isEmpty { Text(AppText.text("暫無到站資訊")).font(.subheadline).shadow(color: .white, radius: 3) }
                     }
                 }
-                Text("官方路線預估").font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
+                Text(AppText.text("官方路線預估")).font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
             }
         } else if let bus = model.selectedVehicle {
             HStack(spacing: 8) {
                 Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
                 if model.planner.selected == nil {
-                    Text(model.metadata.route(bus.routeID)?.name ?? bus.routeName)
+                    Text(model.metadata.route(bus.routeID)?.localizedName ?? bus.localizedRouteName)
                         .font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor).lineLimit(1)
                 }
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
-                    .accessibilityLabel("車輛資訊")
+                    .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
         }
     }

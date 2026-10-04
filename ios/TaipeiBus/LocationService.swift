@@ -63,7 +63,12 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         manager.activityType = .otherNavigation
         manager.pausesLocationUpdatesAutomatically = true
     }
-    func updateSettings(_ settings: LiveSettings) { self.settings = settings }
+    func updateSettings(_ settings: LiveSettings) {
+        self.settings = settings
+        if let sample, sample.accuracy > 120, sample.canDisplay(at: Date()), sample.coordinate.isInServiceArea {
+            message = AppText.text("位置約 ±%@ 公尺", Int(sample.accuracy.rounded()))
+        } else if let value = message { message = settings.text(value) }
+    }
     func setActive(_ active: Bool) {
         self.active = active
         if active { requestIfAuthorized(); updateHeadingActivity() }
@@ -152,7 +157,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if let bytes = try? JSONEncoder().encode(value) { UserDefaults.standard.set(bytes, forKey: cacheKey) }
         if !value.coordinate.isInServiceArea { message = settings.text("目前在服務範圍外，可手動選擇台北出發地") }
         else if Date().timeIntervalSince(value.timestamp) > 60 { message = settings.text("上次位置，正在更新") }
-        else if value.accuracy > 120 { message = "位置約 ±\(Int(value.accuracy.rounded())) 公尺" }
+        else if value.accuracy > 120 { message = AppText.text("位置約 ±%@ 公尺", Int(value.accuracy.rounded())) }
         else { message = nil }
         revision += 1
 #if DEBUG

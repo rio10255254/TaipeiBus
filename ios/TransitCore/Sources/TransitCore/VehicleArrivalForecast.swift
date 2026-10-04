@@ -7,9 +7,9 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 
     public var label: String {
         switch self {
-        case .nearStop: return "已在站牌附近"
-        case .minutes(let lower, let upper): return "約 \(max(1, Int((Double(lower + upper) / 2).rounded()))) 分"
-        case .unavailable: return "暫無法估算"
+        case .nearStop: return AppText.text("已在站牌附近")
+        case .minutes(let lower, let upper): return AppText.text("約 %@ 分", max(1, Int((Double(lower + upper) / 2).rounded())))
+        case .unavailable: return AppText.text("暫無法估算")
         }
     }
 }
@@ -24,22 +24,22 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
         nearStop || (evidence != .limited && uncertaintySeconds <= 120 && uncertaintySeconds <= max(60, seconds * 0.4))
     }
     public var label: String {
-        if nearStop { return "站牌附近" }
-        guard hasUsableTime else { return "時間待確認" }
+        if nearStop { return AppText.text("站牌附近") }
+        guard hasUsableTime else { return AppText.text("時間待確認") }
         let lower = max(1, Int(ceil((seconds - uncertaintySeconds) / 60)))
         let upper = max(lower, Int(ceil((seconds + uncertaintySeconds) / 60)))
-        return upper - lower >= 2 ? "約 \(lower)–\(upper) 分" : "約 \(max(1, Int(ceil(seconds / 60)))) 分"
+        return upper - lower >= 2 ? AppText.text("約 %@–%@ 分", lower, upper) : AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60))))
     }
     public var rangeLabel: String {
         let lower = max(1, Int(ceil((seconds - uncertaintySeconds) / 60)))
         let upper = max(lower, Int(ceil((seconds + uncertaintySeconds) / 60)))
-        return lower == upper ? "約 \(lower) 分" : "參考範圍 \(lower)–\(upper) 分"
+        return lower == upper ? AppText.text("約 %@ 分", lower) : AppText.text("參考範圍 %@–%@ 分", lower, upper)
     }
     public var evidenceLabel: String {
         switch evidence {
-        case .roadHistory: return "依近期車輛通過各站的時間估算"
-        case .recentMovement: return "依這輛車近期的行駛情況估算"
-        case .limited: return "行駛紀錄較少，時間僅供參考"
+        case .roadHistory: return AppText.text("依近期車輛通過各站的時間估算")
+        case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
+        case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
         }
     }
 }
@@ -212,40 +212,40 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func display(_ bus: BusVehicle, stopID: String, metadata: TransitMetadata, at date: Date,
                         officialSeconds: Int? = nil, allowTypicalWhenStopped: Bool = false) -> VehicleArrivalDisplay {
-        let officialAdvice = (officialSeconds ?? -1) >= 0 ? "候車請以官方下一班為準。" : ""
+        let officialAdvice = (officialSeconds ?? -1) >= 0 ? AppText.text("候車請以官方下一班為準。") : ""
         guard let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
               let progress = journey.progress(stopID: stopID, vehicle: bus, at: date) else {
-            return VehicleArrivalDisplay(label: "位置待確認", positionLabel: "位置待確認",
-                explanation: "車輛位置尚未確認，暫停推估到站時間。" + officialAdvice, prediction: nil)
+            return VehicleArrivalDisplay(label: AppText.text("位置待確認"), positionLabel: AppText.text("位置待確認"),
+                explanation: AppText.text("車輛位置尚未確認，暫停推估到站時間。") + officialAdvice, prediction: nil)
         }
         if progress.distance < -20 {
-            return VehicleArrivalDisplay(label: "已過站", positionLabel: "已過站",
-                explanation: "這輛車已通過此站。", prediction: nil)
+            return VehicleArrivalDisplay(label: AppText.text("已過站"), positionLabel: AppText.text("已過站"),
+                explanation: AppText.text("這輛車已通過此站。"), prediction: nil)
         }
         let stops = journey.upcoming(vehicle: bus, at: date)
         let count = stops.firstIndex { $0.stop.id == stopID }.map { $0 + 1 }
-        let position = progress.distance <= 40 ? "站牌附近" : count.map { "還有 \($0) 站" } ?? "位置待確認"
+        let position = progress.distance <= 40 ? AppText.text("站牌附近") : count.map { AppText.remainingStops($0) } ?? AppText.text("位置待確認")
         if let official = officialSeconds, official < 0 {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "官方目前標示「\(EstimateFeed.label(official))」，候車以官方資訊為準。", prediction: nil)
+                explanation: AppText.text("官方目前標示「%@」，候車以官方資訊為準。", EstimateFeed.label(official)), prediction: nil)
         }
         guard date.timeIntervalSince(bus.observedAt) <= 30 else {
-            return VehicleArrivalDisplay(label: "位置更新中", positionLabel: "上次位置 · " + position,
-                explanation: "車輛位置等待更新，暫停顯示分鐘數。" + officialAdvice, prediction: nil)
+            return VehicleArrivalDisplay(label: AppText.text("位置更新中"), positionLabel: AppText.text("上次位置 · ") + position,
+                explanation: AppText.text("車輛位置等待更新，暫停顯示分鐘數。") + officialAdvice, prediction: nil)
         }
         guard let result = prediction(bus, stopID: stopID, metadata: metadata, at: date,
                                       allowTypicalWhenStopped: allowTypicalWhenStopped) else {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。" + officialAdvice, prediction: nil)
+                explanation: AppText.text("尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。") + officialAdvice, prediction: nil)
         }
         if let official = officialSeconds, official >= 0,
            result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) {
-            return VehicleArrivalDisplay(label: "時間待確認", positionLabel: position,
-                explanation: "候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。", prediction: nil)
+            return VehicleArrivalDisplay(label: AppText.text("時間待確認"), positionLabel: position,
+                explanation: AppText.text("候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。"), prediction: nil)
         }
         guard result.hasUsableTime else {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "行駛紀錄較少或變化較大，先顯示站數，等待時間確認。" + officialAdvice, prediction: nil)
+                explanation: AppText.text("行駛紀錄較少或變化較大，先顯示站數，等待時間確認。") + officialAdvice, prediction: nil)
         }
         return VehicleArrivalDisplay(label: result.label, positionLabel: position,
             explanation: result.evidenceLabel, prediction: result)

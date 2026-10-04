@@ -12,7 +12,7 @@ struct WalkingLeg: Sendable {
     var road: RouteLine?
     var verified: Bool { duration != nil }
     var timeLabel: String {
-        duration.map { $0 < 30 ? "就在附近" : "步行 \(Int(ceil($0 / 60))) 分" } ?? "步行路線待確認"
+        duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
     }
 }
 
@@ -25,9 +25,9 @@ struct JourneyOption: Identifiable, Sendable {
     var walkingOnly: Bool { trip == nil }
     var verified: Bool { walks.allSatisfy(\.verified) }
     var walkingTimeLabel: String {
-        guard verified else { return "步行路線待確認" }
+        guard verified else { return AppText.text("步行路線待確認") }
         let minutes = Int(ceil(walks.compactMap(\.duration).reduce(0, +) / 60))
-        return "步行 \(max(1, minutes)) 分"
+        return AppText.text("步行 %@ 分", max(1, minutes))
     }
     var coordinates: [Coordinate] {
         rides.flatMap(\.coordinates) + walks.flatMap(\.coordinates) + walks.flatMap { [$0.from, $0.to] }
@@ -404,10 +404,10 @@ final class JourneyPlannerModel: ObservableObject {
     func navigateWalk(_ index: Int) {
         guard let option = selected, option.walks.indices.contains(index) else { return }
         let leg = option.walks[index]
-        let title = index < option.rides.count ? option.rides[index].boarding.name : destination?.name ?? "目的地"
+        let title = index < option.rides.count ? option.rides[index].boarding.localizedName : destination?.localizedName ?? AppText.text("目的地")
         let target = TravelPlace(name: title, address: "", coordinate: leg.to).mapItem
         let source = index == 0 && usingLocation ? MKMapItem.forCurrentLocation() :
-            TravelPlace(name: index == 0 ? origin?.name ?? "出發地" : "下車站", address: "", coordinate: leg.from).mapItem
+            TravelPlace(name: index == 0 ? origin?.localizedName ?? AppText.text("出發地") : "下車站", address: "", coordinate: leg.from).mapItem
         MKMapItem.openMaps(with: [source, target], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
     }
     func openAppleTransit() {
@@ -418,7 +418,7 @@ final class JourneyPlannerModel: ObservableObject {
     func unavailableBoarding(_ option: JourneyOption) -> (route: String, status: Int)? {
         for ride in option.rides {
             if let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()),
-               [-2, -3, -4].contains(eta) { return (ride.route.name, eta) }
+               [-2, -3, -4].contains(eta) { return (ride.route.localizedName, eta) }
         }
         return nil
     }

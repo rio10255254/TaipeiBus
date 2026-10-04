@@ -65,6 +65,12 @@ public enum FeedDecoder {
             let (rows, _) = decoded
             guard !rows.isEmpty else { if required { throw FeedError.invalid(name) }; continue }
             switch name {
+            case "GetProvider":
+                for row in rows {
+                    metadata.providers[text(row["id"])] = text(row["nameZn"])
+                    let english = text(row["nameEn"])
+                    if !english.isEmpty { metadata.englishProviders[text(row["id"])] = english }
+                }
             case "GetRoute":
                 for row in rows {
                     let id = text(row["pathAttributeId"]), parent = text(row["Id"])
@@ -74,6 +80,8 @@ public enum FeedDecoder {
                                          departure: text(row["departureZh"]), destination: text(row["destinationZh"]))
                     route.englishName = text(row["nameEn"])
                     route.englishVariantName = text(row["pathAttributeEname"])
+                    route.englishDeparture = text(row["departureEn"])
+                    route.englishDestination = text(row["destinationEn"])
                     route.aliasName = text(row["aliasName"])
                     for (direction, prefix) in [("0", "go"), ("1", "back")] {
                         let holiday = "holiday" + prefix.prefix(1).uppercased() + String(prefix.dropFirst())
@@ -101,19 +109,26 @@ public enum FeedDecoder {
                     // Exclude that route's stop, while other active stops at the physical station remain available.
                     guard !["裁撤", "停用", "暫停使用", "暂停使用"].contains(where: name.contains) else { continue }
                     let stationID = text(row["stopLocationId"]).isEmpty ? id : text(row["stopLocationId"])
-                    let stop = BusStop(id: id, routeID: text(row["routeId"]), stationID: stationID,
+                    var stop = BusStop(id: id, routeID: text(row["routeId"]), stationID: stationID,
                                        name: name, direction: text(row["goBack"]),
                                        sequence: Int(number(row["seqNo"]) ?? 0), coordinate: coordinate)
+                    stop.englishName = text(row["nameEn"])
                     metadata.stops[id] = stop
                     if metadata.stations[stationID] == nil {
                         metadata.stations[stationID] = Station(id: stationID, name: stop.name, coordinate: coordinate,
                                                                address: text(row["address"]), bearing: text(row["bearing"]), stopIDs: [])
+                    }
+                    if metadata.stations[stationID]?.englishName.isEmpty == true {
+                        metadata.stations[stationID]?.englishName = stop.englishName
                     }
                     metadata.stations[stationID]?.stopIDs.append(id)
                     for name in [stop.name, text(row["nameEn"])] where !name.isEmpty {
                         if metadata.stations[stationID]?.searchNames.contains(name) == false {
                             metadata.stations[stationID]?.searchNames.append(name)
                         }
+                    }
+                    for alias in StationSearch.englishNames(stop.englishName) where !metadata.stations[stationID]!.searchNames.contains(alias) {
+                        metadata.stations[stationID]!.searchNames.append(alias)
                     }
                 }
             case "GetProvider":
@@ -194,6 +209,9 @@ public enum FeedDecoder {
                 status: text(row["BusStatus"]), lowFloor: text(row["CarType"]) == "1",
                 provider: metadata.providers[text(row["ProviderID"])])
             vehicle.hasHeading = number(row["Azimuth"]).map { (0...360).contains($0) } ?? false
+            vehicle.englishRouteName = route.map { $0.englishVariantName.isEmpty ? $0.englishName : $0.englishVariantName } ?? ""
+            vehicle.englishDestination = direction == "0" ? route?.englishDestination ?? "" : route?.englishDeparture ?? ""
+            vehicle.englishProvider = metadata.englishProviders[text(row["ProviderID"])]
             vehicle.hasSpeed = number(row["Speed"]).map { (0..<180).contains($0) } ?? false
             unique[id] = vehicle
         }

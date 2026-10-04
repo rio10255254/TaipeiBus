@@ -78,6 +78,16 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var recentStationIDs: [String]
     @Published private(set) var recentRouteIDs: [String]
     @Published private(set) var liveSettings = LiveSettings.defaults
+    @Published private(set) var language = AppLanguage.current
+    var presentationSettings: LiveSettings {
+        var settings = liveSettings; settings.language = language; return settings
+    }
+    func setLanguage(_ value: AppLanguage) {
+        guard value != language else { return }
+        defaults.set(value.rawValue, forKey: AppLanguage.preferenceKey)
+        language = value
+        location.updateSettings(presentationSettings)
+    }
     private(set) var vocabulary = SearchVocabulary()
 
     let location = LocationService()
@@ -96,6 +106,15 @@ final class TransitAppModel: ObservableObject {
 #endif
 
     init() {
+        let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
+        var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
+#if DEBUG
+        let languageArguments = ProcessInfo.processInfo.arguments
+        if let index = languageArguments.firstIndex(of: "--test-language"), languageArguments.indices.contains(index + 1),
+           let forced = AppLanguage(rawValue: languageArguments[index + 1]) { chosen = forced }
+#endif
+        UserDefaults.standard.set(chosen.rawValue, forKey: AppLanguage.preferenceKey)
+        language = chosen
         favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? [])
         recentStationIDs = UserDefaults.standard.stringArray(forKey: "recentStations") ?? []
         recentRouteIDs = UserDefaults.standard.stringArray(forKey: "recentRoutes") ?? []
@@ -113,7 +132,7 @@ final class TransitAppModel: ObservableObject {
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
-    var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.name : $0.displayName } }
+    var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.localizedName : $0.localizedDisplayName } }
     var routeVariants: [BusRoute] { selectedRouteID.map { metadata.variants(routeID: $0) } ?? [] }
     var routeDirections: [String] {
         selectedRouteID.map { metadata.directions(routeID: $0, allVariants: allRouteVariants) } ?? ["0", "1"]
@@ -465,9 +484,13 @@ final class TransitAppModel: ObservableObject {
     }
     func onboardTimeLabel(_ bus: BusVehicle, ride: TransitRide, stopID: String, at date: Date) -> String {
         let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
-        guard display.prediction == nil, display.label.hasPrefix("還有 "),
-              let index = onboardStops(for: ride, at: date).firstIndex(where: { $0.id == stopID }) else { return display.label }
-        return "還有 \(index + 1) 站"
+        guard let index = onboardStops(for: ride, at: date).firstIndex(where: { $0.id == stopID }) else { return display.label }
+        let count = AppText.remainingStops(index + 1)
+        return count + " · " + onboardEstimateLabel(bus, stopID: stopID, at: date)
+    }
+    func onboardEstimateLabel(_ bus: BusVehicle, stopID: String, at date: Date) -> String {
+        let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
+        return display.prediction != nil ? display.label : AppText.text("時間待確認")
     }
 
     func returnToWaiting() {
@@ -575,7 +598,7 @@ final class TransitAppModel: ObservableObject {
             return
         } else if arguments.contains("--preview-neihu-planning") {
             guard let station = metadata.stationSearch.search("內湖站", near: Coordinate(latitude: 25.0837, longitude: 121.5947)).first else { return }
-            planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate), metadata: metadata)
+            planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate, englishName: station.englishName), metadata: metadata)
             planner.setDestination(TravelPlace(name: "忠孝復興站", address: "", coordinate: Coordinate(latitude: 25.0416, longitude: 121.5438)), metadata: metadata, currentLocation: nil)
             previewSelectionApplied = true
         } else if arguments.contains("--preview-boarding-fixture") {
@@ -593,7 +616,7 @@ final class TransitAppModel: ObservableObject {
             let origin = Coordinate.taipei
             planner.useLocation(origin, metadata: metadata)
             if let id = value(after: "--preview-origin-station"), let station = metadata.stations[id] {
-                planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate), metadata: metadata)
+                planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate, englishName: station.englishName), metadata: metadata)
             }
             Task {
                 let search = PlaceSearch()

@@ -65,3 +65,22 @@ extension View {
         modifier(LiveFontModifier(style: style, weight: weight, design: design))
     }
 }
+
+/// Published English names keep their Chinese sign text visible as a smaller
+/// second line. Route/stop identifiers and search keys never change language.
+struct BilingualName: View {
+    @Environment(\.liveSettings) private var live
+    let chinese: String
+    let english: String
+    init(_ station: Station) { chinese = station.name; english = station.englishName }
+    init(_ stop: BusStop) { chinese = stop.name; english = stop.englishName }
+    init(chinese: String, english: String) { self.chinese = chinese; self.english = english }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(live.language == .english && !english.isEmpty ? english : chinese)
+            if live.language == .english, !english.isEmpty, english != chinese {
+                Text(chinese).liveFont(.caption).foregroundStyle(.secondary)
+            }
+        }.accessibilityElement(children: .combine)
+    }
+}

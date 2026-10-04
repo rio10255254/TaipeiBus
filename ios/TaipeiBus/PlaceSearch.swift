@@ -13,9 +13,11 @@ struct TravelPlace: Identifiable, Codable, Sendable {
     let address: String
     let coordinate: Coordinate
     var isTransitPlace: Bool? = nil
+    var englishName: String? = nil
+    var localizedName: String { AppLanguage.current == .english ? englishName.flatMap { $0.isEmpty ? nil : $0 } ?? AppText.text(name) : name }
     var mapItem: MKMapItem {
         let item = MKMapItem(placemark: MKPlacemark(coordinate: coordinate.locationCoordinate))
-        item.name = name
+        item.name = localizedName
         return item
     }
 }
@@ -56,12 +58,12 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         }
     }
     private var cacheKey: String {
-        "\(rulesRevision):\(StationSearch.normalize(StationSearch.cleanQuery(query))):\(Int(preferredPosition.latitude * 100)):\(Int(preferredPosition.longitude * 100))"
+        "\(AppLanguage.current.rawValue):\(rulesRevision):\(StationSearch.normalize(StationSearch.cleanQuery(query))):\(Int(preferredPosition.latitude * 100)):\(Int(preferredPosition.longitude * 100))"
     }
     private func queries(for text: String) -> [String] {
         var queries = StationSearch.placeQueries(text, vocabulary: vocabulary)
         if StationSearch.isTransitQuery(text), let hint = stationHints.first(where: { $0.name.hasPrefix("捷運") || $0.searchNames.contains(where: { $0.hasPrefix("MRT") }) }) {
-            let name = hint.name.components(separatedBy: CharacterSet(charactersIn: "(（")).first ?? hint.name
+            let name = hint.localizedName.components(separatedBy: CharacterSet(charactersIn: "(（")).first ?? hint.name
             queries.insert(name, at: 0)
         }
         var seen = Set<String>()

@@ -9,10 +9,20 @@ public struct BusRoute: Identifiable, Sendable {
     public let destination: String
     public var englishName: String = ""
     public var englishVariantName: String = ""
+    public var englishDeparture: String = ""
+    public var englishDestination: String = ""
     public var aliasName: String = ""
     public var serviceWindows: [String: [BusServiceWindow]] = [:]
     public var servicePlans: [String: BusServicePlan] = [:]
     public var displayName: String { variantName.isEmpty ? name : variantName }
+    public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
+    public var localizedDisplayName: String {
+        AppLanguage.current == .english ? (englishVariantName.isEmpty ? localizedName : englishVariantName) : displayName
+    }
+    public func localizedDestination(direction: String) -> String {
+        let english = direction == "0" ? englishDestination : direction == "1" ? englishDeparture : ""
+        return AppLanguage.current == .english && !english.isEmpty ? english : AppText.text(destination(direction: direction))
+    }
     public func destination(direction: String) -> String {
         direction == "0" ? destination : direction == "1" ? departure : "方向未提供"
     }
@@ -26,6 +36,9 @@ public struct BusStop: Identifiable, Sendable {
     public let direction: String
     public var sequence: Int
     public let coordinate: Coordinate
+    public var englishName: String = ""
+    public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
+    public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
 }
 
 public struct Station: Identifiable, Sendable {
@@ -36,6 +49,10 @@ public struct Station: Identifiable, Sendable {
     public let bearing: String
     public var stopIDs: [String]
     public var searchNames: [String] = []
+    public var englishName: String = ""
+    public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
+    public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
+    public var localizedBearing: String { AppText.text(bearingLabel) }
     public var bearingLabel: String {
         ["N": "北向", "NE": "東北向", "E": "東向", "SE": "東南向",
          "S": "南向", "SW": "西南向", "W": "西向", "NW": "西北向"][bearing] ?? bearing
@@ -58,6 +75,12 @@ public struct BusVehicle: Identifiable, Sendable {
     public let status: String
     public let lowFloor: Bool
     public let provider: String?
+    public var englishRouteName: String = ""
+    public var englishDestination: String = ""
+    public var localizedRouteName: String { AppLanguage.current == .english && !englishRouteName.isEmpty ? englishRouteName : routeName }
+    public var localizedDestination: String { AppLanguage.current == .english && !englishDestination.isEmpty ? englishDestination : AppText.text(destination) }
+    public var englishProvider: String? = nil
+    public var localizedProvider: String? { AppLanguage.current == .english ? englishProvider ?? provider : provider }
     public var aligned: Bool = false
     public var path: [Coordinate] = []
     public var roadMatch: LineMatch?
@@ -72,18 +95,18 @@ public struct BusVehicle: Identifiable, Sendable {
         return (-60...120).contains(age)
     }
     public func hasReliablePosition(at date: Date) -> Bool { isFresh(at: date) && trackingIssue == nil }
-    public var speedLabel: String { hasSpeed ? "\(Int(speed)) km/h" : "速度未提供" }
+    public var speedLabel: String { hasSpeed ? "\(Int(speed)) km/h" : AppText.text("速度未提供") }
     public func trackingLabel(at date: Date) -> String? {
-        if !isFresh(at: date) { return "定位已延遲" }
+        if !isFresh(at: date) { return AppText.text("定位已延遲") }
         switch trackingIssue {
-        case .missing: return "訊號暫缺，保留最後位置"
-        case .rejected: return "定位跳動，等待確認"
-        case nil: return aligned ? nil : "原始 GPS · 軌跡未確認"
+        case .missing: return AppText.text("訊號暫缺，保留最後位置")
+        case .rejected: return AppText.text("定位跳動，等待確認")
+        case nil: return aligned ? nil : AppText.text("原始 GPS · 軌跡未確認")
         }
     }
     public var statusLabel: String {
-        ["0": "營運中", "1": "事故", "2": "車輛故障", "3": "交通壅塞",
-         "4": "緊急狀況", "5": "加油中"][status] ?? "狀態未提供"
+        AppText.text(["0": "營運中", "1": "事故", "2": "車輛故障", "3": "交通壅塞",
+         "4": "緊急狀況", "5": "加油中"][status] ?? "狀態未提供")
     }
 }
 
@@ -106,6 +129,7 @@ public struct TransitMetadata: Sendable {
     public var stations: [String: Station] = [:]
     public var paths: [String: [StopReference]] = [:]
     public var providers: [String: String] = [:]
+    public var englishProviders: [String: String] = [:]
     public var lines: [String: RouteLine] = [:]
     public var directionalLines: [String: RouteLine] = [:]
     public var journeys: [String: RouteJourney] = [:]
@@ -167,11 +191,11 @@ public struct EstimateFeed: Sendable {
         return max(0, value - elapsed)
     }
     public static func label(_ seconds: Int?) -> String {
-        guard let seconds else { return "暫無預估" }
+        guard let seconds else { return AppText.text("暫無預估") }
         if seconds < 0 {
-            return [-1: "尚未發車", -2: "交管不停靠", -3: "末班已過", -4: "今日未營運"][seconds] ?? "暫無預估"
+            return AppText.text([-1: "尚未發車", -2: "交管不停靠", -3: "末班已過", -4: "今日未營運"][seconds] ?? "暫無預估")
         }
-        return seconds <= 60 ? "1 分鐘內" : "\(max(1, seconds / 60)) 分鐘"
+        return seconds <= 60 ? AppText.text("1 分鐘內") : AppText.text("%@ 分鐘", max(1, seconds / 60))
     }
 }
 

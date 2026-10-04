@@ -64,10 +64,10 @@ actor TransitService {
         }
         try Task.checkCancellation()
         let decoded = try FeedDecoder.metadata(feeds: feeds)
-        if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append("路線軌跡／站序") }
+        if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append(AppText.text("路線軌跡／站序")) }
         metadata = decoded
         metadataLoadedAt = Date()
-        metadataNotice = notices.isEmpty ? nil : "部分路線資料暫用快取或未取得"
+        metadataNotice = notices.isEmpty ? nil : AppText.text("部分路線資料暫用快取或未取得")
         return decoded
     }
 
@@ -117,21 +117,21 @@ actor TransitService {
                 switch result {
                 case .vehicles(let bytes):
                     do {
-                        guard let bytes else { throw FeedError.invalid("車輛定位") }
+                        guard let bytes else { throw FeedError.invalid(AppText.text("車輛定位")) }
                         let value = try FeedDecoder.vehicles(bytes, metadata: metadata, previous: snapshot.vehicles, now: Date())
                         if let date = value.updatedAt, snapshot.sourceUpdatedAt.map({ date >= $0 }) ?? true {
                             snapshot.vehicles = value.vehicles; snapshot.sourceUpdatedAt = date
                             snapshot.receivedAt = Date(); snapshot.vehicleError = nil
-                        } else { snapshot.vehicleError = "定位來源回報較舊，保留最後資料" }
-                    } catch { snapshot.vehicleError = "定位來源連線中斷，保留最後回報" }
+                        } else { snapshot.vehicleError = AppText.text("定位來源回報較舊，保留最後資料") }
+                    } catch { snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報") }
                 case .estimates(let bytes):
                     do {
-                        guard let bytes else { throw FeedError.invalid("到站預估") }
+                        guard let bytes else { throw FeedError.invalid(AppText.text("到站預估")) }
                         let value = try FeedDecoder.estimates(bytes)
                         if let date = value.updatedAt, snapshot.estimates.updatedAt.map({ date >= $0 }) ?? true {
                             snapshot.estimates = value
-                        } else { snapshot.estimates.error = "到站預估來源回報較舊" }
-                    } catch { snapshot.estimates.error = "到站預估來源連線中斷" }
+                        } else { snapshot.estimates.error = AppText.text("到站預估來源回報較舊") }
+                    } catch { snapshot.estimates.error = AppText.text("到站預估來源連線中斷") }
                 }
                 snapshot.revision += 1
                 await onPartial(snapshot)
@@ -148,7 +148,7 @@ actor TransitService {
         let status = data.withUnsafeBytes { bytes in
             TaipeiBusInflateGzip(bytes.bindMemory(to: UInt8.self).baseAddress, data.count, &output, &length)
         }
-        guard status == 0, let output else { throw FeedError.invalid("壓縮來源") }
+        guard status == 0, let output else { throw FeedError.invalid(AppText.text("壓縮來源")) }
         defer { TaipeiBusFreeBytes(output) }
         return Data(bytes: output, count: length)
     }

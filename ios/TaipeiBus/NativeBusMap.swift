@@ -99,6 +99,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var positionedInitialCamera = false
         private var lastAppearance: LiveSettings.Appearance?
         private var lastDarkMode: Bool?
+        private var lastLanguage: AppLanguage?
         private var dayPaints: [String: [String: NSExpression]] = [:]
 #if DEBUG
         private var lastPreviewCameraSignature = ""
@@ -237,6 +238,11 @@ struct NativeBusMap: UIViewRepresentable {
             if let style = map.style, lastAppearance != model.liveSettings.appearance || lastDarkMode != darkMode {
                 applyAppearance(style); lastAppearance = model.liveSettings.appearance; lastDarkMode = darkMode
             }
+            if let style = map.style, lastLanguage != model.language {
+                applyLabelLanguage(style)
+                updateNearbyStations(force: true); updateTripStops()
+                lastLanguage = model.language
+            }
             guard let buses else { return }
             buses.darkAppearance = darkMode
             if lastMetadataCount != model.metadata.stations.count {
@@ -320,13 +326,13 @@ struct NativeBusMap: UIViewRepresentable {
                 !model.planner.started || model.planner.activeRide?.id == ride.id
             }
             for (index, ride) in visibleRides {
-                add(ride.boarding.coordinate, id: ride.boarding.stationID, title: "\(index == 0 ? "上車" : "轉乘") · \(ride.boarding.name)")
+                add(ride.boarding.coordinate, id: ride.boarding.stationID, title: AppText.text(index == 0 ? "上車" : "轉乘") + " · " + ride.boarding.bilingualName)
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
-                    title: "\(index == option.rides.count - 1 ? "下車" : "轉乘") · \(ride.alighting.name)")
+                    title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
             }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
-                add(destination.coordinate, id: "destination", title: destination.name)
+                add(destination.coordinate, id: "destination", title: destination.localizedName)
             }
             tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: features.keys.sorted().compactMap { features[$0] })
         }
@@ -347,7 +353,7 @@ struct NativeBusMap: UIViewRepresentable {
             let features = stations.map { station -> MLNPointFeature in
                 let feature = MLNPointFeature()
                 feature.coordinate = station.coordinate.locationCoordinate
-                feature.attributes = ["stationID": station.id, "name": "\(station.name) \(station.bearingLabel)"]
+                feature.attributes = ["stationID": station.id, "name": station.bilingualName + " · " + station.localizedBearing]
                 return feature
             }
             nearbySource?.shape = MLNShapeCollectionFeature(shapes: features)
@@ -634,6 +640,7 @@ struct NativeBusMap: UIViewRepresentable {
                 if let layer = layer as? MLNLineStyleLayer { paints["line"] = layer.lineColor }
                 if let layer = layer as? MLNSymbolStyleLayer {
                     paints["text"] = layer.textColor; paints["halo"] = layer.textHaloColor
+                    paints["labelField"] = layer.text
                 }
                 dayPaints[layer.identifier] = paints
             }
@@ -677,6 +684,7 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func applyAppearance(_ style: MLNStyle) {
             applyBasePalette(style)
+            applyLabelLanguage(style)
             let theme = model.liveSettings.appearance
             let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
             let blue = darkMode && theme.accentColor.uppercased() == "#007AFF" ? UIColor.systemBlue.resolvedColor(with: traits) : UIColor(liveHex: theme.accentColor)
@@ -700,6 +708,15 @@ struct NativeBusMap: UIViewRepresentable {
             style.setImage(stationIcon(size: 20), forName: "station-marker")
             style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
             style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
+        }
+
+        private func applyLabelLanguage(_ style: MLNStyle) {
+            for (id, fields) in dayPaints {
+                guard let layer = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer,
+                      let original = fields["labelField"], String(describing: original.mgl_jsonExpressionObject).contains("name:zh") else { continue }
+                layer.text = model.language == .english
+                    ? NSExpression(mglJSONObject: ["coalesce", ["get", "name:en"], ["get", "name_en"], ["get", "name:latin"], ["get", "name"]]) : original
+            }
         }
 
         func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {
