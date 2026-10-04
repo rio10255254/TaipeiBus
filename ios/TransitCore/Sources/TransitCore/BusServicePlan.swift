@@ -5,6 +5,7 @@ public struct BusHeadway: Equatable, Sendable {
     public let upperSeconds: Double
     public init?(published text: String) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value != "9999" else { return nil }
         let values: [Int]
         if value.count == 4, value.allSatisfy(\.isNumber) {
             values = [Int(value.prefix(2))!, Int(value.suffix(2))!]
@@ -95,6 +96,12 @@ public enum BoardingTime {
         }
         let opening = max(0, minimumServiceWait - ready)
         if let headway = service?.headway {
+            if official == nil || official! < 0 {
+                let expected = max(buffer, opening, official == -1 ? headway.midpoint : headway.midpoint / 2)
+                return BoardingWait(seconds: expected,
+                    lowerSeconds: max(buffer, opening, official == -1 ? headway.lowerSeconds : 0),
+                    upperSeconds: max(buffer, opening, headway.upperSeconds), evidence: .headway, missedNext: false)
+            }
             let first: Double
             if let arrival = official, arrival >= 0 { first = Double(arrival) }
             else { first = ready + max(buffer, headway.midpoint / 2, opening) }

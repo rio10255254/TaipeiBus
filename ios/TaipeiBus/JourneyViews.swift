@@ -686,7 +686,7 @@ struct JourneyOptionsView: View {
                         TimelineView(.periodic(from: .now, by: 15)) { timeline in
                             if let timing = model.journeyDuration(option, at: timeline.date) {
                                 HStack(spacing: 6) {
-                                    Text(timing.waitingLabel)
+                                    Text(option.walkingOnly ? "" : "行程 \(max(1, Int(ceil(timing.travelSeconds / 60)))) 分 · " + timing.waitingLabel)
                                     Spacer(minLength: 2)
                                     Text(timing.arrivalLabel).monospacedDigit()
                                 }.liveFont(.caption).foregroundStyle(timing.unknownWaits > 0 ? Color.orange : Color.secondary)

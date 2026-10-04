@@ -113,7 +113,7 @@ final class TripPlannerTests: XCTestCase {
         let all = planner.plan(from: a, to: c, maximumWalk: 100, limit: 18)
         let ranked = TripRanking.recommended(all, estimates: EstimateFeed(), at: Date(), limit: 3)
         XCTAssertEqual(ranked.first?.transfers, 1)
-        XCTAssertTrue(ranked.contains { $0.transfers == 0 })
+        XCTAssertFalse(ranked.contains { $0.transfers == 0 }, "Do not force an extreme direct detour into the useful shortlist")
     }
 
     func testRankingUsesRoadGeometryAndVerifiedWalkingTime() throws {
