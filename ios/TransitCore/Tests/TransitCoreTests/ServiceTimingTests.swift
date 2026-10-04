@@ -46,4 +46,25 @@ final class ServiceTimingTests: XCTestCase {
         XCTAssertEqual(unknown.arrivalLabel, "抵達待確認")
         XCTAssertTrue(unknown.label.hasPrefix("行程")); XCTAssertEqual(unknown.waitingLabel, "候車待確認")
     }
+    func testReachableTransferClockDoesNotKeepEarlierWaitingUncertainty() throws {
+        let service = BusDayService(headway: try XCTUnwrap(BusHeadway(published: "1020")))
+        let timing = JourneyDuration(riding: [300, 300], walking: [60, 60, 0], arrivals: [nil, 2100],
+            services: [service, nil], at: date("2026-10-04T04:00:00Z"))
+        XCTAssertEqual(timing.waitingSeconds, timing.waits.map(\.seconds).reduce(0, +), accuracy: 0.01)
+        XCTAssertEqual(timing.totalSeconds, 2400, accuracy: 0.01)
+        XCTAssertEqual(timing.lowerTotalSeconds, 2400, accuracy: 0.01)
+        XCTAssertEqual(timing.upperTotalSeconds, 2400, accuracy: 0.01)
+        XCTAssertEqual(timing.waitingLabel, "候車約 28 分")
+        XCTAssertEqual(timing.arrivalLabel, "約 12:40 抵達")
+    }
+    func testTwoUncertainConnectionsHaveConsistentWaitsAndArrivalBounds() throws {
+        let service = BusDayService(headway: try XCTUnwrap(BusHeadway(published: "1020")))
+        let timing = JourneyDuration(riding: [300, 300], walking: [60, 60, 60], arrivals: [nil, nil],
+            services: [service, service], at: date("2026-10-04T04:00:00Z"))
+        XCTAssertEqual(timing.waitingSeconds, timing.waits.map(\.seconds).reduce(0, +), accuracy: 0.01)
+        XCTAssertEqual(timing.totalSeconds, timing.travelSeconds + timing.waitingSeconds, accuracy: 0.01)
+        XCTAssertLessThanOrEqual(timing.lowerTotalSeconds, timing.totalSeconds)
+        XCTAssertGreaterThanOrEqual(timing.upperTotalSeconds, timing.totalSeconds)
+        XCTAssertTrue(timing.arrivalLabel.contains("–"))
+    }
 }

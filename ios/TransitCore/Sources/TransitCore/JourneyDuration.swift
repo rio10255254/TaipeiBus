@@ -22,7 +22,9 @@ public struct JourneyDuration: Equatable, Sendable {
     public var waitingLabel: String {
         if waits.isEmpty { return "步行即可" }
         if unknownWaits > 0 { return waits.dropFirst().contains(where: { $0.evidence == .unknown }) ? "轉乘候車待確認" : "候車待確認" }
-        let lower = waits.reduce(0) { $0 + $1.lowerSeconds }, upper = waits.reduce(0) { $0 + $1.upperSeconds }
+        // Transfer waits can be correlated: arriving earlier means waiting longer
+        // for the same reachable departure. Use the whole-journey bounds.
+        let lower = max(0, lowerTotalSeconds - travelSeconds), upper = max(lower, upperTotalSeconds - travelSeconds)
         if upper < 30 { return "即將可搭" }
         return minutes(upper) - minutes(lower) >= 2 ? "候車約 \(minutes(lower))–\(minutes(upper)) 分" : "候車約 \(minutes(waitingSeconds)) 分"
     }

@@ -43,11 +43,27 @@ public enum TripRanking {
                 minimumServiceWait: minimumServiceWaits.indices.contains(index) ? minimumServiceWaits[index] : 0)
             if index == 0 && result.missedNext { missed = true }
             if result.isEstimated { unknown += 1 }
-            waits.append(result)
-            let wait = max(0, result.seconds + ready - elapsed)
-            elapsed += wait + max(0, riding[index]); waiting += wait
-            lower += result.lowerSeconds + max(0, riding[index])
-            upper += result.upperSeconds + max(0, riding[index])
+            let before = elapsed, beforeLower = lower, beforeUpper = upper
+            let wait = max(0, result.seconds + ready - before)
+            let ride = max(0, riding[index])
+            // A reachable official departure is anchored to query time. Earlier
+            // uncertainty changes how long we wait, not that departure's clock.
+            if result.evidence == .official, let arrival {
+                elapsed = Double(arrival) + ride; lower = elapsed; upper = elapsed
+            } else if result.evidence == .timetable || result.missedNext {
+                elapsed = ready + result.seconds + ride
+                lower = ready + result.lowerSeconds + ride
+                upper = ready + result.upperSeconds + ride
+            } else {
+                elapsed = ready + result.seconds + ride
+                lower = beforeLower + result.lowerSeconds + ride
+                upper = ready + result.upperSeconds + ride
+            }
+            waits.append(BoardingWait(seconds: wait,
+                lowerSeconds: max(0, lower - ride - beforeUpper),
+                upperSeconds: max(0, upper - ride - beforeLower),
+                evidence: result.evidence, missedNext: result.missedNext))
+            waiting += wait
         }
         elapsed += walks.last ?? 0
         lower += walks.last ?? 0; upper += walks.last ?? 0
@@ -78,7 +94,7 @@ public enum TripRanking {
             boardingOffsets: trip.rides.map(\.boardingOffsetSeconds), at: date)
     }
 
-    /// Reserve one usable direct alternative, even when several transfers have lower scores.
+    /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
     public static func recommended(_ trips: [TransitTrip], estimates: EstimateFeed, at date: Date,
                                    preferences: LiveSettings.Planning = .init(), limit: Int = 3,
                                    walkingDurations: [String: [Double?]] = [:],
