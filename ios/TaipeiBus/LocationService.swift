@@ -23,6 +23,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private var settings = LiveSettings.defaults
     private var lastRestart = Date.distantPast
     private var walkingNavigation = false
+    var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
     func setWalkingNavigation(_ enabled: Bool) {
         guard walkingNavigation != enabled else { return }
         walkingNavigation = enabled

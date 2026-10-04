@@ -7,6 +7,7 @@ struct TransitHomeView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var location: LocationService
     @ObservedObject private var planner: JourneyPlannerModel
+    @ObservedObject private var stationWalk: StationWalkingNavigation
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     @State private var showSearch = false
@@ -16,6 +17,8 @@ struct TransitHomeView: View {
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
     @State private var pendingJourneyDetail = false
+    @State private var stationWalkReturnDetails = false
+    @State private var stationWalkReturnSearch = false
     @State private var bottomControlsHeight: CGFloat = 210
     @State private var lastLocationFocus: Coordinate?
     @State private var lastJourneyOptionID: String?
@@ -27,10 +30,11 @@ struct TransitHomeView: View {
         self.model = model
         location = model.location
         planner = model.planner
+        stationWalk = model.stationWalk
     }
 
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
-    private var hasSelection: Bool { hasTransitSelection || planner.selected != nil }
+    private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
     private var nearbyStations: [Station] {
         guard live.display.nearbyStops, !model.cityFleetMode, !hasSelection, let position = location.usableCoordinate, position.isInServiceArea else { return [] }
         return model.metadata.stations.values.filter { $0.coordinate.distance(to: position) <= 800 }
@@ -40,8 +44,8 @@ struct TransitHomeView: View {
     private var mapContent: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
-                NativeBusMap(model: model, planner: planner, location: location.displayCoordinate,
-                             bottomInset: (showJourney && planner.selected != nil ? 460 : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? 330 : showSearch ? 390 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
+                NativeBusMap(model: model, planner: planner, stationWalk: stationWalk, location: location.displayCoordinate,
+                             bottomInset: (showJourney && planner.selected != nil ? 460 : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? (model.sheetDetent == .height(520) ? 520 : 330) : showSearch ? 390 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -49,8 +53,8 @@ struct TransitHomeView: View {
 #if DEBUG
                     .accessibilityIdentifier("native-map").accessibilityValue(selectionOverlay.cameraState)
 #endif
-                if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
-                    MapContextLabels(model: model, overlay: selectionOverlay) { showDetails = true }
+                if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail && !stationWalk.isActive {
+                    MapContextLabels(model: model, overlay: selectionOverlay, bottomClearance: bottomControlsHeight) { showDetails = true }
                 }
                 HStack(alignment: .top, spacing: 12) {
                     SourceStatusView(snapshot: model.snapshot, loading: model.loading || model.refreshing, compact: planner.selected != nil) {
@@ -58,7 +62,7 @@ struct TransitHomeView: View {
                         else { Task { await model.refresh() } }
                     }
                     Spacer(minLength: 0)
-                    if planner.selected == nil {
+                    if planner.selected == nil && !stationWalk.isActive {
                         Button { model.toggleCityFleet() } label: {
                             Label(model.cityFleetMode ? AppText.text("全城 %@", model.cityVehicles.count) : AppText.text("全城"), systemImage: "globe.asia.australia.fill")
                                 .liveFont(.subheadline, weight: .medium).padding(.horizontal, 12).frame(minHeight: 46)
@@ -106,26 +110,22 @@ struct TransitHomeView: View {
                 }
 #endif
 
-                if !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(model.selectedRouteName ?? route.localizedName).liveFont(.largeTitle, weight: .bold, design: .rounded)
-                            .foregroundStyle(Color(liveHex: live.appearance.accentColor)).lineLimit(2)
-                        HStack(spacing: 10) {
-                            Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.subheadline)
-                            if model.routeDirections.count > 1 {
-                                Button { model.switchDirection() } label: {
-                                    Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44)
-                                }.phoneGlass(in: Circle()).accessibilityLabel(live.text("切換路線方向"))
-                            }
+                if !stationWalk.isActive, !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+                    HStack(spacing: 10) {
+                        Text(model.selectedRouteName ?? route.localizedName).liveFont(.title3, weight: .bold, design: .rounded)
+                            .foregroundStyle(Color.accentColor).lineLimit(1)
+                        Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.caption).lineLimit(1)
+                        Spacer(minLength: 0)
+                        if model.routeDirections.count > 1 {
+                            Button { model.switchDirection() } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44) }
+                                .accessibilityLabel(AppText.text("切換路線方向"))
                         }
                         Button { showDetails = true } label: {
-                            Label(AppText.text("%@ 輛可定位 · 查看公車", model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
-                                .liveFont(.subheadline, weight: .medium).frame(minHeight: 44)
-                        }.secondaryAction()
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(12).readableMapSurface()
-                    .padding(.horizontal, 24 * CGFloat(live.appearance.spacingScale)).padding(.top, 104 * CGFloat(live.appearance.spacingScale))
+                            Label(String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
+                                .liveFont(.subheadline, weight: .medium).frame(minWidth: 44, minHeight: 44)
+                        }.accessibilityLabel(AppText.text("查看此路線公車")).accessibilityIdentifier("route-map-vehicles")
+                    }.padding(.horizontal, 12).phoneGlass(in: Capsule())
+                        .padding(.horizontal, 24 * CGFloat(live.appearance.spacingScale)).padding(.top, 104 * CGFloat(live.appearance.spacingScale))
                 }
                 if model.selectedVehicleID != nil, model.selectedVehicle == nil {
                     Button { showDetails = true } label: {
@@ -160,7 +160,9 @@ struct TransitHomeView: View {
                             .background(.regularMaterial, in: Capsule())
                     }
                     Group {
-                    if planner.started || planner.selected?.walkingOnly == true {
+                    if stationWalk.isActive {
+                        StationWalkingDock(model: model, navigation: stationWalk)
+                    } else if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
                         JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
@@ -196,7 +198,7 @@ struct TransitHomeView: View {
                             }
                         }.transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
-                    if planner.selected == nil {
+                    if planner.selected == nil && !stationWalk.isActive {
                     HStack(spacing: 4) {
                         if live.display.stationShortcut || hasSelection {
                         Button { openBrowse(.stops) } label: {
@@ -257,15 +259,15 @@ struct TransitHomeView: View {
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .sheet(isPresented: $showSearch, onDismiss: { model.stationBrowsing = false; restoreJourneyMap() }) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
-                .presentationDetents(hasTransitSelection ? [.height(330), .large] : model.mode == .stops ? [.height(390), .large] : [.large], selection: $model.sheetDetent)
+                .presentationDetents(hasTransitSelection ? [.height(330), .height(520), .large] : model.mode == .stops ? [.height(390), .large] : [.large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(390)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
         .sheet(isPresented: $showDetails, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
-                .presentationDetents([.height(330), .large], selection: $model.sheetDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(330)))
+                .presentationDetents([.height(330), .height(520), .large], selection: $model.sheetDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(520)))
                 .presentationDragIndicator(.visible)
                 .presentationCornerRadius(30)
         }
@@ -294,6 +296,7 @@ struct TransitHomeView: View {
             }
         }
         .onChange(of: planner.mapRevision) { _, _ in
+            guard !stationWalk.isActive else { return }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
@@ -322,7 +325,22 @@ struct TransitHomeView: View {
             }
 #endif
         }
-        .onChange(of: model.walkingMapIndex) { _, _ in model.updateWalkingLocation() }
+        .onChange(of: model.walkingMapIndex) { _, index in
+            model.updateWalkingLocation()
+            if index != nil { pendingJourneyDetail = false; showJourney = false; showDetails = false; showSearch = false }
+        }
+        .onChange(of: stationWalk.isActive) { _, active in
+            if active {
+                stationWalkReturnDetails = showDetails; stationWalkReturnSearch = showSearch
+                showDetails = false; showSearch = false; showJourney = false
+            } else {
+                showDetails = stationWalkReturnDetails; showSearch = stationWalkReturnSearch
+            }
+        }
+        .onChange(of: stationWalk.routeRevision) { _, _ in
+            model.updateWalkingLocation()
+            if !model.mapWasMoved { model.showStationWalkOverview() }
+        }
         .onChange(of: planner.currentStep) { _, _ in model.updateWalkingLocation() }
         .onChange(of: planner.walkingRouteRevision) { _, _ in
             if let index = model.activeWalkingIndex, !model.mapWasMoved {
@@ -358,7 +376,7 @@ struct TransitHomeView: View {
     }
 
     private func restoreJourneyMap() {
-        guard planner.selected != nil else { return }
+        guard !stationWalk.isActive, planner.selected != nil else { return }
         if planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
            let bus = model.onboardVehicle(for: ride), model.selectedVehicleID != bus.id {
             model.trackApproachingVehicle(bus); return
@@ -624,8 +642,8 @@ private struct TransitPanel: View {
 
     private var detailHeader: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { model.returnToBrowse() } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
-                .accessibilityLabel(live.text("返回搜尋"))
+            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else { model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
+                .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : live.text("返回搜尋"))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.selectedStation?.localizedName ?? model.selectedVehicle?.localizedRouteName ?? model.selectedRouteName ?? AppText.text("公車動態"))
                     .liveFont(.title2, weight: .bold).lineLimit(2)
@@ -634,6 +652,8 @@ private struct TransitPanel: View {
                 else { Text(live.text("路線動態")).liveFont(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 4)
+            Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+                .accessibilityLabel(AppText.text("返回地圖")).accessibilityIdentifier("transit-details-close")
             if let station = model.selectedStation {
                 Button { model.toggleFavorite(station) } label: {
                     Image(systemName: model.favorites.contains(station.id) ? "star.fill" : "star")
@@ -764,19 +784,17 @@ private struct StationDetails: View {
             let rows = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
             VStack(alignment: .leading, spacing: 0) {
                 Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                VStack(alignment: .leading, spacing: 12) {
                 ForEach(model.oppositeStations(to: station)) { opposite in
                     Button { model.selectStation(opposite) } label: {
                         Label(AppText.text("改看%@站牌", opposite.localizedBearing), systemImage: "arrow.left.arrow.right")
                             .liveFont(.subheadline).frame(minHeight: 44)
-                    }.secondaryAction()
+                    }.secondaryAction().accessibilityIdentifier("station-opposite-" + opposite.id)
                 }
-                Button {
-                    let item = MKMapItem(placemark: MKPlacemark(coordinate: station.coordinate.locationCoordinate))
-                    item.name = station.localizedName
-                    item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
-                } label: { Label(live.text("步行到這個站牌"), systemImage: "figure.walk").liveFont(.subheadline, weight: .medium).frame(minHeight: 44) }
-                    .secondaryAction()
-                    .padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                Button { model.startStationWalk(station) } label: {
+                    Label(live.text("步行到這個站牌"), systemImage: "figure.walk").liveFont(.subheadline, weight: .medium).frame(minHeight: 44)
+                }.secondaryAction().accessibilityIdentifier("station-start-walk")
+                }.padding(.bottom, 18 * CGFloat(live.appearance.spacingScale))
                 HStack {
                     Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
@@ -788,7 +806,7 @@ private struct StationDetails: View {
                 ForEach(rows) { row in
                     VStack(alignment: .leading, spacing: 10) {
                         Button {
-                            if let route = row.route { model.selectRoute(route, direction: row.stop.direction) }
+                            if let route = row.route { model.selectRoute(route, direction: row.stop.direction, boardingStopID: row.stop.id) }
                         } label: {
                             HStack(spacing: 12) {
                                 RouteBadge(name: row.route?.name ?? row.stop.routeID)
@@ -800,7 +818,7 @@ private struct StationDetails: View {
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
-                        }.buttonStyle(.plain).frame(minHeight: 44)
+                        }.buttonStyle(.plain).frame(minHeight: 44).accessibilityIdentifier("station-route-" + row.stop.routeID)
                         if !row.approaches.isEmpty {
                             Text(live.text("同方向車輛")).liveFont(.caption2).foregroundStyle(.secondary)
                             HStack(spacing: 8) {
@@ -863,15 +881,54 @@ private struct RouteDetails: View {
             } else {
                 Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.subheadline).foregroundStyle(.secondary)
             }
-            let buses = model.routeVehicles()
-            let count = buses.filter { $0.hasReliablePosition(at: Date()) }.count
-            Text(AppText.text("%@ 輛可定位", count) + (count < buses.count ? AppText.text(" · %@ 輛等待定位", buses.count - count) : ""))
-                .liveFont(.subheadline).foregroundStyle(.secondary)
-            ForEach(buses) { bus in
-                VehicleRow(vehicle: bus) { model.selectVehicle(bus) }
-                Divider()
+            boardingStopSelector
+            TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                let buses = model.routeVehicles()
+                if let stop = model.routeBoardingStop {
+                    let group = RouteBoardingVehicles(stop: stop, vehicles: buses, metadata: model.metadata, at: timeline.date)
+                    TimelineView(.periodic(from: .now, by: 1)) { clock in
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(AppText.text("官方下一班")).liveFont(.subheadline).foregroundStyle(.secondary)
+                            Spacer()
+                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: clock.date)))
+                                .liveFont(.title2, weight: .bold).monospacedDigit()
+                        }.accessibilityElement(children: .combine).accessibilityIdentifier("route-stop-official-arrival")
+                    }
+                    if group.approaching.isEmpty {
+                        Text(AppText.text("往此站的車輛位置待確認")).liveFont(.subheadline).foregroundStyle(.secondary)
+                    } else {
+                        Text(AppText.text("往此站的公車")).liveFont(.subheadline, weight: .semibold)
+                        ForEach(Array(group.approaching.prefix(3).enumerated()), id: \.element.id) { index, approach in
+                            boardingVehicle(approach, stop: stop, nearest: index == 0, at: timeline.date)
+                        }
+                        if group.approaching.count > 3 {
+                            DisclosureGroup(AppText.text("後續 %@ 輛", group.approaching.count - 3)) {
+                                ForEach(Array(group.approaching.dropFirst(3))) { boardingVehicle($0, stop: stop, nearest: false, at: timeline.date) }
+                            }.liveFont(.subheadline)
+                        }
+                    }
+                    if !group.other.isEmpty {
+                        DisclosureGroup(AppText.text("其他公車 · %@", group.other.count)) {
+                            ForEach(group.other) { entry in
+                                HStack {
+                                    Button { model.selectVehicle(entry.vehicle) } label: {
+                                        HStack {
+                                            Text(entry.vehicle.plate).monospaced().liveFont(.subheadline, weight: .medium)
+                                            Spacer()
+                                            Text(otherReason(entry.reason)).liveFont(.caption).foregroundStyle(.secondary)
+                                            Image(systemName: "chevron.right").liveFont(.caption)
+                                        }.frame(minHeight: 44).contentShape(Rectangle())
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                        }.liveFont(.subheadline).accessibilityIdentifier("route-other-vehicles")
+                    }
+                } else {
+                    DisclosureGroup(AppText.text("沿線公車 · %@", buses.count)) {
+                        ForEach(buses) { bus in VehicleRow(vehicle: bus) { model.selectVehicle(bus) } }
+                    }.liveFont(.subheadline)
+                }
             }
-            if buses.isEmpty { Text(live.text("目前沒有此方向的車輛回報")).liveFont(.subheadline).foregroundStyle(.secondary) }
             Text(model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
                 .liveFont(.headline).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
             if model.allRouteVariants && model.routeVariants.count > 1 {
@@ -880,19 +937,63 @@ private struct RouteDetails: View {
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
                 ForEach(model.routeStops) { stop in
                     Button {
-                        if let station = model.metadata.stations[stop.stationID] { model.selectStation(station) }
+                        model.chooseRouteBoardingStop(stop)
                     } label: {
                         HStack(spacing: 10) {
-                            Text("\(stop.sequence)").liveFont(.caption).foregroundStyle(.secondary).frame(width: 26)
+                            Image(systemName: model.routeBoardingStopID == stop.id ? "checkmark.circle.fill" : "circle").foregroundStyle(model.routeBoardingStopID == stop.id ? Color.accentColor : .secondary).frame(width: 26)
                             BilingualName(stop).liveFont(.subheadline)
                             Spacer(minLength: 8)
                             Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)))
                                 .liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
                         }.frame(minHeight: 50).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(.plain).accessibilityIdentifier("route-boarding-stop-" + stop.id)
                     Divider()
                 }
             }
+        }
+    }
+    private var boardingStopSelector: some View {
+        Menu {
+            ForEach(model.routeStops) { stop in
+                Button { model.chooseRouteBoardingStop(stop) } label: {
+                    if model.routeBoardingStopID == stop.id { Label(stop.bilingualName, systemImage: "checkmark") }
+                    else { Text(stop.bilingualName) }
+                }
+            }
+        } label: {
+            HStack {
+                Image(systemName: "mappin.circle.fill")
+                if let stop = model.routeBoardingStop { BilingualName(stop).lineLimit(2) }
+                else { Text(AppText.text("選擇上車站")) }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.up.chevron.down").liveFont(.caption)
+            }.liveFont(.subheadline, weight: .semibold).frame(maxWidth: .infinity, minHeight: 44)
+        }.secondaryAction().accessibilityIdentifier("route-boarding-selector")
+    }
+    private func boardingVehicle(_ approach: VehicleApproach, stop: BusStop, nearest: Bool, at date: Date) -> some View {
+        let display = model.arrivalDisplay(approach.vehicle, stopID: stop.id, at: date)
+        return Button { model.selectVehicle(approach.vehicle) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: nearest ? "bus.fill" : "bus").foregroundStyle(Color.accentColor)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(approach.vehicle.plate).liveFont(.subheadline, weight: .semibold).monospaced()
+                    Text(nearest ? AppText.text("沿線最近") : AppText.text("後續車輛")).liveFont(.caption).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text(display.prediction != nil ? display.label : AppText.text("時間待確認")).liveFont(.subheadline, weight: .medium).monospacedDigit()
+                    Text(AppText.text("追蹤")).liveFont(.caption).foregroundStyle(Color.accentColor)
+                }
+                Image(systemName: "scope").foregroundStyle(Color.accentColor)
+            }.frame(minHeight: 54).contentShape(Rectangle())
+        }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-approaching-" + approach.vehicle.plate)
+    }
+    private func otherReason(_ reason: RouteBoardingVehicles.OtherReason) -> String {
+        switch reason {
+        case .passed: return AppText.text("已過此站")
+        case .differentPattern: return AppText.text("不經此站")
+        case .positionUnknown: return AppText.text("位置待確認")
+        case .notRunning: return AppText.text("尚未行駛")
         }
     }
 }

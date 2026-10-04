@@ -14,6 +14,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     var highlightSelected = true {
         didSet { if highlightSelected != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
     }
+    var emphasizedIDs: Set<String> = [] {
+        didSet { if emphasizedIDs != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
+    }
     var darkAppearance = false {
         didSet { if darkAppearance != oldValue { setNeedsDisplay() } }
     }
@@ -87,7 +90,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
     func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
-        motion.isAnimating(time: time, now: now) || (selectedID != nil && !reduceMotion && time - selectionStartedAt < 0.45)
+        motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
     }
 
     override func didMove(to mapView: MLNMapView) {
@@ -219,6 +222,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let screen = CGPoint(x: (ndc.x + 1) * context.size.width / 2,
                                  y: (1 - ndc.y) * context.size.height / 2)
             let selected = pose.id == selectedID
+            let emphasized = emphasizedIDs.contains(pose.id)
             let angle = pose.heading * .pi / 180
             let front = projection * SIMD4(east + sin(angle) * 6, north + cos(angle) * 6, 1.75, 1)
             let screenLength = hypot((front.x / front.w - ndc.x) * context.size.width / 2,
@@ -226,7 +230,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let naturalLength = max(0.01, screenLength * 2)
             let scale = Float(max(1, minimumLength / naturalLength))
             let instance = Instance(position: SIMD4(Float(east), Float(north), 0, scale),
-                                    style: SIMD4(Float(angle), selected ? selectionStrength : 0,
+                                    style: SIMD4(Float(angle), selected ? selectionStrength : emphasized ? selectionStrength * 0.7 : 0,
                                                  pose.stale ? 1 : 0, Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
             candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
                                selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))

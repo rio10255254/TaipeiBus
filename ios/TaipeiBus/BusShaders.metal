@@ -76,6 +76,9 @@ fragment float4 busFragment(BusFragment in [[stage_in]], constant BusUniforms &u
     if (uniforms.mode.x == 0 && uniforms.mode.y > 0) {
         color = mix(color, float3(0.73) * diffuse, uniforms.mode.y * 0.55);
     }
+    if (uniforms.mode.x == 0 && in.material < 0.5) {
+        color = mix(color, uniforms.viewDirection.w > 0 ? float3(0.24,0.64,0.96) : float3(0.31,0.59,0.85), in.selection * 0.55);
+    }
     return float4(color, in.color.a);
 }
 

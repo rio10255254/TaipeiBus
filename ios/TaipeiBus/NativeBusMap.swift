@@ -7,6 +7,7 @@ struct NativeBusMap: UIViewRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
+    @ObservedObject var stationWalk: StationWalkingNavigation
     let location: Coordinate?
     let bottomInset: CGFloat
     let topInset: CGFloat
@@ -66,6 +67,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
         private var lastRouteKey = ""
+        private var lastVehicleKey = ""
         private var lastFocusRevision = -1
         private var lastFollowTime: CFTimeInterval = 0
         private var lastTickTime: CFTimeInterval = 0
@@ -309,11 +311,14 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision)"
-            if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
+            let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil)"
+            if lastSnapshotRevision != model.snapshot.revision || vehicleKey != lastVehicleKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.cityFleetMode { vehicles = model.cityVehicles }
-                else if model.selectedRoute != nil { vehicles = model.routeVehicles() }
+                else if model.selectedRoute != nil {
+                    vehicles = model.selectedVehicleID == nil && model.planner.selected == nil ? model.routeMapVehicles : model.routeVehicles()
+                }
                 else if let trip = model.planner.selected {
                     let rides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : trip.rides
                     let services = rides.map { ($0.direction, model.metadata.routeIDs(serving: $0)) }
@@ -323,6 +328,7 @@ struct NativeBusMap: UIViewRepresentable {
                 buses.ingest(vehicles, time: CACurrentMediaTime())
                 lastSnapshotRevision = model.snapshot.revision
                 lastMotionSetting = reduceMotion
+                lastVehicleKey = vehicleKey
             }
             if routeKey != lastRouteKey {
                 let tripRides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : model.planner.selected?.rides ?? []
@@ -338,7 +344,7 @@ struct NativeBusMap: UIViewRepresentable {
                     if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
                     else { displayedWalks = [] }
                 }
-                let visibleWalks = model.activeWalkingIndex.map { [model.planner.walkingCoordinates(at: $0)] } ?? displayedWalks.map(\.coordinates)
+                let visibleWalks = model.stationWalk.isActive ? [model.stationWalk.coordinates] : model.activeWalkingIndex.map { [model.planner.walkingCoordinates(at: $0)] } ?? displayedWalks.map(\.coordinates)
                 let walks = visibleWalks.filter { $0.count >= 2 }.map { walk -> MLNPolylineFeature in
                     var coordinates = walk.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
@@ -348,6 +354,7 @@ struct NativeBusMap: UIViewRepresentable {
                 lastRouteKey = routeKey
             }
             buses.selectedID = model.selectedVehicleID
+            buses.emphasizedIDs = model.selectedRouteID != nil && model.selectedVehicleID == nil && model.planner.selected == nil ? Set(model.routeVehicles().map(\.id)) : []
             buses.highlightSelected = model.highlightVehicle
             buses.reduceMotion = reduceMotion
             // Station dots remain tappable; their names must not cover the vehicle's anchored information.
@@ -368,16 +375,21 @@ struct NativeBusMap: UIViewRepresentable {
                 buildingLayer?.fillExtrusionOpacityTransition = MLNTransition(duration: reduceMotion ? 0 : 0.25, delay: 0)
                 buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
             }
-            if lastStationID != model.selectedStationID {
-                stationSource?.shape = point(model.selectedStation?.coordinate)
-                lastStationID = model.selectedStationID
+            if lastStationID != model.mapLabelStation?.id {
+                stationSource?.shape = point(model.mapLabelStation?.coordinate)
+                lastStationID = model.mapLabelStation?.id
             }
-            if model.selectedVehicleID == nil && model.selectedStationID == nil { overlay.update(nil) }
+            if model.stationWalk.isActive || model.selectedVehicleID == nil && model.mapLabelStation == nil { overlay.update(nil) }
             buses.setNeedsDisplay()
             updateStationAnchor()
         }
 
         private func updateTripStops() {
+            if let station = model.stationWalk.target {
+                let feature = MLNPointFeature(); feature.coordinate = station.coordinate.locationCoordinate
+                feature.attributes = ["name": station.bilingualName, "stationID": station.id, "icon": "destination-marker"]
+                tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: [feature]); return
+            }
             guard let option = model.planner.selected else { tripStopsSource?.shape = nil; return }
             var features: [String: MLNPointFeature] = [:]
             func add(_ coordinate: Coordinate, id: String, title: String) {
@@ -425,7 +437,7 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func updateStationAnchor() {
-            guard let map, let station = model.selectedStation else { return }
+            guard !model.stationWalk.isActive, let map, let station = model.mapLabelStation else { return }
             let point = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
             let visible = map.bounds.insetBy(dx: -20, dy: -20).contains(point)
             let global = visible ? map.convert(point, to: nil) : nil
@@ -488,6 +500,12 @@ struct NativeBusMap: UIViewRepresentable {
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
                 state["fleetSampled"] = buses?.sampledVehicleCount ?? 0
+                state["routeFleetEmphasized"] = buses?.emphasizedIDs.count ?? 0
+                state["routeBoardingStop"] = model.routeBoardingStopID ?? ""
+                state["routeBoardingStation"] = model.routeBoardingStop?.stationID ?? ""
+                state["stationWalkActive"] = model.stationWalk.isActive
+                state["stationWalkPoints"] = model.stationWalk.coordinates.count
+                state["stationWalkTarget"] = model.stationWalk.target?.id ?? ""
                 state["autoVisibilityAdjustments"] = visibilityAdjustments
                 state["walkingActive"] = model.activeWalkingIndex != nil
                 state["walkingAccuracyConfigured"] = model.location.walkingAccuracyConfigured
@@ -560,8 +578,9 @@ struct NativeBusMap: UIViewRepresentable {
             case .userLocation:
                 guard let point = model.location.displayCoordinate, point.isInServiceArea else { return }
                 let heading = model.userMapMode == .heading ? model.location.currentHeading ?? map.direction : 0
-                showPoint(point, altitude: model.activeWalkingIndex != nil ? 350 : 600, heading: heading,
-                          pitch: model.activeWalkingIndex != nil ? 0 : model.userMapMode == .heading ? 45 : 0,
+                let walking = model.activeWalkingIndex != nil || model.stationWalk.isActive
+                showPoint(point, altitude: walking ? 350 : 600, heading: heading,
+                          pitch: walking ? 0 : model.userMapMode == .heading ? 45 : 0,
                           map: map, duration: duration)
             case .vehicle(let id):
                 guard let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else { return }
@@ -578,6 +597,7 @@ struct NativeBusMap: UIViewRepresentable {
                                                                allVariants: model.allRouteVariants).map(\.coordinate)
                 }
                 if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
+                if model.planner.selected == nil { coordinates += model.routeMapVehicles.filter { $0.hasReliablePosition(at: Date()) }.map(\.coordinate) }
                 if let camera = fittedCamera(coordinates, map: map) { moveCamera(camera, map: map, duration: duration) }
             case .journey(let coordinates):
                 if let camera = fittedCamera(coordinates, map: map) { moveCamera(camera, map: map, duration: duration) }
@@ -647,7 +667,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
                 viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return nil }
-            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil ? 0 : 35)
+            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
             // Convert the existing verified framing to one camera, so center, zoom,
             // tilt and padding travel together instead of two instantaneous moves.
             let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)

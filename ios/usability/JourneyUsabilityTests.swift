@@ -279,13 +279,12 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
         capture("full-itinerary")
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
-        let externalWalk = button("journey-external-walk-0")
-        XCTAssertTrue(externalWalk.waitForExistence(timeout: 10)); externalWalk.tap()
+        let internalWalk = button("journey-in-app-walk-0")
+        XCTAssertTrue(internalWalk.waitForExistence(timeout: 10)); internalWalk.tap()
         let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
-        XCTAssertTrue(maps.wait(for: .runningForeground, timeout: 15))
-        capture("walking-in-apple-maps")
-        app.activate()
-        button("返回地圖").tap()
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertNotEqual(maps.state, .runningForeground)
+        capture("walking-in-the-app")
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["journey-selected-state"].label, selectedID)
         button("journey-options").tap(); button("更改").tap()
@@ -533,6 +532,79 @@ final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
             thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.32)))
         wait("Manual map movement stops automatic camera control") { ($0["following"] as? Bool) == false }
         XCTAssertEqual(camera()["autoVisibilityAdjustments"] as? Int, adjustments)
+    }
+}
+
+final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
+    func camera() -> [String: Any] {
+        guard let data = app.staticTexts["map-camera-state"].label.data(using: .utf8),
+              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return state
+    }
+    func wait(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 90), .completed, description + String(describing: camera()))
+    }
+    func expandDetails() {
+        let close = button("transit-details-close")
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        let origin = app.coordinate(withNormalizedOffset: .zero)
+        origin.withOffset(CGVector(dx: 200, dy: close.frame.minY - 24)).press(forDuration: 0.15,
+            thenDragTo: origin.withOffset(CGVector(dx: 200, dy: 100)))
+    }
+    func testRouteRetainsItsStopAndShowsApproachingBusesBeforeTheRest() {
+        launch(["--test-map-controls", "--preview-route-stop-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 90))
+        wait("Station camera is settled") { ($0["cameraMoving"] as? Bool) == false }
+        let station = camera()["station"] as? String
+        let label = app.descendants(matching: .any).matching(identifier: "map-station-inline-label").firstMatch
+        XCTAssertLessThan(label.frame.height, 125)
+        capture("station-name-and-arrivals-without-a-card")
+        button("map-station-details").press(forDuration: 0.15)
+        expandDetails()
+        let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-route-")).firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 10)); route.press(forDuration: 0.15)
+        wait("Route retains the exact platform and highlights its fleet") {
+            ($0["routeBoardingStation"] as? String) == station && ($0["routeFleetEmphasized"] as? Int ?? 0) >= 3
+        }
+        let first = button("route-approaching-TEST-01"), second = button("route-approaching-TEST-02")
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); XCTAssertTrue(second.exists)
+        XCTAssertLessThan(first.frame.minY, second.frame.minY)
+        XCTAssertFalse(button("route-approaching-TEST-05").exists, "A passed vehicle cannot be presented as an approaching bus.")
+        XCTAssertTrue(button("route-other-vehicles").exists)
+        capture("route-approaching-buses-with-selected-stop-and-official-time")
+        first.press(forDuration: 0.15)
+        wait("Tracking uses the chosen physical bus") { ($0["following"] as? Bool) == true && !($0["selectedVehicle"] as? String ?? "").isEmpty }
+        XCTAssertTrue(button("返回路線").waitForExistence(timeout: 5)); button("返回路線").press(forDuration: 0.15)
+        wait("Back from tracking restores the same boarding stop") { ($0["selectedVehicle"] as? String ?? "") == "" && ($0["routeBoardingStation"] as? String) == station }
+        button("transit-details-close").press(forDuration: 0.15)
+        wait("Route map is settled with all buses emphasized") { ($0["cameraMoving"] as? Bool) == false && ($0["routeFleetEmphasized"] as? Int ?? 0) >= 3 }
+        capture("route-map-with-emphasized-physical-buses")
+    }
+    func testStationWalkingStaysInTheAppAndReturnsToTheSamePlatform() {
+        launch(["--test-language", "en", "--test-map-controls", "--preview-station-walk-fixture"])
+        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 90))
+        wait("Station is ready") { ($0["cameraMoving"] as? Bool) == false }
+        let station = camera()["station"] as? String
+        button("map-station-details").press(forDuration: 0.15); expandDetails()
+        let opposite = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-opposite-")).firstMatch
+        let walk = button("station-start-walk")
+        XCTAssertTrue(opposite.exists); XCTAssertTrue(opposite.isHittable); XCTAssertTrue(walk.isHittable)
+        XCTAssertGreaterThanOrEqual(walk.frame.minY - opposite.frame.maxY, 10)
+        capture("separate-station-direction-and-walking-controls")
+        walk.press(forDuration: 0.15)
+        wait("The real pedestrian route renders inside this app") {
+            ($0["stationWalkActive"] as? Bool) == true && ($0["stationWalkPoints"] as? Int ?? 0) > 4 &&
+            ($0["walkingAboveBuildings"] as? Bool) == true && ($0["cameraMoving"] as? Bool) == false && ($0["pitch"] as? Double ?? 90) < 1
+        }
+        XCTAssertEqual(app.state, .runningForeground)
+        XCTAssertNotEqual(XCUIApplication(bundleIdentifier: "com.apple.Maps").state, .runningForeground)
+        XCTAssertTrue(app.staticTexts["station-walk-instruction"].exists)
+        capture("in-app-pedestrian-guidance-to-a-real-stop")
+        button("station-walk-close").press(forDuration: 0.15)
+        wait("Closing walking restores the original platform") { ($0["stationWalkActive"] as? Bool) == false && ($0["station"] as? String) == station }
+        XCTAssertTrue(button("station-start-walk").waitForExistence(timeout: 10))
+        capture("same-station-after-ending-in-app-walking")
     }
 }
 

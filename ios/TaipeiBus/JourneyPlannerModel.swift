@@ -429,22 +429,8 @@ final class JourneyPlannerModel: ObservableObject {
         do {
             let response = try await operation.calculate()
             try Task.checkCancellation()
-            let usable = response.routes.filter { route in
-                guard route.polyline.pointCount >= 2 else { return false }
-                var ends = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
-                route.polyline.getCoordinates(&ends, range: NSRange(location: 0, length: ends.count))
-                let first = Coordinate(latitude: ends[0].latitude, longitude: ends[0].longitude)
-                let last = Coordinate(latitude: ends.last!.latitude, longitude: ends.last!.longitude)
-                return first.distance(to: leg.from) <= 50 && last.distance(to: leg.to) <= 50
-            }
-            if let route = usable.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) {
-                var coordinates = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
-                route.polyline.getCoordinates(&coordinates, range: NSRange(location: 0, length: coordinates.count))
-                result.coordinates = coordinates.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
-                result.distance = route.distance; result.duration = route.expectedTravelTime
-        result.instructions = route.steps.map(\.instructions).filter { !$0.isEmpty }
-                result.road = RouteLine(coordinates: result.coordinates)
-            }
+            if let path = response.routes.compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
+                .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()
             // No straight-line walking polyline or fabricated time when Apple cannot confirm a route.
@@ -477,15 +463,6 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
         verifiedPool = []; comparisonChanged = false; optionLabels = [:]
-    }
-    func navigateWalk(_ index: Int) {
-        guard let option = selected, option.walks.indices.contains(index) else { return }
-        let leg = option.walks[index]
-        let title = index < option.rides.count ? option.rides[index].boarding.localizedName : destination?.localizedName ?? AppText.text("目的地")
-        let target = TravelPlace(name: title, address: "", coordinate: leg.to).mapItem
-        let source = index == 0 && usingLocation ? MKMapItem.forCurrentLocation() :
-            TravelPlace(name: index == 0 ? origin?.localizedName ?? AppText.text("出發地") : "下車站", address: "", coordinate: leg.from).mapItem
-        MKMapItem.openMaps(with: [source, target], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
     }
     func openAppleTransit() {
         guard let destination else { return }

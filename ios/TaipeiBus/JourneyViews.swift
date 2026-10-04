@@ -805,9 +805,9 @@ struct JourneyItineraryView: View {
                         }
                         Spacer(minLength: 0)
                         if !walked {
-                        Button { planner.navigateWalk(index) } label: { Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44) }
+                        Button { model.showWalkOnMap(index) } label: { Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44) }
                             .accessibilityLabel(AppText.text("步行導航到%@", index < option.rides.count ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地")))
-                            .accessibilityIdentifier("journey-external-walk-\(index)")
+                            .accessibilityIdentifier("journey-in-app-walk-\(index)")
                         }
                     }
                     if index < option.rides.count {
