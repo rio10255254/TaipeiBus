@@ -550,8 +550,9 @@ final class AppearanceUsabilityTests: JourneyUsabilityTestBase {
         button("journey-all-vehicles").tap()
         XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 10))
         capture("arrival-confidence-vehicle-list")
-        let supported = button("boarding-vehicle-TEST-03")
-        if !supported.isHittable { app.swipeUp() }
+        // The underlying waiting screen contains the same vehicle. Scope to the presented List.
+        let supported = app.collectionViews.buttons["boarding-vehicle-TEST-03"]
+        if !supported.isHittable { app.collectionViews.firstMatch.swipeUp() }
         XCTAssertTrue(supported.isHittable)
         XCTAssertTrue(supported.label.contains("約") && supported.label.contains("分"),
             "A bus with continuous observed movement retains an individual arrival estimate")
