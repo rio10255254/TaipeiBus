@@ -642,7 +642,12 @@ final class TransitAppModel: ObservableObject {
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false) -> Bool {
-        let network = TripPlanner(metadata: metadata)
+        var planningMetadata = metadata
+        if cooperated {
+            planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
+            planningMetadata.rebuildRouteCatalog()
+        }
+        let network = TripPlanner(metadata: planningMetadata)
         var chosen: TransitTrip?
         if transfer {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
@@ -657,8 +662,8 @@ final class TransitAppModel: ObservableObject {
                 if chosen != nil { break }
             }
         } else {
-        for route in metadata.variants(routeID: metadata.routeCatalog.search("307").first?.route.id ?? "") {
-            guard let journey = metadata.journey(routeID: route.id, direction: "0"), journey.anchors.count > 10 else { continue }
+        for route in metadata.variants(routeID: metadata.routeCatalog.search(cooperated ? "630" : "307").first?.route.id ?? "") {
+            guard let journey = metadata.journey(routeID: route.id, direction: cooperated ? "1" : "0"), journey.anchors.count > 10 else { continue }
             let middle = journey.anchors.count / 2
             let trips = network.plan(from: journey.anchors[middle].stop.coordinate,
                 to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20)
