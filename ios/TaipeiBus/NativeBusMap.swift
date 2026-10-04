@@ -197,7 +197,7 @@ struct NativeBusMap: UIViewRepresentable {
             layer.onSelectedPoint = { [weak self, weak mapView] point in
                 guard let self, let mapView, self.model.selectedVehicleID != nil else { return }
                 let global = point.map { mapView.convert($0, to: nil) }
-                DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: map.zoomLevel) }
+                DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
             }
             style.addLayer(layer); buses = layer
             stationSource = addStationLayer(id: "selected-station", style: style)
@@ -441,7 +441,7 @@ struct NativeBusMap: UIViewRepresentable {
             let point = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
             let visible = map.bounds.insetBy(dx: -20, dy: -20).contains(point)
             let global = visible ? map.convert(point, to: nil) : nil
-            DispatchQueue.main.async { [weak self] in self?.overlay.update(global) }
+            DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: map.zoomLevel) }
         }
 
         func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) {
