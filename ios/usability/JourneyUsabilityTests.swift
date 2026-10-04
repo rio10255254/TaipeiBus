@@ -764,6 +764,15 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].label.contains("Remaining"))
         capture("english-onboard-trip-details")
     }
+    func testEnglishBoardingWithoutSelectedPlateKeepsChineseAlightingName() {
+        launch(["--test-language", "en", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90)); button("journey-board").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("Choose"))
+        XCTAssertTrue(app.staticTexts["市民敦化路口"].exists)
+        XCTAssertTrue(button("journey-options").isHittable); XCTAssertTrue(button("journey-ride-stops").isHittable)
+        capture("english-no-selected-bus-still-has-chinese-alighting-sign")
+    }
     func testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival() {
         launch(["--test-language", "en", "--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
         waitProbe("journey-timing-state") { ($0["checking"] as? Bool) == false && ($0["options"] as? [[String: Any]] ?? []).count > 0 }

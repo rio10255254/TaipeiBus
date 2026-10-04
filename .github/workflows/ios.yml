@@ -430,8 +430,7 @@ jobs:
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testLanguageSwitchPreservesFollowingAndPersistsAfterRelaunch'
-              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount')
+            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBoardingWithoutSelectedPlateKeepsChineseAlightingName')
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
@@ -488,7 +487,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'english-motion'
         run: |
           set -euo pipefail
-          python3 ios/usability/record-run.py xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+          BUS_INTERACTION_RECORDING_NAME=iPhone17-camera-transitions.mp4 python3 ios/usability/record-run.py xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability-motion.xcresult" \
@@ -731,7 +730,9 @@ jobs:
             ${{ runner.temp }}/usability-motion-screenshots
             ${{ runner.temp }}/usability-motion.log
             ${{ runner.temp }}/iPhone17-interactions.mp4
-            ${{ runner.temp }}/interactions-record.log
+            ${{ runner.temp }}/iPhone17-interactions-record.log
+            ${{ runner.temp }}/iPhone17-camera-transitions.mp4
+            ${{ runner.temp }}/iPhone17-camera-transitions-record.log
             ${{ runner.temp }}/appearance-switches
           if-no-files-found: ignore
           retention-days: 7

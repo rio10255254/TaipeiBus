@@ -487,6 +487,7 @@ private struct OnboardSummary: View {
                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             } else {
                 Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).liveFont(.title3, weight: .bold).lineLimit(2)
+                if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(.secondary) }
                 Text(model.onboardPlate(for: ride) == nil ? AppText.text("選擇車牌即可看沿途時間") : AppText.text("車輛位置更新中"))
                     .liveFont(.caption).foregroundStyle(.secondary)
             }

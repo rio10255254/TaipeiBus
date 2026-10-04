@@ -8,8 +8,8 @@ import time
 
 root = Path(os.environ["RUNNER_TEMP"])
 simctl = subprocess.check_output(["xcrun", "--find", "simctl"], text=True).strip()
-output = root / "iPhone17-interactions.mp4"
-log_path = root / "interactions-record.log"
+output = root / os.environ.get("BUS_INTERACTION_RECORDING_NAME", "iPhone17-interactions.mp4")
+log_path = root / (output.stem + "-record.log")
 with log_path.open("w") as log:
     recorder = subprocess.Popen([simctl, "io", os.environ["BUS_SIM_DEVICE"], "recordVideo",
         "--codec=h264", str(output)], stdout=log, stderr=subprocess.STDOUT)
