@@ -223,7 +223,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let detailed = eligible.count <= Self.maximumDetailed ? eligible :
             Array(eligible.sorted { $0.score < $1.score }.prefix(Self.maximumDetailed))
         let detailedIDs = Set(detailed.map(\.id))
-        let compact = candidates.filter { !detailedIDs.contains($0.id) }.map(\.instance)
+        let compact = detailedIDs.isEmpty ? candidates.map(\.instance) :
+            candidates.compactMap { detailedIDs.contains($0.id) ? nil : $0.instance }
         hitPoints = candidates.map { ($0.id, $0.point, $0.size) }
         var instances = compact + detailed.map(\.instance)
         let selected = candidates.first { $0.id == selectedID }

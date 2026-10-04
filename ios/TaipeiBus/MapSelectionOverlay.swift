@@ -26,6 +26,16 @@ final class MapSelectionOverlay: ObservableObject {
     }
 }
 
+#if DEBUG
+struct DebugMapCameraText: View {
+    @ObservedObject var overlay: MapSelectionOverlay
+    var body: some View {
+        Text(overlay.cameraState).font(.system(size: 1)).foregroundStyle(.clear)
+            .frame(width: 1, height: 1).accessibilityIdentifier("map-camera-state").allowsHitTesting(false)
+    }
+}
+#endif
+
 struct MapContextLabels: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var overlay: MapSelectionOverlay

@@ -20,6 +20,18 @@ public struct VehicleMotion {
         let startDistance: Double
         let startSlope: Double
         let endSlope: Double
+        let shortPathHeading: Double?
+
+        init(vehicle: BusVehicle, path: RouteLine, startedAt: TimeInterval, duration: TimeInterval,
+             startHeading: Double, startDistance: Double, startSlope: Double, endSlope: Double) {
+            self.vehicle = vehicle; self.path = path; self.startedAt = startedAt; self.duration = duration
+            self.startHeading = startHeading; self.startDistance = startDistance
+            self.startSlope = startSlope; self.endSlope = endSlope
+            if path.length > 0.2, path.length <= 5.5 {
+                let first = path.sample(fraction: 0).0, last = path.sample(fraction: 1).0
+                shortPathHeading = first.distance(to: last) > 0.05 ? first.bearing(to: last) : nil
+            } else { shortPathHeading = nil }
+        }
 
         func progress(time: TimeInterval, stale: Bool = false) -> (fraction: Double, velocity: Double) {
             guard duration > 0, !stale else { return (1, 0) }
@@ -101,10 +113,13 @@ public struct VehicleMotion {
         let (coordinate, tangent) = state.path.sample(fraction: progress.fraction)
         var heading = state.startHeading
         if state.path.length > 0.2 {
-            // A bus-length tangent turns the body smoothly, while its center stays on the road polyline.
-            let before = state.path.sample(fraction: max(0, along - 5.5) / state.path.length).0
-            let after = state.path.sample(fraction: min(state.path.length, along + 5.5) / state.path.length).0
-            heading = before.distance(to: after) > 0.05 ? before.bearing(to: after) : tangent
+            if let fixed = state.shortPathHeading { heading = fixed }
+            else {
+                // A bus-length tangent turns the body smoothly, while its center stays on the road polyline.
+                let before = state.path.sample(fraction: max(0, along - 5.5) / state.path.length).0
+                let after = state.path.sample(fraction: min(state.path.length, along + 5.5) / state.path.length).0
+                heading = before.distance(to: after) > 0.05 ? before.bearing(to: after) : tangent
+            }
             let entry = min(1, max(0, (time - state.startedAt) / 0.7))
             heading = Self.blendHeading(state.startHeading, heading, fraction: entry * entry * (3 - 2 * entry))
         }

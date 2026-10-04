@@ -19,7 +19,8 @@ struct TransitHomeView: View {
     @State private var lastLocationFocus: Coordinate?
     @State private var lastJourneyOptionID: String?
     @State private var lastJourneyStep: JourneyStep?
-    @StateObject private var selectionOverlay = MapSelectionOverlay()
+    // Retain the reference here; only the label/probe children observe frame updates.
+    @State private var selectionOverlay = MapSelectionOverlay()
 
     init(model: TransitAppModel) {
         self.model = model
@@ -78,8 +79,7 @@ struct TransitHomeView: View {
                         .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)
                 }
                 if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
-                    Text(selectionOverlay.cameraState).font(.system(size: 1)).foregroundStyle(.clear)
-                        .frame(width: 1, height: 1).accessibilityIdentifier("map-camera-state").allowsHitTesting(false)
+                    DebugMapCameraText(overlay: selectionOverlay)
                 }
                 if let notice = model.previewNotice {
                     Text(notice).liveFont(.caption, weight: .semibold).padding(8)
