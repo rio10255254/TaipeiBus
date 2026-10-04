@@ -443,9 +443,9 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
     }
     func testCityCameraMovesContinuouslyAndReturnsToTheSameView() {
         launch(["--test-map-controls", "--test-transitions", "--city-fleet-fixture", "--usability-fixture"])
-        wait("Controlled fleet is ready") { ($0["fleetInput"] as? Int) == 2500 }
+        wait("Controlled fleet and initial street camera are ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 90) < 1 }
         let local = camera()
-        button("city-fleet-toggle").tap()
+        button("city-fleet-toggle").press(forDuration: 0.15)
         wait("City framing settles") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
             let samples = trace?["samples"] as? [[String: Double]] ?? []
@@ -465,7 +465,7 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
             ($0["selectedVehicle"] as? String ?? "") == "" && abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.03
         }
         assertContinuousCamera(camera())
-        button("city-fleet-toggle").tap()
+        button("city-fleet-toggle").press(forDuration: 0.15)
         wait("Leaving restores the original local view") {
             ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
         }
@@ -475,14 +475,14 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         launch(["--test-map-controls", "--test-transitions", "--test-reduce-motion", "--city-fleet-fixture", "--usability-fixture"])
         wait("Controlled fleet is ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["reduceMotion"] as? Bool) == true }
         let local = camera()
-        button("city-fleet-toggle").tap()
+        button("city-fleet-toggle").press(forDuration: 0.15)
         wait("City appears at its target without animated travel") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
             return state["cityMode"] as? Bool == true && (trace?["duration"] as? Double) == 0 &&
                 abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03
         }
         capture("reduce-motion-city-view")
-        button("city-fleet-toggle").tap()
+        button("city-fleet-toggle").press(forDuration: 0.15)
         wait("Reduce Motion also restores the local view") {
             ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
         }
