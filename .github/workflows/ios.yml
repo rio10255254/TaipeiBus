@@ -487,7 +487,8 @@ jobs:
             test -n "$BUS_STORE_VEHICLE_ROUTE"
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE="$BUS_STORE_VEHICLE_ROUTE"
           fi
-          recorder=()
+          # macOS Bash 3.2 treats an empty array as unset under set -u.
+          recorder=(env)
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ]; then recorder=(python3 ios/usability/record-run.py); fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
