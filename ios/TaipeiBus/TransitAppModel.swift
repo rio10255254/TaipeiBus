@@ -666,6 +666,9 @@ final class TransitAppModel: ObservableObject {
                 guard trip.rides.count == 1, let ride = trip.rides.first,
                       let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
                       let boarding = pattern.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
+                if cooperated && !metadata.routeIDs(serving: ride).contains(where: {
+                    $0 != ride.route.id && metadata.routes[$0] != nil && metadata.journey(routeID: $0, direction: ride.direction) != nil
+                }) { return false }
                 return (boarding.match.along - pattern.anchors[0].match.along) * Double(pattern.direction) > 1_000
             }
             if chosen != nil { break }

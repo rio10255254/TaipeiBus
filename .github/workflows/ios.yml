@@ -120,11 +120,11 @@ jobs:
           try:
               subprocess.run(command, check=True, timeout=timeout)
           except subprocess.TimeoutExpired:
-              if command[1] != 'install':
+              if command[1] not in ('install', 'get_app_container'):
                   raise
               # A freshly booted hosted simulator can stall its installation RPC.
               # Restart only this disposable device, then retry the same app once.
-              print('Installation timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
+              print('Simulator installation/container RPC timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
               simulator, device = command[0], command[2]
               subprocess.run([simulator, 'shutdown', device], check=True, timeout=60)
               subprocess.run([simulator, 'boot', device], check=True, timeout=60)
