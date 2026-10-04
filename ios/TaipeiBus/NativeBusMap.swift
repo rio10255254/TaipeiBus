@@ -391,6 +391,9 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func updateNearbyStations(force: Bool = false) {
             guard let map, nearbySource != nil else { return }
+            // Hidden station labels need no distance scan, sort, or symbol-layout
+            // update while the camera is zooming through the city view.
+            guard model.stationBrowsing || map.zoomLevel >= 15.5 else { return }
             let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
             let time = CACurrentMediaTime()
             if !force, let previous = lastNearbyCenter,
@@ -437,6 +440,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             updateStationAnchor()
 #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(mapView) }
             recordPreviewCamera(mapView, fullyRendered: fullyRendered)
             if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), fullyRendered,
                CACurrentMediaTime() - lastTestCameraAt >= 0.25 {
@@ -629,7 +633,8 @@ struct NativeBusMap: UIViewRepresentable {
         private func recordCameraSample(_ map: MLNMapView) {
             guard let index = cameraTransitions.indices.last else { return }
             let elapsed = CACurrentMediaTime() - cameraTransitions[index].started
-            guard elapsed <= cameraTransitions[index].duration + 0.3, cameraTransitions[index].samples.count < 120 else { return }
+            let hasCompletion = (cameraTransitions[index].samples.last?["t"] ?? -1) >= cameraTransitions[index].duration
+            guard (elapsed <= cameraTransitions[index].duration + 0.3 || !hasCompletion), cameraTransitions[index].samples.count < 240 else { return }
             cameraTransitions[index].samples.append(["t": elapsed, "zoom": map.zoomLevel,
                 "latitude": map.centerCoordinate.latitude, "longitude": map.centerCoordinate.longitude,
                 "pitch": map.camera.pitch])

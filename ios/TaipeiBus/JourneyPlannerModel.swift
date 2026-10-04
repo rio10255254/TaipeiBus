@@ -152,6 +152,7 @@ final class JourneyPlannerModel: ObservableObject {
         if walkingRouteUnavailable { return AppText.text("步行路線暫時無法更新") }
         guard let progress = walkingProgress, progress.locationConfirmed,
               let date = progress.lastFix, Date().timeIntervalSince(date) <= 20 else { return AppText.text("正在確認步行位置") }
+        if progress.remainingDistance < 12 { return AppText.text("就在附近") }
         return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(progress.remainingDistance), max(1, Int(ceil(progress.remainingSeconds / 60))))
     }
 

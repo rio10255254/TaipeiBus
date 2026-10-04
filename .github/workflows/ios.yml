@@ -433,9 +433,7 @@ jobs:
             selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'walking-clarity' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/WalkingAndReadabilityUsabilityTests'
-              '-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests'
-              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip')
+            selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then

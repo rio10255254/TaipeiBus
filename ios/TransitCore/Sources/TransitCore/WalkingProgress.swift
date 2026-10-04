@@ -36,6 +36,11 @@ public struct WalkingProgress: Sendable {
             locationConfirmed = false; outsideSince = nil; outsideCount = 0; return false
         }
         guard lastFix.map({ timestamp > $0 }) ?? true else { return false }
+        if line.length < 1, let end = line.coordinates.last, coordinate.distance(to: end) <= max(10, accuracy) {
+            lastFix = timestamp; lastAccuracy = accuracy; locationConfirmed = true; outsideSince = nil; outsideCount = 0
+            match = LineMatch(coordinate: end, segment: 0, along: 0, distance: coordinate.distance(to: end))
+            return true
+        }
         let elapsed = lastFix.map { timestamp.timeIntervalSince($0) } ?? 0
         let candidates = line.candidates(coordinate, maximumDistance: max(20, accuracy * 1.5))
         let limit = max(45, min(180, elapsed * 3 + accuracy + lastAccuracy))
