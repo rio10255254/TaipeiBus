@@ -49,11 +49,12 @@ struct MapContextLabels: View {
                 let anchor = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
                 let width = min(290.0, geometry.size.width - 32)
                 let x = min(geometry.size.width - width / 2 - 16, max(width / 2 + 16, anchor.x))
-                let y = min(geometry.size.height - 210, max(160, anchor.y - 108))
+                let compactVehicle = model.selectedVehicleID != nil
+                let y = min(geometry.size.height - 210, max(compactVehicle ? 60 : 160, anchor.y - (compactVehicle ? 60 : 108)))
                 Path { path in
                     path.move(to: anchor)
                     path.addLine(to: CGPoint(x: anchor.x, y: anchor.y - 18))
-                    path.addLine(to: CGPoint(x: x, y: y + 44))
+                    path.addLine(to: CGPoint(x: x, y: y + (compactVehicle ? 20 : 44)))
                 }
                 .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .allowsHitTesting(false)
@@ -111,47 +112,16 @@ struct MapContextLabels: View {
                 Text("官方路線預估").font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
             }
         } else if let bus = model.selectedVehicle {
-            if model.planner.selected != nil {
-                HStack(spacing: 8) {
-                    Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
-                    Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
-                        .accessibilityLabel("車輛資訊")
-                }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
-            } else {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text(bus.routeName).font(.system(.title, design: .rounded).weight(.bold)).foregroundStyle(Color.accentColor)
-                    Text("往 \(bus.destination)").font(.subheadline).lineLimit(2)
-                    Spacer(minLength: 0)
-                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .phoneGlass(in: Circle()).accessibilityLabel("車輛資訊")
+            HStack(spacing: 8) {
+                Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
+                if model.planner.selected == nil {
+                    Text(model.metadata.route(bus.routeID)?.name ?? bus.routeName)
+                        .font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor).lineLimit(1)
                 }
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(bus.hasReliablePosition(at: timeline.date) ? "GPS \(bus.speedLabel) · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "最後回報 · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                        if let state = bus.trackingLabel(at: timeline.date) {
-                            Text(state).font(.caption).foregroundStyle(bus.trackingIssue == nil && bus.isFresh(at: timeline.date) ? Color.secondary : Color.orange)
-                        }
-                        if let next = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)?.upcoming(vehicle: bus, at: timeline.date).first {
-                            Button {
-                                if let station = model.metadata.stations[next.stop.stationID] { model.selectStation(station) }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "mappin").font(.caption)
-                                    Text(next.distance <= 25 ? "\(next.stop.name)附近" : "前方 · \(next.stop.name)").lineLimit(1)
-                                    Spacer(minLength: 0)
-                                    if next.distance > 25 { Text(next.distance >= 1_000 ? String(format: "%.1f km", next.distance / 1_000) : "\(Int(next.distance.rounded())) m").monospacedDigit() }
-                                }.font(.caption.weight(.medium)).frame(minHeight: 44)
-                            }.buttonStyle(.plain).accessibilityHint("查看前方站牌的官方到站預估")
-                        }
-                    }
-                }
-            }
-            .shadow(color: .white.opacity(0.95), radius: 4)
-            }
+                Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                    .accessibilityLabel("車輛資訊")
+            }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
         }
     }
 }

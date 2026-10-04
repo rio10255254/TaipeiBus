@@ -28,8 +28,8 @@ final class CityFleetMotionTests: XCTestCase {
         XCTAssertEqual(a.count, 2500); XCTAssertEqual(b.count, 2500)
         var motion = VehicleMotion()
         motion.ingest(a, time: 0, now: start); motion.ingest(b, time: 15, now: end)
-        let halfway = motion.poses(time: 16.5, now: end)
-        XCTAssertTrue(motion.isAnimating(time: 16.5, now: end))
+        let halfway = motion.poses(time: 22.5, now: end)
+        XCTAssertTrue(motion.isAnimating(time: 22.5, now: end))
         XCTAssertEqual(Set(halfway.map(\.id)).count, 2500)
         let previous = Dictionary(uniqueKeysWithValues: a.map { ($0.id, $0.coordinate) })
         let expected = Dictionary(uniqueKeysWithValues: b.map { ($0.id, $0.coordinate) })
@@ -37,9 +37,9 @@ final class CityFleetMotionTests: XCTestCase {
             XCTAssertGreaterThan(pose.coordinate.longitude, previous[pose.id]!.longitude)
             XCTAssertLessThan(pose.coordinate.longitude, expected[pose.id]!.longitude)
         }
-        XCTAssertFalse(motion.isAnimating(time: 18, now: end))
-        for pose in motion.poses(time: 18, now: end) {
-            XCTAssertLessThan(pose.coordinate.distance(to: expected[pose.id]!), 0.01, "Reach the latest GPS fix within three seconds")
+        XCTAssertFalse(motion.isAnimating(time: 30, now: end))
+        for pose in motion.poses(time: 30, now: end) {
+            XCTAssertLessThan(pose.coordinate.distance(to: expected[pose.id]!), 0.01, "Replay the received movement over its actual GPS interval")
         }
         for pose in motion.poses(time: 100, now: end.addingTimeInterval(60)) {
             XCTAssertLessThan(pose.coordinate.distance(to: expected[pose.id]!), 0.01)

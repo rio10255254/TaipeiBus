@@ -487,6 +487,72 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
     }
 }
 
+final class ContinuousGpsUsabilityTests: JourneyUsabilityTestBase {
+    private func state() -> [String: Any] {
+        guard let bytes = app.staticTexts["map-camera-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func waitState(_ predicate: @escaping ([String: Any]) -> Bool) {
+        let test = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.staticTexts["map-camera-state"].exists && predicate(self.state())
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 90), .completed)
+    }
+    func testDenseFleetMovesAcrossWholeGPSIntervalsWithoutCatchUpBursts() {
+        launch(["--test-map-controls", "--city-fleet-fixture", "--continuous-gps-fixture", "--usability-fixture"])
+        waitState { ($0["fleetInput"] as? Int) == 2500 }
+        button("city-fleet-toggle").tap()
+        waitState {
+            ($0["fleetModels"] as? Int) == 2500 &&
+            ($0["fleetProbeSourceLongitude"] as? Double ?? 0) - ($0["fleetProbeLongitude"] as? Double ?? 0) > 0.000002
+        }
+        capture("continuous-2500-gps-before")
+        var samples: [[String: Any]] = []
+        for _ in 0..<14 {
+            samples.append(state())
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        let identity = samples.first?["fleetProbeID"] as? String
+        var moving = 0, measured = 0
+        for (a, b) in zip(samples, samples.dropFirst()) {
+            XCTAssertEqual(b["fleetProbeID"] as? String, identity)
+            let interval = (b["fleetProbeFrameTime"] as? Double ?? 0) - (a["fleetProbeFrameTime"] as? Double ?? 0)
+            guard interval > 0 else { continue }
+            let rate = ((b["fleetProbeLongitude"] as? Double ?? 0) - (a["fleetProbeLongitude"] as? Double ?? 0)) / interval
+            XCTAssertGreaterThanOrEqual(rate, -0.0000001)
+            XCTAssertLessThan(rate, 0.00004, "Received walking-pace GPS must not be replayed as a fast jump")
+            if rate > 0.000001 { moving += 1 }
+            measured += 1
+            XCTAssertLessThanOrEqual(b["fleetProbeLongitude"] as? Double ?? 0, (b["fleetProbeSourceLongitude"] as? Double ?? 0) + 0.00000001)
+            XCTAssertLessThanOrEqual(b["fleetProbeObservedAt"] as? Double ?? 0, b["fleetProbeSourceObservedAt"] as? Double ?? 0)
+        }
+        XCTAssertGreaterThan(measured, 8)
+        XCTAssertGreaterThanOrEqual(Double(moving) / Double(max(1, measured)), 0.7,
+            "The fleet should keep moving across the reporting interval rather than finish early and sit still")
+        XCTAssertLessThan(state()["fleetEncodeP95Ms"] as? Double ?? 1000, 25)
+        let data = try! JSONSerialization.data(withJSONObject: samples, options: [.sortedKeys])
+        let trace = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        trace.name = "continuous-gps-frame-samples"; trace.lifetime = .keepAlways; add(trace)
+        capture("continuous-2500-gps-after")
+    }
+    func testActualOfficialFleetRefreshesWhileFollowingTheSamePhysicalBus() {
+        launch(["--test-map-controls", "--preview-vehicle-route", "__live__"])
+        waitState { ($0["pitch"] as? Double ?? 0) > 50 && !($0["vehicle"] as? String ?? "").isEmpty }
+        let initial = state()
+        XCTAssertEqual(initial["vehicleRefreshSeconds"] as? Double, 5)
+        XCTAssertFalse(app.staticTexts["2500 輛壓力測試資料"].exists)
+        capture("continuous-official-following-before")
+        waitState {
+            ($0["gpsSourceUpdatedAt"] as? Double ?? 0) > (initial["gpsSourceUpdatedAt"] as? Double ?? 0) &&
+            $0["vehicle"] as? String == initial["vehicle"] as? String && ($0["fleetModels"] as? Int ?? 0) > 0
+        }
+        capture("continuous-official-following-after")
+        let update = XCTAttachment(string: String(describing: state()))
+        update.name = "continuous-official-source-update"; update.lifetime = .keepAlways; add(update)
+    }
+}
+
 final class AppearanceUsabilityTests: JourneyUsabilityTestBase {
     private var expectedDark: Bool { ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true" }
     private func state() -> [String: Any] {

@@ -3,7 +3,7 @@ import TransitCore
 
 /// Networking, gzip, parsing and road matching all run outside the UI actor.
 actor TransitService {
-    private let session: URLSession
+    private let transport: ConditionalFeedTransport
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()
     private var snapshot = TransitSnapshot()
@@ -19,7 +19,8 @@ actor TransitService {
         configuration.timeoutIntervalForResource = 40
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
-        session = URLSession(configuration: configuration)
+        transport = ConditionalFeedTransport(session: URLSession(configuration: configuration),
+            baseURL: URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/")!)
         cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }
@@ -140,10 +141,7 @@ actor TransitService {
     }
 
     private func fetch(_ name: String) async throws -> Data {
-        let url = URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/\(name).gz")!
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-              !data.isEmpty, data.count <= 32 * 1024 * 1024 else { throw FeedError.invalid(name) }
+        let data = try await transport.data(name)
         guard data.starts(with: [0x1f, 0x8b]) else { return data }
         var output: UnsafeMutablePointer<UInt8>?
         var length = 0

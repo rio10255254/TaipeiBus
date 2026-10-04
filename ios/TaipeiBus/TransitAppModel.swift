@@ -157,13 +157,16 @@ final class TransitAppModel: ObservableObject {
                 loading = false; loadError = nil
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
+                    let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    try await Task.sleep(for: .seconds(liveSettings.refresh.vehicleSeconds))
+                    let interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
+                    let elapsed = ProcessInfo.processInfo.systemUptime - requestStartedAt
+                    try await Task.sleep(for: .seconds(max(0.25, interval - elapsed)))
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
                     metadataNotice = await service.metadataNotice
@@ -493,7 +496,8 @@ final class TransitAppModel: ObservableObject {
             cityFixtureTask = Task { [weak self] in
                 var tick = 0
                 while !Task.isCancelled {
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
+                    let seconds = arguments.contains("--continuous-gps-fixture") ? 5.0 : 2.0
+                    do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
                     guard let self, self.isActive else { return }
                     tick += 1; self.updateCityFixture(tick: tick)
                 }
@@ -565,7 +569,8 @@ final class TransitAppModel: ObservableObject {
         }
         let rows: [[String: Any]] = (0..<2500).map { index in
             let latitude = 25.015 + Double(index / 50) * 0.0015
-            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick) * 0.000025
+            let distance = ProcessInfo.processInfo.arguments.contains("--continuous-gps-fixture") ? 0.00006 : 0.000025
+            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick) * distance
             return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY-\(index / 50)", "GoBack": "0",
                     "Latitude": latitude, "Longitude": longitude, "Azimuth": 90, "Speed": 5,
                     "DutyStatus": "1", "BusStatus": "0", "CarType": "1", "DataTime": timestamp]

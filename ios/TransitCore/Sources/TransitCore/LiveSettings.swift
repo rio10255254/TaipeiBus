@@ -50,6 +50,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
     }
     public struct Refresh: Codable, Equatable, Sendable {
         public var vehicleSeconds = 15.0
+        public var trackingSeconds = 5.0
         public var metadataHours = 24.0
         public var settingsSeconds = 300.0
         public init() {}
@@ -136,6 +137,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         try bounded(planning.waitingWeight, 0.5...2, "planning.waitingWeight")
         try bounded(planning.transferPenaltySeconds, 180...900, "planning.transferPenaltySeconds")
         try bounded(refresh.vehicleSeconds, 10...30, "refresh.vehicleSeconds")
+        try bounded(refresh.trackingSeconds, 5...10, "refresh.trackingSeconds")
         try bounded(refresh.metadataHours, 6...24, "refresh.metadataHours")
         try bounded(refresh.settingsSeconds, 60...900, "refresh.settingsSeconds")
         try require((1...6).contains(quickDestinations.count) && quickDestinations.allSatisfy { shortText($0, maximum: 40) }, "quickDestinations")

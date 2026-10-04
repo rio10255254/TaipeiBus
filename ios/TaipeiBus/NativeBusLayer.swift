@@ -320,8 +320,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 #if DEBUG
     func testMotionPose() -> VehiclePose? {
-        guard let motionProbeID else { return nil }
-        return motion.pose(id: motionProbeID, time: CACurrentMediaTime(), now: Date())
+        guard let id = selectedID ?? motionProbeID else { return nil }
+        return motion.pose(id: id, time: CACurrentMediaTime(), now: Date())
+    }
+    func testMotionObservation() -> BusVehicle? {
+        guard let id = selectedID ?? motionProbeID else { return nil }
+        return motion.observation(id: id)
     }
     func testVisiblePoint(in bounds: CGRect) -> (id: String, point: CGPoint)? {
         let center = CGPoint(x: bounds.midX, y: bounds.midY)

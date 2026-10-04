@@ -33,6 +33,14 @@ final class LiveSettingsTests: XCTestCase {
         XCTAssertTrue(value.supports(appVersion: "0.5.0"))
         XCTAssertFalse(value.supports(appVersion: "0.4.9"))
     }
+    func testExistingSharedSettingsGetFastTrackingWithoutChangingThePublicDocument() throws {
+        let settings = try LiveSettings.decode(document(extra: ["refresh": ["vehicleSeconds": 15]]), appVersion: "1.1.4")
+        XCTAssertEqual(settings.refresh.vehicleSeconds, 15)
+        XCTAssertEqual(settings.refresh.trackingSeconds, 5)
+        for value in [0, 1, 4, 11, 100] {
+            XCTAssertThrowsError(try LiveSettings.decode(document(extra: ["refresh": ["trackingSeconds": value]]), appVersion: "1.1.4"))
+        }
+    }
     func testDownloadedAliasUpdatesExistingIndexAndPreservesPhysicalPlatforms() throws {
         let point = Coordinate(latitude: 25.083, longitude: 121.594)
         var north = Station(id: "north", name: "捷運內湖站", coordinate: point, address: "成功路北側", bearing: "N", stopIDs: [])

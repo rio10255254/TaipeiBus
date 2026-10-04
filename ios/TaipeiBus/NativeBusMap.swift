@@ -408,7 +408,15 @@ struct NativeBusMap: UIViewRepresentable {
                 state["fleetFrameP95Ms"] = buses?.denseFrameP95 ?? 0
                 if let pose = buses?.testMotionPose() {
                     state["fleetProbeID"] = pose.id; state["fleetProbeLongitude"] = pose.coordinate.longitude
+                    state["fleetProbeObservedAt"] = pose.observedAt.timeIntervalSince1970
+                    state["fleetProbeFrameTime"] = CACurrentMediaTime()
                 }
+                if let observation = buses?.testMotionObservation() {
+                    state["fleetProbeSourceLongitude"] = observation.coordinate.longitude
+                    state["fleetProbeSourceObservedAt"] = observation.observedAt.timeIntervalSince1970
+                }
+                state["gpsSourceUpdatedAt"] = model.snapshot.sourceUpdatedAt?.timeIntervalSince1970 ?? 0
+                state["vehicleRefreshSeconds"] = min(model.liveSettings.refresh.vehicleSeconds, model.liveSettings.refresh.trackingSeconds)
                 state["vehicle"] = model.selectedVehicleID ?? ""
                 if let point = buses?.testVisiblePoint(in: mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 32, dy: 32)) {
                     state["busHitID"] = point.id; state["busHitX"] = point.point.x; state["busHitY"] = point.point.y
