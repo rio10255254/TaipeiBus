@@ -554,12 +554,14 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
     }
     func testRouteRetainsItsStopAndShowsApproachingBusesBeforeTheRest() {
         launch(["--test-map-controls", "--preview-route-stop-fixture", "--usability-fixture"])
-        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 90))
+        XCTAssertTrue(button("map-station-expand").waitForExistence(timeout: 90))
         wait("Station camera is settled") { ($0["cameraMoving"] as? Bool) == false }
         let station = camera()["station"] as? String
         let label = app.descendants(matching: .any).matching(identifier: "map-station-inline-label").firstMatch
         XCTAssertLessThan(label.frame.height, 125)
         capture("station-name-and-arrivals-without-a-card")
+        button("map-station-expand").press(forDuration: 0.15)
+        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 5))
         button("map-station-details").press(forDuration: 0.15)
         expandDetails()
         let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-route-")).firstMatch
@@ -579,13 +581,18 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         wait("Back from tracking restores the same boarding stop") { ($0["selectedVehicle"] as? String ?? "") == "" && ($0["routeBoardingStation"] as? String) == station }
         button("transit-details-close").press(forDuration: 0.15)
         wait("Route map is settled with all buses emphasized") { ($0["cameraMoving"] as? Bool) == false && ($0["routeFleetEmphasized"] as? Int ?? 0) >= 3 }
+        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
+        map.pinch(withScale: 0.2, velocity: -2)
+        wait("Zooming out keeps the station label compact") { ($0["stationLabelCompact"] as? Bool) == true }
         capture("route-map-with-emphasized-physical-buses")
     }
     func testStationWalkingStaysInTheAppAndReturnsToTheSamePlatform() {
         launch(["--test-language", "en", "--test-map-controls", "--preview-station-walk-fixture"])
-        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 90))
+        XCTAssertTrue(button("map-station-expand").waitForExistence(timeout: 90))
         wait("Station is ready") { ($0["cameraMoving"] as? Bool) == false }
         let station = camera()["station"] as? String
+        button("map-station-expand").press(forDuration: 0.15)
+        XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 5))
         button("map-station-details").press(forDuration: 0.15); expandDetails()
         let opposite = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-opposite-")).firstMatch
         let walk = button("station-start-walk")

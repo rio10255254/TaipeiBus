@@ -419,5 +419,8 @@
   "官方下一班時間": "Official next-bus time",
   "查看此路線公車": "View route buses",
   "返回路線": "Back to route",
-  "開啟定位設定": "Open location settings"
+  "開啟定位設定": "Open location settings",
+  "已展開": "Expanded",
+  "已收合": "Collapsed",
+  "步行": "Walk"
 }

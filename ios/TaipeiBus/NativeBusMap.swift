@@ -197,7 +197,7 @@ struct NativeBusMap: UIViewRepresentable {
             layer.onSelectedPoint = { [weak self, weak mapView] point in
                 guard let self, let mapView, self.model.selectedVehicleID != nil else { return }
                 let global = point.map { mapView.convert($0, to: nil) }
-                DispatchQueue.main.async { [weak self] in self?.overlay.update(global) }
+                DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: map.zoomLevel) }
             }
             style.addLayer(layer); buses = layer
             stationSource = addStationLayer(id: "selected-station", style: style)
@@ -503,6 +503,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["routeFleetEmphasized"] = buses?.emphasizedIDs.count ?? 0
                 state["routeBoardingStop"] = model.routeBoardingStopID ?? ""
                 state["routeBoardingStation"] = model.routeBoardingStop?.stationID ?? ""
+                state["stationLabelCompact"] = overlay.compactStation
                 state["stationWalkActive"] = model.stationWalk.isActive
                 state["stationWalkPoints"] = model.stationWalk.coordinates.count
                 state["stationWalkTarget"] = model.stationWalk.target?.id ?? ""

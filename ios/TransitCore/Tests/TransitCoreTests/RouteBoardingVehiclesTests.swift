@@ -3,9 +3,23 @@ import XCTest
 
 final class RouteBoardingVehiclesTests: XCTestCase {
     let now = Date(timeIntervalSince1970: 1_800_000_000)
+    func testMapLabelsChangeSidesAtEdgesAndAvoidControls() {
+        let bounds = CGRect(x: 16, y: 140, width: 370, height: 500)
+        let size = CGSize(width: 240, height: 90)
+        let top = CGPoint(x: 35, y: 150)
+        let first = MapLabelPlacement.frame(anchor: top, size: size, inside: bounds)
+        XCTAssertTrue(bounds.contains(first)); XCTAssertGreaterThan(first.minY, top.y)
+        let bottom = CGPoint(x: 220, y: 630)
+        let second = MapLabelPlacement.frame(anchor: bottom, size: size, inside: bounds)
+        XCTAssertTrue(bounds.contains(second)); XCTAssertLessThan(second.maxY, bottom.y)
+        let anchor = CGPoint(x: 200, y: 400)
+        let control = CGRect(x: 80, y: 290, width: 240, height: 100)
+        let third = MapLabelPlacement.frame(anchor: anchor, size: size, inside: bounds, avoiding: [control])
+        XCTAssertFalse(third.intersects(control)); XCTAssertFalse(third.contains(anchor))
+    }
     func testOnlyVerifiedApproachingBusesLeadTheSelectedStop() throws {
         var metadata = TransitMetadata()
-        let route = BusRoute(id: "operator", parentID: "family", name: "630", departure: "起點", destination: "終點")
+        let route = BusRoute(id: "operator", parentID: "family", name: "630", variantName: "630", departure: "起點", destination: "終點")
         metadata.routes[route.id] = route
         let line = RouteLine(coordinates: (0..<8).map { Coordinate(latitude: 25.08, longitude: 121.59 + Double($0) * 0.002) })
         metadata.lines["sub:operator"] = line
