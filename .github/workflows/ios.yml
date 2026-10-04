@@ -14,6 +14,10 @@ on:
         description: 'Also launch iPhone 17 and capture native live-data screenshots'
         type: boolean
         default: false
+      live_audit:
+        description: 'Recheck the live official fleet (disable for UI-only reruns after a passed data audit)'
+        type: boolean
+        default: true
       preview_scope:
         description: 'Choose which iPhone screens to capture'
         type: choice
@@ -84,7 +88,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: Audit complete official route catalog
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.live_audit != false
         run: |
           set -euo pipefail
           export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/live-transit-feeds"
