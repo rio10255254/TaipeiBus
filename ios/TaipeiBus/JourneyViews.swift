@@ -704,7 +704,7 @@ struct JourneyOptionsView: View {
                     HStack {
                         Label(live.text("其他交通方式"), systemImage: "map")
                         Spacer()
-                        if let seconds = planner.alternativeTransitSeconds,
+                        if let seconds = planner.freshAlternativeTransitSeconds,
                            planner.options.first.flatMap({ model.journeyDuration($0, at: Date())?.totalSeconds }).map({ seconds < $0 - 300 }) ?? true {
                             Text("Apple 公運約 \(max(1, Int(ceil(seconds / 60)))) 分").monospacedDigit()
                         }

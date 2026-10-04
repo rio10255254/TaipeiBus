@@ -82,6 +82,10 @@ final class JourneyPlannerModel: ObservableObject {
     private var lastTimingRefresh = Date.distantPast
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var alternativeTransitSeconds: Double?
+    private var alternativeTransitUpdatedAt = Date.distantPast
+    var freshAlternativeTransitSeconds: Double? {
+        Date().timeIntervalSince(alternativeTransitUpdatedAt) <= 120 ? alternativeTransitSeconds : nil
+    }
     private var alternativeTask: Task<Void, Never>?
 
 
@@ -141,11 +145,13 @@ final class JourneyPlannerModel: ObservableObject {
             request.source = TravelPlace(name: "出發地", address: "", coordinate: from).mapItem
             request.destination = TravelPlace(name: "目的地", address: "", coordinate: to).mapItem
             request.transportType = .transit; request.departureDate = Date()
+            let requestedAt = Date()
             let operation = MKDirections(request: request); directions.append(operation)
             defer { directions.removeAll { $0 === operation } }
             if let response = try? await operation.calculateETA(), !Task.isCancelled, token == generation,
                response.transportType == .transit, response.expectedTravelTime.isFinite, response.expectedTravelTime > 0 {
-                alternativeTransitSeconds = response.expectedTravelTime
+                alternativeTransitSeconds = max(response.expectedTravelTime, response.expectedArrivalDate.timeIntervalSince(requestedAt))
+                alternativeTransitUpdatedAt = Date()
             }
         }
     }
