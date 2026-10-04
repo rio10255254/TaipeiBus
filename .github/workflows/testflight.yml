@@ -135,7 +135,7 @@ jobs:
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
             MARKETING_VERSION="$BUS_VERSION" CURRENT_PROJECT_VERSION="$BUS_BUILD_NUMBER" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$BUS_SIGNING_CERTIFICATE_SHA1" \
-            PROVISIONING_PROFILE_SPECIFIER="$BUS_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
+            BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
           ditto -c -k --sequesterRsrc --keepParent \
