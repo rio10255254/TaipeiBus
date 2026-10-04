@@ -699,7 +699,8 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         button("資料來源與地圖設定").tap()
         let toggle = app.switches["app-language-toggle"]
         XCTAssertTrue(toggle.waitForExistence(timeout: 10))
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        let nativeSwitch = toggle.descendants(matching: .switch).firstMatch
+        XCTAssertTrue(nativeSwitch.waitForExistence(timeout: 5)); nativeSwitch.tap()
         XCTAssertEqual(toggle.value as? String, "1")
         XCTAssertTrue(app.navigationBars["Information & settings"].waitForExistence(timeout: 5))
         capture("english-settings-switch")
@@ -741,7 +742,12 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
     func testEnglishNavigationHasAlightingTimeAndStopCount() {
         launch(["--test-language", "en", "--test-map-controls", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--preview-onboard-time-fixture", "--usability-fixture"])
         XCTAssertTrue(button("boarding-vehicle-TEST-01").waitForExistence(timeout: 90))
-        button("boarding-vehicle-TEST-01").tap(); button("journey-board").tap()
+        capture("english-before-following")
+        button("boarding-vehicle-TEST-01").tap()
+        waitProbe("map-camera-state") { !($0["selectedVehicle"] as? String ?? "").isEmpty && ($0["following"] as? Bool) == true }
+        XCTAssertEqual(button("boarding-vehicle-TEST-01").value as? String, "Following")
+        capture("english-following-before-boarding")
+        button("journey-board").tap()
         let summary = app.staticTexts["journey-alighting-time"]
         XCTAssertTrue(summary.waitForExistence(timeout: 10))
         XCTAssertTrue(summary.label.contains("stops left")); XCTAssertTrue(summary.label.contains("min"))

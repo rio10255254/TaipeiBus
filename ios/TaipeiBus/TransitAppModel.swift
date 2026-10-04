@@ -84,6 +84,9 @@ final class TransitAppModel: ObservableObject {
     }
     func setLanguage(_ value: AppLanguage) {
         guard value != language else { return }
+#if DEBUG
+        debugActions.append("language:" + value.rawValue)
+#endif
         defaults.set(value.rawValue, forKey: AppLanguage.preferenceKey)
         language = value
         location.updateSettings(presentationSettings)
@@ -100,6 +103,7 @@ final class TransitAppModel: ObservableObject {
     private let defaults = UserDefaults.standard
     private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
+    private(set) var debugActions: [String] = []
     private var previewSelectionApplied = false
     private var cityFixtureTask: Task<Void, Never>?
     @Published private(set) var previewNotice: String?
@@ -348,6 +352,9 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
+#if DEBUG
+        debugActions.append("clear-selection")
+#endif
         let returningToCity = cityFleetMode && (selectedVehicleID != nil || selectedRouteID != nil || selectedStationID != nil)
         selectedVehicleID = nil; selectedRouteID = nil; allRouteVariants = true; selectedStationID = nil; following = false
         sheetDetent = .height(330)
@@ -445,6 +452,9 @@ final class TransitAppModel: ObservableObject {
 
     func boardCurrentRide() {
         guard let ride = planner.activeRide else { return }
+#if DEBUG
+        debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
+#endif
         boardedAt = Date()
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
@@ -502,6 +512,9 @@ final class TransitAppModel: ObservableObject {
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
+#if DEBUG
+        debugActions.append("track:" + vehicle.plate)
+#endif
         walkingMapIndex = nil
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
         selectedStationID = nil; direction = vehicle.direction; following = true

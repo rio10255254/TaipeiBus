@@ -429,6 +429,10 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testLanguageSwitchPreservesFollowingAndPersistsAfterRelaunch'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
               '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
@@ -471,7 +475,9 @@ jobs:
             test -n "$BUS_STORE_VEHICLE_ROUTE"
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE="$BUS_STORE_VEHICLE_ROUTE"
           fi
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+          recorder=()
+          if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \

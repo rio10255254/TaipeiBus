@@ -410,6 +410,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["following"] = model.following
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
+                state["actions"] = Array(model.debugActions.suffix(12))
                 if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
                     state["reduceMotion"] = reduceMotion
                     state["transitions"] = cameraTransitions.map { trace in
