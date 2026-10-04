@@ -399,6 +399,10 @@ struct NativeBusMap: UIViewRepresentable {
                     "userFanAngle": locationMarker.directionAngle,
                     "stationSymbol": mapView.style?.layer(withIdentifier: "nearby-station-dots") is MLNSymbolStyleLayer]
                 state["cityMode"] = model.cityFleetMode
+                state["selectedVehicle"] = model.selectedVehicleID ?? ""
+                state["following"] = model.following
+                state["language"] = model.language.rawValue
+                state["selectedJourney"] = model.planner.selectedID ?? ""
                 state["darkMode"] = darkMode
                 state["themeBackground"] = darkMode ? "#10151D" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier

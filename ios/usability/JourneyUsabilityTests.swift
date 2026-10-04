@@ -586,6 +586,110 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
     }
 }
 
+final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
+    private func probe(_ id: String) -> [String: Any] {
+        guard let data = app.staticTexts[id].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func waitProbe(_ id: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.staticTexts[id].exists && condition(self.probe(id))
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 160), .completed)
+    }
+    func testEnglishBrowsingShowsOfficialTimesWithBilingualStops() {
+        launch(["--test-language", "en", "--preview-browse-fixture", "--preview-cooperated-fixture", "--preview-details", "--usability-fixture"])
+        let official = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "browse-official-arrival-")).firstMatch
+        XCTAssertTrue(official.waitForExistence(timeout: 90))
+        for _ in 0..<3 { if official.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(official.isHittable)
+        XCTAssertTrue(official.label.contains("min") || official.label == "Time unavailable")
+        XCTAssertTrue(app.staticTexts["Official arrival times"].exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "stops left")).firstMatch.exists)
+        capture("english-official-browse-and-bilingual-stops")
+    }
+    func testLanguageSwitchPreservesFollowingAndPersistsAfterRelaunch() {
+        let flags = ["--test-map-controls", "--test-journey-selection", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--usability-fixture"]
+        launch(flags)
+        XCTAssertTrue(button("boarding-vehicle-TEST-01").waitForExistence(timeout: 90)); button("boarding-vehicle-TEST-01").tap()
+        waitProbe("map-camera-state") { ($0["following"] as? Bool) == true }
+        let before = probe("map-camera-state")
+        button("資料來源與地圖設定").tap()
+        let toggle = app.switches["app-language-toggle"]
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10)); toggle.tap()
+        XCTAssertTrue(app.navigationBars["Information & settings"].waitForExistence(timeout: 5))
+        capture("english-settings-switch")
+        button("Done").tap()
+        waitProbe("map-camera-state") { ($0["language"] as? String) == "en" && ($0["following"] as? Bool) == true }
+        let after = probe("map-camera-state")
+        XCTAssertEqual(after["selectedVehicle"] as? String, before["selectedVehicle"] as? String)
+        XCTAssertEqual(after["selectedJourney"] as? String, before["selectedJourney"] as? String)
+        XCTAssertEqual(after["zoom"] as? Double ?? 0, before["zoom"] as? Double ?? 0, accuracy: 0.15)
+        XCTAssertTrue(button("journey-board").label.contains("on board"))
+        capture("english-switch-preserves-followed-bus")
+        app.terminate(); launch(flags + ["--persist-language-preference"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
+        XCTAssertTrue(button("journey-board").label.contains("on board"))
+        button("Information and settings").tap(); app.switches["app-language-toggle"].tap(); button("完成").tap()
+        XCTAssertEqual(button("journey-board").label, "已上車")
+    }
+    func testEnglishRouteAndStopSearch() {
+        launch(["--test-language", "en", "--test-map-controls"])
+        XCTAssertTrue(button("Routes").waitForExistence(timeout: 90)); button("Routes").tap()
+        XCTAssertTrue(button("route-key-藍").waitForExistence(timeout: 10))
+        XCTAssertEqual(button("route-key-藍").label, "Blue")
+        button("route-key-藍").tap(); button("route-key-2").tap(); button("route-key-7").tap()
+        let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "route-result-")).firstMatch
+        XCTAssertTrue(route.waitForExistence(timeout: 15)); XCTAssertTrue(route.label.lowercased().contains("blue27"))
+        capture("english-route-keypad-and-endpoints")
+        button("Stops").tap()
+        let field = app.textFields["transit-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap()
+        if button("Clear search").exists { button("Clear search").tap() }
+        field.typeText("Neihu Station")
+        let stop = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-result-")).firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 20)); XCTAssertTrue(stop.label.lowercased().contains("neihu")); XCTAssertTrue(stop.label.contains("內湖"))
+        capture("english-neihu-search-with-chinese-comparison")
+    }
+    func testEnglishNavigationHasAlightingTimeAndStopCount() {
+        launch(["--test-language", "en", "--test-map-controls", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--preview-onboard-time-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("boarding-vehicle-TEST-01").waitForExistence(timeout: 90))
+        button("boarding-vehicle-TEST-01").tap(); button("journey-board").tap()
+        let summary = app.staticTexts["journey-alighting-time"]
+        XCTAssertTrue(summary.waitForExistence(timeout: 10))
+        XCTAssertTrue(summary.label.contains("stops left")); XCTAssertTrue(summary.label.contains("min"))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))
+        capture("english-onboard-bilingual-count-and-time")
+        button("journey-ride-stops").tap()
+        XCTAssertTrue(app.navigationBars["Upcoming stops"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["Alight here"].exists)
+        capture("english-upcoming-stops-with-chinese-signs")
+        button("journey-stops-done").tap(); button("journey-options").tap()
+        XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].label.contains("Remaining"))
+        capture("english-onboard-trip-details")
+    }
+    func testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival() {
+        launch(["--test-language", "en", "--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
+        waitProbe("journey-timing-state") { ($0["checking"] as? Bool) == false && ($0["options"] as? [[String: Any]] ?? []).count > 0 }
+        button("journey-options").tap()
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 10))
+        let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
+        XCTAssertTrue((1...3).contains(options.count))
+        for index in 0..<options.count {
+            let item = options.element(boundBy: index)
+            XCTAssertTrue(item.isHittable)
+            XCTAssertTrue(item.label.contains("Travel") && item.label.contains("Wait") && item.label.contains("Arriv"))
+            XCTAssertFalse(item.label.contains("候車")); XCTAssertTrue(item.label.contains("內湖"))
+        }
+        capture("english-real-neihu-compact-options")
+        firstOption.tap()
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
+        capture("english-real-neihu-waiting-and-arrival")
+    }
+}
+
 final class ContinuousGpsUsabilityTests: JourneyUsabilityTestBase {
     private func state() -> [String: Any] {
         guard let bytes = app.staticTexts["map-camera-state"].label.data(using: .utf8),

@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -48,7 +48,7 @@ env:
 jobs:
   simulator:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.usability_scope == 'english-mode' && 40 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -58,6 +58,7 @@ jobs:
           ruby -c ios/apple-connect.rb
           ruby ios/release/apple_client_test.rb
           python3 ios/release-check.py
+          python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
         if: inputs.usability_scope != 'routing-only'
@@ -423,6 +424,11 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'english-mode' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
@@ -467,7 +473,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify system dark appearance with native journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard')
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -485,6 +491,11 @@ jobs:
             selection=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'english-mode' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
@@ -493,7 +504,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard')
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode')
         run: python3 ios/usability/verify-appearance.py
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')
