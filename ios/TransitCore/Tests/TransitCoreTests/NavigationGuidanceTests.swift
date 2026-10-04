@@ -280,8 +280,12 @@ final class NavigationGuidanceTests: XCTestCase {
         for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape"] {
             feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
         }
-        let metadata = try FeedDecoder.metadata(feeds: feeds), date = Date()
+        let metadata = try FeedDecoder.metadata(feeds: feeds)
         let data = try Data(contentsOf: root.appendingPathComponent("GetBusData.json"))
+        // These files were captured before the other network audits. Replay this
+        // snapshot at its source time; elapsed CI work is not vehicle staleness.
+        // The +121-second assertion below still verifies genuine expiry.
+        let date = try XCTUnwrap(FeedDecoder.rows(data).1)
         let vehicles = try FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date).vehicles
         var forecast = VehicleArrivalForecast(); forecast.ingest(vehicles, metadata: metadata, at: date)
         var buses = 0, predictions = 0

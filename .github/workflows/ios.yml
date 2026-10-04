@@ -85,6 +85,7 @@ jobs:
       - name: Audit complete official route catalog
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
         run: |
+          set -euo pipefail
           export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/live-transit-feeds"
           python3 - <<'PY'
           import concurrent.futures, gzip, os

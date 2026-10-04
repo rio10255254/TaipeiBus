@@ -4,7 +4,7 @@ import MapKit
 #endif
 @testable import TransitCore
 
-/// Diagnostic evidence for the recommendation audit; does not change shipped routing behavior.
+/// Recommendation regressions and explicit live-data diagnostic evidence.
 final class RouteRecommendationAuditTests: XCTestCase {
     private func source() -> TransitMetadata {
         var value = TransitMetadata()
@@ -57,7 +57,7 @@ final class RouteRecommendationAuditTests: XCTestCase {
         let pending = TripRanking.assess(riding: [600], walking: [90, 90], arrivals: [-1])
         XCTAssertEqual(unknown.waitingSeconds, 480)
         XCTAssertEqual(pending.waitingSeconds, 900)
-        print("Recommendation audit: first bus ETA 120 sec and walk 140 sec still treated as catchable; unknown next service uses 8 min, not-departed uses 15 min without route headway.")
+        print("Recommendation guard verified: ETA 120 sec with walk 140 sec is missed; absent headways use comparison costs only and do not promise an arrival clock.")
     }
 
     #if canImport(MapKit)
