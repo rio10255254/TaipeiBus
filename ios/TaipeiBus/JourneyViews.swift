@@ -675,8 +675,11 @@ struct JourneyOptionsView: View {
             ForEach(planner.options) { option in
                 Button { planner.select(option); collapse() } label: {
                     VStack(alignment: .leading, spacing: 4) {
+                        if live.language == .english, let label = planner.optionLabels[option.id], !option.walkingOnly {
+                            Text(live.text(label)).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
+                        }
                         HStack(spacing: 6) {
-                            if let label = planner.optionLabels[option.id], !option.walkingOnly {
+                            if live.language != .english, let label = planner.optionLabels[option.id], !option.walkingOnly {
                                 Text(live.text(label)).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
                             }
                             if option.walkingOnly { Label(live.text("步行即可"), systemImage: "figure.walk").liveFont(.headline) }

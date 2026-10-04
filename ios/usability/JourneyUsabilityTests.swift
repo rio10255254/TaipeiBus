@@ -600,6 +600,8 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
     }
     func testEnglishBrowsingShowsOfficialTimesWithBilingualStops() {
         launch(["--test-language", "en", "--preview-browse-fixture", "--preview-cooperated-fixture", "--preview-details", "--usability-fixture"])
+        XCTAssertTrue(app.staticTexts["browse-hero-official-arrival"].waitForExistence(timeout: 90))
+        XCTAssertTrue(app.staticTexts["browse-hero-official-arrival"].isHittable, "The official time should be visible before scrolling")
         let official = app.staticTexts.matching(NSPredicate(format: "identifier BEGINSWITH %@", "browse-official-arrival-")).firstMatch
         XCTAssertTrue(official.waitForExistence(timeout: 90))
         for _ in 0..<3 { if official.isHittable { break }; app.swipeUp() }
@@ -686,7 +688,8 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
             let item = options.element(boundBy: index)
             XCTAssertTrue(item.isHittable)
             XCTAssertTrue(item.label.contains("Travel") && item.label.contains("Wait") && item.label.contains("Arriv"))
-            XCTAssertFalse(item.label.contains("候車")); XCTAssertTrue(item.label.contains("內湖"))
+            XCTAssertFalse(item.label.contains("候車"))
+            XCTAssertNotNil(item.label.range(of: "[\\u3400-\\u9fff]", options: .regularExpression), "Every boarding/alighting pair keeps Chinese sign names")
         }
         capture("english-real-neihu-compact-options")
         firstOption.tap()

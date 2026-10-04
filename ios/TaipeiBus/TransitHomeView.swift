@@ -882,11 +882,25 @@ private struct VehicleDetails: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 15) {
             Text(AppText.text("往 %@", vehicle.localizedDestination)).liveFont(.headline)
+            if !model.planner.started, let next = model.upcomingStops.first {
+                TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(live.text("官方下一班")).liveFont(.caption).foregroundStyle(.secondary)
+                            BilingualName(next.stop).liveFont(.subheadline, weight: .semibold).lineLimit(2)
+                        }
+                        Spacer(minLength: 4)
+                        Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: next.stop.id, at: timeline.date)))
+                            .liveFont(.title, weight: .semibold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.75)
+                            .accessibilityIdentifier("browse-hero-official-arrival")
+                    }
+                }
+            }
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let fresh = vehicle.hasReliablePosition(at: timeline.date)
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").liveFont(.largeTitle, weight: .semibold, design: .rounded).monospacedDigit()
+                        Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").liveFont(.subheadline, weight: .semibold, design: .rounded).monospacedDigit()
                         Text(live.text("GPS 回報 km/h")).liveFont(.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 5) {
