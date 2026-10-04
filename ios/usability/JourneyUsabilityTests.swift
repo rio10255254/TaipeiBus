@@ -408,6 +408,85 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
     }
 }
 
+final class AnimationUsabilityTests: JourneyUsabilityTestBase {
+    var map: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func camera() -> [String: Any] {
+        let value = app.staticTexts["map-camera-state"].label
+        guard let data = value.data(using: .utf8), let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return state
+    }
+    func wait(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 90), .completed, description + String(describing: camera()))
+    }
+    func assertContinuousCamera(_ state: [String: Any]) {
+        let traces = state["transitions"] as? [[String: Any]] ?? []
+        let moving = traces.filter { trace in
+            let samples = trace["samples"] as? [[String: Double]] ?? []
+            let target = trace["targetZoom"] as? Double ?? 0
+            return (trace["duration"] as? Double ?? 0) > 0 && abs((samples.first?["zoom"] ?? 0) - target) > 1 &&
+                abs((samples.last?["zoom"] ?? 99) - target) < 0.03
+        }
+        XCTAssertFalse(moving.isEmpty, "A zoom-changing camera transition must be measured.")
+        for trace in moving {
+            let samples = trace["samples"] as? [[String: Double]] ?? []
+            let start = samples.first?["zoom"] ?? 0, target = trace["targetZoom"] as? Double ?? 0
+            let span = target - start
+            let intermediate = samples.filter { sample in
+                let progress = ((sample["zoom"] ?? start) - start) / span
+                return progress > 0.05 && progress < 0.95
+            }
+            XCTAssertGreaterThanOrEqual(intermediate.count, 3, "The map must render intermediate viewpoints, not jump straight to the end.")
+        }
+        let attachment = XCTAttachment(string: String(describing: traces))
+        attachment.name = "measured-camera-transition-frames"; attachment.lifetime = .keepAlways; add(attachment)
+    }
+    func testCityCameraMovesContinuouslyAndReturnsToTheSameView() {
+        launch(["--test-map-controls", "--test-transitions", "--city-fleet-fixture", "--usability-fixture"])
+        wait("Controlled fleet is ready") { ($0["fleetInput"] as? Int) == 2500 }
+        let local = camera()
+        button("city-fleet-toggle").tap()
+        wait("City framing settles") { state in
+            let trace = (state["transitions"] as? [[String: Any]])?.last
+            return state["cityMode"] as? Bool == true && abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03 &&
+                ((trace?["samples"] as? [[String: Double]])?.count ?? 0) > 10
+        }
+        let overview = camera(); assertContinuousCamera(overview); capture("continuous-city-camera-and-subtle-controls")
+        XCTAssertNotNil(overview["busHitID"])
+        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: overview["busHitX"] as? Double ?? -10,
+            dy: overview["busHitY"] as? Double ?? -10)).tap()
+        wait("The selected bus remains centered") { ($0["pitch"] as? Double ?? 0) > 56 && !($0["selectedVehicle"] as? String ?? "").isEmpty }
+        button("關閉選取").tap()
+        wait("Returning restores the city overview") {
+            ($0["selectedVehicle"] as? String ?? "") == "" && abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.03
+        }
+        assertContinuousCamera(camera())
+        button("city-fleet-toggle").tap()
+        wait("Leaving restores the original local view") {
+            ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
+        }
+        assertContinuousCamera(camera()); capture("local-view-restored-after-city-animation")
+    }
+    func testReduceMotionPreservesFramingWithoutAnimatedTravel() {
+        launch(["--test-map-controls", "--test-transitions", "--test-reduce-motion", "--city-fleet-fixture", "--usability-fixture"])
+        wait("Controlled fleet is ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["reduceMotion"] as? Bool) == true }
+        let local = camera()
+        button("city-fleet-toggle").tap()
+        wait("City appears at its target without animated travel") { state in
+            let trace = (state["transitions"] as? [[String: Any]])?.last
+            return state["cityMode"] as? Bool == true && (trace?["duration"] as? Double) == 0 &&
+                abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03
+        }
+        capture("reduce-motion-city-view")
+        button("city-fleet-toggle").tap()
+        wait("Reduce Motion also restores the local view") {
+            ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
+        }
+        let traces = camera()["transitions"] as? [[String: Any]] ?? []
+        XCTAssertTrue(traces.allSatisfy { ($0["duration"] as? Double) == 0 })
+    }
+}
+
 final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
     var map: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
     func camera() -> [String: Any] {
@@ -672,7 +751,9 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.navigationBars["Upcoming stops"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["Alight here"].exists)
         capture("english-upcoming-stops-with-chinese-signs")
-        button("journey-stops-done").tap(); button("journey-options").tap()
+        button("journey-stops-done").tap()
+        XCTAssertTrue(app.navigationBars["Upcoming stops"].waitForNonExistence(timeout: 10))
+        button("journey-options").tap()
         XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].label.contains("Remaining"))
         capture("english-onboard-trip-details")

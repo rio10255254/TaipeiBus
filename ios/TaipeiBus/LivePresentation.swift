@@ -66,6 +66,22 @@ extension View {
     }
 }
 
+/// Animate discrete interface changes without animating every GPS or countdown update.
+private struct SmoothChange<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let value: Value
+    func body(content: Content) -> some View {
+        content.contentTransition(reduceMotion ? .identity : .opacity)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: value)
+    }
+}
+extension View {
+    func smoothChanges<Value: Equatable>(_ value: Value) -> some View { modifier(SmoothChange(value: value)) }
+    func secondaryAction() -> some View {
+        buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+    }
+}
+
 /// Published English names keep their Chinese sign text visible as a smaller
 /// second line. Route/stop identifiers and search keys never change language.
 struct BilingualName: View {
@@ -81,6 +97,6 @@ struct BilingualName: View {
             if live.language == .english, !english.isEmpty, english != chinese {
                 Text(chinese).liveFont(.caption).foregroundStyle(.secondary)
             }
-        }.accessibilityElement(children: .combine)
+        }.accessibilityElement(children: .combine).smoothChanges(live.language)
     }
 }

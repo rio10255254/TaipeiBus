@@ -118,9 +118,9 @@ struct TransitHomeView: View {
                             }
                         }
                         Button { showDetails = true } label: {
-                            Text(AppText.text("%@ 輛可定位 · 查看公車", model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count))
+                            Label(AppText.text("%@ 輛可定位 · 查看公車", model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
                                 .liveFont(.subheadline, weight: .medium).frame(minHeight: 44)
-                        }
+                        }.secondaryAction()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .shadow(color: .white, radius: 4)
@@ -158,6 +158,7 @@ struct TransitHomeView: View {
                         Text(live.text(message)).liveFont(.caption).padding(10)
                             .background(.regularMaterial, in: Capsule())
                     }
+                    Group {
                     if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
@@ -173,6 +174,11 @@ struct TransitHomeView: View {
                                 .contentShape(Capsule())
                         }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                     }
+                    }
+                    .smoothChanges(planner.currentStep)
+                    .smoothChanges(planner.started)
+                    .smoothChanges(planner.selectedID)
+                    .smoothChanges(model.language)
                     if !nearbyStations.isEmpty, let position = location.usableCoordinate {
                         HStack(spacing: 10) {
                             ForEach(nearbyStations) { station in
@@ -501,6 +507,7 @@ private struct TransitPanel: View {
             }
             if isBrowsing, model.mode == .routes, !systemRouteKeyboard {
                 RouteSearchKeypad(query: $model.query) { systemRouteKeyboard = true; searchFocused = true }
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
         .padding(.top, 16 * CGFloat(live.appearance.spacingScale))
@@ -508,6 +515,10 @@ private struct TransitPanel: View {
 
     var body: some View {
         panelContent
+        .smoothChanges(model.mode)
+        .smoothChanges(systemRouteKeyboard)
+        .smoothChanges(isBrowsing)
+        .smoothChanges(model.language)
         .onAppear {
             if browseOnly {
                 searchFocused = false
@@ -647,7 +658,7 @@ private struct TransitPanel: View {
                         }
                         Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                     }.padding(.vertical, 15 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityIdentifier("station-result-" + station.id)
+                }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("station-result-" + station.id)
                 Divider()
             }
         } else if model.mode == .routes {
@@ -672,7 +683,7 @@ private struct TransitPanel: View {
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
                     }.padding(.vertical, 12 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-                }.buttonStyle(.plain).accessibilityIdentifier("route-result-" + route.id)
+                }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-result-" + route.id)
                 Divider()
             }
         }
@@ -747,13 +758,14 @@ private struct StationDetails: View {
                     Button { model.selectStation(opposite) } label: {
                         Label(AppText.text("改看%@站牌", opposite.localizedBearing), systemImage: "arrow.left.arrow.right")
                             .liveFont(.subheadline).frame(minHeight: 44)
-                    }
+                    }.secondaryAction()
                 }
                 Button {
                     let item = MKMapItem(placemark: MKPlacemark(coordinate: station.coordinate.locationCoordinate))
                     item.name = station.localizedName
                     item.openInMaps(launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeWalking])
                 } label: { Label(live.text("步行到這個站牌"), systemImage: "figure.walk").liveFont(.subheadline, weight: .medium).frame(minHeight: 44) }
+                    .secondaryAction()
                     .padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
                 HStack {
                     Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
@@ -776,6 +788,7 @@ private struct StationDetails: View {
                                 Text(EstimateFeed.label(row.estimateSeconds))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
+                                Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).frame(minHeight: 44)
                         if !row.approaches.isEmpty {
@@ -952,6 +965,7 @@ private struct VehicleDetails: View {
                 Button {
                     if let station = model.metadata.stations[stop.stationID] { model.selectStation(station) }
                 } label: { Label(live.text("查看此站到站預估"), systemImage: "mappin.and.ellipse").frame(minHeight: 44) }
+                    .secondaryAction()
             }
         }
     }
@@ -1038,6 +1052,7 @@ private struct AppInformationView: View {
                         .accessibilityIdentifier("app-support")
                 }
             }
+            .smoothChanges(model.language)
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }
         }

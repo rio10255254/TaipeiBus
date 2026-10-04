@@ -49,7 +49,7 @@ struct NativeBusMap: UIViewRepresentable {
         context.coordinator.darkMode = colorScheme == .dark
         let inset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
         let viewportChanged = map.contentInset != inset
-        if viewportChanged { map.contentInset = inset }
+        if viewportChanged { map.setContentInset(inset, animated: !reduceMotion) }
         context.coordinator.update(location: location, viewportChanged: viewportChanged)
     }
 
@@ -95,6 +95,13 @@ struct NativeBusMap: UIViewRepresentable {
         private var beforeCityCamera: MLNMapCamera?
 #if DEBUG
         private var lastTestCameraAt: CFTimeInterval = 0
+        private struct CameraTransitionTrace {
+            let started: CFTimeInterval
+            let duration: Double
+            let targetZoom: Double
+            var samples: [[String: Double]] = []
+        }
+        private var cameraTransitions: [CameraTransitionTrace] = []
 #endif
         private var positionedInitialCamera = false
         private var lastAppearance: LiveSettings.Appearance?
@@ -231,7 +238,7 @@ struct NativeBusMap: UIViewRepresentable {
             let refit = viewportChanged && !model.mapWasMoved && model.focus != nil &&
                 (model.selectedVehicleID == nil || model.following)
             if (lastFocusRevision != model.focusRevision || refit), map.bounds.width > 0, map.bounds.height > 0 {
-                focus(model.focus, map: map, animated: lastFocusRevision != model.focusRevision)
+                focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.28)
                 lastFocusRevision = model.focusRevision
             }
             guard buses != nil else { return }
@@ -403,6 +410,12 @@ struct NativeBusMap: UIViewRepresentable {
                 state["following"] = model.following
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
+                if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
+                    state["reduceMotion"] = reduceMotion
+                    state["transitions"] = cameraTransitions.map { trace in
+                        ["duration": trace.duration, "targetZoom": trace.targetZoom, "samples": trace.samples] as [String: Any]
+                    }
+                }
                 state["darkMode"] = darkMode
                 state["themeBackground"] = darkMode ? "#10151D" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
@@ -455,31 +468,26 @@ struct NativeBusMap: UIViewRepresentable {
             return feature
         }
 
-        private func focus(_ focus: MapFocus?, map: MLNMapView, animated: Bool = true) {
+        private func focus(_ focus: MapFocus?, map: MLNMapView, duration: Double = 0.65) {
             guard let focus else { return }
             switch focus {
             case .coordinate(let position):
-                showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, animated: animated)
+                showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
             case .station(let id):
                 guard let station = model.metadata.stations[id] else { return }
-                showPoint(station.coordinate, altitude: 480, heading: 0, pitch: 0, map: map, animated: animated)
+                showPoint(station.coordinate, altitude: 480, heading: 0, pitch: 0, map: map, duration: duration)
             case .userLocation:
                 guard let point = model.location.displayCoordinate, point.isInServiceArea else { return }
                 let heading = model.userMapMode == .heading ? model.location.currentHeading ?? map.direction : 0
                 showPoint(point, altitude: 600, heading: heading, pitch: model.userMapMode == .heading ? 45 : 0,
-                          map: map, animated: animated)
+                          map: map, duration: duration)
             case .vehicle(let id):
                 guard let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else { return }
                 let position = buses?.pose(id: id, time: CACurrentMediaTime(), now: Date())?.coordinate ?? bus.coordinate
                 if model.cityFleetMode, cityCamera == nil { cityCamera = savedCamera(map.camera) }
-                // A panel can resize during the initial camera animation. Reapply
-                // vehicle framing immediately once the new viewport is laid out.
-                let animate = animated && !reduceMotion
-                followSuspendedUntil = CACurrentMediaTime() + (animate ? 0.7 : 0)
-                map.setCamera(MLNMapCamera(lookingAtCenter: position.locationCoordinate,
+                moveCamera(MLNMapCamera(lookingAtCenter: position.locationCoordinate,
                                           altitude: 245, pitch: 57, heading: map.direction),
-                              withDuration: animate ? 0.65 : 0,
-                              animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut), completionHandler: nil)
+                           map: map, duration: duration)
             case .route(let id):
                 var coordinates = model.metadata.displayPaths(routeID: id, direction: model.direction,
                                                                allVariants: model.allRouteVariants).flatMap { $0 }
@@ -488,21 +496,22 @@ struct NativeBusMap: UIViewRepresentable {
                                                                allVariants: model.allRouteVariants).map(\.coordinate)
                 }
                 if coordinates.isEmpty { coordinates = model.routeVehicles().map(\.coordinate) }
-                fit(coordinates, map: map)
-            case .journey(let coordinates): fit(coordinates, map: map)
+                if let camera = fittedCamera(coordinates, map: map) { moveCamera(camera, map: map, duration: duration) }
+            case .journey(let coordinates):
+                if let camera = fittedCamera(coordinates, map: map) { moveCamera(camera, map: map, duration: duration) }
             case .cityOverview:
                 if beforeCityCamera == nil { beforeCityCamera = savedCamera(map.camera) }
                 cityCamera = nil
                 let points = model.cityVehicles.map(\.coordinate)
                 let defaults = [Coordinate(latitude: 24.99, longitude: 121.43), Coordinate(latitude: 25.15, longitude: 121.68)]
-                fit(points.isEmpty ? defaults : points, map: map)
-                let camera = map.camera; camera.pitch = 0; camera.heading = 0
-                map.setCamera(camera, animated: false)
-                cityCamera = savedCamera(map.camera)
+                if let camera = fittedCamera(points.isEmpty ? defaults : points, map: map, pitch: 0) {
+                    cityCamera = savedCamera(camera)
+                    moveCamera(camera, map: map, duration: duration)
+                }
             case .returnToCity:
-                if let cityCamera { map.setCamera(savedCamera(cityCamera), animated: false) }
+                if let cityCamera { moveCamera(savedCamera(cityCamera), map: map, duration: duration) }
             case .leaveCity:
-                if let beforeCityCamera { map.setCamera(savedCamera(beforeCityCamera), animated: false) }
+                if let beforeCityCamera { moveCamera(savedCamera(beforeCityCamera), map: map, duration: duration) }
                 cityCamera = nil; beforeCityCamera = nil
             }
         }
@@ -511,23 +520,47 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func showPoint(_ point: Coordinate, altitude: Double, heading: Double, pitch: Double,
-                               map: MLNMapView, animated: Bool) {
-            followSuspendedUntil = CACurrentMediaTime() + (animated && !reduceMotion ? 0.65 : 0)
-            map.setCamera(MLNMapCamera(lookingAtCenter: point.locationCoordinate, altitude: altitude, pitch: pitch, heading: heading),
-                withDuration: animated && !reduceMotion ? 0.6 : 0,
+                               map: MLNMapView, duration: Double) {
+            moveCamera(MLNMapCamera(lookingAtCenter: point.locationCoordinate, altitude: altitude, pitch: pitch, heading: heading),
+                       map: map, duration: duration)
+        }
+
+        private func moveCamera(_ camera: MLNMapCamera, map: MLNMapView, duration: Double) {
+            let seconds = reduceMotion ? 0 : duration
+            followSuspendedUntil = CACurrentMediaTime() + seconds + (seconds > 0 ? 0.04 : 0)
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
+                cameraTransitions.append(CameraTransitionTrace(started: CACurrentMediaTime(), duration: seconds,
+                    targetZoom: MLNZoomLevelForAltitude(camera.altitude, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)))
+                if cameraTransitions.count > 8 { cameraTransitions.removeFirst() }
+                recordCameraSample(map)
+            }
+#endif
+            map.setCamera(camera, withDuration: seconds,
                 animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut), completionHandler: nil)
         }
 
-        private func fit(_ coordinates: [Coordinate], map: MLNMapView) {
+        private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return }
-            map.setCamera(MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate,
-                                      altitude: 1000, pitch: model.stationBrowsing ? 0 : 35, heading: 0), animated: false)
-            map.setCenter(overview.center.locationCoordinate, zoomLevel: overview.zoom, animated: false)
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return nil }
+            let pitch = requestedPitch ?? (model.stationBrowsing ? 0 : 35)
+            // Convert the existing verified framing to one camera, so center, zoom,
+            // tilt and padding travel together instead of two instantaneous moves.
+            let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)
+            return MLNMapCamera(lookingAtCenter: overview.center.locationCoordinate, altitude: altitude, pitch: pitch, heading: 0)
         }
 
 #if DEBUG
+        private func recordCameraSample(_ map: MLNMapView) {
+            guard let index = cameraTransitions.indices.last else { return }
+            let elapsed = CACurrentMediaTime() - cameraTransitions[index].started
+            guard elapsed <= cameraTransitions[index].duration + 0.3, cameraTransitions[index].samples.count < 120 else { return }
+            cameraTransitions[index].samples.append(["t": elapsed, "zoom": map.zoomLevel,
+                "latitude": map.centerCoordinate.latitude, "longitude": map.centerCoordinate.longitude,
+                "pitch": map.camera.pitch])
+        }
+
         private func recordPreviewCamera(_ map: MLNMapView, fullyRendered: Bool) {
             let arguments = ProcessInfo.processInfo.arguments
             guard fullyRendered, (model.selectedRoute != nil || model.planner.selected != nil), model.selectedVehicleID == nil,
@@ -556,6 +589,9 @@ struct NativeBusMap: UIViewRepresentable {
 
         @objc private func tick(_ link: CADisplayLink) {
             guard model.isActive, let map else { return }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(map) }
+#endif
             let now = CACurrentMediaTime(), date = Date()
             let dt = lastTickTime > 0 ? min(0.1, max(0.001, now - lastTickTime)) : 1 / 60
             lastTickTime = now
