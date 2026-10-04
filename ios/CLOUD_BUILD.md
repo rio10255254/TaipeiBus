@@ -1,6 +1,6 @@
 # TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
-更新：2026-10-04。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
+更新：2026-10-05。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
 ## 公開 App Store 發佈
 
@@ -17,6 +17,20 @@
 `TestFlight` 工作流程支援 `store-audit`（唯讀）、`store-prepare`（將文案及指定有效 build 寫入可編輯版本）、`store-verify`（驗證台灣零元供應及完成處理的截圖）。`store-prepare` 必須提供 `resume_build`，審查聯絡資料來自 `APP_STORE_REVIEW_CONTACT` Secret；回條及製作紀錄不輸出私人聯絡內容。Apple 的 App 隱私權問卷仍需網站操作。
 
 商店前三張依序為 3D 跟車、公車導航、沿途逐站時間，總共七張圖片均已完成 Apple 處理。商店圖片以 iPhone 17 Pro Max 真正執行 App 拍攝，1320 × 2868 RGB；公車位置和時間使用官方即時資料，僅乘客定位由模擬器提供。`app-store-features` 拍攝實際公車的 3D 跟車、搭車引導及沿途到站預估；不使用測試公車或編造到站資料。沒有即時營運車輛時應等待有效資料，不以測試資料替代。Apple API 的 `APP_IPHONE_67` 對應目前網站的 6.9 吋截圖欄位。
+
+## TestFlight 1.1.7：連貫縮放、步行定位與深色閱讀
+
+`1.1.7 (39.1.0)` 已於 2026-10-05 03:45（台灣時間）上傳，並完成 Apple 處理及加入既有內部測試群組。來源 `bcfff57cf90f06c12416ec148b3c9b3e75fb93ae`，[發布回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37229118944)確認 `upload_confirmed=true`、`status=internal_group_assigned`、App 與群組身分。僅供 TestFlight；草稿 PR 保留未合併，正式商店設定、公開網站和共享內容設定未修改。
+
+縮放結束以前，面板重排、跟車及建築避讓不再同時改寫鏡頭；改用真正的鏡頭完成事件接續，並按縮放距離調整速度。可視範圍外的公車略過逐幀位置計算，仍保留會穿過視野的完整軌跡及選定車輛；不更改已收到 GPS 的移動規則。隱藏的附近站名不再重算、建築淡入淡出交給地圖處理，地圖與跟車更新上限為 60 Hz，低耗電及減少動態效果為 30 Hz。2,500 輛的街道跟車畫面記錄到只計算 8 輛、繪製 3 輛；四段縮放分別保留 16、64、76、30 個中間視角取樣，返回原視野。這些是模擬器負擔與操作證據，不能換算成實機幀率保證。
+
+步行使用較精確的定位要求，依新鮮且誤差可接受的位置，沿已確認的 Apple 步行路線更新剩餘距離／時間；連續偏離才重算到同一目的地，避免平行道路、折返路線或過期定位造成跳動。行程中的搭車選擇保留。建築遮住正在跟隨的公車時，依建築外框與高度選較清楚的方向，必要時俯視；調整傾角保留放大程度，手動拖曳後停止自動控制。
+
+深色步行線保留橘色並加描邊，畫在建築上方；懸浮文字有穩定底色及邊界。按鈕使用原生玻璃外觀、明確間距及相同主操作寬度；英文模式的中文站名和方向改用系統文字色，避免跟著藍色控制項一起變暗。
+
+[主要操作驗證](https://github.com/rio10255254/TaipeiBus/actions/runs/37226645650)通過兩項縮放／減少動態效果、英文上車與下車資訊、真正 Apple 步行路線、同程序明暗切換，以及 Debug／Release 編譯。該輪的手動拖曳起點碰到地圖資訊控制項擴大的點按區域；將測試起點移至空白地圖後，[單項補驗證](https://github.com/rio10255254/TaipeiBus/actions/runs/37228431402)全部通過，確認地圖實際移動且自動跟隨停止、避讓次數不再增加。最終 App 原始碼為 `8025c4b`，後續只有測試、執行流程與 Beta 說明調整；實際截圖已檢視。
+
+核心測試共列出 132 項，其中 126 項通過、6 項需要即時資料而略過；398 個英文模板檢查通過。五項[官方資料核對](https://github.com/rio10255254/TaipeiBus/actions/runs/37221999927)已先完成；後續深夜來源沒有行駛樣本，介面補驗證明確關閉重抓資料，沒有將缺乏樣本當作通過。尚未完成實機幀率或實際沿街步行誤差測量。
 
 ## TestFlight 1.1.6：英文、官方到站資訊與流暢操作
 
