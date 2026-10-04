@@ -889,8 +889,9 @@ struct JourneyGuideCard: View {
                     JourneyDockHeader(model: model, planner: planner, showJourney: showJourney)
                     if planner.arrived {
                         Label(live.text("已抵達"), systemImage: "checkmark.circle.fill").liveFont(.title2, weight: .bold)
-                        Button(live.text("完成")) { model.finishJourney() }
-                            .frame(maxWidth: .infinity, minHeight: 46).primaryAction()
+                        Button { model.finishJourney() } label: {
+                            Text(live.text("完成")).frame(maxWidth: .infinity, minHeight: 46)
+                        }.primaryAction()
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
                         HStack(spacing: 8) {
@@ -921,10 +922,12 @@ struct JourneyGuideCard: View {
                             Text(AppText.text("接著轉搭 %@ · %@", next.route.localizedName, next.boarding.localizedName)).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                         HStack(spacing: 16) {
-                            Button(live.text("返回等車")) { model.returnToWaiting() }
-                                .frame(maxWidth: .infinity, minHeight: 44).secondaryAction()
-                            Button(live.text("已下車")) { model.alight() }
-                                .frame(maxWidth: .infinity, minHeight: 44).primaryAction()
+                            Button { model.returnToWaiting() } label: {
+                                Text(live.text("返回等車")).frame(maxWidth: .infinity, minHeight: 44)
+                            }.secondaryAction()
+                            Button { model.alight() } label: {
+                                Text(live.text("已下車")).frame(maxWidth: .infinity, minHeight: 44)
+                            }.primaryAction()
                                 .accessibilityIdentifier("journey-alight")
                         }.liveFont(.subheadline, weight: .semibold)
                     } else {
@@ -938,8 +941,9 @@ struct JourneyGuideCard: View {
                                 Label(live.text("看步行路線"), systemImage: "figure.walk")
                                     .frame(maxWidth: .infinity, minHeight: 44)
                             }.secondaryAction().accessibilityHint(AppText.text("在目前地圖查看步行路線"))
-                            Button(live.text("已抵達")) { if !planner.started { planner.begin() }; planner.advance() }
-                                .frame(maxWidth: .infinity, minHeight: 44).primaryAction()
+                            Button { if !planner.started { planner.begin() }; planner.advance() } label: {
+                                Text(live.text("已抵達")).frame(maxWidth: .infinity, minHeight: 44)
+                            }.primaryAction()
                                 .accessibilityIdentifier("journey-arrive")
                         }.liveFont(.subheadline, weight: .semibold)
                     }

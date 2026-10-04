@@ -505,7 +505,8 @@ final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
         launch(["--test-language", "en", "--test-map-controls", "--preview-walking-guidance"])
         wait("Verified pedestrian geometry and precise walking location are ready") {
             ($0["walkingActive"] as? Bool) == true && ($0["walkingAccuracyConfigured"] as? Bool) == true &&
-            ($0["walkingPointCount"] as? Int ?? 0) > 4 && ($0["walkingAboveBuildings"] as? Bool) == true
+            ($0["walkingPointCount"] as? Int ?? 0) > 4 && ($0["walkingAboveBuildings"] as? Bool) == true &&
+            ($0["pitch"] as? Double ?? 90) < 1
         }
         XCTAssertLessThan(camera()["pitch"] as? Double ?? 90, 1)
         if ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true" {
@@ -526,8 +527,8 @@ final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertGreaterThan(first.frame.minY - arrivals.frame.maxY, 4)
         capture("unobstructed-follow-with-separated-native-buttons")
         let adjustments = camera()["autoVisibilityAdjustments"] as? Int
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.24)).press(forDuration: 0.1,
-            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.31)))
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.28)).press(forDuration: 0.2,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.42, dy: 0.33)))
         wait("Manual map movement stops automatic camera control") { ($0["following"] as? Bool) == false }
         XCTAssertEqual(camera()["autoVisibilityAdjustments"] as? Int, adjustments)
     }

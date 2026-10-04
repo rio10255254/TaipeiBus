@@ -442,8 +442,14 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(mapView) }
             recordPreviewCamera(mapView, fullyRendered: fullyRendered)
-            if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), fullyRendered,
-               CACurrentMediaTime() - lastTestCameraAt >= 0.25 {
+            recordTestCamera(mapView)
+#endif
+        }
+
+#if DEBUG
+        private func recordTestCamera(_ mapView: MLNMapView) {
+            if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), mapView.style != nil,
+               CACurrentMediaTime() - lastTestCameraAt >= 0.5 {
                 lastTestCameraAt = CACurrentMediaTime()
                 let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
                 var state: [String: Any] = ["latitude": center.latitude, "longitude": center.longitude, "zoom": mapView.zoomLevel,
@@ -519,8 +525,8 @@ struct NativeBusMap: UIViewRepresentable {
                     try? bytes.write(to: folder.appendingPathComponent("appearance-probe.json"), options: .atomic)
                 }
             }
-#endif
         }
+#endif
 
         private func point(_ coordinate: Coordinate?) -> MLNPointFeature? {
             guard let coordinate else { return nil }
@@ -670,6 +676,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard model.isActive, let map else { return }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(map) }
+            recordTestCamera(map)
 #endif
             let now = CACurrentMediaTime(), date = Date()
             let dt = lastTickTime > 0 ? min(0.1, max(0.001, now - lastTickTime)) : 1 / 60

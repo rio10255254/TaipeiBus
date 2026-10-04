@@ -416,7 +416,7 @@ final class JourneyPlannerModel: ObservableObject {
         if let cached = walkingCache[cacheKey] { return cached }
         var result = leg
         if leg.from.distance(to: leg.to) < 1 {
-            result.distance = 0; result.duration = 0; return result
+            result.distance = 0; result.duration = 0; result.coordinates = [leg.from, leg.to]; result.road = RouteLine(coordinates: result.coordinates); return result
         }
         let request = MKDirections.Request()
         request.source = TravelPlace(name: "起點", address: "", coordinate: leg.from).mapItem
