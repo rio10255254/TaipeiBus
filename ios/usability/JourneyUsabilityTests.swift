@@ -231,12 +231,20 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
         let firstRoute = app.staticTexts["boarding-route"].label
         capture("transfer-first-bus")
-        button("journey-board").tap(); button("journey-alight").tap()
+        XCTAssertTrue(button("journey-board").isEnabled)
+        XCTAssertTrue(button("journey-board").isHittable)
+        // Wait for the initial bottom-dock insertion to finish before touching it.
+        Thread.sleep(forTimeInterval: 1)
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
+        button("journey-alight").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 5))
         let secondRoute = app.staticTexts["boarding-route"].label
         XCTAssertNotEqual(firstRoute, secondRoute)
         capture("transfer-second-bus")
-        button("journey-board").tap(); button("journey-alight").tap()
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
+        button("journey-alight").tap()
         XCTAssertTrue(button("journey-arrive").waitForExistence(timeout: 5))
         button("journey-arrive").tap(); button("完成").tap()
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 5))
@@ -500,8 +508,11 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 150), .completed)
     }
     func testRealNeihuOptionsHaveVerifiedWalkingSeparateWaitsAndArrivalClocks() {
-        launch(["--test-journey-selection", "--test-map-controls", "--preview-neihu-planning", "--preview-journey-search"])
+        launch(["--test-journey-selection", "--test-map-controls", "--preview-neihu-planning"])
         waitTiming { ($0["checking"] as? Bool) == false && ($0["options"] as? [[String: Any]] ?? []).count > 0 }
+        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 10))
+        button("journey-options").tap()
+        XCTAssertTrue(app.navigationBars["忠孝復興站"].waitForExistence(timeout: 10))
         let state = timing(), records = state["options"] as? [[String: Any]] ?? []
         XCTAssertTrue((1...3).contains(records.count))
         for record in records {
@@ -512,9 +523,14 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertFalse((record["arrival_label"] as? String ?? "").isEmpty)
             if (record["unknown"] as? Int ?? 0) > 0 { XCTAssertEqual(record["arrival_label"] as? String, "抵達待確認") }
             let choice = button("journey-option-" + (record["id"] as? String ?? ""))
+            XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertTrue(choice.isEnabled)
+            XCTAssertTrue(choice.isHittable, "All verified choices must be visible without scrolling")
             XCTAssertTrue(choice.label.contains("候車") || choice.label.contains("步行即可"))
         }
+        Thread.sleep(forTimeInterval: 17)
+        XCTAssertEqual((timing()["options"] as? [[String: Any]] ?? []).compactMap { $0["id"] as? String },
+                       records.compactMap { $0["id"] as? String }, "Live updates must not move or replace choices while comparing")
         capture("optimized-neihu-options-and-times")
         let report = XCTAttachment(string: String(describing: state))
         report.name = "navigation-optimized-timing-report"; report.lifetime = .keepAlways; add(report)

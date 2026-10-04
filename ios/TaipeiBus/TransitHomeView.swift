@@ -159,7 +159,7 @@ struct TransitHomeView: View {
                     if planner.started || planner.selected?.walkingOnly == true {
                         JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
                     } else if planner.selected != nil {
-                        JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .height(460); showJourney = true }
+                        JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
                     } else {
                         Button { showJourneyItinerary = false; journeyDetent = .large; showJourney = true } label: {
                             HStack(spacing: 12) {

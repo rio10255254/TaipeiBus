@@ -79,7 +79,6 @@ final class JourneyPlannerModel: ObservableObject {
     private var forecast = VehicleArrivalForecast()
     private var verifiedPool: [JourneyOption] = []
     private var walkingCache: [String: WalkingLeg] = [:]
-    private var lastTimingRefresh = Date.distantPast
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var alternativeTransitSeconds: Double?
     private var alternativeTransitUpdatedAt = Date.distantPast
@@ -176,16 +175,9 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func updateSnapshot(_ snapshot: TransitSnapshot, forecast: VehicleArrivalForecast = .init()) {
         latestSnapshot = snapshot; self.forecast = forecast
-        if !started, !planning, !checkingWalks, !selectionConfirmed, !verifiedPool.isEmpty,
-           Date().timeIntervalSince(lastTimingRefresh) >= 15 {
-            publishRecommendations(); lastTimingRefresh = Date()
-        }
-        // Arrival data can complete after the first GPS response and route candidates.
-        // Replace provisional choices before the rider chooses one, without changing an active trip.
-        if !started, !planning, !selectionConfirmed, !options.isEmpty,
-           options.contains(where: { unavailableBoarding($0) != nil }), let metadata = lastMetadata {
-            plan(metadata: metadata)
-        }
+        // Live times continue updating inside each row. Once walking verification
+        // finishes, leave those rows in place while the rider reads and compares.
+        // Replacing them on a GPS refresh can change the option beneath a finger.
     }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
     var arrived: Bool { started && stepIndex >= steps.count }
@@ -295,6 +287,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func select(_ option: JourneyOption) {
+        guard option.verified, option.walkIssue == nil, unavailableBoarding(option) == nil else { return }
         selectionConfirmed = true
         // The recommended option can already be verified while alternatives are
         // still loading. Confirming it must stop that work from selecting another.

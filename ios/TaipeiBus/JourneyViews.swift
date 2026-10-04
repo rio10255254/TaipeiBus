@@ -66,6 +66,7 @@ struct JourneyPlanningView: View {
                         ToolbarItem(placement: .topBarTrailing) {
                             Menu {
                                 Button(live.text("查看行程")) { showingItinerary = true; expand() }
+                                Button("重新比較路線") { planner.plan(metadata: model.metadata) }
                                 Button("推薦順序說明") { showingRankingInfo = true }
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
                             } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
@@ -78,7 +79,7 @@ struct JourneyPlanningView: View {
         .alert("推薦順序", isPresented: $showingRankingInfo) {
             Button("知道了", role: .cancel) {}
         } message: {
-            Text("先確認實際步行，再比较可趕上的班次、候車與搭車時間。推薦兼顧時間、少走路與少轉乘；較快方案會另外保留。班距推估會標示範圍，班次不足則標示待確認。抵達時間包含走路、候車與搭車。")
+            Text("先確認實際步行，再比較可趕上的班次、候車與搭車時間。推薦兼顧時間、少走路與少轉乘；較快方案會另外保留。班距推估會標示範圍，班次不足則標示待確認。抵達時間包含走路、候車與搭車。")
         }
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
@@ -105,7 +106,7 @@ struct JourneyPlanningView: View {
             searchError = nil; search.update(value)
         }
         .onChange(of: planner.options.count) { _, count in
-            if count > 0, !searchingPlaces, !planner.started, !showingItinerary { focused = false; collapse() }
+            if count > 0, !searchingPlaces, !planner.started, !showingItinerary { focused = false }
         }
         .onChange(of: location.revision) { _, _ in search.setContext(searchContext) }
         .onChange(of: model.liveSettings.revision) { _, _ in
@@ -263,7 +264,6 @@ struct JourneyPlanningView: View {
         else { planner.setDestination(place, metadata: model.metadata, currentLocation: location.usableCoordinate) }
         editingOrigin = false; editingDestination = planner.destination == nil; query = ""
         search.cancel()
-        if !planner.options.isEmpty, !editingDestination, !planner.started { collapse() }
         if planner.destination != nil, planner.origin == nil { edit(origin: true) }
     }
 }
@@ -633,10 +633,8 @@ private struct JourneyWaitingActions: View {
                 }
                 if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange) }
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    if let ride = planner.activeRide, let walk = option.walks.first,
-                       let eta = model.snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: timeline.date),
-                       eta >= 0, let duration = walk.duration, duration > Double(eta) + 45 {
-                        Text(live.text("這班可能趕不上")).liveFont(.caption).foregroundStyle(.orange)
+                    if model.journeyDuration(option, at: timeline.date)?.waits.first?.missedNext == true {
+                        Text("下一班可能趕不上").liveFont(.caption).foregroundStyle(.orange)
                     }
                 }
             }
@@ -693,8 +691,12 @@ struct JourneyOptionsView: View {
                             }
                         }
                         if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
+                        if let unavailable = planner.unavailableBoarding(option) {
+                            Text(unavailable.route + " · " + EstimateFeed.label(unavailable.status))
+                                .liveFont(.caption).foregroundStyle(.secondary)
+                        }
                     }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(!option.verified || option.walkIssue != nil)
+                }.buttonStyle(.plain).disabled(!option.verified || option.walkIssue != nil || planner.unavailableBoarding(option) != nil)
                     .accessibilityIdentifier("journey-option-" + option.id)
                 Divider()
             }
