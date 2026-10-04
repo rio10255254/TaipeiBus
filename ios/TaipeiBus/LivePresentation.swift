@@ -67,8 +67,17 @@ extension View {
 }
 
 /// Animate discrete interface changes without animating every GPS or countdown update.
+enum InterfaceMotion {
+    static func reduced(_ system: Bool) -> Bool {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--test-reduce-motion") { return true }
+#endif
+        return system
+    }
+}
 private struct SmoothChange<Value: Equatable>: ViewModifier {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     let value: Value
     func body(content: Content) -> some View {
         content.contentTransition(reduceMotion ? .identity : .opacity)

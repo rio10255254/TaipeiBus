@@ -11,11 +11,6 @@ struct TaipeiBusApp: App {
             TransitHomeView(model: model)
                 .environment(\.liveSettings, model.presentationSettings)
                 .environment(\.locale, model.language.locale)
-#if DEBUG
-                .transformEnvironment(\.accessibilityReduceMotion) { value in
-                    if ProcessInfo.processInfo.arguments.contains("--test-reduce-motion") { value = true }
-                }
-#endif
                 .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .onChange(of: scenePhase, initial: true) { _, phase in

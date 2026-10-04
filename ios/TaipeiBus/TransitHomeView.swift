@@ -7,7 +7,8 @@ struct TransitHomeView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var location: LocationService
     @ObservedObject private var planner: JourneyPlannerModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     @State private var showSearch = false
     @State private var showDetails = false
     @State private var showInformation = false
@@ -417,7 +418,8 @@ struct PhoneGlassGroup<Content: View>: View {
 
 struct PhonePressStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.contentShape(Rectangle()).scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.78 : 1)
