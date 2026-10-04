@@ -78,6 +78,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     func ingest(_ vehicles: [BusVehicle], time: TimeInterval) {
         inputVehicleCount = vehicles.count
         motion.ingest(vehicles, time: time, now: Date())
+        if reduceMotion { motion.finishAnimations(time: time, now: Date()) }
 #if DEBUG
         if !vehicles.contains(where: { $0.id == motionProbeID }) { motionProbeID = vehicles.first?.id }
 #endif
