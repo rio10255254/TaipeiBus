@@ -135,7 +135,9 @@ final class ArrivalIntegrityTests: XCTestCase {
             forecast.ingest([bus(along: along, age: age, metadata: metadata)], metadata: metadata, at: now.addingTimeInterval(-age))
         }
         let moving = bus(along: 400, metadata: metadata)
-        XCTAssertNil(forecast.display(moving, stopID: ride.boarding.id, metadata: metadata, at: now.addingTimeInterval(31)).prediction)
+        let delayed = forecast.display(moving, stopID: ride.boarding.id, metadata: metadata, at: now.addingTimeInterval(31))
+        XCTAssertNil(delayed.prediction); XCTAssertEqual(delayed.label, "位置更新中")
+        XCTAssertTrue(delayed.positionLabel.hasPrefix("上次位置"))
         let near = bus(along: metadata.journey(routeID: ride.route.id, direction: "0")!.anchors[4].match.along - 10, metadata: metadata)
         XCTAssertNil(forecast.prediction(near, stopID: ride.boarding.id, metadata: metadata, at: now.addingTimeInterval(31)))
         let wrongHeading = bus(along: 400, heading: 270, metadata: metadata)

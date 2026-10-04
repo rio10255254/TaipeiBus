@@ -210,7 +210,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(pick.waitForExistence(timeout: 5)); pick.tap()
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
         XCTAssertTrue(app.staticTexts["journey-next-stop"].label.contains("下一站"))
-        XCTAssertTrue(app.staticTexts["journey-alighting-time"].label.contains("還有"), "A single GPS fix must show stop progress instead of a fabricated time")
+        let alighting = app.staticTexts["journey-alighting-time"].label
+        XCTAssertTrue(alighting.contains("還有") || alighting.contains("位置更新中"),
+            "A single GPS fix must show stop progress or a delayed-position status instead of a fabricated time")
         capture("onboard-next-stop-and-alighting-time")
         button("journey-ride-stops").tap()
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 5))

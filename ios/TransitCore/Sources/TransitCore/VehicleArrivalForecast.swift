@@ -230,7 +230,7 @@ public struct VehicleArrivalForecast: Sendable {
                 explanation: "官方目前標示「\(EstimateFeed.label(official))」，候車以官方資訊為準。", prediction: nil)
         }
         guard date.timeIntervalSince(bus.observedAt) <= 30 else {
-            return VehicleArrivalDisplay(label: position, positionLabel: position,
+            return VehicleArrivalDisplay(label: "位置更新中", positionLabel: "上次位置 · " + position,
                 explanation: "車輛位置等待更新，暫停顯示分鐘數。" + officialAdvice, prediction: nil)
         }
         guard let result = prediction(bus, stopID: stopID, metadata: metadata, at: date,
