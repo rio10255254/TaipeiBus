@@ -30,7 +30,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -440,6 +440,10 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'walking-clarity' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'walking-controls' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/WalkingAndReadabilityUsabilityTests/testOcclusionTurnsCameraAndWaitingActionsRemainSeparate')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'

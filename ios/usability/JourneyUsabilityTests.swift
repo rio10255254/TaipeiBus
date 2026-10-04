@@ -527,8 +527,10 @@ final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertGreaterThan(first.frame.minY - arrivals.frame.maxY, 4)
         capture("unobstructed-follow-with-separated-native-buttons")
         let adjustments = camera()["autoVisibilityAdjustments"] as? Int
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.15, dy: 0.28)).press(forDuration: 0.2,
-            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.42, dy: 0.33)))
+        // Stay clear of the attribution control's expanded touch target on the
+        // left, the bus label above and the location button on the right.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.28)).press(forDuration: 0.2,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.72, dy: 0.32)))
         wait("Manual map movement stops automatic camera control") { ($0["following"] as? Bool) == false }
         XCTAssertEqual(camera()["autoVisibilityAdjustments"] as? Int, adjustments)
     }
