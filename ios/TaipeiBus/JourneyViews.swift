@@ -729,11 +729,12 @@ struct JourneyItineraryView: View {
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
                     if let duration = model.journeyDuration(option, at: timeline.date) {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(duration.label).liveFont(.title2, weight: .bold).monospacedDigit()
+                            Text(planner.started ? duration.label.replacingOccurrences(of: "全程", with: "剩餘").replacingOccurrences(of: "行程", with: "剩餘行程") : duration.label)
+                                .liveFont(.title2, weight: .bold).monospacedDigit()
                             Text(duration.arrivalLabel).liveFont(.subheadline, weight: .semibold).monospacedDigit()
                             HStack(spacing: 14) {
                                 Label("\(Int(ceil(duration.walkingSeconds / 60))) 分", systemImage: "figure.walk")
-                                Label(duration.waitingLabel, systemImage: "clock")
+                                Label(planner.started && duration.waitingSeconds < 30 && duration.unknownWaits == 0 ? "無需再候車" : duration.waitingLabel, systemImage: "clock")
                                 Label("\(Int(ceil(duration.ridingSeconds / 60))) 分", systemImage: "bus.fill")
                             }.liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                             if duration.uncertainWaits > 0 {
