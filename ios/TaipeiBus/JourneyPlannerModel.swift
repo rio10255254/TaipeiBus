@@ -80,6 +80,7 @@ final class JourneyPlannerModel: ObservableObject {
     private var verifiedPool: [JourneyOption] = []
     private var walkingCache: [String: WalkingLeg] = [:]
     @Published private(set) var optionLabels: [String: String] = [:]
+    @Published private(set) var comparisonChanged = false
     @Published private(set) var alternativeTransitSeconds: Double?
     private var alternativeTransitUpdatedAt = Date.distantPast
     var freshAlternativeTransitSeconds: Double? {
@@ -105,8 +106,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
         return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
     }
-    private func publishRecommendations() {
-        let date = Date()
+    private func recommendations(at date: Date) -> [JourneyOption] {
         let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil }
         let trips = valid.compactMap(\.trip)
         let walks = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) })
@@ -121,20 +121,36 @@ final class JourneyPlannerModel: ObservableObject {
             result.insert(foot, at: 0)
         }
         result = Array(result.prefix(3))
-        let recommended = result.first.flatMap { duration($0, at: date) }
+        return result
+    }
+    private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
+        let recommended = recommendedOption.flatMap { duration($0, at: date) }
         var labels: [String: String] = [:]
-        for (index, option) in result.enumerated() {
-            if index == 0 { labels[option.id] = option.walkingOnly ? "步行即可" : "推薦"; continue }
+        for option in result {
+            if option.id == recommendedOption?.id { labels[option.id] = option.walkingOnly ? "步行即可" : "推薦"; continue }
             if let timing = duration(option, at: date), let recommended {
                 if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
                 else if timing.walkingSeconds < recommended.walkingSeconds - 120 { labels[option.id] = "少走路" }
-                else { labels[option.id] = option.rides.count == 1 ? "直達" : "少轉乘" }
+                else if option.rides.count == 1 { labels[option.id] = "直達" }
+                else { labels[option.id] = option.rides.count < (recommendedOption?.rides.count ?? 0) ? "少轉乘" : "轉乘" }
             }
         }
+        return labels
+    }
+    private func publishRecommendations() {
+        let date = Date()
+        let result = recommendations(at: date)
         let oldIDs = options.map(\.id)
-        options = result; optionLabels = labels
+        options = result; optionLabels = labels(for: result, recommendedOption: result.first, at: date)
+        comparisonChanged = false
         if !selectionConfirmed { selectedID = result.first?.id }
         if oldIDs != result.map(\.id) { mapRevision += 1 }
+    }
+    func refreshRecommendations() {
+        guard !started else { return }
+        if !checkingWalks, !verifiedPool.isEmpty {
+            selectionConfirmed = false; publishRecommendations()
+        } else if let metadata = lastMetadata { plan(metadata: metadata) }
     }
     private func startAlternativeTransit(from: Coordinate, to: Coordinate, token: UUID) {
         alternativeTask?.cancel()
@@ -178,6 +194,13 @@ final class JourneyPlannerModel: ObservableObject {
         // Live times continue updating inside each row. Once walking verification
         // finishes, leave those rows in place while the rider reads and compares.
         // Replacing them on a GPS refresh can change the option beneath a finger.
+        if !started, !planning, !checkingWalks, !verifiedPool.isEmpty {
+            let date = Date()
+            let fresh = recommendations(at: date)
+            comparisonChanged = fresh.map(\.id) != options.map(\.id)
+            let updatedLabels = labels(for: options, recommendedOption: fresh.first, at: date)
+            if updatedLabels != optionLabels { optionLabels = updatedLabels }
+        }
     }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
     var arrived: Bool { started && stepIndex >= steps.count }
@@ -217,7 +240,7 @@ final class JourneyPlannerModel: ObservableObject {
     func plan(metadata: TransitMetadata) {
         lastMetadata = metadata; selectionConfirmed = false
         cancelRequests()
-        verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil
+        verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil; comparisonChanged = false
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
@@ -376,6 +399,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
+        verifiedPool = []; comparisonChanged = false; optionLabels = [:]
     }
     func navigateWalk(_ index: Int) {
         guard let option = selected, option.walks.indices.contains(index) else { return }

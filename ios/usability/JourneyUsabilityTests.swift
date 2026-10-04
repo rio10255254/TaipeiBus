@@ -517,6 +517,7 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue((1...3).contains(records.count))
         for record in records {
             XCTAssertEqual(record["verified"] as? Bool, true)
+            XCTAssertNotEqual(record["label"] as? String, "少轉乘", "A one-transfer option cannot claim fewer transfers than a direct bus")
             let total = record["total"] as? Double ?? -1
             let walking = record["walking"] as? Double ?? -1, waiting = record["waiting"] as? Double ?? -1, riding = record["riding"] as? Double ?? -1
             XCTAssertEqual(total, walking + waiting + riding, accuracy: 0.01)
@@ -535,6 +536,13 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         let report = XCTAttachment(string: String(describing: state))
         report.name = "navigation-optimized-timing-report"; report.lifetime = .keepAlways; add(report)
         XCTAssertTrue(button("journey-other-transit").exists)
+        if button("journey-refresh-options").exists {
+            button("journey-refresh-options").tap()
+            let refreshed = timing()
+            XCTAssertEqual(refreshed["selected"] as? String, (refreshed["options"] as? [[String: Any]])?.first?["id"] as? String)
+            XCTAssertEqual(refreshed["checking"] as? Bool, false, "Refreshing verified choices should reuse their pedestrian routes")
+            capture("optimized-explicitly-refreshed-options")
+        }
         let choice = firstOption
         let identity = choice.identifier
         choice.tap()
@@ -560,6 +568,9 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         button("journey-options").tap()
         XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].waitForExistence(timeout: 5))
         XCTAssertTrue(app.staticTexts["journey-duration-breakdown"].label.contains("剩餘"))
+        XCTAssertTrue(app.staticTexts["journey-walk-status-0"].label.hasPrefix("已走到"))
+        XCTAssertTrue(app.staticTexts["journey-ride-status-0"].label.contains("搭乘中 · TEST-01"))
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "路線到站：")).firstMatch.exists)
         capture("optimized-onboard-itinerary-remaining-time")
         button("返回地圖").tap()
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))

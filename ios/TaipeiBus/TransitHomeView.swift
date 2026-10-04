@@ -81,13 +81,14 @@ struct TransitHomeView: View {
                         let records: [[String: Any]] = planner.options.map { option in
                             let timing = model.journeyDuration(option, at: timeline.date)
                             return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
+                                "transfers": max(0, option.rides.count - 1),
                                 "total": timing?.totalSeconds ?? -1, "travel": timing?.travelSeconds ?? -1,
                                 "walking": timing?.walkingSeconds ?? -1, "waiting": timing?.waitingSeconds ?? -1,
                                 "riding": timing?.ridingSeconds ?? -1, "unknown": timing?.unknownWaits ?? -1,
                                 "duration_label": timing?.label ?? "", "waiting_label": timing?.waitingLabel ?? "",
                                 "arrival_label": timing?.arrivalLabel ?? ""]
                         }
-                        let value: [String: Any] = ["checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "options": records]
+                        let value: [String: Any] = ["checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "comparison_changed": planner.comparisonChanged, "options": records]
                         let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
                         Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
                             .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)

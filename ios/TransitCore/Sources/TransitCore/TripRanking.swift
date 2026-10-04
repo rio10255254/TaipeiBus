@@ -110,19 +110,22 @@ public enum TripRanking {
             if $0.transfers != $1.transfers { return $0.transfers < $1.transfers }
             return $0.id < $1.id
         }
-        guard diverse, limit <= 4, let best = ordered.first else { return Array(ordered.prefix(limit)) }
+        guard diverse, limit <= 4, !ordered.isEmpty else { return Array(ordered.prefix(limit)) }
         // Keep useful trade-offs, then collapse the same bus chain only after walking is verified.
         let frontier = ordered.filter { candidate in
             let a = scores[candidate.id]!
             return !ordered.contains { other in
                 guard other.id != candidate.id else { return false }
                 let b = scores[other.id]!
-                return b.elapsedSeconds <= a.elapsedSeconds && b.walkingSeconds <= a.walkingSeconds &&
+                let fewerTransfers = other.transfers < candidate.transfers
+                return b.elapsedSeconds <= a.elapsedSeconds + (fewerTransfers ? 60 : 0) &&
+                    b.walkingSeconds <= a.walkingSeconds + (fewerTransfers ? 30 : 0) &&
                     other.transfers <= candidate.transfers && b.unknownWaits <= a.unknownWaits &&
                     (b.elapsedSeconds < a.elapsedSeconds - 30 || b.walkingSeconds < a.walkingSeconds - 30 || other.transfers < candidate.transfers)
             }
         }
-        let fastest = ordered.min { scores[$0.id]!.elapsedSeconds < scores[$1.id]!.elapsedSeconds }!
+        let best = frontier.first ?? ordered[0]
+        let fastest = (frontier.isEmpty ? ordered : frontier).min { scores[$0.id]!.elapsedSeconds < scores[$1.id]!.elapsedSeconds }!
         var result = [best]
         func append(_ candidate: TransitTrip?) {
             guard let candidate, result.count < limit,
@@ -134,7 +137,6 @@ public enum TripRanking {
         append(reasonable.min { scores[$0.id]!.walkingSeconds < scores[$1.id]!.walkingSeconds })
         append(reasonable.first { $0.transfers == 0 })
         for trip in frontier { append(trip) }
-        for trip in ordered { append(trip) }
         return result
     }
 }
