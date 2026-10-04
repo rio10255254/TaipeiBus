@@ -14,6 +14,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     var highlightSelected = true {
         didSet { if highlightSelected != oldValue { selectionStartedAt = CACurrentMediaTime(); setNeedsDisplay() } }
     }
+    var darkAppearance = false {
+        didSet { if darkAppearance != oldValue { setNeedsDisplay() } }
+    }
     var reduceMotion = false {
         didSet {
             if reduceMotion != oldValue {
@@ -62,9 +65,6 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         guard !samples.isEmpty else { return 0 }
         let ordered = samples.sorted()
         return ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * fraction))]
-    }
-    var darkAppearance = false {
-        didSet { if darkAppearance != oldValue { setNeedsDisplay() } }
     }
 #endif
     private static let origin = Coordinate(latitude: 25.04, longitude: 121.55)
