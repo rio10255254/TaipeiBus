@@ -67,9 +67,11 @@ public enum FeedDecoder {
             switch name {
             case "GetProvider":
                 for row in rows {
-                    metadata.providers[text(row["id"])] = text(row["nameZn"])
+                    let id = text(row["id"]), name = text(row["nameZn"])
+                    guard !id.isEmpty else { continue }
+                    if !name.isEmpty { metadata.providers[id] = name }
                     let english = text(row["nameEn"])
-                    if !english.isEmpty { metadata.englishProviders[text(row["id"])] = english }
+                    if !english.isEmpty { metadata.englishProviders[id] = english }
                 }
             case "GetRoute":
                 for row in rows {
@@ -130,11 +132,6 @@ public enum FeedDecoder {
                     for alias in StationSearch.englishNames(stop.englishName) where !metadata.stations[stationID]!.searchNames.contains(alias) {
                         metadata.stations[stationID]!.searchNames.append(alias)
                     }
-                }
-            case "GetProvider":
-                for row in rows {
-                    let id = text(row["id"]), name = text(row["nameZn"])
-                    if !id.isEmpty && !name.isEmpty { metadata.providers[id] = name }
                 }
             case "GetPathDetail":
                 for row in rows {
