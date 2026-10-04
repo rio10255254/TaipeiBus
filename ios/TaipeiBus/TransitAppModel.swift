@@ -104,6 +104,7 @@ final class TransitAppModel: ObservableObject {
     private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
     private(set) var debugActions: [String] = []
+    func recordMapTap(_ value: String) { debugActions.append(value) }
     private var previewSelectionApplied = false
     private var cityFixtureTask: Task<Void, Never>?
     @Published private(set) var previewNotice: String?

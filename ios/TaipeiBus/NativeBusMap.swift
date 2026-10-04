@@ -814,6 +814,9 @@ struct NativeBusMap: UIViewRepresentable {
         @objc func selectBus(_ gesture: UITapGestureRecognizer) {
             guard let map, let buses else { return }
             let point = gesture.location(in: map)
+#if DEBUG
+            model.recordMapTap("map-tap:\(Int(point.x)),\(Int(point.y))")
+#endif
             let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
             let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
             let station = features.compactMap { feature -> Station? in
@@ -826,12 +829,24 @@ struct NativeBusMap: UIViewRepresentable {
             }
             if model.stationBrowsing, let station { model.selectStation(station); return }
             guard let id = buses.hitTest(point), let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else {
+#if DEBUG
+                model.recordMapTap("map-tap:no-bus")
+#endif
                 if let station { model.selectStation(station) }
                 return
             }
-            // Without highlight mode, don't select a mesh behind a rendered building.
-            if !(model.highlightVehicle && model.selectedVehicleID == id),
-               !map.visibleFeatures(at: point, styleLayerIdentifiers: Set(["building-3d"])).isEmpty { return }
+            // Only rendered 3D buildings can occlude a bus. Cached building
+            // footprints must not block taps in the flat, zoomed-out city view.
+            let buildings = map.style?.layer(withIdentifier: "building-3d")
+            let buildingsVisible = buildings?.isVisible == true && buildingOpacity > 0.02 &&
+                map.zoomLevel >= Double(buildings?.minimumZoomLevel ?? 15) &&
+                map.zoomLevel < Double(buildings?.maximumZoomLevel ?? 24)
+            let occluded = buildingsVisible && !(model.highlightVehicle && model.selectedVehicleID == id) &&
+                !map.visibleFeatures(at: point, styleLayerIdentifiers: Set(["building-3d"])).isEmpty
+#if DEBUG
+            model.recordMapTap("map-hit:\(bus.plate):occluded=\(occluded)")
+#endif
+            if occluded { return }
             model.selectVehicle(bus)
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }

@@ -453,9 +453,10 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
                 samples.count >= 3 && (samples.last?["t"] ?? 0) >= (trace?["duration"] as? Double ?? 99)
         }
         let overview = camera(); assertContinuousCamera(overview); capture("continuous-city-camera-and-subtle-controls")
-        XCTAssertNotNil(overview["busHitID"])
-        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: overview["busHitX"] as? Double ?? -10,
-            dy: overview["busHitY"] as? Double ?? -10)).tap()
+        let hit = camera()
+        XCTAssertNotNil(hit["busHitID"])
+        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: hit["busHitX"] as? Double ?? -10,
+            dy: hit["busHitY"] as? Double ?? -10)).tap()
         wait("The selected bus remains centered") { ($0["pitch"] as? Double ?? 0) > 56 && !($0["selectedVehicle"] as? String ?? "").isEmpty }
         button("關閉選取").tap()
         wait("Returning restores the city overview") {
