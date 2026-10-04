@@ -671,7 +671,7 @@ struct JourneyOptionsView: View {
                             }
                             Spacer(minLength: 4)
                             TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                                Text(model.journeyDuration(option, at: timeline.date)?.label ?? "確認接駁中")
+                                Text(model.journeyDuration(option, at: timeline.date)?.comparisonLabel ?? "確認接駁中")
                                     .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                             }
                             Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)

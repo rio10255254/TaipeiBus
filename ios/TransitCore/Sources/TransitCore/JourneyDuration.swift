@@ -17,6 +17,7 @@ public struct JourneyDuration: Equatable, Sendable {
     public var label: String {
         unknownWaits > 0 ? "行程約 \(minutes(travelSeconds)) 分" : "全程約 \(minutes(totalSeconds)) 分"
     }
+    public var comparisonLabel: String { unknownWaits > 0 ? "全程待確認" : label }
     public var breakdownLabel: String { "步行 \(minutes(walkingSeconds)) 分 · 搭車 \(minutes(ridingSeconds)) 分" }
     public var waitingLabel: String {
         if waits.isEmpty { return "步行即可" }
