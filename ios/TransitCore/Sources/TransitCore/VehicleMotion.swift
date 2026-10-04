@@ -80,7 +80,8 @@ public struct VehicleMotion {
                 if old.duration == 0 || time >= old.startedAt + old.duration {
                     initialVelocity = old.vehicle.speed / 3.6
                 }
-                duration = min(20, max(2, vehicle.observedAt.timeIntervalSince(old.vehicle.observedAt)))
+                // Catch up to the newest received fix promptly; the feed interval is already source latency.
+                duration = min(3, max(1.2, vehicle.observedAt.timeIntervalSince(old.vehicle.observedAt) * 0.2))
             } else if let old, sameJourney, old.vehicle.coordinate.distance(to: vehicle.coordinate) < 0.8 {
                 // GPS headings at a stationary stop are noisy; keep the actual rendered orientation.
                 let oldPose = pose(state: old, time: time, now: now)

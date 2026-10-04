@@ -15,7 +15,7 @@ public struct BoardingGuide: Sendable {
         estimateUpdatedAt = estimateSeconds == nil ? nil : snapshot.estimates.updatedAt
         approaches = [-2, -3, -4].contains(estimateSeconds ?? 0) ? [] :
             Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: true)
-        if [-2, -3, -4].contains(estimateSeconds ?? 0) { emptyPositionLabel = "目前未發車" }
+        if [-2, -3, -4].contains(estimateSeconds ?? 0) { emptyPositionLabel = EstimateFeed.label(estimateSeconds) }
         else if !Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: false).isEmpty,
                 approaches.isEmpty { emptyPositionLabel = "前車已過站 · 等待後續車輛" }
         else if estimateSeconds != nil { emptyPositionLabel = "到站預估可用 · GPS 暫缺" }

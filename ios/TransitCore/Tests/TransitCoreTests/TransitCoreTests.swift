@@ -117,9 +117,9 @@ final class TransitCoreTests: XCTestCase {
         var motion = VehicleMotion()
         motion.ingest(first, time: 0, now: now)
         motion.ingest(second, time: 15, now: now)
-        let before = motion.pose(id: "physical-1", time: 18, now: now)!
-        motion.ingest(second, time: 18, now: now)
-        XCTAssertEqual(before.coordinate, motion.pose(id: "physical-1", time: 18, now: now)!.coordinate)
+        let before = motion.pose(id: "physical-1", time: 16.5, now: now)!
+        motion.ingest(second, time: 16.5, now: now)
+        XCTAssertEqual(before.coordinate, motion.pose(id: "physical-1", time: 16.5, now: now)!.coordinate)
         let stale = motion.pose(id: "physical-1", time: 18, now: now.addingTimeInterval(180))!
         XCTAssertTrue(stale.stale)
         XCTAssertEqual(stale.coordinate, second[0].coordinate)
@@ -147,16 +147,16 @@ final class TransitCoreTests: XCTestCase {
         var motion = VehicleMotion()
         motion.ingest([movingBus([a], observedAt: now.addingTimeInterval(-30))], time: 0, now: now)
         motion.ingest([movingBus([a,b,c], observedAt: now.addingTimeInterval(-15), heading: 0)], time: 10, now: now)
-        let before = motion.pose(id: "bus", time: 14, now: now)!
-        motion.ingest([movingBus([c,d], observedAt: now)], time: 14, now: now)
-        let after = motion.pose(id: "bus", time: 14, now: now)!
+        let before = motion.pose(id: "bus", time: 11.5, now: now)!
+        motion.ingest([movingBus([c,d], observedAt: now)], time: 11.5, now: now)
+        let after = motion.pose(id: "bus", time: 11.5, now: now)!
         XCTAssertLessThan(before.coordinate.distance(to: after.coordinate), 0.001)
         XCTAssertEqual(before.heading, after.heading, accuracy: 0.001)
         XCTAssertEqual(before.traveledDistance, after.traveledDistance, accuracy: 0.001)
         let road = RouteLine(coordinates: [a,b,c,d])
         var previousDistance = after.traveledDistance
         for index in 0...150 {
-            let pose = motion.pose(id: "bus", time: 14 + Double(index) / 10, now: now)!
+            let pose = motion.pose(id: "bus", time: 11.5 + Double(index) / 10, now: now)!
             XCTAssertLessThan(road.match(pose.coordinate, heading: nil)!.distance, 0.01)
             XCTAssertGreaterThanOrEqual(pose.traveledDistance, previousDistance)
             previousDistance = pose.traveledDistance

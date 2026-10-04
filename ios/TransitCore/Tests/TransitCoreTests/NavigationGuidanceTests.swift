@@ -89,7 +89,11 @@ final class NavigationGuidanceTests: XCTestCase {
     func testEveryVehicleCanBeTrackedSeparatelyAndOfficialETAIsNeverAssignedToItsPlate() {
         let (metadata, ride) = source()
         let vehicles = [bus("near", longitude: 121.597, metadata: metadata), bus("far", longitude: 121.592, metadata: metadata)]
-        var forecast = VehicleArrivalForecast(); forecast.ingest(vehicles, metadata: metadata, at: now)
+        var forecast = VehicleArrivalForecast()
+        for (age, near, far) in [(60.0, 121.594, 121.590), (30.0, 121.5955, 121.591), (0.0, 121.597, 121.592)] {
+            forecast.ingest([bus("near", longitude: near, metadata: metadata, age: age),
+                bus("far", longitude: far, metadata: metadata, age: age)], metadata: metadata, at: now)
+        }
         let approaches = BoardingGuide(ride: ride, metadata: metadata, snapshot: TransitSnapshot(vehicles: vehicles), at: now).approaches
         let first = forecast.estimate(approaches[0], ride: ride, metadata: metadata, at: now)
         let second = forecast.estimate(approaches[1], ride: ride, metadata: metadata, at: now)
@@ -166,13 +170,14 @@ final class NavigationGuidanceTests: XCTestCase {
 
     func testReceivedMovementCanEstimateAStoppedVehicleButDuplicateSnapshotsCannotInventMovement() {
         let (metadata, ride) = source()
-        let first = bus("one", longitude: 121.593, metadata: metadata, age: 30, speed: 0)
+        let first = bus("one", longitude: 121.591, metadata: metadata, age: 60, speed: 0)
         let second = bus("one", longitude: 121.595, metadata: metadata, speed: 0)
         var forecast = VehicleArrivalForecast()
         forecast.ingest([first], metadata: metadata, at: now)
         forecast.ingest([first], metadata: metadata, at: now)
         XCTAssertEqual(forecast.estimate(VehicleApproach(vehicle: first, alongDistance: 500, directDistance: 500),
                                        ride: ride, metadata: metadata, at: now), .unavailable)
+        forecast.ingest([bus("one", longitude: 121.593, metadata: metadata, age: 30, speed: 0)], metadata: metadata, at: now)
         forecast.ingest([second], metadata: metadata, at: now)
         let approach = VehicleApproach(vehicle: second, alongDistance: 300, directDistance: 300)
         guard case .minutes = forecast.estimate(approach, ride: ride, metadata: metadata, at: now) else {
@@ -191,7 +196,7 @@ final class NavigationGuidanceTests: XCTestCase {
         }
     }
 
-    func testAlongTheSameVehicleStopsIncreaseAndOldGPSDoesNotRestartTheCountdown() throws {
+    func testAlongTheSameVehicleStopsIncreaseButOldGPSCannotManufactureAnArrival() throws {
         let (metadata, ride) = source()
         let vehicle = bus("same-plate", longitude: 121.595, metadata: metadata)
         var forecast = VehicleArrivalForecast(); forecast.ingest([vehicle], metadata: metadata, at: now)
@@ -200,8 +205,9 @@ final class NavigationGuidanceTests: XCTestCase {
         XCTAssertLessThan(predictions[1].seconds, predictions[2].seconds)
         XCTAssertFalse(predictions[2].label.contains("–"))
         let later = try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(30)))
-        XCTAssertEqual(later.seconds, predictions[2].seconds - 30, accuracy: 0.01)
+        XCTAssertEqual(later.seconds, predictions[2].seconds - min(15, predictions[2].seconds * 0.1), accuracy: 0.01)
         XCTAssertGreaterThan(later.uncertaintySeconds, predictions[2].uncertaintySeconds)
+        XCTAssertFalse(later.hasUsableTime, "One position is insufficient for a confident per-vehicle minute label")
         XCTAssertNil(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(91)))
         XCTAssertNil(forecast.prediction(vehicle, stopID: "stop-1", metadata: metadata, at: now))
     }

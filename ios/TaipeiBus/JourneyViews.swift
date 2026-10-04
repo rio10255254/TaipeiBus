@@ -378,13 +378,13 @@ private struct VehicleArrivalsView: View {
                         ForEach(guide.approaches) { approach in
                             VStack(alignment: .leading, spacing: 3) {
                                 BoardingVehicleRow(model: model, ride: ride, approach: approach, date: timeline.date)
-                                if let prediction = model.arrivalPrediction(approach.vehicle, stopID: ride.boarding.id, at: timeline.date) {
-                                    DisclosureGroup("時間說明") {
-                                        Text(prediction.rangeLabel)
-                                        Text(prediction.evidenceLabel)
-                                        Text("車輛位置更新於 " + approach.vehicle.observedAt.formatted(date: .omitted, time: .standard))
-                                    }.liveFont(.caption).foregroundStyle(.secondary)
-                                }
+                                let display = model.arrivalDisplay(approach.vehicle, stopID: ride.boarding.id, at: timeline.date)
+                                DisclosureGroup("時間說明") {
+                                    Text(display.positionLabel)
+                                    if let prediction = display.prediction { Text(prediction.rangeLabel) }
+                                    Text(display.explanation)
+                                    Text("車輛位置更新於 " + approach.vehicle.observedAt.formatted(date: .omitted, time: .standard))
+                                }.liveFont(.caption).foregroundStyle(.secondary)
                             }
                         }
                     } header: { Text("\(ride.route.name) · 已發車車輛") }
@@ -419,7 +419,7 @@ private struct BoardingVehicleRow: View {
                     if selected { Text(nextStop.map { "前方 · " + $0 } ?? "位置待確認").liveFont(.caption).foregroundStyle(.secondary).lineLimit(1) }
                 }
                 Spacer(minLength: 4)
-                Text(model.arrivalPrediction(approach.vehicle, stopID: ride.boarding.id, at: date)?.label ?? "暫無法估算")
+                Text(model.arrivalDisplay(approach.vehicle, stopID: ride.boarding.id, at: date).label)
                     .liveFont(.subheadline, weight: .semibold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                 Label(tracking ? "追蹤中" : "追蹤", systemImage: "scope").liveFont(.caption)
                     .foregroundStyle(tracking ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
@@ -443,8 +443,8 @@ private struct OnboardSummary: View {
                 HStack {
                     Text(next.map { "下一站 · " + $0.stop.name } ?? "位置更新中").lineLimit(1)
                     Spacer()
-                    if let next, let prediction = model.arrivalPrediction(bus, stopID: next.stop.id, at: date, onboard: true) {
-                        Text(prediction.label).monospacedDigit()
+                    if let next {
+                        Text(model.arrivalDisplay(bus, stopID: next.stop.id, at: date, onboard: true).label).monospacedDigit()
                     }
                 }.liveFont(.subheadline).foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")
                 let progress = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date)
@@ -452,9 +452,8 @@ private struct OnboardSummary: View {
                     Text((progress?.distance ?? 0) < -20 ? "已通過「\(ride.alighting.name)」" : "在「\(ride.alighting.name)」下車")
                         .liveFont(.title3, weight: .bold).lineLimit(2)
                     Spacer(minLength: 4)
-                    if let prediction = model.arrivalPrediction(bus, stopID: ride.alighting.id, at: date, onboard: true) {
-                        Text(prediction.label).liveFont(.title3, weight: .bold).monospacedDigit().fixedSize()
-                    }
+                    Text(model.arrivalDisplay(bus, stopID: ride.alighting.id, at: date, onboard: true).label)
+                        .liveFont(.title3, weight: .bold).monospacedDigit().fixedSize()
                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             } else {
                 Text("在「\(ride.alighting.name)」下車").liveFont(.title3, weight: .bold).lineLimit(2)
@@ -494,12 +493,12 @@ private struct OnboardStopsView: View {
                                     if stop.id == ride.alighting.id { Text("在這裡下車").liveFont(.caption).foregroundStyle(.orange) }
                                 }
                                 Spacer(minLength: 4)
-                                Text(bus.flatMap { model.arrivalPrediction($0, stopID: stop.id, at: timeline.date, onboard: true) }?.label ?? "—")
+                                Text(bus.map { model.arrivalDisplay($0, stopID: stop.id, at: timeline.date, onboard: true).label } ?? "—")
                                     .liveFont(.subheadline, weight: .semibold).monospacedDigit().fixedSize()
                             }.frame(minHeight: 40).accessibilityIdentifier("onboard-stop-" + stop.id)
                         }
                     } header: { Text("這輛車的沿途預估") } footer: {
-                        Text(bus.flatMap { model.arrivalPrediction($0, stopID: ride.alighting.id, at: timeline.date, onboard: true) }?.evidenceLabel
+                        Text(bus.map { model.arrivalDisplay($0, stopID: ride.alighting.id, at: timeline.date, onboard: true).explanation }
                              ?? "時間依行駛情況更新，塞車與停靠可能影響預估。")
                     }
                 }.listStyle(.insetGrouped)

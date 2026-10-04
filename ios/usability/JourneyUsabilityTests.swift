@@ -210,7 +210,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(pick.waitForExistence(timeout: 5)); pick.tap()
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
         XCTAssertTrue(app.staticTexts["journey-next-stop"].label.contains("下一站"))
-        XCTAssertTrue(app.staticTexts["journey-alighting-time"].label.contains("約"))
+        XCTAssertTrue(app.staticTexts["journey-alighting-time"].label.contains("還有"), "A single GPS fix must show stop progress instead of a fabricated time")
         capture("onboard-next-stop-and-alighting-time")
         button("journey-ride-stops").tap()
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 5))
@@ -532,6 +532,37 @@ final class AppearanceUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, "TEST-01")
         capture("appearance-onboard-stop-times")
+    }
+    func testConflictingTimesKeepOfficialArrivalAndTrackableVehiclePositions() {
+        launch(["--test-map-controls", "--preview-boarding-fixture", "--preview-cooperated-fixture",
+            "--preview-arrival-integrity", "--usability-fixture"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
+        waitState { ($0["darkMode"] as? Bool) == self.expectedDark }
+        let uncertain = button("boarding-vehicle-TEST-01")
+        XCTAssertTrue(uncertain.waitForExistence(timeout: 10))
+        XCTAssertTrue(uncertain.label.contains("時間待確認"))
+        XCTAssertFalse(uncertain.label.contains("約 1 分"))
+        capture("arrival-conflict-waiting")
+        button("journey-all-vehicles").tap()
+        XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 10))
+        capture("arrival-confidence-vehicle-list")
+        let supported = button("boarding-vehicle-TEST-03")
+        if !supported.isHittable { app.swipeUp() }
+        XCTAssertTrue(supported.isHittable)
+        XCTAssertTrue(supported.label.contains("約") && supported.label.contains("分"),
+            "A bus with continuous observed movement retains an individual arrival estimate")
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "54 分")).firstMatch.exists)
+        supported.tap()
+        button("journey-vehicles-done").tap()
+        waitState { ($0["pitch"] as? Double ?? 0) > 50 && !($0["vehicle"] as? String ?? "").isEmpty }
+        capture("arrival-confidence-tracking")
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-03"))
+        button("journey-ride-stops").tap()
+        XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, "TEST-03")
+        capture("arrival-confidence-onboard-stops")
     }
 }
 

@@ -363,6 +363,12 @@ final class TransitAppModel: ObservableObject {
         arrivalForecast.prediction(vehicle, stopID: stopID, metadata: metadata, at: date, allowTypicalWhenStopped: onboard)
     }
 
+    func arrivalDisplay(_ vehicle: BusVehicle, stopID: String, at date: Date, onboard: Bool = false) -> VehicleArrivalDisplay {
+        let official = onboard ? nil : snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: stopID, at: date)
+        return arrivalForecast.display(vehicle, stopID: stopID, metadata: metadata, at: date,
+            officialSeconds: official, allowTypicalWhenStopped: onboard)
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         if planner.started, let boardedDuration, boardedDuration.optionID == option.id { return boardedDuration.duration }
         guard option.verified else { return nil }
@@ -694,7 +700,9 @@ final class TransitAppModel: ObservableObject {
         let vehicleBoarding = vehicleJourney.anchors.first { $0.stop.id == ride.boarding.id } ?? boarding
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 28_800); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let rows = [100.0, 450, 900, 950].enumerated().map { index, distance -> [String: Any] in
+        let integrity = ProcessInfo.processInfo.arguments.contains("--preview-arrival-integrity")
+        let distances = integrity ? [100.0, 800, 2_400, 3_000] : [100.0, 450, 900, 950]
+        let rows = distances.enumerated().map { index, distance -> [String: Any] in
             let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along - distance * Double(vehicleJourney.direction)) / vehicleLine.length)
             return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": vehicleRouteID,
                 "GoBack": ride.direction, "Latitude": sample.0.latitude, "Longitude": sample.0.longitude,
@@ -704,8 +712,26 @@ final class TransitAppModel: ObservableObject {
         guard let data = try? JSONSerialization.data(withJSONObject: ["BusInfo": rows,
             "EssentialInfo": ["UpdateTime": formatter.string(from: date)]]),
               let result = try? FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date) else { return false }
+        if integrity {
+            // One moving bus with three genuine timed observations; the other buses have only one fix.
+            arrivalForecast = VehicleArrivalForecast()
+            for age in [180.0, 90] {
+                let past = date.addingTimeInterval(-age)
+                let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along -
+                    (distances[2] + age * (600 / 180.0)) * Double(vehicleJourney.direction)) / vehicleLine.length)
+                var row = rows[2]
+                row["Latitude"] = sample.0.latitude; row["Longitude"] = sample.0.longitude
+                row["Speed"] = 12
+                row["Azimuth"] = (sample.1 + (vehicleJourney.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360)
+                row["DataTime"] = formatter.string(from: past)
+                guard let bytes = try? JSONSerialization.data(withJSONObject: ["BusInfo": [row],
+                    "EssentialInfo": ["UpdateTime": formatter.string(from: past)]]),
+                      let history = try? FeedDecoder.vehicles(bytes, metadata: metadata, previous: [], now: past) else { return false }
+                arrivalForecast.ingest(history.vehicles, metadata: metadata, at: past)
+            }
+        }
         let estimates = EstimateFeed(seconds: Dictionary(uniqueKeysWithValues: trip.rides.map {
-            ("\($0.route.parentID):\($0.boarding.id)", 120)
+            ("\($0.route.parentID):\($0.boarding.id)", integrity ? 750 : 120)
         }), updatedAt: date)
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
