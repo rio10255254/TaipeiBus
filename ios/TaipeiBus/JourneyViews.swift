@@ -312,7 +312,7 @@ private struct JourneyBoardingContent: View {
                             .liveFont(.subheadline).padding(20).frame(maxWidth: 300).presentationCompactAdaptation(.popover)
                     }
             }
-            .padding(.bottom, -10)
+            .padding(.bottom, 2)
             if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
             VStack(spacing: 0) {
                 ForEach(Array(guide.approaches.prefix(3))) { approach in
@@ -629,8 +629,9 @@ private struct JourneyDockSurface: ViewModifier {
     func body(content: Content) -> some View {
         content.padding(.horizontal, 24 * CGFloat(live.appearance.spacingScale)).padding(.top, 10)
             .padding(.bottom, 16)
-            .phoneGlass(in: UnevenRoundedRectangle(topLeadingRadius: 28 * CGFloat(live.appearance.cornerScale),
+            .background(Color(uiColor: .secondarySystemBackground), in: UnevenRoundedRectangle(topLeadingRadius: 28 * CGFloat(live.appearance.cornerScale),
                 topTrailingRadius: 28 * CGFloat(live.appearance.cornerScale)))
+            .overlay(alignment: .top) { Capsule().fill(Color.primary.opacity(0.12)).frame(height: 0.7).padding(.horizontal, 28) }
             .padding(.horizontal, -24 * CGFloat(live.appearance.spacingScale)).padding(.bottom, -12 * CGFloat(live.appearance.spacingScale))
     }
 }
@@ -646,25 +647,25 @@ private struct JourneyWaitingActions: View {
     let board: () -> Void
     var body: some View {
         VStack(spacing: 6) {
-            HStack(spacing: 12) {
+            HStack(spacing: 16) {
                 Button { model.showWalkOnMap(index) } label: {
                     Label(live.text("走到站牌"), systemImage: "figure.walk")
                         .liveFont(.subheadline, weight: .semibold).frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                }.secondaryAction()
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                     .accessibilityIdentifier("journey-walk-to-stop")
                 Button(action: board) {
                     Text(live.text("已上車")).liveFont(.subheadline, weight: .semibold)
                         .frame(maxWidth: .infinity, minHeight: 44)
-                }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                }.primaryAction()
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityIdentifier("journey-board")
             }
             if let option = planner.selected, index == 0 {
                 if planner.checkingWalks { ProgressView().controlSize(.small) }
                 else if let walk = option.walks.first, let duration = walk.duration, duration >= 30 {
-                    Text(walk.timeLabel).liveFont(.caption).foregroundStyle(.secondary)
+                    Text(planner.walkingStatus(at: index) ?? walk.timeLabel).liveFont(.caption).foregroundStyle(.secondary).accessibilityIdentifier("walking-live-status")
                 }
                 if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange) }
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
@@ -889,7 +890,7 @@ struct JourneyGuideCard: View {
                     if planner.arrived {
                         Label(live.text("已抵達"), systemImage: "checkmark.circle.fill").liveFont(.title2, weight: .bold)
                         Button(live.text("完成")) { model.finishJourney() }
-                            .frame(maxWidth: .infinity, minHeight: 46).buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                            .frame(maxWidth: .infinity, minHeight: 46).primaryAction()
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
                         HStack(spacing: 8) {
@@ -919,26 +920,26 @@ struct JourneyGuideCard: View {
                             let next = option.rides[index + 1]
                             Text(AppText.text("接著轉搭 %@ · %@", next.route.localizedName, next.boarding.localizedName)).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
-                        HStack(spacing: 12) {
+                        HStack(spacing: 16) {
                             Button(live.text("返回等車")) { model.returnToWaiting() }
-                                .frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.bordered).buttonBorderShape(.capsule)
+                                .frame(maxWidth: .infinity, minHeight: 44).secondaryAction()
                             Button(live.text("已下車")) { model.alight() }
-                                .frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                                .frame(maxWidth: .infinity, minHeight: 44).primaryAction()
                                 .accessibilityIdentifier("journey-alight")
                         }.liveFont(.subheadline, weight: .semibold)
                     } else {
                         let index: Int = { if case .walk(let value) = planner.currentStep { return value }; return 0 }()
                         Text(AppText.text("走到「%@」", planner.destination?.localizedName ?? AppText.text("目的地"))).liveFont(.title2, weight: .bold).lineLimit(2)
                         if option.walks.indices.contains(index) {
-                            Text(option.walks[index].timeLabel).liveFont(.subheadline).foregroundStyle(.secondary)
+                            Text(planner.walkingStatus(at: index) ?? option.walks[index].timeLabel).liveFont(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("walking-live-status")
                         }
                         HStack(spacing: 12) {
                             Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index) } label: {
                                 Label(live.text("看步行路線"), systemImage: "figure.walk")
                                     .frame(maxWidth: .infinity, minHeight: 44)
-                            }.buttonStyle(.bordered).buttonBorderShape(.capsule).accessibilityHint(AppText.text("在目前地圖查看步行路線"))
+                            }.secondaryAction().accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                             Button(live.text("已抵達")) { if !planner.started { planner.begin() }; planner.advance() }
-                                .frame(maxWidth: .infinity, minHeight: 44).buttonStyle(.borderedProminent).buttonBorderShape(.capsule)
+                                .frame(maxWidth: .infinity, minHeight: 44).primaryAction()
                                 .accessibilityIdentifier("journey-arrive")
                         }.liveFont(.subheadline, weight: .semibold)
                     }

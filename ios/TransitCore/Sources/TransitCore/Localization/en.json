@@ -392,5 +392,9 @@
   "此方向暫無車輛回報": "No bus positions in this direction",
   "車輛定位更新中": "Updating bus positions",
   "切換路線方向": "Switch direction",
-  "介面驗證用資料 · 非即時車輛": "Interface test data · not live"
+  "介面驗證用資料 · 非即時車輛": "Interface test data · not live",
+  "重新規劃步行中": "Updating walking route",
+  "步行路線暫時無法更新": "Walking route update unavailable",
+  "正在確認步行位置": "Confirming walking position",
+  "步行剩餘 %@ · %@ 分": "Walk remaining: %@ · %@ min"
 }

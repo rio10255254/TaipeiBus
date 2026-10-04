@@ -22,7 +22,18 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private let cacheKey = "recentDeviceLocation.v1"
     private var settings = LiveSettings.defaults
     private var lastRestart = Date.distantPast
+    private var walkingNavigation = false
+    func setWalkingNavigation(_ enabled: Bool) {
+        guard walkingNavigation != enabled else { return }
+        walkingNavigation = enabled
+        manager.desiredAccuracy = enabled ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = enabled ? 3 : 20
+        manager.activityType = enabled ? .fitness : .otherNavigation
+        manager.pausesLocationUpdatesAutomatically = !enabled
+        if enabled, active, authorized { manager.startUpdatingLocation(); updating = true }
+    }
 #if DEBUG
+    var walkingAccuracyConfigured: Bool { manager.desiredAccuracy == kCLLocationAccuracyBestForNavigation && manager.distanceFilter == 3 }
     private(set) var requestStartedAt: Date?
     private(set) var firstUsableMilliseconds: Double?
 #endif
@@ -103,7 +114,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             }
             updating = true
             lastRestart = Date()
-            manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyHundredMeters
             manager.startUpdatingLocation()
             updateHeadingActivity()
             timeoutTask?.cancel()
@@ -135,7 +146,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if displayCoordinate != nil {
             requesting = false; timeoutTask?.cancel(); timeoutTask = nil
             // Refinement happens after publishing the first useful position.
-            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateHeading value: CLHeading) {

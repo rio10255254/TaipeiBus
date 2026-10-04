@@ -87,7 +87,33 @@ private struct SmoothChange<Value: Equatable>: ViewModifier {
 extension View {
     func smoothChanges<Value: Equatable>(_ value: Value) -> some View { modifier(SmoothChange(value: value)) }
     func secondaryAction() -> some View {
-        buttonStyle(.bordered).buttonBorderShape(.capsule).controlSize(.small)
+        modifier(NativeActionSurface(prominent: false)).buttonBorderShape(.capsule).controlSize(.small)
+    }
+    func primaryAction() -> some View { modifier(NativeActionSurface(prominent: true)).buttonBorderShape(.capsule) }
+    func readableMapSurface() -> some View { modifier(ReadableMapSurface()) }
+}
+
+private struct NativeActionSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let prominent: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            if prominent { content.buttonStyle(.glassProminent) }
+            else { content.buttonStyle(.glass) }
+        } else {
+            if prominent { content.buttonStyle(.borderedProminent) }
+            else { content.buttonStyle(.bordered) }
+        }
+    }
+}
+
+private struct ReadableMapSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        content.foregroundStyle(.primary)
+            .background(Color(uiColor: .secondarySystemBackground).opacity(0.97), in: RoundedRectangle(cornerRadius: 19))
+            .overlay { RoundedRectangle(cornerRadius: 19).stroke(Color.primary.opacity(scheme == .dark ? 0.18 : 0.09), lineWidth: 0.7) }
+            .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.12), radius: 9, y: 3)
     }
 }
 

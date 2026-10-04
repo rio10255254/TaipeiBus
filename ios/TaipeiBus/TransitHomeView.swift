@@ -124,7 +124,7 @@ struct TransitHomeView: View {
                         }.secondaryAction()
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .shadow(color: .white, radius: 4)
+                    .padding(12).readableMapSurface()
                     .padding(.horizontal, 24 * CGFloat(live.appearance.spacingScale)).padding(.top, 104 * CGFloat(live.appearance.spacingScale))
                 }
                 if model.selectedVehicleID != nil, model.selectedVehicle == nil {
@@ -283,6 +283,7 @@ struct TransitHomeView: View {
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .onChange(of: location.revision, initial: true) { _, _ in
+            model.updateWalkingLocation()
             if let position = location.usableCoordinate { planner.locationArrived(position, metadata: model.metadata) }
             if model.userMapMode != .free, let position = location.displayCoordinate, lastLocationFocus != position {
                 lastLocationFocus = position; model.focusMap(.userLocation)
@@ -320,6 +321,13 @@ struct TransitHomeView: View {
                 journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(460)
             }
 #endif
+        }
+        .onChange(of: model.walkingMapIndex) { _, _ in model.updateWalkingLocation() }
+        .onChange(of: planner.currentStep) { _, _ in model.updateWalkingLocation() }
+        .onChange(of: planner.walkingRouteRevision) { _, _ in
+            if let index = model.activeWalkingIndex, !model.mapWasMoved {
+                model.focusMap(.journey(planner.walkingCoordinates(at: index)))
+            }
         }
         .onChange(of: model.loading) { _, loading in
             if !loading, planner.destination != nil, planner.options.isEmpty { planner.plan(metadata: model.metadata) }
@@ -411,7 +419,7 @@ struct PhoneGlassGroup<Content: View>: View {
     private let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     @ViewBuilder var body: some View {
-        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 10) { content } }
+        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 3) { content } }
         else { content }
     }
 }

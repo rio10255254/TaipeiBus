@@ -248,7 +248,26 @@ final class TransitAppModel: ObservableObject {
     }
 
     @Published private(set) var walkingMapIndex: Int?
-    func clearWalkingMap() { walkingMapIndex = nil }
+    var activeWalkingIndex: Int? {
+        if let walkingMapIndex { return walkingMapIndex }
+        if planner.started, case .walk(let index) = planner.currentStep { return index }
+        return nil
+    }
+    func updateWalkingLocation() {
+        let index = activeWalkingIndex
+        location.setWalkingNavigation(index != nil)
+        guard let index else {
+            if planner.walkingLegIndex != nil { planner.endWalkingGuidance() }
+            return
+        }
+        guard let position = location.usableCoordinate, let accuracy = location.accuracy,
+              let timestamp = location.updatedAt else { return }
+        planner.updateWalking(index: index, coordinate: position, accuracy: accuracy, timestamp: timestamp, now: Date())
+    }
+    func clearWalkingMap() {
+        walkingMapIndex = nil; planner.endWalkingGuidance(); location.setWalkingNavigation(false)
+        if planner.started, case .walk = planner.currentStep { updateWalkingLocation() }
+    }
     func focusMap(_ target: MapFocus) {
         if case .userLocation = target {} else { stopUserTracking() }
         mapWasMoved = false; focus = target; focusRevision += 1
@@ -295,7 +314,9 @@ final class TransitAppModel: ObservableObject {
         let walk = option.walks[index]
         walkingMapIndex = index
         following = false
-        focusMap(.journey(walk.coordinates.isEmpty ? [walk.from, walk.to] : walk.coordinates))
+        updateWalkingLocation()
+        let points = planner.walkingCoordinates(at: index)
+        focusMap(.journey(points.isEmpty ? [walk.from, walk.to] : points))
     }
     func selectStation(_ station: Station) {
         if selectedStationID == nil { browseQuery = query }
@@ -415,11 +436,10 @@ final class TransitAppModel: ObservableObject {
         let remainingRides = Array(option.rides.dropFirst(index))
         var riding = remainingRides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) }
         var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
-        if !onboard, option.walks.indices.contains(index), !walking.isEmpty,
-           planner.started || planner.usingLocation,
-           let point = location.usableCoordinate, let line = option.walks[index].road, line.length > 1,
-           let match = line.match(point, heading: nil), match.distance < 45 {
-            walking[0] *= max(0, min(1, (line.length - match.along) / line.length))
+        if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
+           let progress = planner.walkingProgress, progress.locationConfirmed,
+           let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
+            walking[0] = progress.remainingSeconds
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
@@ -453,6 +473,7 @@ final class TransitAppModel: ObservableObject {
 
     func boardCurrentRide() {
         guard let ride = planner.activeRide else { return }
+        clearWalkingMap()
 #if DEBUG
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
@@ -585,6 +606,16 @@ final class TransitAppModel: ObservableObject {
         func value(after flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
+        }
+        if arguments.contains("--preview-walking-guidance") {
+            previewSelectionApplied = true
+            previewNotice = "介面驗證用資料 · 非即時車輛"
+            Task { [weak self] in
+                guard let self else { return }
+                await planner.prepareWalkingPreview()
+                if planner.selected != nil { showWalkOnMap(0) }
+            }
+            return
         }
         if arguments.contains("--city-fleet-fixture") {
             previewSelectionApplied = true

@@ -59,22 +59,30 @@ struct MapContextLabels: View {
                 }
                 .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
                 .allowsHitTesting(false)
-                label.frame(width: width).position(x: x, y: y)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: x)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: y)
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.selectedStationID ?? ""):\(model.selectedVehicleID ?? ""):\(model.language.rawValue)", showDetails: showDetails)
+                    .equatable().frame(width: width).position(x: x, y: y)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: overlay.windowPoint != nil)
     }
 
-    @ViewBuilder private var label: some View {
+}
+
+private struct MapContextLabelContent: View, Equatable {
+    @ObservedObject var model: TransitAppModel
+    let signature: String
+    let showDetails: () -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.signature == rhs.signature }
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
+
+    @ViewBuilder var body: some View {
         if let station = model.selectedStation {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     Button(action: showDetails) {
                         BilingualName(station).font(.headline).foregroundStyle(.primary)
-                            .shadow(color: .white, radius: 4)
                     }.buttonStyle(.plain).frame(minHeight: 44)
                         .contextMenu {
                             Button { model.toggleFavorite(station) } label: {
@@ -84,7 +92,7 @@ struct MapContextLabels: View {
                                 Button(AppText.text("改看%@站牌", opposite.localizedBearing)) { model.selectStation(opposite) }
                             }
                         }
-                    Text(station.localizedBearing).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
+                    Text(station.localizedBearing).font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 0)
                     Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
                         .phoneGlass(in: Circle()).accessibilityLabel(AppText.text("此站所有路線與到站預估"))
@@ -107,11 +115,11 @@ struct MapContextLabels: View {
                                 .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
                             }.buttonStyle(PhonePressStyle())
                         }
-                        if arrivals.isEmpty { Text(AppText.text("暫無到站資訊")).font(.subheadline).shadow(color: .white, radius: 3) }
+                        if arrivals.isEmpty { Text(AppText.text("暫無到站資訊")).font(.subheadline).foregroundStyle(.secondary) }
                     }
                 }
-                Text(AppText.text("官方路線預估")).font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
-            }
+                Text(AppText.text("官方路線預估")).font(.caption2).foregroundStyle(.secondary)
+            }.padding(12).readableMapSurface()
         } else if let bus = model.selectedVehicle {
             HStack(spacing: 8) {
                 Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
@@ -122,7 +130,7 @@ struct MapContextLabels: View {
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
-            }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
+            }.padding(.horizontal, 12).readableMapSurface().fixedSize()
         }
     }
 }

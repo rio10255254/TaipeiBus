@@ -52,6 +52,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private(set) var compactVehicleCount = 0
     private(set) var detailedVehicleCount = 0
     private(set) var lastEncodeMilliseconds = 0.0
+    private(set) var sampledVehicleCount = 0
 #if DEBUG
     private var denseEncodeSamples: [Double] = []
     private var denseFrameSamples: [Double] = []
@@ -193,7 +194,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let time = CACurrentMediaTime()
         let selection = reduceMotion ? 1 : min(1, max(0, (time - selectionStartedAt) / 0.45))
         let selectionStrength = Float(selection * selection * (3 - 2 * selection))
-        let poses = motion.poses(time: time, now: Date())
+        let viewport = mapView.visibleCoordinateBounds
+        // A generous geographic margin covers the enlarged city glyphs and a
+        // trajectory crossing the edge, without evaluating off-screen bus motion.
+        let marginMeters = max(100, 40 * metersPerWorld / worldSize)
+        let latitudeMargin = marginMeters / 111_320
+        let longitudeMargin = latitudeMargin / cos(Self.origin.latitude * .pi / 180)
+        let bounds = GeoBounds(south: viewport.sw.latitude - latitudeMargin, west: viewport.sw.longitude - longitudeMargin,
+                               north: viewport.ne.latitude + latitudeMargin, east: viewport.ne.longitude + longitudeMargin)
+        let poses = motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
+        sampledVehicleCount = poses.count
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
         candidates.reserveCapacity(poses.count)

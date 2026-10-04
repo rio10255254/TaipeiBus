@@ -457,7 +457,9 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertNotNil(hit["busHitID"])
         map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: hit["busHitX"] as? Double ?? -10,
             dy: hit["busHitY"] as? Double ?? -10)).tap()
-        wait("The selected bus remains centered") { ($0["pitch"] as? Double ?? 0) > 56 && !($0["selectedVehicle"] as? String ?? "").isEmpty }
+        wait("The selected bus remains centered") { ($0["zoom"] as? Double ?? 0) > 16 && !($0["selectedVehicle"] as? String ?? "").isEmpty }
+        XCTAssertLessThan(camera()["fleetSampled"] as? Int ?? 2500, 500, "Street-scale tracking must avoid evaluating most off-screen vehicles.")
+        capture("focused-bus-with-offscreen-motion-culled")
         button("關閉選取").tap()
         wait("Returning restores the city overview") {
             ($0["selectedVehicle"] as? String ?? "") == "" && abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.03
@@ -486,6 +488,48 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         }
         let traces = camera()["transitions"] as? [[String: Any]] ?? []
         XCTAssertTrue(traces.allSatisfy { ($0["duration"] as? Double) == 0 })
+    }
+}
+
+final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
+    func camera() -> [String: Any] {
+        guard let data = app.staticTexts["map-camera-state"].label.data(using: .utf8),
+              let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return state
+    }
+    func wait(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 90), .completed, description + String(describing: camera()))
+    }
+    func testRealWalkingRouteHasAccurateLocationAndVisibleOrangeOverlay() {
+        launch(["--test-language", "en", "--test-map-controls", "--preview-walking-guidance"])
+        wait("Verified pedestrian geometry and precise walking location are ready") {
+            ($0["walkingActive"] as? Bool) == true && ($0["walkingAccuracyConfigured"] as? Bool) == true &&
+            ($0["walkingPointCount"] as? Int ?? 0) > 4 && ($0["walkingAboveBuildings"] as? Bool) == true
+        }
+        XCTAssertLessThan(camera()["pitch"] as? Double ?? 90, 1)
+        if ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true" {
+            XCTAssertEqual(camera()["walkingLineColor"] as? String, "#FFB340")
+        }
+        XCTAssertTrue(app.staticTexts["walking-live-status"].waitForExistence(timeout: 10))
+        capture("walking-orange-casing-real-road-and-readable-controls")
+    }
+    func testOcclusionTurnsCameraAndWaitingActionsRemainSeparate() {
+        launch(["--test-map-controls", "--test-occlusion", "--preview-boarding-fixture", "--preview-track-next", "--usability-fixture"])
+        wait("An obstructed view turns to a clear side") { ($0["autoVisibilityAdjustments"] as? Int ?? 0) > 0 }
+        XCTAssertTrue(camera()["following"] as? Bool == true)
+        XCTAssertFalse((camera()["selectedVehicle"] as? String ?? "").isEmpty)
+        let walk = button("journey-walk-to-stop"), board = button("journey-board")
+        XCTAssertTrue(walk.isHittable); XCTAssertTrue(board.isHittable)
+        XCTAssertGreaterThanOrEqual(board.frame.minX - walk.frame.maxX, 10)
+        let arrivals = button("journey-all-vehicles"), first = button("boarding-vehicle-TEST-01")
+        XCTAssertGreaterThan(first.frame.minY - arrivals.frame.maxY, 4)
+        capture("unobstructed-follow-with-separated-native-buttons")
+        let adjustments = camera()["autoVisibilityAdjustments"] as? Int
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.24)).press(forDuration: 0.1,
+            thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.31)))
+        wait("Manual map movement stops automatic camera control") { ($0["following"] as? Bool) == false }
+        XCTAssertEqual(camera()["autoVisibilityAdjustments"] as? Int, adjustments)
     }
 }
 

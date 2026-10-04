@@ -97,6 +97,12 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastFocusWasLeavingCity = false
         private var insetWork: DispatchWorkItem?
         private var pendingInset: UIEdgeInsets?
+        private var lastVisibilityCheck: CFTimeInterval = 0
+        private var lastVisibilityTarget: Coordinate?
+        private var visibilityVehicleID: String?
+        private var visibilityAdjustments = 0
+        private var consecutiveVisibilityAdjustments = 0
+        private var lastVisibilityAdjustmentAt: CFTimeInterval = 0
 #if DEBUG
         private var lastTestCameraAt: CFTimeInterval = 0
         private struct CameraTransitionTrace {
@@ -122,7 +128,7 @@ struct NativeBusMap: UIViewRepresentable {
             self.map = map
             map.addSubview(locationMarker)
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
-            let rate = Float(map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60)
+            let rate: Float = 60
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
             link.add(to: .main, forMode: .common)
@@ -151,10 +157,16 @@ struct NativeBusMap: UIViewRepresentable {
             style.addSource(walking); walkingSource = walking
             let walkingLine = MLNLineStyleLayer(identifier: "journey-walking-line", source: walking)
             walkingLine.lineColor = NSExpression(forConstantValue: UIColor.systemOrange)
-            walkingLine.lineWidth = NSExpression(forConstantValue: 3)
-            walkingLine.lineDashPattern = NSExpression(forConstantValue: [2, 2])
-            if let building = style.layer(withIdentifier: "building-3d") { style.insertLayer(walkingLine, below: building) }
-            else { style.addLayer(walkingLine) }
+            walkingLine.lineWidth = NSExpression(forConstantValue: 4)
+            walkingLine.lineDashPattern = NSExpression(forConstantValue: [1.5, 1])
+            walkingLine.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            let walkingCasing = MLNLineStyleLayer(identifier: "journey-walking-casing", source: walking)
+            walkingCasing.lineWidth = NSExpression(forConstantValue: 7)
+            walkingCasing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            walkingCasing.lineOpacity = NSExpression(forConstantValue: 0.9)
+            walkingCasing.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            // Walking guidance must remain legible over roofs and dense road colours.
+            style.addLayer(walkingCasing); style.addLayer(walkingLine)
             let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
             style.addSource(tripStops); tripStopsSource = tripStops
             style.setImage(stationIcon(size: 20), forName: "station-marker")
@@ -287,7 +299,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all")"
+            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision)"
             if lastSnapshotRevision != model.snapshot.revision || routeKey != lastRouteKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.cityFleetMode { vehicles = model.cityVehicles }
@@ -316,8 +328,9 @@ struct NativeBusMap: UIViewRepresentable {
                     if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
                     else { displayedWalks = [] }
                 }
-                let walks = displayedWalks.filter { $0.coordinates.count >= 2 }.map { walk -> MLNPolylineFeature in
-                    var coordinates = walk.coordinates.map(\.locationCoordinate)
+                let visibleWalks = model.activeWalkingIndex.map { [model.planner.walkingCoordinates(at: $0)] } ?? displayedWalks.map(\.coordinates)
+                let walks = visibleWalks.filter { $0.count >= 2 }.map { walk -> MLNPolylineFeature in
+                    var coordinates = walk.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 walkingSource?.shape = walks.isEmpty ? nil : MLNShapeCollectionFeature(shapes: walks)
@@ -338,9 +351,11 @@ struct NativeBusMap: UIViewRepresentable {
                 lastStationBrowsing = model.stationBrowsing
             }
             map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.stationBrowsing || (!hasVehicle && model.planner.selected == nil)
-            buildingOpacityTarget = model.highlightVehicle && hasVehicle ? 0.26 : 1
-            if reduceMotion {
+            let nextBuildingOpacity = model.highlightVehicle && hasVehicle ? 0.26 : 1.0
+            if nextBuildingOpacity != buildingOpacityTarget || reduceMotion && buildingOpacity != nextBuildingOpacity {
+                buildingOpacityTarget = nextBuildingOpacity
                 buildingOpacity = buildingOpacityTarget
+                buildingLayer?.fillExtrusionOpacityTransition = MLNTransition(duration: reduceMotion ? 0 : 0.25, delay: 0)
                 buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
             }
             if lastStationID != model.selectedStationID {
@@ -451,6 +466,17 @@ struct NativeBusMap: UIViewRepresentable {
                 state["themeBackground"] = darkMode ? "#10151D" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
+                state["fleetSampled"] = buses?.sampledVehicleCount ?? 0
+                state["autoVisibilityAdjustments"] = visibilityAdjustments
+                state["walkingActive"] = model.activeWalkingIndex != nil
+                state["walkingAccuracyConfigured"] = model.location.walkingAccuracyConfigured
+                state["walkingConfirmed"] = model.planner.walkingProgress?.locationConfirmed ?? false
+                state["walkingRemainingMeters"] = model.planner.walkingProgress?.remainingDistance ?? -1
+                state["walkingRecalculating"] = model.planner.walkingRecalculating
+                state["walkingLineColor"] = darkMode ? "#FFB340" : model.liveSettings.appearance.walkingColor
+                state["walkingPointCount"] = model.activeWalkingIndex.map { model.planner.walkingCoordinates(at: $0).count } ?? 0
+                let layerIDs = mapView.style?.layers.map(\.identifier) ?? []
+                state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
                 state["fleetCompactModels"] = buses?.compactVehicleCount ?? 0
@@ -513,7 +539,8 @@ struct NativeBusMap: UIViewRepresentable {
             case .userLocation:
                 guard let point = model.location.displayCoordinate, point.isInServiceArea else { return }
                 let heading = model.userMapMode == .heading ? model.location.currentHeading ?? map.direction : 0
-                showPoint(point, altitude: 600, heading: heading, pitch: model.userMapMode == .heading ? 45 : 0,
+                showPoint(point, altitude: model.activeWalkingIndex != nil ? 350 : 600, heading: heading,
+                          pitch: model.activeWalkingIndex != nil ? 0 : model.userMapMode == .heading ? 45 : 0,
                           map: map, duration: duration)
             case .vehicle(let id):
                 guard let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else { return }
@@ -591,7 +618,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
                 viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return nil }
-            let pitch = requestedPitch ?? (model.stationBrowsing ? 0 : 35)
+            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil ? 0 : 35)
             // Convert the existing verified framing to one camera, so center, zoom,
             // tilt and padding travel together instead of two instantaneous moves.
             let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)
@@ -646,18 +673,13 @@ struct NativeBusMap: UIViewRepresentable {
             guard let buses else { return }
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-                let maximum = map.window?.windowScene?.screen.maximumFramesPerSecond ?? 60
-                let rate = lowPower || reduceMotion ? 30 : maximum
+                let rate = lowPower || reduceMotion ? 30 : 60
                 link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: Float(rate), preferred: Float(rate))
                 map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
-            if abs(buildingOpacityTarget - buildingOpacity) > 0.001 {
-                buildingOpacity += (buildingOpacityTarget - buildingOpacity) * (1 - exp(-dt / 0.13))
-                if abs(buildingOpacityTarget - buildingOpacity) < 0.003 { buildingOpacity = buildingOpacityTarget }
-                buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
-            }
+            if now >= followSuspendedUntil { keepSelectedVehicleVisible(map, at: now) }
             if model.userMapMode != .free, now >= followSuspendedUntil,
                let point = model.location.displayCoordinate, point.isInServiceArea {
                 let camera = map.camera
@@ -734,6 +756,60 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        private func keepSelectedVehicleVisible(_ map: MLNMapView, at time: CFTimeInterval) {
+            guard model.following, !model.mapWasMoved, model.userMapMode == .free,
+                  let vehicle = model.selectedVehicle,
+                  map.zoomLevel >= 15, map.camera.pitch > 1,
+                  time - lastVisibilityCheck >= 1.5 else { return }
+            let point = buses?.pose(id: vehicle.id, time: time, now: Date())?.coordinate ?? vehicle.coordinate
+            if visibilityVehicleID == vehicle.id, let previous = lastVisibilityTarget,
+               previous.distance(to: point) < 25, time - lastVisibilityCheck < 10 { return }
+            lastVisibilityCheck = time; lastVisibilityTarget = point; visibilityVehicleID = vehicle.id
+            func coordinates(_ polygon: MLNPolygon) -> [Coordinate] {
+                var points = Array(repeating: CLLocationCoordinate2D(), count: Int(polygon.pointCount))
+                polygon.getCoordinates(&points, range: NSRange(location: 0, length: points.count))
+                return points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
+            }
+            let features = map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: Set(["building-3d"]))
+            var footprints = features.flatMap { feature -> [MapBuilding] in
+                let value = feature.attribute(forKey: "render_height")
+                let height = (value as? NSNumber)?.doubleValue ?? Double(value as? String ?? "") ?? 0
+                let baseHeight = (feature.attribute(forKey: "render_min_height") as? NSNumber)?.doubleValue ?? 0
+                guard height > 2 else { return [] }
+                let polygons: [MLNPolygon]
+                if let polygon = feature as? MLNPolygon { polygons = [polygon] }
+                else if let multi = feature as? MLNMultiPolygon { polygons = multi.polygons }
+                else { return [] }
+                return polygons.map { polygon in
+                    MapBuilding(rings: [coordinates(polygon)] + (polygon.interiorPolygons ?? []).map(coordinates), height: height, baseHeight: baseHeight)
+                }
+            }
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-occlusion"), visibilityAdjustments == 0 {
+                let meters = 1 / 111_320.0
+                footprints = [MapBuilding(rings: [[
+                    Coordinate(latitude: point.latitude - 35 * meters, longitude: point.longitude - 12 * meters),
+                    Coordinate(latitude: point.latitude - 35 * meters, longitude: point.longitude + 12 * meters),
+                    Coordinate(latitude: point.latitude - 12 * meters, longitude: point.longitude + 12 * meters),
+                    Coordinate(latitude: point.latitude - 12 * meters, longitude: point.longitude - 12 * meters)
+                ]], height: 90)]
+            }
+#endif
+            let camera = map.camera
+            if footprints.isEmpty { lastVisibilityTarget = nil; return }
+            guard CameraVisibility.isBlocked(target: point, altitude: camera.altitude, heading: camera.heading,
+                                             pitch: camera.pitch, buildings: footprints) else { return }
+            let angle = CameraVisibility.clearAngle(target: point, altitude: camera.altitude, heading: camera.heading,
+                                                   pitch: camera.pitch, buildings: footprints)
+            camera.heading = reduceMotion ? camera.heading : angle.heading
+            consecutiveVisibilityAdjustments = time - lastVisibilityAdjustmentAt < 8 ? consecutiveVisibilityAdjustments + 1 : 1
+            lastVisibilityAdjustmentAt = time; lastVisibilityTarget = nil
+            camera.pitch = reduceMotion || consecutiveVisibilityAdjustments >= 3 ? 0 : angle.pitch
+            camera.centerCoordinate = point.locationCoordinate
+            visibilityAdjustments += 1
+            moveCamera(camera, map: map, duration: 0.5)
+        }
+
         private func applyBasePalette(_ style: MLNStyle) {
             func color(_ value: String) -> NSExpression { NSExpression(forConstantValue: UIColor(liveHex: value)) }
             for (id, day) in dayPaints {
@@ -778,7 +854,8 @@ struct NativeBusMap: UIViewRepresentable {
             let blue = darkMode && theme.accentColor.uppercased() == "#007AFF" ? UIColor.systemBlue.resolvedColor(with: traits) : UIColor(liveHex: theme.accentColor)
             let accent = NSExpression(forConstantValue: blue)
             (style.layer(withIdentifier: "selected-route-line") as? MLNLineStyleLayer)?.lineColor = accent
-            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#71B7EE" : theme.walkingColor))
+            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#FFB340" : theme.walkingColor))
+            (style.layer(withIdentifier: "journey-walking-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#21170B" : "#FFFFFF"))
             (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#102937" : theme.waterColor))
             if let park = style.layer(withIdentifier: "park") as? MLNFillStyleLayer {
                 let color = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#18281F" : theme.parkColor))
@@ -789,8 +866,9 @@ struct NativeBusMap: UIViewRepresentable {
             (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = building
             for id in ["journey-stop-names", "nearby-station-names"] {
                 if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
-                    names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#D7DFEA" : "#333333"))
+                    names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F3F6FB" : "#252B32"))
                     names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#10151D" : "#FFFFFF"))
+                    names.textHaloWidth = NSExpression(forConstantValue: 2)
                 }
             }
             style.setImage(stationIcon(size: 20), forName: "station-marker")

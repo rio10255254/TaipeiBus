@@ -87,6 +87,73 @@ final class JourneyPlannerModel: ObservableObject {
         Date().timeIntervalSince(alternativeTransitUpdatedAt) <= 120 ? alternativeTransitSeconds : nil
     }
     private var alternativeTask: Task<Void, Never>?
+    @Published private(set) var walkingProgress: WalkingProgress?
+    @Published private(set) var walkingLegIndex: Int?
+    @Published private(set) var walkingRecalculating = false
+    @Published private(set) var walkingRouteUnavailable = false
+    @Published private(set) var walkingRevision = 0
+    @Published private(set) var walkingRouteRevision = 0
+    private var walkingTask: Task<Void, Never>?
+    private var walkingRequest: MKDirections?
+    private var walkingGeneration = UUID()
+    private var lastWalkingRequestAt = Date.distantPast
+
+    func endWalkingGuidance() {
+        walkingTask?.cancel(); walkingTask = nil; walkingRequest?.cancel(); walkingRequest = nil
+        walkingGeneration = UUID(); walkingLegIndex = nil; walkingProgress = nil
+        walkingRecalculating = false; walkingRouteUnavailable = false; lastWalkingRequestAt = .distantPast
+        walkingRevision += 1
+    }
+
+    func updateWalking(index: Int, coordinate: Coordinate, accuracy: Double, timestamp: Date, now: Date) {
+        guard let option = selected, option.walks.indices.contains(index) else { return }
+        let leg = option.walks[index]
+        let first = walkingLegIndex != index
+        if first {
+            endWalkingGuidance(); walkingLegIndex = index
+            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.duration ?? 0)
+        }
+        guard var progress = walkingProgress else { return }
+        let firstReliable = progress.lastFix == nil
+        let advanced = progress.update(coordinate: coordinate, accuracy: accuracy, timestamp: timestamp, now: now)
+        walkingProgress = progress
+        if advanced { walkingRouteUnavailable = false; walkingRevision += 1 }
+        let fresh = accuracy >= 0 && accuracy <= 35 && abs(now.timeIntervalSince(timestamp)) <= 15
+        let startChanged = (first || firstReliable) && coordinate.distance(to: leg.from) > 35 && progress.match == nil
+        guard fresh, (startChanged || progress.needsReroute), !walkingRecalculating,
+              now.timeIntervalSince(lastWalkingRequestAt) >= 20 else { return }
+        walkingRecalculating = true; walkingRouteUnavailable = false; lastWalkingRequestAt = now
+        let token = walkingGeneration, optionID = option.id
+        walkingTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let refreshed = try await walk(WalkingLeg(from: coordinate, to: leg.to), guidance: true)
+                guard !Task.isCancelled, walkingGeneration == token, selectedID == optionID,
+                      walkingLegIndex == index, let slot = options.firstIndex(where: { $0.id == optionID }) else { return }
+                walkingRecalculating = false
+                guard refreshed.verified else { walkingRouteUnavailable = true; return }
+                options[slot].walks[index] = refreshed
+                walkingProgress = WalkingProgress(coordinates: refreshed.coordinates, distance: refreshed.distance ?? 0, seconds: refreshed.duration ?? 0)
+                walkingRevision += 1; walkingRouteRevision += 1
+            } catch {
+                if walkingGeneration == token, !Task.isCancelled { walkingRecalculating = false; walkingRouteUnavailable = true }
+            }
+        }
+    }
+
+    func walkingCoordinates(at index: Int) -> [Coordinate] {
+        if walkingLegIndex == index, let walkingProgress { return walkingProgress.remainingCoordinates }
+        return selected?.walks.indices.contains(index) == true ? selected!.walks[index].coordinates : []
+    }
+
+    func walkingStatus(at index: Int) -> String? {
+        guard walkingLegIndex == index else { return nil }
+        if walkingRecalculating { return AppText.text("重新規劃步行中") }
+        if walkingRouteUnavailable { return AppText.text("步行路線暫時無法更新") }
+        guard let progress = walkingProgress, progress.locationConfirmed,
+              let date = progress.lastFix, Date().timeIntervalSince(date) <= 20 else { return AppText.text("正在確認步行位置") }
+        return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(progress.remainingDistance), max(1, Int(ceil(progress.remainingSeconds / 60))))
+    }
 
 
     init() {
@@ -343,8 +410,8 @@ final class JourneyPlannerModel: ObservableObject {
         if !result.verified { result.walkIssue = "步行接駁待確認" }
         return result
     }
-    private func walk(_ leg: WalkingLeg) async throws -> WalkingLeg {
-        let cacheKey = "\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude)"
+    private func walk(_ leg: WalkingLeg, guidance: Bool = false) async throws -> WalkingLeg {
+        let cacheKey = "\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
         if let cached = walkingCache[cacheKey] { return cached }
         var result = leg
         if leg.from.distance(to: leg.to) < 1 {
@@ -354,13 +421,22 @@ final class JourneyPlannerModel: ObservableObject {
         request.source = TravelPlace(name: "起點", address: "", coordinate: leg.from).mapItem
         request.destination = TravelPlace(name: "終點", address: "", coordinate: leg.to).mapItem
         request.transportType = .walking
-        request.requestsAlternateRoutes = false
+        request.requestsAlternateRoutes = true
         let operation = MKDirections(request: request); directions.append(operation)
-        defer { directions.removeAll { $0 === operation } }
+        if guidance { walkingRequest = operation }
+        defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
             let response = try await operation.calculate()
             try Task.checkCancellation()
-            if let route = response.routes.first {
+            let usable = response.routes.filter { route in
+                guard route.polyline.pointCount >= 2 else { return false }
+                var ends = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
+                route.polyline.getCoordinates(&ends, range: NSRange(location: 0, length: ends.count))
+                let first = Coordinate(latitude: ends[0].latitude, longitude: ends[0].longitude)
+                let last = Coordinate(latitude: ends.last!.latitude, longitude: ends.last!.longitude)
+                return first.distance(to: leg.from) <= 50 && last.distance(to: leg.to) <= 50
+            }
+            if let route = usable.min(by: { $0.expectedTravelTime < $1.expectedTravelTime }) {
                 var coordinates = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
                 route.polyline.getCoordinates(&coordinates, range: NSRange(location: 0, length: coordinates.count))
                 result.coordinates = coordinates.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
@@ -423,11 +499,25 @@ final class JourneyPlannerModel: ObservableObject {
         return nil
     }
     private func cancelRequests() {
+        endWalkingGuidance()
         task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
 
 #if DEBUG
+    func prepareWalkingPreview() async {
+        cancelRequests(); usingLocation = true
+        let start = Coordinate.taipei, end = Coordinate(latitude: 25.0410, longitude: 121.5663)
+        origin = TravelPlace(name: "目前位置", address: "", coordinate: start)
+        destination = TravelPlace(name: "市政府附近", address: "", coordinate: end, englishName: "Near City Hall")
+        do {
+            let leg = try await walk(WalkingLeg(from: start, to: end))
+            guard leg.verified else { return }
+            let option = JourneyOption(id: "walking-interface-check", trip: nil, walks: [leg])
+            options = [option]; selectedID = option.id; started = true; stepIndex = 0; mapRevision += 1
+        } catch { return }
+    }
+
     func prepareBoardingPreview(_ trip: TransitTrip) {
         cancelRequests()
         guard let first = trip.rides.first, let last = trip.rides.last else { return }

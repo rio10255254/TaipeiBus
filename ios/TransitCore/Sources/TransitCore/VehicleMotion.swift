@@ -16,6 +16,7 @@ public struct VehicleMotion {
     private struct State {
         var vehicle: BusVehicle
         let path: RouteLine
+        let bounds: GeoBounds
         let startedAt: TimeInterval
         let duration: TimeInterval
         let startHeading: Double
@@ -28,7 +29,8 @@ public struct VehicleMotion {
         init(vehicle: BusVehicle, path: RouteLine, startedAt: TimeInterval, duration: TimeInterval,
              startHeading: Double, startDistance: Double, startSlope: Double, endSlope: Double,
              startObservedAt: Date) {
-            self.vehicle = vehicle; self.path = path; self.startedAt = startedAt; self.duration = duration
+            self.vehicle = vehicle; self.path = path; self.bounds = GeoBounds(path.coordinates)
+            self.startedAt = startedAt; self.duration = duration
             self.startHeading = startHeading; self.startDistance = startDistance
             self.startSlope = startSlope; self.endSlope = endSlope
             self.startObservedAt = startObservedAt
@@ -53,6 +55,11 @@ public struct VehicleMotion {
     private struct Track {
         var vehicle: BusVehicle
         var legs: [State]
+        let bounds: GeoBounds
+        init(vehicle: BusVehicle, legs: [State]) {
+            self.vehicle = vehicle; self.legs = legs
+            self.bounds = legs.reduce(GeoBounds([vehicle.coordinate])) { $0.union($1.bounds) }
+        }
     }
     private var states: [String: Track] = [:]
     private static let maximumBuffer: TimeInterval = 20
@@ -199,6 +206,13 @@ public struct VehicleMotion {
 
     public func poses(time: TimeInterval, now: Date) -> [VehiclePose] {
         states.values.map { pose(track: $0, time: time, now: now) }
+    }
+
+    public func poses(time: TimeInterval, now: Date, in bounds: GeoBounds, including selectedID: String?) -> [VehiclePose] {
+        states.values.compactMap { track in
+            guard track.vehicle.id == selectedID || track.bounds.intersects(bounds) else { return nil }
+            return pose(track: track, time: time, now: now)
+        }
     }
 
     /// Accessibility changes can end an in-flight transition without waiting for a new GPS timestamp.
