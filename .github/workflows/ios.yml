@@ -26,7 +26,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -390,6 +390,10 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'city-fleet' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/CityFleetUsabilityTests')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-appearance' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
@@ -433,6 +437,22 @@ jobs:
             "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
+      - name: Verify system dark appearance with native journeys
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'navigation-appearance'
+        run: |
+          set -euo pipefail
+          xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+          export TEST_RUNNER_BUS_TEST_DARK=true
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            -resultBundlePath "$RUNNER_TEMP/usability-dark.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/usability-dark.log"
+      - name: Verify appearance switches without resetting the active bus
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope == 'navigation-appearance'
+        run: python3 ios/usability/verify-appearance.py
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')
         run: |
@@ -456,12 +476,16 @@ jobs:
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-no-location.xcresult" \
               --output-path "$RUNNER_TEMP/usability-no-location-screenshots"
           fi
+          if [ -d "$RUNNER_TEMP/usability-dark.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-dark.xcresult" \
+              --output-path "$RUNNER_TEMP/usability-dark-screenshots"
+          fi
           python3 - <<'PY'
           import json, os, re, shutil
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           names = set(re.findall(r'capture\("([^"]+)"\)', Path('ios/usability/JourneyUsabilityTests.swift').read_text()))
-          for folder in ['usability-screenshots', 'usability-no-location-screenshots']:
+          for folder in ['usability-screenshots', 'usability-no-location-screenshots', 'usability-dark-screenshots']:
               manifest = root / folder / 'manifest.json'
               if not manifest.exists():
                   continue
@@ -472,7 +496,7 @@ jobs:
                   keep = []
                   for item in record.get('attachments', []):
                       label = item.get('suggestedHumanReadableName', '')
-                      if item.get('isAssociatedWithFailure') or label.startswith('city-') or any(label.startswith(name) for name in names):
+                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-')) or any(label.startswith(name) for name in names):
                           filename = Path(item['exportedFileName']).name
                           shutil.copyfile(manifest.parent / filename, target / filename)
                           keep.append(item)
@@ -623,6 +647,8 @@ jobs:
             ${{ runner.temp }}/usability-preview
             ${{ runner.temp }}/usability-tests.log
             ${{ runner.temp }}/usability-no-location.log
+            ${{ runner.temp }}/usability-dark.log
+            ${{ runner.temp }}/appearance-switches
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4

@@ -11,7 +11,6 @@ struct TaipeiBusApp: App {
                 .environment(\.liveSettings, model.liveSettings)
                 .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
-                .preferredColorScheme(.light)
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     model.setActive(phase == .active)
                 }

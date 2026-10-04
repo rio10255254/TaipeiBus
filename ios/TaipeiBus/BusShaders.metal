@@ -50,7 +50,9 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     out.selection = bus.style.y;
     out.uv = float2(0);
     if (uniforms.mode.x == 1) { out.color.a *= bus.style.y; }
-    if (uniforms.mode.x == 2) { out.color = float4(0.12, 0.42, 0.96, bus.style.y * 0.9); }
+    if (uniforms.mode.x == 2) {
+        out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.10,0.57,1.0) : float3(0.12,0.42,0.96), bus.style.y * 0.9);
+    }
     else if (bus.style.z > 0) { out.color.a *= 0.48; }
     return out;
 }
@@ -89,7 +91,7 @@ vertex BusFragment busShadowVertex(uint vertexID [[vertex_id]], uint instanceID 
     out.position = readableBus(uniforms.matrix * float4(p, 1),
                                uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.uv = v.normal.xy;
-    out.color = float4(0.10, 0.12, 0.15, bus.style.z > 0 ? 0.10 : 0.22);
+    out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.025) : float3(0.10,0.12,0.15), bus.style.z > 0 ? 0.10 : 0.22);
     out.color.a *= max(uniforms.mode.z, bus.style.y);
     out.normal = float3(0, 0, 1);
     out.material = 0;

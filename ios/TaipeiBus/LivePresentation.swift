@@ -19,7 +19,16 @@ extension UIColor {
     }
 }
 extension Color {
-    init(liveHex: String) { self.init(uiColor: UIColor(liveHex: liveHex)) }
+    init(liveHex: String) {
+        self.init(uiColor: UIColor { traits in
+            let base = UIColor(liveHex: liveHex)
+            guard traits.userInterfaceStyle == .dark else { return base }
+            if liveHex.uppercased() == "#007AFF" { return UIColor.systemBlue.resolvedColor(with: traits) }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            base.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return UIColor(red: r + (1-r)*0.18, green: g + (1-g)*0.18, blue: b + (1-b)*0.18, alpha: a)
+        })
+    }
 }
 private struct LiveFontModifier: ViewModifier {
     @Environment(\.liveSettings) private var live

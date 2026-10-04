@@ -485,6 +485,56 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
     }
 }
 
+final class AppearanceUsabilityTests: JourneyUsabilityTestBase {
+    private var expectedDark: Bool { ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true" }
+    private func state() -> [String: Any] {
+        guard let bytes = app.staticTexts["map-camera-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func waitState(_ predicate: @escaping ([String: Any]) -> Bool) {
+        let test = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.app.staticTexts["map-camera-state"].exists && predicate(self.state())
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 90), .completed)
+    }
+    func testSystemAppearanceHomeRouteKeyboardAndStops() {
+        launch(["--test-map-controls"])
+        waitState { ($0["darkMode"] as? Bool) == self.expectedDark && ($0["fleetInput"] as? Int ?? 0) > 0 }
+        capture("appearance-home")
+        button("city-fleet-toggle").tap()
+        waitState { ($0["cityMode"] as? Bool) == true && ($0["fleetModels"] as? Int ?? 0) > 0 }
+        capture("appearance-city-flow")
+        button("city-fleet-toggle").tap()
+        button("路線").tap()
+        XCTAssertTrue(button("route-key-3").waitForExistence(timeout: 20))
+        button("route-key-3").tap(); button("route-key-0").tap(); button("route-key-7").tap()
+        capture("appearance-route-keypad")
+        let result = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "307")).firstMatch
+        XCTAssertTrue(result.waitForExistence(timeout: 15)); result.tap()
+        capture("appearance-route-stops")
+    }
+    func testInterchangeableVehicleTrackingAndOnboardFlow() {
+        launch(["--test-map-controls", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--usability-fixture"])
+        XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
+        waitState { ($0["darkMode"] as? Bool) == self.expectedDark }
+        let bus = button("boarding-vehicle-TEST-01")
+        XCTAssertTrue(bus.waitForExistence(timeout: 20))
+        capture("appearance-boarding-compatible-vehicles")
+        bus.tap()
+        waitState { ($0["pitch"] as? Double ?? 0) > 50 && !($0["vehicle"] as? String ?? "").isEmpty }
+        capture("appearance-3d-following")
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-onboard-vehicle").waitForExistence(timeout: 15))
+        XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))
+        capture("appearance-onboard")
+        button("journey-ride-stops").tap()
+        XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
+        XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, "TEST-01")
+        capture("appearance-onboard-stop-times")
+    }
+}
+
 final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
     func testManualOriginStillWorksWhenLocationIsDenied() throws {
         launch()

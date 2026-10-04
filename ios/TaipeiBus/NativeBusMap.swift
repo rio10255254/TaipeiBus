@@ -4,6 +4,7 @@ import MetalKit
 import TransitCore
 
 struct NativeBusMap: UIViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let location: Coordinate?
@@ -17,6 +18,7 @@ struct NativeBusMap: UIViewRepresentable {
     func makeUIView(context: Context) -> MLNMapView {
         let style = Bundle.main.url(forResource: "taipei", withExtension: "json")
         let map = MLNMapView(frame: .zero, styleURL: style)
+        context.coordinator.darkMode = colorScheme == .dark
         map.delegate = context.coordinator
         map.maximumZoomLevel = 20
         map.minimumZoomLevel = 9
@@ -44,6 +46,7 @@ struct NativeBusMap: UIViewRepresentable {
     func updateUIView(_ map: MLNMapView, context: Context) {
         context.coordinator.model = model
         context.coordinator.reduceMotion = reduceMotion
+        context.coordinator.darkMode = colorScheme == .dark
         let inset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
         let viewportChanged = map.contentInset != inset
         if viewportChanged { map.contentInset = inset }
@@ -58,6 +61,7 @@ struct NativeBusMap: UIViewRepresentable {
     final class Coordinator: NSObject, MLNMapViewDelegate, UIGestureRecognizerDelegate {
         var model: TransitAppModel
         var reduceMotion = false
+        var darkMode = false
         private weak var map: MLNMapView?
         private var buses: NativeBusLayer?
         private var displayLink: CADisplayLink?
@@ -94,6 +98,8 @@ struct NativeBusMap: UIViewRepresentable {
 #endif
         private var positionedInitialCamera = false
         private var lastAppearance: LiveSettings.Appearance?
+        private var lastDarkMode: Bool?
+        private var dayPaints: [String: [String: NSExpression]] = [:]
 #if DEBUG
         private var lastPreviewCameraSignature = ""
 #endif
@@ -113,7 +119,8 @@ struct NativeBusMap: UIViewRepresentable {
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
-            lastAppearance = nil
+            lastAppearance = nil; lastDarkMode = nil
+            captureDayPalette(style)
             buildingLayer = style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer
             buildingOpacity = 1; buildingOpacityTarget = 1
             let route = MLNShapeSource(identifier: "selected-route", shape: nil, options: nil)
@@ -201,10 +208,10 @@ struct NativeBusMap: UIViewRepresentable {
             UIGraphicsImageRenderer(size: CGSize(width: size + 4, height: size + 4)).image { _ in
                 let rect = CGRect(x: 2, y: 2, width: size, height: size)
                 let shape = UIBezierPath(roundedRect: rect, cornerRadius: size * 0.25)
-                UIColor.white.setFill(); shape.fill()
+                UIColor(liveHex: darkMode ? "#242E3B" : "#FFFFFF").setFill(); shape.fill()
                 UIColor(red: 0.36, green: 0.46, blue: 0.57, alpha: 0.55).setStroke(); shape.lineWidth = 1; shape.stroke()
                 let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.57, weight: .medium))?
-                    .withTintColor(UIColor(red: 0.28, green: 0.40, blue: 0.53, alpha: 1), renderingMode: .alwaysOriginal)
+                    .withTintColor(darkMode ? UIColor(liveHex: "#B4C5DB") : UIColor(red: 0.28, green: 0.40, blue: 0.53, alpha: 1), renderingMode: .alwaysOriginal)
                 glyph?.draw(in: rect.insetBy(dx: size * 0.23, dy: size * 0.23))
             }
         }
@@ -227,10 +234,11 @@ struct NativeBusMap: UIViewRepresentable {
                 lastFocusRevision = model.focusRevision
             }
             guard buses != nil else { return }
-            if let style = map.style, lastAppearance != model.liveSettings.appearance {
-                applyAppearance(style); lastAppearance = model.liveSettings.appearance
+            if let style = map.style, lastAppearance != model.liveSettings.appearance || lastDarkMode != darkMode {
+                applyAppearance(style); lastAppearance = model.liveSettings.appearance; lastDarkMode = darkMode
             }
             guard let buses else { return }
+            buses.darkAppearance = darkMode
             if lastMetadataCount != model.metadata.stations.count {
                 updateNearbyStations(force: true); lastMetadataCount = model.metadata.stations.count
             }
@@ -243,7 +251,8 @@ struct NativeBusMap: UIViewRepresentable {
                 else if model.selectedRoute != nil { vehicles = model.routeVehicles() }
                 else if let trip = model.planner.selected {
                     let rides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : trip.rides
-                    vehicles = vehicles.filter { bus in rides.contains { $0.route.id == bus.routeID && $0.direction == bus.direction } }
+                    let services = rides.map { ($0.direction, model.metadata.routeIDs(serving: $0)) }
+                    vehicles = vehicles.filter { bus in services.contains { $0.0 == bus.direction && $0.1.contains(bus.routeID) } }
                 }
                 if reduceMotion { vehicles = vehicles.map { var bus = $0; bus.path = [bus.coordinate]; return bus } }
                 buses.ingest(vehicles, time: CACurrentMediaTime())
@@ -384,6 +393,9 @@ struct NativeBusMap: UIViewRepresentable {
                     "userFanAngle": locationMarker.directionAngle,
                     "stationSymbol": mapView.style?.layer(withIdentifier: "nearby-station-dots") is MLNSymbolStyleLayer]
                 state["cityMode"] = model.cityFleetMode
+                state["darkMode"] = darkMode
+                state["themeBackground"] = darkMode ? "#10151D" : "light"
+                state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
@@ -410,6 +422,10 @@ struct NativeBusMap: UIViewRepresentable {
                     }
                 }
                 DispatchQueue.main.async { [weak self] in self?.overlay.recordCamera(state) }
+                if let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
+                   let bytes = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys]) {
+                    try? bytes.write(to: folder.appendingPathComponent("appearance-probe.json"), options: .atomic)
+                }
             }
 #endif
         }
@@ -598,19 +614,84 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        private func captureDayPalette(_ style: MLNStyle) {
+            dayPaints = [:]
+            for layer in style.layers {
+                var paints: [String: NSExpression] = [:]
+                if let layer = layer as? MLNBackgroundStyleLayer { paints["background"] = layer.backgroundColor }
+                if let layer = layer as? MLNFillStyleLayer {
+                    paints["fill"] = layer.fillColor; paints["outline"] = layer.fillOutlineColor
+                    paints["pattern"] = layer.fillPattern
+                }
+                if let layer = layer as? MLNLineStyleLayer { paints["line"] = layer.lineColor }
+                if let layer = layer as? MLNSymbolStyleLayer {
+                    paints["text"] = layer.textColor; paints["halo"] = layer.textHaloColor
+                }
+                dayPaints[layer.identifier] = paints
+            }
+        }
+
+        private func applyBasePalette(_ style: MLNStyle) {
+            func color(_ value: String) -> NSExpression { NSExpression(forConstantValue: UIColor(liveHex: value)) }
+            for (id, day) in dayPaints {
+                guard let layer = style.layer(withIdentifier: id) else { continue }
+                if let layer = layer as? MLNBackgroundStyleLayer {
+                    layer.backgroundColor = darkMode ? color("#10151D") : day["background"]
+                }
+                if let layer = layer as? MLNFillStyleLayer {
+                    let shade: String
+                    if id.contains("water") { shade = "#102937" }
+                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch"].contains(where: id.contains) { shade = "#18281F" }
+                    else if id.contains("building") { shade = "#28323F" }
+                    else if id.contains("hospital") { shade = "#29232E" }
+                    else if id.contains("sand") { shade = "#29281F" }
+                    else { shade = "#1B2430" }
+                    layer.fillColor = darkMode ? color(shade) : day["fill"]
+                    layer.fillOutlineColor = darkMode ? color(shade) : day["outline"]
+                    layer.fillPattern = darkMode ? nil : day["pattern"]
+                }
+                if let layer = layer as? MLNLineStyleLayer {
+                    let shade: String
+                    if id.contains("casing") { shade = "#141B24" }
+                    else if id.contains("water") { shade = "#204454" }
+                    else if id.contains("boundary") { shade = "#536174" }
+                    else if id.contains("motorway") || id.contains("trunk") { shade = "#776341" }
+                    else if id.contains("rail") { shade = "#536071" }
+                    else { shade = "#455261" }
+                    layer.lineColor = darkMode ? color(shade) : day["line"]
+                }
+                if let layer = layer as? MLNSymbolStyleLayer {
+                    layer.textColor = darkMode ? color(id.contains("water") ? "#7DA2B8" : "#CAD3DF") : day["text"]
+                    layer.textHaloColor = darkMode ? color("#10151D") : day["halo"]
+                }
+            }
+        }
+
         private func applyAppearance(_ style: MLNStyle) {
+            applyBasePalette(style)
             let theme = model.liveSettings.appearance
-            let accent = NSExpression(forConstantValue: UIColor(liveHex: theme.accentColor))
+            let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
+            let blue = darkMode && theme.accentColor.uppercased() == "#007AFF" ? UIColor.systemBlue.resolvedColor(with: traits) : UIColor(liveHex: theme.accentColor)
+            let accent = NSExpression(forConstantValue: blue)
             (style.layer(withIdentifier: "selected-route-line") as? MLNLineStyleLayer)?.lineColor = accent
-            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: theme.walkingColor))
-            (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: theme.waterColor))
+            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#71B7EE" : theme.walkingColor))
+            (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#102937" : theme.waterColor))
             if let park = style.layer(withIdentifier: "park") as? MLNFillStyleLayer {
-                let color = NSExpression(forConstantValue: UIColor(liveHex: theme.parkColor))
+                let color = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#18281F" : theme.parkColor))
                 park.fillColor = color; park.fillOutlineColor = color
             }
-            let building = NSExpression(forConstantValue: UIColor(liveHex: theme.buildingColor))
+            let building = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#354152" : theme.buildingColor))
             (style.layer(withIdentifier: "building") as? MLNFillStyleLayer)?.fillColor = building
             (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = building
+            for id in ["journey-stop-names", "nearby-station-names"] {
+                if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
+                    names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#D7DFEA" : "#333333"))
+                    names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#10151D" : "#FFFFFF"))
+                }
+            }
+            style.setImage(stationIcon(size: 20), forName: "station-marker")
+            style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
+            style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
         }
 
         func mapViewDidFailLoadingMap(_ mapView: MLNMapView, withError error: Error) {

@@ -306,14 +306,14 @@ private struct JourneyBoardingContent: View {
                     }
             }
             .padding(.bottom, -10)
-            if guide.approaches.isEmpty { Text(live.text("暫無車輛位置")).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
+            if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
             VStack(spacing: 0) {
                 ForEach(Array(guide.approaches.prefix(3))) { approach in
                     BoardingVehicleRow(model: model, ride: ride, approach: approach, date: date)
                     if approach.id != guide.approaches.prefix(3).last?.id { Divider() }
                 }
             }
-            if let bus = model.selectedVehicle, bus.routeID == ride.route.id, bus.direction == ride.direction,
+            if let bus = model.selectedVehicle, model.metadata.canServe(ride, vehicle: bus),
                !guide.approaches.contains(where: { $0.id == bus.id }) {
                 let passed = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)?
                     .progress(stopID: ride.boarding.id, vehicle: bus, at: date).map { $0.distance < -20 } ?? false
@@ -330,7 +330,10 @@ private struct JourneyBoardingContent: View {
                     .foregroundStyle(Color(liveHex: live.appearance.accentColor)).lineLimit(1).minimumScaleFactor(0.65)
                     .accessibilityIdentifier("boarding-route")
                 Text(live.text("往 ") + ride.route.destination(direction: ride.direction)).liveFont(.caption).lineLimit(1)
-                if ride.route.displayName != ride.route.name { Text(ride.route.displayName).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                if ride.route.displayName != ride.route.name,
+                   model.metadata.routeIDs(serving: ride).filter({ model.metadata.routes[$0] != nil }).count <= 1 {
+                    Text(ride.route.displayName).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 4) {
@@ -371,7 +374,7 @@ private struct VehicleArrivalsView: View {
                         Text("往 " + ride.route.destination(direction: ride.direction)).foregroundStyle(.secondary)
                     } header: { Text("官方到站") }
                     Section {
-                        if guide.approaches.isEmpty { Text("暫無車輛位置").foregroundStyle(.secondary) }
+                        if guide.approaches.isEmpty { Text(guide.emptyPositionLabel).foregroundStyle(.secondary) }
                         ForEach(guide.approaches) { approach in
                             VStack(alignment: .leading, spacing: 3) {
                                 BoardingVehicleRow(model: model, ride: ride, approach: approach, date: timeline.date)
@@ -435,7 +438,7 @@ private struct OnboardSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let bus = model.onboardVehicle(for: ride) {
-                let journey = model.metadata.journey(routeID: ride.route.id, direction: ride.direction)
+                let journey = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)
                 let next = journey?.upcoming(vehicle: bus, at: date).first
                 HStack {
                     Text(next.map { "下一站 · " + $0.stop.name } ?? "位置更新中").lineLimit(1)
@@ -471,7 +474,7 @@ private struct OnboardStopsView: View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let bus = model.onboardVehicle(for: ride)
-                let upcoming = bus.flatMap { model.metadata.journey(routeID: ride.route.id, direction: ride.direction)?.upcoming(vehicle: $0, at: timeline.date) } ?? []
+                let upcoming = bus.flatMap { model.metadata.journey(routeID: $0.routeID, direction: $0.direction)?.upcoming(vehicle: $0, at: timeline.date) } ?? []
                 let stops = upcoming.isEmpty ? Array(ride.stops.dropFirst()) : upcoming.map(\.stop)
                 List {
                     Section {

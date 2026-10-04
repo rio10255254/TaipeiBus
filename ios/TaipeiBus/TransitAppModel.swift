@@ -380,21 +380,21 @@ final class TransitAppModel: ObservableObject {
             boardedDuration = (option.id, duration)
         }
         boardedVehicle = nil
-        if let bus = selectedVehicle, bus.routeID == ride.route.id, bus.direction == ride.direction {
+        if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
             confirmBoardedVehicle(bus, ride: ride)
         }
         planner.boardCurrentRide()
     }
 
     func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
-        guard bus.routeID == ride.route.id, bus.direction == ride.direction else { return }
+        guard metadata.canServe(ride, vehicle: bus) else { return }
         boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
         trackApproachingVehicle(bus)
     }
 
     func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
         guard let boardedVehicle, boardedVehicle.rideID == ride.id else { return nil }
-        return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && $0.routeID == ride.route.id && $0.direction == ride.direction }
+        return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) }
     }
 
     func onboardPlate(for ride: TransitRide) -> String? {
@@ -443,6 +443,9 @@ final class TransitAppModel: ObservableObject {
     }
     func routeVehicles() -> [BusVehicle] {
         guard let id = selectedRouteID else { return [] }
+        if let ride = planner.activeRide, metadata.routeIDs(serving: ride).contains(id), direction == ride.direction {
+            return BoardingGuide.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: Date(), approachingOnly: false).map(\.vehicle)
+        }
         return metadata.vehicles(routeID: id, direction: direction, allVariants: allRouteVariants, in: snapshot.vehicles)
     }
 
@@ -502,7 +505,7 @@ final class TransitAppModel: ObservableObject {
             return
         } else if arguments.contains("--preview-boarding-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"))
+                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"))
             if let token = value(after: "--preview-capture"), previewSelectionApplied,
                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                 try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
@@ -638,7 +641,7 @@ final class TransitAppModel: ObservableObject {
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false) -> Bool {
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false) -> Bool {
         let network = TripPlanner(metadata: metadata)
         var chosen: TransitTrip?
         if transfer {
@@ -673,13 +676,21 @@ final class TransitAppModel: ObservableObject {
               let line = metadata.line(ride.route.id, direction: ride.direction),
               let boarding = journey.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
         let date = Date()
+        let alternate = metadata.routeIDs(serving: ride).sorted().first {
+            $0 != ride.route.id && metadata.routes[$0] != nil && metadata.journey(routeID: $0, direction: ride.direction) != nil
+        }
+        if cooperated && alternate == nil { return false }
+        let vehicleRouteID = cooperated ? alternate! : ride.route.id
+        let vehicleJourney = metadata.journey(routeID: vehicleRouteID, direction: ride.direction) ?? journey
+        let vehicleLine = metadata.line(vehicleRouteID, direction: ride.direction) ?? line
+        let vehicleBoarding = vehicleJourney.anchors.first { $0.stop.id == ride.boarding.id } ?? boarding
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 28_800); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
         let rows = [100.0, 450, 900, 950].enumerated().map { index, distance -> [String: Any] in
-            let sample = line.sample(fraction: (boarding.match.along - distance * Double(journey.direction)) / line.length)
-            return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": ride.route.id,
+            let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along - distance * Double(vehicleJourney.direction)) / vehicleLine.length)
+            return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": vehicleRouteID,
                 "GoBack": ride.direction, "Latitude": sample.0.latitude, "Longitude": sample.0.longitude,
-                "Speed": 25, "Azimuth": (sample.1 + (journey.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360),
+                "Speed": 25, "Azimuth": (sample.1 + (vehicleJourney.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360),
                 "BusStatus": "0", "DutyStatus": "0", "DataTime": formatter.string(from: date)]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: ["BusInfo": rows,

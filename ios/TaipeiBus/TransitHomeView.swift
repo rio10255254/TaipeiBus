@@ -275,7 +275,7 @@ struct TransitHomeView: View {
             if !showDetails && !pendingJourneyDetail && !(showSearch && hasTransitSelection),
                userChangedJourney || model.userMapMode == .free {
                 let sameVehicle = model.selectedVehicle.map { bus in
-                    planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                    planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
                 } ?? false
                 if let index = model.walkingMapIndex, !userChangedJourney,
                    planner.selected?.walks.indices.contains(index) == true {
@@ -332,13 +332,13 @@ struct TransitHomeView: View {
         }
         if let index = model.walkingMapIndex {
             let relevantBus = model.selectedVehicle.map { bus in
-                planner.activeRide.map { $0.route.id == bus.routeID && $0.direction == bus.direction } == true
+                planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
             } ?? false
             if !relevantBus { model.clearSelection() }
             model.showWalkOnMap(index); return
         }
         if let bus = model.selectedVehicle, let ride = planner.activeRide,
-           bus.routeID == ride.route.id, bus.direction == ride.direction {
+           model.metadata.canServe(ride, vehicle: bus) {
             if model.following { model.focusMap(.vehicle(bus.id)) }
         } else {
             model.clearSelection()

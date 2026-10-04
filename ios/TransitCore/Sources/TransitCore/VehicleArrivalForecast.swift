@@ -99,8 +99,7 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func estimate(_ approach: VehicleApproach, ride: TransitRide, metadata: TransitMetadata,
                          at date: Date) -> VehicleArrivalEstimate {
-        guard approach.alongDistance != nil, approach.vehicle.routeID == ride.route.id,
-              approach.vehicle.direction == ride.direction,
+        guard approach.alongDistance != nil, metadata.canServe(ride, vehicle: approach.vehicle),
               let result = prediction(approach.vehicle, stopID: ride.boarding.id, metadata: metadata, at: date) else { return .unavailable }
         if result.nearStop { return .nearStop }
         let lower = max(1, Int(ceil((result.seconds - result.uncertaintySeconds) / 60)))

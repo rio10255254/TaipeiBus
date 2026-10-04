@@ -7,6 +7,6 @@ let package = Package(
     products: [.library(name: "TransitCore", targets: ["TransitCore"])],
     targets: [
         .target(name: "TransitCore"),
-        .testTarget(name: "TransitCoreTests", dependencies: ["TransitCore"])
+        .testTarget(name: "TransitCoreTests", dependencies: ["TransitCore"], resources: [.process("Fixtures")])
     ]
 )

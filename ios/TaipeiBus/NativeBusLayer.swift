@@ -63,6 +63,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let ordered = samples.sorted()
         return ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * fraction))]
     }
+    var darkAppearance = false {
+        didSet { if darkAppearance != oldValue { setNeedsDisplay() } }
+    }
 #endif
     private static let origin = Coordinate(latitude: 25.04, longitude: 121.55)
     private static let circumference = 40_075_016.68557849
@@ -185,7 +188,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                                                   floatColumn(projection.columns.2), floatColumn(projection.columns.3)))
         let heading = Float(mapView.camera.heading * .pi / 180), pitch = Float(mapView.camera.pitch * .pi / 180)
         var uniforms = Uniforms(matrix: gpuProjection, mode: SIMD4(0, 0, 1, 1),
-                                viewDirection: SIMD4(-sin(heading) * sin(pitch), -cos(heading) * sin(pitch), cos(pitch), 0))
+                                viewDirection: SIMD4(-sin(heading) * sin(pitch), -cos(heading) * sin(pitch), cos(pitch), darkAppearance ? 1 : 0))
         let time = CACurrentMediaTime()
         let selection = reduceMotion ? 1 : min(1, max(0, (time - selectionStartedAt) / 0.45))
         let selectionStrength = Float(selection * selection * (3 - 2 * selection))
