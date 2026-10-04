@@ -255,7 +255,8 @@ public struct VehicleArrivalForecast: Sendable {
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
               let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
-            let distance = zip(ride.coordinates, ride.coordinates.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) }
+            let points = ride.coordinates.count >= 2 ? ride.coordinates : ride.stops.map(\.coordinate)
+            let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
             return distance / 4.5 + Double(ride.stopCount) * 20
         }
         return ((first + 1)...last).reduce(0) { result, index in

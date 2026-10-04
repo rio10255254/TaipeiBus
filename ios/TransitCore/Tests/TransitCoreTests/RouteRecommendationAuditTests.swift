@@ -40,13 +40,19 @@ final class RouteRecommendationAuditTests: XCTestCase {
         let keptRealWalk = TripRanking.assessment(kept, estimates: EstimateFeed(), at: date, walkingDurations: [600, 0])
         let alternativeRealWalk = TripRanking.assessment(alternative, estimates: EstimateFeed(), at: date, walkingDurations: [180, 0])
         XCTAssertLessThan(alternativeRealWalk.elapsedSeconds, keptRealWalk.elapsedSeconds - 300)
-        print("Recommendation audit counterexample: same-family boarding option discarded before real walking verification; retained \(keptRealWalk.elapsedSeconds / 60) min vs feasible alternative \(alternativeRealWalk.elapsedSeconds / 60) min.")
+        let retained = TripPlanner(metadata: metadata).plan(from: origin, to: destination, maximumWalk: 300,
+            limit: 18, preservePlatforms: true)
+        XCTAssertTrue(retained.contains { $0.rides[0].boarding.id == "stop-1" })
+        let durations = Dictionary(uniqueKeysWithValues: retained.map { ($0.id, [$0.rides[0].boarding.id == "stop-0" ? 600.0 : 180.0, 0.0].map(Optional.some)) })
+        let refined = TripRanking.recommended(retained, estimates: EstimateFeed(), at: date, walkingDurations: durations)
+        XCTAssertEqual(refined.first?.rides[0].boarding.id, "stop-1")
+        print("Recommendation improvement: retained alternative station and selected \(alternativeRealWalk.elapsedSeconds / 60) min after true walking, instead of \(keptRealWalk.elapsedSeconds / 60) min.")
     }
 
     func testDocumentBoardingGraceAndUnknownConnectionCosts() {
         let grace = TripRanking.assess(riding: [600], walking: [140, 0], arrivals: [120])
-        XCTAssertFalse(grace.missedFirstArrival)
-        XCTAssertEqual(grace.waitingSeconds, 0)
+        XCTAssertTrue(grace.missedFirstArrival)
+        XCTAssertGreaterThan(grace.waitingSeconds, 0)
         let unknown = TripRanking.assess(riding: [600], walking: [90, 90], arrivals: [nil])
         let pending = TripRanking.assess(riding: [600], walking: [90, 90], arrivals: [-1])
         XCTAssertEqual(unknown.waitingSeconds, 480)

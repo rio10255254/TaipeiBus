@@ -9,6 +9,7 @@ struct WalkingLeg: Sendable {
     var distance: Double?
     var duration: TimeInterval?
     var instructions: [String] = []
+    var road: RouteLine?
     var verified: Bool { duration != nil }
     var timeLabel: String {
         duration.map { $0 < 30 ? "就在附近" : "步行 \(Int(ceil($0 / 60))) 分" } ?? "步行路線待確認"
@@ -47,15 +48,9 @@ private actor TripNetwork {
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
-        let nearby = planner!.plan(from: from, to: to, maximumWalk: preferences.firstWalkMeters, limit: 18,
-                                  preferences: preferences, estimates: estimates)
-        if nearby.contains(where: { $0.transfers == 0 }) { return nearby }
-        let expanded = planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 18,
-                                     preferences: preferences, estimates: estimates)
-        if nearby.isEmpty { return expanded }
-        let existing = Set(nearby.map(\.id))
-        return TripRanking.recommended(nearby + expanded.filter { $0.transfers == 0 && !existing.contains($0.id) },
-            estimates: estimates, at: Date(), preferences: preferences, limit: 18)
+        return planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 36,
+                             preferences: preferences, estimates: estimates, preservePlatforms: true)
+
     }
 }
 
@@ -81,12 +76,79 @@ final class JourneyPlannerModel: ObservableObject {
     private var preferences = LiveSettings.Planning()
     private var lastMetadata: TransitMetadata?
     private var selectionConfirmed = false
+    private var forecast = VehicleArrivalForecast()
+    private var verifiedPool: [JourneyOption] = []
+    private var walkingCache: [String: WalkingLeg] = [:]
+    private var lastTimingRefresh = Date.distantPast
+    @Published private(set) var optionLabels: [String: String] = [:]
+    @Published private(set) var alternativeTransitSeconds: Double?
+    private var alternativeTask: Task<Void, Never>?
+
 
     init() {
         if let data = UserDefaults.standard.data(forKey: "journeyRecentPlaces"),
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
+    func duration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+        guard option.verified, option.walkIssue == nil else { return nil }
+        let riding = option.rides.map { ride in
+            lastMetadata.map { forecast.ridingSeconds(ride, metadata: $0, at: date) } ?? option.trip?.rideSeconds[option.rides.firstIndex(where: { $0.id == ride.id }) ?? 0] ?? 0
+        }
+        if let trip = option.trip {
+            let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
+                preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding)
+            return JourneyDuration(assessment: assessment, riding: riding)
+        }
+        return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
+    }
+    private func publishRecommendations() {
+        let date = Date()
+        let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil }
+        let trips = valid.compactMap(\.trip)
+        let walks = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) })
+        let rides = Dictionary(uniqueKeysWithValues: valid.filter { !$0.walkingOnly }.map { option in
+            (option.id, option.rides.map { ride in lastMetadata.map { forecast.ridingSeconds(ride, metadata: $0, at: date) } ?? 0 })
+        })
+        let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
+            preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides)
+        var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
+        if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
+           result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
+            result.insert(foot, at: 0)
+        }
+        result = Array(result.prefix(3))
+        let recommended = result.first.flatMap { duration($0, at: date) }
+        var labels: [String: String] = [:]
+        for (index, option) in result.enumerated() {
+            if index == 0 { labels[option.id] = option.walkingOnly ? "步行即可" : "推薦"; continue }
+            if let timing = duration(option, at: date), let recommended {
+                if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
+                else if timing.walkingSeconds < recommended.walkingSeconds - 120 { labels[option.id] = "少走路" }
+                else { labels[option.id] = option.rides.count == 1 ? "直達" : "少轉乘" }
+            }
+        }
+        let oldIDs = options.map(\.id)
+        options = result; optionLabels = labels
+        if !selectionConfirmed { selectedID = result.first?.id }
+        if oldIDs != result.map(\.id) { mapRevision += 1 }
+    }
+    private func startAlternativeTransit(from: Coordinate, to: Coordinate, token: UUID) {
+        alternativeTask?.cancel()
+        alternativeTask = Task { [weak self] in
+            guard let self else { return }
+            let request = MKDirections.Request()
+            request.source = TravelPlace(name: "出發地", address: "", coordinate: from).mapItem
+            request.destination = TravelPlace(name: "目的地", address: "", coordinate: to).mapItem
+            request.transportType = .transit; request.departureDate = Date()
+            let operation = MKDirections(request: request); directions.append(operation)
+            defer { directions.removeAll { $0 === operation } }
+            if let response = try? await operation.calculateETA(), !Task.isCancelled, token == generation,
+               response.transportType == .transit, response.expectedTravelTime.isFinite, response.expectedTravelTime > 0 {
+                alternativeTransitSeconds = response.expectedTravelTime
+            }
+        }
+    }
     var steps: [JourneyStep] {
         guard let option = selected else { return [] }
         if option.walkingOnly { return [.walk(0)] }
@@ -106,8 +168,12 @@ final class JourneyPlannerModel: ObservableObject {
         if case .ride(let index) = currentStep { return option.rides[index] }
         return nil
     }
-    func updateSnapshot(_ snapshot: TransitSnapshot) {
-        latestSnapshot = snapshot
+    func updateSnapshot(_ snapshot: TransitSnapshot, forecast: VehicleArrivalForecast = .init()) {
+        latestSnapshot = snapshot; self.forecast = forecast
+        if !started, !planning, !checkingWalks, !selectionConfirmed, !verifiedPool.isEmpty,
+           Date().timeIntervalSince(lastTimingRefresh) >= 15 {
+            publishRecommendations(); lastTimingRefresh = Date()
+        }
         // Arrival data can complete after the first GPS response and route candidates.
         // Replace provisional choices before the rider chooses one, without changing an active trip.
         if !started, !planning, !selectionConfirmed, !options.isEmpty,
@@ -153,6 +219,7 @@ final class JourneyPlannerModel: ObservableObject {
     func plan(metadata: TransitMetadata) {
         lastMetadata = metadata; selectionConfirmed = false
         cancelRequests()
+        verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
@@ -169,50 +236,56 @@ final class JourneyPlannerModel: ObservableObject {
             let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
                                               preferences: preferences, estimates: latestSnapshot.estimates)
             guard !Task.isCancelled, token == generation else { return }
-            let estimates = latestSnapshot.estimates
-            let walkable = origin.coordinate.distance(to: destination.coordinate) <= preferences.walkingOnlyMeters
-            let ordered = TripRanking.recommended(trips, estimates: estimates, at: Date(), preferences: preferences, limit: walkable ? 2 : 3)
-            var choices = ordered.map { trip -> JourneyOption in
+            verifiedPool = []; optionLabels = [:]
+            let date = Date()
+            let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
+                preferences: preferences, limit: 36, diverse: false)
+            func option(_ trip: TransitTrip) -> JourneyOption {
                 var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
-                if trip.rides.count > 1 {
-                    for i in 1..<trip.rides.count {
-                        walks.append(WalkingLeg(from: trip.rides[i - 1].alighting.coordinate, to: trip.rides[i].boarding.coordinate))
-                    }
+                for index in trip.rides.indices.dropFirst() {
+                    walks.append(WalkingLeg(from: trip.rides[index - 1].alighting.coordinate, to: trip.rides[index].boarding.coordinate))
                 }
                 walks.append(WalkingLeg(from: trip.rides.last!.alighting.coordinate, to: destination.coordinate))
                 return JourneyOption(id: trip.id, trip: trip, walks: walks)
             }
-            if walkable {
-                choices.insert(JourneyOption(id: "walking", trip: nil,
+            // Verify several families plus their alternative platforms, not just the three eventual rows.
+            var selected: [TransitTrip] = []
+            var families = Set<String>()
+            for trip in ordered where families.insert(trip.familyID).inserted {
+                selected.append(trip); if selected.count >= 6 { break }
+            }
+            for trip in ordered where !selected.contains(where: { $0.id == trip.id }) {
+                selected.append(trip); if selected.count >= 18 { break }
+            }
+            var pending = selected.map(option)
+            if origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 1_500) {
+                pending.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
-                choices = Array(choices.prefix(3))
             }
-            options = choices; selectedID = choices.first?.id; planning = false; mapRevision += 1
-            guard !choices.isEmpty else {
-                message = "附近沒有合適公車"; return
-            }
-            checkingWalks = true
-            // Publish choices immediately, then verify each displayed walk. Selecting a choice
-            // cancels this background refinement and locks the passenger's chosen itinerary.
-            for choice in choices {
-                do {
-                    let verified = try await enrich(choice)
-                    guard token == generation, !Task.isCancelled else { return }
-                    if let index = options.firstIndex(where: { $0.id == choice.id }) { options[index] = verified }
-                    if selected?.walkIssue != nil, verified.walkIssue == nil { selectedID = verified.id }
-                    checkingWalks = selected?.verified == false
-                    mapRevision += 1
-                } catch { return }
+            options = Array(pending.prefix(3)); selectedID = nil; planning = false; checkingWalks = true
+            startAlternativeTransit(from: origin.coordinate, to: destination.coordinate, token: token)
+            guard !pending.isEmpty else { message = "附近沒有合適公車"; checkingWalks = false; return }
+            // Two pedestrian requests at a time, with shared leg cache and cancellation.
+            for start in stride(from: 0, to: pending.count, by: 2) {
+                let batch = Array(pending[start..<min(pending.count, start + 2)])
+                await withTaskGroup(of: JourneyOption?.self) { group in
+                    for choice in batch {
+                        group.addTask { [weak self] in try? await self?.enrich(choice) }
+                    }
+                    for await result in group {
+                        guard token == self.generation, !Task.isCancelled, let result else { continue }
+                        if result.verified && result.walkIssue == nil { self.verifiedPool.append(result) }
+                    }
+                }
+                guard token == generation, !Task.isCancelled else { return }
+                publishRecommendations()
             }
             guard token == generation else { return }
-            let valid = options.filter { $0.walkIssue == nil }
-            let ranked = TripRanking.recommended(valid.compactMap(\.trip), estimates: latestSnapshot.estimates,
-                at: Date(), preferences: preferences, limit: 3,
-                walkingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) }))
-            let walkChoices = valid.filter(\.walkingOnly)
-            options = walkChoices + ranked.compactMap { trip in valid.first { $0.id == trip.id } } + options.filter { $0.walkIssue != nil }
-            selectedID = options.first(where: { $0.walkIssue == nil })?.id ?? options.first?.id
-            checkingWalks = false; mapRevision += 1
+            checkingWalks = false
+            publishRecommendations()
+            if verifiedPool.isEmpty { message = "步行接駁暫時無法確認，請稍後重試或查看其他交通方式。"; options = []; selectedID = nil }
+            mapRevision += 1
+
         }
     }
     func select(_ option: JourneyOption) {
@@ -244,10 +317,13 @@ final class JourneyPlannerModel: ObservableObject {
             let transfer = index > 0 && index < result.walks.count - 1
             return (leg.distance ?? 0) > (transfer ? 600 : 1_800)
         }
-        if hasLongWalk { result.walkIssue = "實際步行距離較長，建議選擇其他方案。" }
+        if hasLongWalk { result.walkIssue = "步行接駁過長" }
+        if !result.verified { result.walkIssue = "步行接駁待確認" }
         return result
     }
     private func walk(_ leg: WalkingLeg) async throws -> WalkingLeg {
+        let cacheKey = "\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude)"
+        if let cached = walkingCache[cacheKey] { return cached }
         var result = leg
         if leg.from.distance(to: leg.to) < 1 {
             result.distance = 0; result.duration = 0; return result
@@ -267,16 +343,18 @@ final class JourneyPlannerModel: ObservableObject {
                 route.polyline.getCoordinates(&coordinates, range: NSRange(location: 0, length: coordinates.count))
                 result.coordinates = coordinates.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
                 result.distance = route.distance; result.duration = route.expectedTravelTime
-                result.instructions = route.steps.map(\.instructions).filter { !$0.isEmpty }
+        result.instructions = route.steps.map(\.instructions).filter { !$0.isEmpty }
+                result.road = RouteLine(coordinates: result.coordinates)
             }
         } catch {
             try Task.checkCancellation()
             // No straight-line walking polyline or fabricated time when Apple cannot confirm a route.
         }
+        if result.verified { walkingCache[cacheKey] = result }
         return result
     }
     func begin() {
-        guard let option = selected, option.walkIssue == nil, !checkingWalks else { return }
+        guard let option = selected, option.verified, option.walkIssue == nil else { return }
         guard unavailableBoarding(option) == nil else { return }
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -322,7 +400,7 @@ final class JourneyPlannerModel: ObservableObject {
         return nil
     }
     private func cancelRequests() {
-        task?.cancel(); task = nil; directions.forEach { $0.cancel() }; directions = []
+        task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
 

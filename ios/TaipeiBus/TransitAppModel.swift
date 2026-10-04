@@ -57,7 +57,7 @@ final class TransitAppModel: ObservableObject {
         let plate: String
     }
     @Published private(set) var boardedVehicle: BoardedVehicle?
-    private var boardedDuration: (optionID: String, duration: JourneyDuration)?
+    private var boardedAt: Date?
     @Published var direction = "0"
     @Published var following = false
     @Published private(set) var cityFleetMode = false
@@ -211,7 +211,7 @@ final class TransitAppModel: ObservableObject {
         guard result.revision > snapshot.revision else { return }
         snapshot = result
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
-        planner.updateSnapshot(result)
+        planner.updateSnapshot(result, forecast: arrivalForecast)
 #if DEBUG
         markLiveSettingsPreview()
 #endif
@@ -373,21 +373,60 @@ final class TransitAppModel: ObservableObject {
     }
 
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
-        if planner.started, let boardedDuration, boardedDuration.optionID == option.id { return boardedDuration.duration }
-        guard option.verified else { return nil }
-        return JourneyDuration(riding: option.rides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) },
-            walking: option.walks.compactMap(\.duration),
-            arrivals: option.rides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
-            minimumServiceWaits: option.rides.map {
-                $0.route.minimumServiceWait(direction: $0.direction, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: $0.fullRouteSeconds)
-            })
+        guard option.verified, option.walkIssue == nil else { return nil }
+        if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
+            return planner.duration(option, at: date)
+        }
+        if planner.arrived { return JourneyDuration(riding: [], walking: [0], arrivals: [], at: date) }
+        let index: Int
+        let onboard: Bool
+        switch planner.currentStep {
+        case .ride(let i): index = i; onboard = true
+        case .walk(let i): index = i; onboard = false
+        case nil: return planner.duration(option, at: date)
+        }
+        let remainingRides = Array(option.rides.dropFirst(index))
+        var riding = remainingRides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) }
+        var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
+        if !onboard, option.walks.indices.contains(index), !walking.isEmpty,
+           planner.started || planner.usingLocation,
+           let point = location.usableCoordinate, let line = option.walks[index].road, line.length > 1,
+           let match = line.match(point, heading: nil), match.distance < 45 {
+            walking[0] *= max(0, min(1, (line.length - match.along) / line.length))
+        }
+        var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
+        var positionUncertain = false
+        if onboard, let first = remainingRides.first, !riding.isEmpty {
+            if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
+               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
+               let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
+                if progress.distance < -20 { riding[0] = 0 }
+                else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
+                    riding[0] = prediction.seconds
+                } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
+                          let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
+                    let total = abs(alight.match.along - board.match.along)
+                    if total > 1 { riding[0] *= min(1.5, max(0, progress.distance / total)) }
+                }
+            } else if let boardedAt {
+                riding[0] = max(60, riding[0] - max(0, date.timeIntervalSince(boardedAt)))
+                positionUncertain = true
+            } else {
+                positionUncertain = true
+            }
+            walking[0] = 0; arrivals[0] = 0
+        }
+        var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
+            minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
+            services: remainingRides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
+            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
+        duration.positionUncertain = positionUncertain
+        return duration
     }
 
     func boardCurrentRide() {
         guard let ride = planner.activeRide else { return }
-        if !planner.started, let option = planner.selected, let duration = journeyDuration(option, at: Date()) {
-            boardedDuration = (option.id, duration)
-        }
+        boardedAt = Date()
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
             confirmBoardedVehicle(bus, ride: ride)
@@ -412,10 +451,10 @@ final class TransitAppModel: ObservableObject {
 
     func returnToWaiting() {
         boardedVehicle = nil; planner.returnToWaiting()
-        if !planner.started { boardedDuration = nil }
+        boardedAt = nil
     }
-    func alight() { boardedVehicle = nil; following = false; planner.advance() }
-    func finishJourney() { boardedVehicle = nil; boardedDuration = nil; planner.finish(); clearSelection() }
+    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {

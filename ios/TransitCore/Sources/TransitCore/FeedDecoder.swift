@@ -80,6 +80,13 @@ public enum FeedDecoder {
                         route.serviceWindows[direction] = [prefix, holiday].compactMap { key in
                             BusServiceWindow(first: text(row[key + "FirstBusTime"]), last: text(row[key + "LastBusTime"]))
                         }
+                        let regular = BusDayService(window: BusServiceWindow(first: text(row[prefix + "FirstBusTime"]), last: text(row[prefix + "LastBusTime"])),
+                            headway: BusHeadway.envelope(["peakHeadway", "offPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
+                            departures: BusDayService.publishedDepartures(text(row["busTimeDesc"])))
+                        let off = BusDayService(window: BusServiceWindow(first: text(row[holiday + "FirstBusTime"]), last: text(row[holiday + "LastBusTime"])),
+                            headway: BusHeadway.envelope(["holidayPeakHeadway", "holidayOffPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
+                            departures: BusDayService.publishedDepartures(text(row["holidayBusTimeDesc"])))
+                        route.servicePlans[direction] = BusServicePlan(weekday: regular, holiday: off)
                     }
                     metadata.routes[id] = route
                 }

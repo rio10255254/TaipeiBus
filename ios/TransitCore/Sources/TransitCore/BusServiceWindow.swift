@@ -39,4 +39,10 @@ extension BusRoute {
         // are not available here, so a calendar guess must not hide a valid service.
         serviceWindows[direction]?.map { $0.waitBeforeOpening(secondsOfDay: secondsOfDay, fullRouteSeconds: fullRouteSeconds) }.min() ?? 0
     }
+    public func minimumServiceWait(direction: String, at date: Date, fullRouteSeconds: Double) -> Double {
+        if let window = servicePlans[direction]?.service(at: date).window {
+            return window.waitBeforeOpening(secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: fullRouteSeconds)
+        }
+        return minimumServiceWait(direction: direction, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: fullRouteSeconds)
+    }
 }
