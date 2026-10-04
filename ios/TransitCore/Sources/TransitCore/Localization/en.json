@@ -391,5 +391,6 @@
   "到站預估可用 · GPS 暫缺": "Arrival time available · position unavailable",
   "此方向暫無車輛回報": "No bus positions in this direction",
   "車輛定位更新中": "Updating bus positions",
-  "切換路線方向": "Switch direction"
+  "切換路線方向": "Switch direction",
+  "介面驗證用資料 · 非即時車輛": "Interface test data · not live"
 }

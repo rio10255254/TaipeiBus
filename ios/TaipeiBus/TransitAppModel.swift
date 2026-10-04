@@ -605,10 +605,8 @@ final class TransitAppModel: ObservableObject {
             previewSelectionApplied = true
         } else if arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"))
-            if arguments.contains("--preview-browse-fixture"), previewSelectionApplied, let bus = snapshot.vehicles.first(where: { $0.plate == "TEST-01" }) {
-                planner.finish(); selectVehicle(bus)
-            }
+                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
+                browse: arguments.contains("--preview-browse-fixture"))
             if let token = value(after: "--preview-capture"), previewSelectionApplied,
                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                 try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
@@ -745,7 +743,7 @@ final class TransitAppModel: ObservableObject {
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false) -> Bool {
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {
         var planningMetadata = metadata
         if cooperated {
             planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
@@ -829,7 +827,7 @@ final class TransitAppModel: ObservableObject {
             }
         }
         if ProcessInfo.processInfo.arguments.contains("--preview-onboard-time-fixture") {
-            for age in [60.0, 30] {
+            for age in [90.0, 45] {
                 let past = date.addingTimeInterval(-age)
                 let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along -
                     (distances[0] + age * 5) * Double(vehicleJourney.direction)) / vehicleLine.length)
@@ -848,6 +846,10 @@ final class TransitAppModel: ObservableObject {
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"
+        if browse {
+            if let bus = snapshot.vehicles.first(where: { $0.plate == "TEST-01" }) { selectVehicle(bus) }
+            return true
+        }
         planner.prepareBoardingPreview(trip)
         if track, let vehicle = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: date).approaches.first?.vehicle {
             trackApproachingVehicle(vehicle)

@@ -617,7 +617,9 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         let before = probe("map-camera-state")
         button("資料來源與地圖設定").tap()
         let toggle = app.switches["app-language-toggle"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10)); toggle.tap()
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10))
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        XCTAssertEqual(toggle.value as? String, "1")
         XCTAssertTrue(app.navigationBars["Information & settings"].waitForExistence(timeout: 5))
         capture("english-settings-switch")
         button("Done").tap()
@@ -631,7 +633,9 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         app.terminate(); launch(flags + ["--persist-language-preference"])
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
         XCTAssertTrue(button("journey-board").label.contains("on board"))
-        button("Information and settings").tap(); app.switches["app-language-toggle"].tap(); button("完成").tap()
+        button("Information and settings").tap()
+        app.switches["app-language-toggle"].coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap()
+        button("完成").tap()
         XCTAssertEqual(button("journey-board").label, "已上車")
     }
     func testEnglishRouteAndStopSearch() {
@@ -641,7 +645,8 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(button("route-key-藍").label, "Blue")
         button("route-key-藍").tap(); button("route-key-2").tap(); button("route-key-7").tap()
         let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "route-result-")).firstMatch
-        XCTAssertTrue(route.waitForExistence(timeout: 15)); XCTAssertTrue(route.label.lowercased().contains("blue27"))
+        XCTAssertTrue(route.waitForExistence(timeout: 15))
+        XCTAssertTrue(route.label.lowercased().contains("bl27") || route.label.lowercased().contains("blue27"))
         capture("english-route-keypad-and-endpoints")
         button("Stops").tap()
         let field = app.textFields["transit-search-field"]

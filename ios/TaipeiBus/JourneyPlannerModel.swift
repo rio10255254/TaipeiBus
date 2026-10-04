@@ -431,8 +431,8 @@ final class JourneyPlannerModel: ObservableObject {
     func prepareBoardingPreview(_ trip: TransitTrip) {
         cancelRequests()
         guard let first = trip.rides.first, let last = trip.rides.last else { return }
-        origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate)
-        destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate)
+        origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate, englishName: first.boarding.englishName)
+        destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate, englishName: last.alighting.englishName)
         usingLocation = false; started = false; stepIndex = 0
         var walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0)]
         for index in trip.rides.indices.dropFirst() {

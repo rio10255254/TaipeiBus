@@ -82,7 +82,8 @@ public struct RouteCatalog: Sendable {
             .filter { !$0.isWhitespace }
         // Localized keypad tokens still address the same canonical route names.
         for (english, chinese) in [("neihutech", "內科"), ("nangangsw", "南軟"), ("civic", "市民"),
-            ("huai-en", "懷恩"), ("maokong", "貓空"), ("minibus", "小"), ("metrobus", "幹線")] {
+            ("huai-en", "懷恩"), ("maokong", "貓空"), ("minibus", "小"), ("metrobus", "幹線"),
+            ("red", "紅"), ("blue", "藍"), ("brown", "棕"), ("green", "綠"), ("orange", "橘"), ("yellow", "黃")] {
             if name.hasPrefix(english) {
                 let suffix = String(name.dropFirst(english.count))
                 if suffix.isEmpty || suffix.allSatisfy(\.isNumber) { return chinese + suffix }

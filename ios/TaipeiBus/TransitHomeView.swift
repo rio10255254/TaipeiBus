@@ -425,8 +425,10 @@ private struct SourceStatusView: View {
     let loading: Bool
     var compact = false
     let refresh: () -> Void
-    static let clockStyle = Date.FormatStyle(date: .omitted, time: .shortened,
-        locale: Locale(identifier: "zh_TW"), timeZone: TimeZone(identifier: "Asia/Taipei")!)
+    static var clockStyle: Date.FormatStyle {
+        Date.FormatStyle(date: .omitted, time: .shortened,
+            locale: AppLanguage.current.locale, timeZone: TimeZone(identifier: "Asia/Taipei")!)
+    }
 
     var body: some View {
         Button(action: refresh) {
@@ -548,7 +550,7 @@ private struct TransitPanel: View {
     private var browseHeader: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
-                Text(browseTitle)
+                Text(live.text(browseTitle))
                     .liveFont(.title2, weight: .bold)
                 Spacer()
                 if model.mode == .stops {
@@ -593,7 +595,7 @@ private struct TransitPanel: View {
             .padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13 * CGFloat(live.appearance.cornerScale)))
             Picker(AppText.text("查詢類型"), selection: $model.mode) {
-                ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
+                ForEach(BrowseMode.allCases) { Text(live.text($0.rawValue)).tag($0) }
             }.pickerStyle(.segmented)
             if let message = location.message { Text(live.text(message)).liveFont(.caption).foregroundStyle(.secondary) }
         }.padding(.horizontal, 18 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
