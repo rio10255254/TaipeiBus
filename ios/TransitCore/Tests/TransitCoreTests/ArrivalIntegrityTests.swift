@@ -102,6 +102,12 @@ final class ArrivalIntegrityTests: XCTestCase {
         XCTAssertTrue(display.label.contains("分")); XCTAssertNotNil(display.prediction)
         let conflict = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 720)
         XCTAssertEqual(conflict.label, "時間待確認"); XCTAssertNil(conflict.prediction)
+        XCTAssertTrue(conflict.explanation.contains("候車請以官方下一班為準"))
+        for status in [-1, -2, -3, -4] {
+            let unavailable = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: status)
+            XCTAssertNil(unavailable.prediction)
+            XCTAssertTrue(unavailable.explanation.contains(EstimateFeed.label(status)))
+        }
     }
 
     func testParkingAndALongUnobservedGapDoNotBecomeFiftyFourMinuteClaims() throws {

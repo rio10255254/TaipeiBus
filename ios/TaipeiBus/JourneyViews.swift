@@ -301,7 +301,7 @@ private struct JourneyBoardingContent: View {
                 Button { showTimingInfo = true } label: { Image(systemName: "info.circle").liveFont(.caption).frame(width: 28, height: 28) }
                     .accessibilityLabel(live.text("到站時間說明"))
                     .popover(isPresented: $showTimingInfo) {
-                        Text(live.text("官方到站時間未指定車牌。各車時間依近期行駛、通過各站的紀錄估算；位置中斷時暫停顯示。點「到站車輛」可查看參考範圍。"))
+                        Text(live.text("候車以官方下一班到站時間為主。官方未指定車牌；各車紀錄足夠才顯示分鐘數，否則先看位置與站數。點「到站車輛」可查看時間說明。"))
                             .liveFont(.subheadline).padding(20).frame(maxWidth: 300).presentationCompactAdaptation(.popover)
                     }
             }
@@ -339,7 +339,8 @@ private struct JourneyBoardingContent: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(guide.arrivalShortLabel).liveFont(.largeTitle, weight: .bold, design: .rounded)
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.6)
-                Text(guide.estimateSeconds == nil ? "暫無預估" : "官方到站").liveFont(.caption).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("boarding-official-arrival")
+                Text(guide.estimateSeconds == nil ? "暫無預估" : "官方下一班").liveFont(.caption).foregroundStyle(.secondary)
             }.layoutPriority(1)
         }
     }
@@ -372,7 +373,7 @@ private struct VehicleArrivalsView: View {
                     Section {
                         HStack { Text(ride.boarding.name); Spacer(); Text(guide.arrivalShortLabel).bold().monospacedDigit() }
                         Text("往 " + ride.route.destination(direction: ride.direction)).foregroundStyle(.secondary)
-                    } header: { Text("官方到站") }
+                    } header: { Text("官方下一班") }
                     Section {
                         if guide.approaches.isEmpty { Text(guide.emptyPositionLabel).foregroundStyle(.secondary) }
                         ForEach(guide.approaches) { approach in

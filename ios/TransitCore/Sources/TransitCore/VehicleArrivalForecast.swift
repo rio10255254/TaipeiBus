@@ -212,10 +212,11 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func display(_ bus: BusVehicle, stopID: String, metadata: TransitMetadata, at date: Date,
                         officialSeconds: Int? = nil, allowTypicalWhenStopped: Bool = false) -> VehicleArrivalDisplay {
+        let officialAdvice = (officialSeconds ?? -1) >= 0 ? "候車請以官方下一班為準。" : ""
         guard let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
               let progress = journey.progress(stopID: stopID, vehicle: bus, at: date) else {
             return VehicleArrivalDisplay(label: "位置待確認", positionLabel: "位置待確認",
-                explanation: "車輛位置尚未確認，暫停推估到站時間。", prediction: nil)
+                explanation: "車輛位置尚未確認，暫停推估到站時間。" + officialAdvice, prediction: nil)
         }
         if progress.distance < -20 {
             return VehicleArrivalDisplay(label: "已過站", positionLabel: "已過站",
@@ -224,23 +225,27 @@ public struct VehicleArrivalForecast: Sendable {
         let stops = journey.upcoming(vehicle: bus, at: date)
         let count = stops.firstIndex { $0.stop.id == stopID }.map { $0 + 1 }
         let position = progress.distance <= 40 ? "站牌附近" : count.map { "還有 \($0) 站" } ?? "位置待確認"
+        if let official = officialSeconds, official < 0 {
+            return VehicleArrivalDisplay(label: position, positionLabel: position,
+                explanation: "官方目前標示「\(EstimateFeed.label(official))」，候車以官方資訊為準。", prediction: nil)
+        }
         guard date.timeIntervalSince(bus.observedAt) <= 30 else {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "車輛位置等待更新，暫停顯示分鐘數。", prediction: nil)
+                explanation: "車輛位置等待更新，暫停顯示分鐘數。" + officialAdvice, prediction: nil)
         }
         guard let result = prediction(bus, stopID: stopID, metadata: metadata, at: date,
                                       allowTypicalWhenStopped: allowTypicalWhenStopped) else {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。", prediction: nil)
+                explanation: "尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。" + officialAdvice, prediction: nil)
         }
         if let official = officialSeconds, official >= 0,
            result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) {
             return VehicleArrivalDisplay(label: "時間待確認", positionLabel: position,
-                explanation: "官方下一班與車輛推估尚不一致；保留車輛位置，不把官方時間指定給車牌。", prediction: nil)
+                explanation: "候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。", prediction: nil)
         }
         guard result.hasUsableTime else {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
-                explanation: "行駛紀錄較少或變化較大，先顯示站數，等待時間確認。", prediction: nil)
+                explanation: "行駛紀錄較少或變化較大，先顯示站數，等待時間確認。" + officialAdvice, prediction: nil)
         }
         return VehicleArrivalDisplay(label: result.label, positionLabel: position,
             explanation: result.evidenceLabel, prediction: result)

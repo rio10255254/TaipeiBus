@@ -542,6 +542,8 @@ final class AppearanceUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(uncertain.waitForExistence(timeout: 10))
         XCTAssertTrue(uncertain.label.contains("時間待確認"))
         XCTAssertFalse(uncertain.label.contains("約 1 分"))
+        XCTAssertTrue(app.staticTexts["boarding-official-arrival"].label.contains("12 分"))
+        XCTAssertTrue(app.staticTexts["官方下一班"].exists)
         capture("arrival-conflict-waiting")
         button("journey-all-vehicles").tap()
         XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 10))
