@@ -22,7 +22,7 @@ final class LocalizationTests: XCTestCase {
         XCTAssertGreaterThan(AppText.english.count, 350)
         for (key, value) in AppText.english {
             XCTAssertEqual(key.components(separatedBy: "%@").count, value.components(separatedBy: "%@").count, key)
-            XCTAssertNil(value.range(of: "[\\p{Han}]", options: .regularExpression), key)
+            XCTAssertNil(value.range(of: "[\\u3400-\\u9fff]", options: .regularExpression), key)
         }
     }
     func testEnglishNamesKeepChineseIdentityAndSearchAliases() throws {

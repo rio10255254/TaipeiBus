@@ -5,7 +5,9 @@ class JourneyUsabilityTestBase: XCTestCase {
     override func setUpWithError() throws { continueAfterFailure = false }
     override func tearDownWithError() throws { capture("test-final-state") }
     func launch(_ args: [String] = []) {
-        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW"] + args
+        let english = args.firstIndex(of: "--test-language").map { args.indices.contains($0 + 1) && args[$0 + 1] == "en" } ?? false
+        let language = args.contains("--test-language") || args.contains("--persist-language-preference") ? [] : ["--test-language", "zh-Hant"]
+        app.launchArguments = ["-AppleLanguages", english ? "(en)" : "(zh-Hant)", "-AppleLocale", english ? "en_TW" : "zh_TW"] + language + args
         app.launch()
     }
     func capture(_ name: String) {

@@ -599,11 +599,16 @@ final class TransitAppModel: ObservableObject {
         } else if arguments.contains("--preview-neihu-planning") {
             guard let station = metadata.stationSearch.search("內湖站", near: Coordinate(latitude: 25.0837, longitude: 121.5947)).first else { return }
             planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate, englishName: station.englishName), metadata: metadata)
-            planner.setDestination(TravelPlace(name: "忠孝復興站", address: "", coordinate: Coordinate(latitude: 25.0416, longitude: 121.5438)), metadata: metadata, currentLocation: nil)
+            let target = Coordinate(latitude: 25.0416, longitude: 121.5438)
+            let english = metadata.stationSearch.search("捷運忠孝復興站", near: target).first?.englishName
+            planner.setDestination(TravelPlace(name: "忠孝復興站", address: "", coordinate: target, englishName: english), metadata: metadata, currentLocation: nil)
             previewSelectionApplied = true
-        } else if arguments.contains("--preview-boarding-fixture") {
+        } else if arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
                 transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"))
+            if arguments.contains("--preview-browse-fixture"), previewSelectionApplied, let bus = snapshot.vehicles.first(where: { $0.plate == "TEST-01" }) {
+                planner.finish(); selectVehicle(bus)
+            }
             if let token = value(after: "--preview-capture"), previewSelectionApplied,
                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                 try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
@@ -816,6 +821,20 @@ final class TransitAppModel: ObservableObject {
                 row["Latitude"] = sample.0.latitude; row["Longitude"] = sample.0.longitude
                 row["Speed"] = 12
                 row["Azimuth"] = (sample.1 + (vehicleJourney.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360)
+                row["DataTime"] = formatter.string(from: past)
+                guard let bytes = try? JSONSerialization.data(withJSONObject: ["BusInfo": [row],
+                    "EssentialInfo": ["UpdateTime": formatter.string(from: past)]]),
+                      let history = try? FeedDecoder.vehicles(bytes, metadata: metadata, previous: [], now: past) else { return false }
+                arrivalForecast.ingest(history.vehicles, metadata: metadata, at: past)
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-onboard-time-fixture") {
+            for age in [60.0, 30] {
+                let past = date.addingTimeInterval(-age)
+                let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along -
+                    (distances[0] + age * 5) * Double(vehicleJourney.direction)) / vehicleLine.length)
+                var row = rows[0]
+                row["Latitude"] = sample.0.latitude; row["Longitude"] = sample.0.longitude
                 row["DataTime"] = formatter.string(from: past)
                 guard let bytes = try? JSONSerialization.data(withJSONObject: ["BusInfo": [row],
                     "EssentialInfo": ["UpdateTime": formatter.string(from: past)]]),
