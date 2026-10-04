@@ -44,7 +44,7 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     out.position = readableBus(uniforms.matrix * float4(p, 1),
                                uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.color = v.color;
-    if (uniforms.mode.x == 0) { out.color.a *= max(uniforms.mode.z, bus.style.y); }
+    if (uniforms.mode.x == 0) { out.color.a *= max(uniforms.mode.z, bus.style.y) * uniforms.mode.w; }
     out.normal = float3(c * normal.x + s * normal.y, -s * normal.x + c * normal.y, normal.z);
     out.material = v.normal.w;
     out.selection = bus.style.y;
@@ -69,6 +69,11 @@ fragment float4 busFragment(BusFragment in [[stage_in]], constant BusUniforms &u
         color += rim * float3(0.035, 0.042, 0.050);
     }
     if (in.material > 2.5) { color = in.color.rgb; }
+    // Far-away buses retain their body geometry, but lose harsh window/roof
+    // contrast smoothly so many vehicles read as a quiet neutral-gray flow.
+    if (uniforms.mode.x == 0 && uniforms.mode.y > 0) {
+        color = mix(color, float3(0.73) * diffuse, uniforms.mode.y * 0.55);
+    }
     return float4(color, in.color.a);
 }
 

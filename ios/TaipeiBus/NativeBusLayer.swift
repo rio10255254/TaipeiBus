@@ -184,7 +184,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let gpuProjection = simd_float4x4(columns: (floatColumn(projection.columns.0), floatColumn(projection.columns.1),
                                                   floatColumn(projection.columns.2), floatColumn(projection.columns.3)))
         let heading = Float(mapView.camera.heading * .pi / 180), pitch = Float(mapView.camera.pitch * .pi / 180)
-        var uniforms = Uniforms(matrix: gpuProjection, mode: SIMD4(0, 0, 1, 0),
+        var uniforms = Uniforms(matrix: gpuProjection, mode: SIMD4(0, 0, 1, 1),
                                 viewDirection: SIMD4(-sin(heading) * sin(pitch), -cos(heading) * sin(pitch), cos(pitch), 0))
         let time = CACurrentMediaTime()
         let selection = reduceMotion ? 1 : min(1, max(0, (time - selectionStartedAt) / 0.45))
@@ -247,11 +247,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         encoder.setViewport(MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1))
         encoder.setCullMode(.none)
         if !compact.isEmpty {
+            let distanceBlend = Float(min(1, max(0, (context.zoomLevel - 11) / 4)))
+            let definition = distanceBlend * distanceBlend * (3 - 2 * distanceBlend)
+            var compactUniforms = uniforms
+            compactUniforms.mode.y = 1 - definition
+            compactUniforms.mode.w = 0.52 + definition * 0.48
             encoder.setRenderPipelineState(pipeline)
             encoder.setDepthStencilState(normalDepth)
             encoder.setVertexBuffer(compactVertexBuffer, offset: 0, index: 0)
-            encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-            encoder.setFragmentBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setVertexBytes(&compactUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+            encoder.setFragmentBytes(&compactUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
             encoder.setVertexBuffer(buffer, offset: 0, index: 2)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: compactVertexCount, instanceCount: compact.count)
         }
