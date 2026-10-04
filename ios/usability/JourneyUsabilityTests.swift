@@ -443,13 +443,13 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
     }
     func testCityCameraMovesContinuouslyAndReturnsToTheSameView() {
         launch(["--test-map-controls", "--test-transitions", "--city-fleet-fixture", "--usability-fixture"])
-        wait("Controlled fleet and initial street camera are ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 90) < 1 }
+        wait("Controlled fleet and initial street camera are ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 90) < 1 && ($0["cameraMoving"] as? Bool) == false }
         let local = camera()
         button("city-fleet-toggle").press(forDuration: 0.15)
         wait("City framing settles") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
             let samples = trace?["samples"] as? [[String: Double]] ?? []
-            return state["cityMode"] as? Bool == true && abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03 &&
+            return state["cityMode"] as? Bool == true && state["cameraMoving"] as? Bool == false && abs((state["zoom"] as? Double ?? 99) - (trace?["targetZoom"] as? Double ?? 0)) < 0.03 &&
                 samples.count >= 3 && (samples.last?["t"] ?? 0) >= (trace?["duration"] as? Double ?? 99)
         }
         let overview = camera(); assertContinuousCamera(overview); capture("continuous-city-camera-and-subtle-controls")
@@ -457,17 +457,17 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertNotNil(hit["busHitID"])
         map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: hit["busHitX"] as? Double ?? -10,
             dy: hit["busHitY"] as? Double ?? -10)).tap()
-        wait("The selected bus remains centered") { ($0["zoom"] as? Double ?? 0) > 16 && !($0["selectedVehicle"] as? String ?? "").isEmpty }
+        wait("The selected bus remains centered") { ($0["zoom"] as? Double ?? 0) > 16 && !($0["selectedVehicle"] as? String ?? "").isEmpty && ($0["cameraMoving"] as? Bool) == false }
         XCTAssertLessThan(camera()["fleetSampled"] as? Int ?? 2500, 500, "Street-scale tracking must avoid evaluating most off-screen vehicles.")
         capture("focused-bus-with-offscreen-motion-culled")
         button("關閉選取").tap()
         wait("Returning restores the city overview") {
-            ($0["selectedVehicle"] as? String ?? "") == "" && abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.03
+            ($0["selectedVehicle"] as? String ?? "") == "" && ($0["cameraMoving"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (overview["zoom"] as? Double ?? 0)) < 0.03
         }
         assertContinuousCamera(camera())
         button("city-fleet-toggle").press(forDuration: 0.15)
         wait("Leaving restores the original local view") {
-            ($0["cityMode"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
+            ($0["cityMode"] as? Bool) == false && ($0["cameraMoving"] as? Bool) == false && abs(($0["zoom"] as? Double ?? 99) - (local["zoom"] as? Double ?? 0)) < 0.03
         }
         assertContinuousCamera(camera()); capture("local-view-restored-after-city-animation")
     }
@@ -789,8 +789,9 @@ final class EnglishModeUsabilityTests: JourneyUsabilityTestBase {
     func testEnglishNavigationHasAlightingTimeAndStopCount() {
         launch(["--test-language", "en", "--test-map-controls", "--preview-boarding-fixture", "--preview-cooperated-fixture", "--preview-onboard-time-fixture", "--usability-fixture"])
         XCTAssertTrue(button("boarding-vehicle-TEST-01").waitForExistence(timeout: 90))
+        waitProbe("map-camera-state") { ($0["cameraMoving"] as? Bool) == false }
         capture("english-before-following")
-        button("boarding-vehicle-TEST-01").tap()
+        button("boarding-vehicle-TEST-01").press(forDuration: 0.15)
         waitProbe("map-camera-state") { !($0["selectedVehicle"] as? String ?? "").isEmpty && ($0["following"] as? Bool) == true }
         XCTAssertEqual(button("boarding-vehicle-TEST-01").value as? String, "Following")
         capture("english-following-before-boarding")

@@ -25,7 +25,7 @@ def wait_for(dark):
     while time.monotonic() < deadline:
         try:
             state = json.loads((container / 'Documents/appearance-probe.json').read_text())
-            if state['darkMode'] == dark and state['vehicle'] and state['pitch'] > 50:
+            if state['darkMode'] == dark and state['vehicle'] and state['following'] and state['zoom'] > 16 and not state['cameraMoving']:
                 return state
         except (OSError, ValueError, KeyError):
             pass
@@ -37,11 +37,11 @@ try:
     for dark, name in [(False, 'light-before'), (True, 'dark'), (False, 'light-after')]:
         sim('ui', device, 'appearance', 'dark' if dark else 'light')
         state = wait_for(dark)
+        (root / f'{name}.json').write_text(json.dumps(state, indent=2))
         assert state['pid'] == before['pid'], 'App process restarted'
         assert state['vehicle'] == before['vehicle'], 'Selected bus changed'
         assert abs(state['zoom'] - before['zoom']) < 0.05, 'Map zoom reset'
         assert abs(state['latitude'] - before['latitude']) < 0.0001, 'Map center reset'
-        (root / f'{name}.json').write_text(json.dumps(state, indent=2))
         sim('io', device, 'screenshot', str(root / f'{name}.png'))
 finally:
     sim('ui', device, 'appearance', 'light')

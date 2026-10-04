@@ -70,6 +70,8 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastFollowTime: CFTimeInterval = 0
         private var lastTickTime: CFTimeInterval = 0
         private var followSuspendedUntil: CFTimeInterval = 0
+        private var cameraMoving = false
+        private var cameraMoveToken = 0
         private var lastPowerCheck: CFTimeInterval = 0
         private var lastMotionSetting: Bool?
         private var lastNearbyUpdate: CFTimeInterval = 0
@@ -257,13 +259,21 @@ struct NativeBusMap: UIViewRepresentable {
             pendingInset = inset
             let work = DispatchWorkItem { [weak self, weak map] in
                 guard let self, let map, self.pendingInset == inset else { return }
-                self.pendingInset = nil; self.insetWork = nil
-                map.setContentInset(inset, animated: !self.reduceMotion)
-                self.update(location: self.pendingLocation, viewportChanged: true)
+                self.insetWork = nil
+                self.applyPendingInset(map)
             }
             insetWork = work
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.06, execute: work)
             return false
+        }
+
+        private func applyPendingInset(_ map: MLNMapView) {
+            guard !cameraMoving, insetWork == nil, let inset = pendingInset else { return }
+            pendingInset = nil
+            // Padding and a camera flight must not run competing native animations.
+            // Refit once after the explicit movement and panel layout have settled.
+            map.setContentInset(inset, animated: false)
+            update(location: pendingLocation, viewportChanged: true)
         }
 
         func update(location: Coordinate?, viewportChanged: Bool = false) {
@@ -463,6 +473,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["cityMode"] = model.cityFleetMode
                 state["selectedVehicle"] = model.selectedVehicleID ?? ""
                 state["following"] = model.following
+                state["cameraMoving"] = cameraMoving || pendingInset != nil
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
                 state["actions"] = Array(model.debugActions.suffix(12))
@@ -604,11 +615,14 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func moveCamera(_ camera: MLNMapCamera, map: MLNMapView, duration: Double) {
             lastCameraTarget = savedCamera(camera); lastCameraTargetRevision = model.focusRevision
-            let seconds = reduceMotion ? 0 : duration
-            followSuspendedUntil = CACurrentMediaTime() + seconds + (seconds > 0 ? 0.04 : 0)
+            let targetZoom = MLNZoomLevelForAltitude(camera.altitude, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)
+            let travel = min(1.4, abs(targetZoom - map.zoomLevel) * 0.14 + 0.2)
+            let seconds = reduceMotion ? 0 : max(duration, travel)
+            cameraMoveToken += 1
+            let token = cameraMoveToken
+            cameraMoving = seconds > 0
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
-                let targetZoom = MLNZoomLevelForAltitude(camera.altitude, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)
                 if let index = cameraTransitions.indices.last, cameraTransitions[index].revision == model.focusRevision {
                     cameraTransitions[index].duration = reduceMotion ? 0 : CACurrentMediaTime() - cameraTransitions[index].started + seconds
                     cameraTransitions[index].targetZoom = targetZoom
@@ -621,7 +635,12 @@ struct NativeBusMap: UIViewRepresentable {
             }
 #endif
             map.setCamera(camera, withDuration: seconds,
-                animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut), completionHandler: nil)
+                animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut)) { [weak self, weak map] in
+                guard let self, let map, self.cameraMoveToken == token else { return }
+                self.cameraMoving = false
+                self.followSuspendedUntil = CACurrentMediaTime() + 0.04
+                self.applyPendingInset(map)
+            }
         }
 
         private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
@@ -695,7 +714,11 @@ struct NativeBusMap: UIViewRepresentable {
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
+            // Tile loading can delay a flight beyond its requested duration. Wait
+            // for MapLibre's completion before following or avoiding buildings.
+            guard !cameraMoving else { return }
             if now >= followSuspendedUntil { keepSelectedVehicleVisible(map, at: now) }
+            guard !cameraMoving else { return }
             if model.userMapMode != .free, now >= followSuspendedUntil,
                let point = model.location.displayCoordinate, point.isInServiceArea {
                 let camera = map.camera
@@ -746,10 +769,12 @@ struct NativeBusMap: UIViewRepresentable {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
                 lastFocusWasLeavingCity = false
+                cameraMoveToken += 1; cameraMoving = false
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false
                     self?.model.stopUserTracking()
+                    if let self, let map = self.map { self.applyPendingInset(map) }
                 }
             }
         }
@@ -822,6 +847,7 @@ struct NativeBusMap: UIViewRepresentable {
             lastVisibilityAdjustmentAt = time; lastVisibilityTarget = nil
             camera.pitch = reduceMotion || consecutiveVisibilityAdjustments >= 3 ? 0 : angle.pitch
             camera.centerCoordinate = point.locationCoordinate
+            camera.altitude = MLNAltitudeForZoomLevel(map.zoomLevel, camera.pitch, point.latitude, map.bounds.size)
             visibilityAdjustments += 1
             moveCamera(camera, map: map, duration: 0.5)
         }
