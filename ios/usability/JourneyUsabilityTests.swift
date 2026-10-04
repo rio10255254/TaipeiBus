@@ -561,6 +561,11 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-onboard-vehicle").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains("TEST-01"))
         let current = timing()
+        let rideCount = (current["options"] as? [[String: Any]])?.first?["ride_stop_count"] as? Int ?? 0
+        let boarding = (current["options"] as? [[String: Any]])?.first?["boarding_name"] as? String ?? ""
+        XCTAssertGreaterThan(rideCount, 0)
+        XCTAssertFalse(app.staticTexts["journey-next-stop"].label.contains("下一站 · " + boarding))
+        XCTAssertTrue(app.staticTexts["journey-alighting-time"].label.contains("還有 \(rideCount) 站"), "A GPS fix before boarding must not add the already-boarded stop")
         let after = (current["options"] as? [[String: Any]])?.first?["total"] as? Double ?? before
         XCTAssertLessThan(after, before, "Already spent access/wait time must not remain in the destination clock")
         XCTAssertTrue(app.staticTexts["journey-total-duration"].label.contains("剩餘"))

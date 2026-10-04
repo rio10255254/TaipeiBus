@@ -440,12 +440,12 @@ private struct OnboardSummary: View {
         VStack(alignment: .leading, spacing: 6) {
             if let bus = model.onboardVehicle(for: ride) {
                 let journey = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)
-                let next = journey?.upcoming(vehicle: bus, at: date).first
+                let next = model.onboardStops(for: ride, at: date).first
                 HStack {
-                    Text(next.map { "下一站 · " + $0.stop.name } ?? "位置更新中").lineLimit(1)
+                    Text(next.map { "下一站 · " + $0.name } ?? "位置更新中").lineLimit(1)
                     Spacer()
                     if let next {
-                        Text(model.arrivalDisplay(bus, stopID: next.stop.id, at: date, onboard: true).label).monospacedDigit()
+                        Text(model.onboardTimeLabel(bus, ride: ride, stopID: next.id, at: date)).monospacedDigit()
                     }
                 }.liveFont(.subheadline).foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")
                 let progress = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date)
@@ -453,7 +453,7 @@ private struct OnboardSummary: View {
                     Text((progress?.distance ?? 0) < -20 ? "已通過「\(ride.alighting.name)」" : "在「\(ride.alighting.name)」下車")
                         .liveFont(.title3, weight: .bold).lineLimit(2)
                     Spacer(minLength: 4)
-                    Text(model.arrivalDisplay(bus, stopID: ride.alighting.id, at: date, onboard: true).label)
+                    Text(model.onboardTimeLabel(bus, ride: ride, stopID: ride.alighting.id, at: date))
                         .liveFont(.title3, weight: .bold).monospacedDigit().fixedSize()
                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             } else {
@@ -474,8 +474,7 @@ private struct OnboardStopsView: View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let bus = model.onboardVehicle(for: ride)
-                let upcoming = bus.flatMap { model.metadata.journey(routeID: $0.routeID, direction: $0.direction)?.upcoming(vehicle: $0, at: timeline.date) } ?? []
-                let stops = upcoming.isEmpty ? Array(ride.stops.dropFirst()) : upcoming.map(\.stop)
+                let stops = model.onboardStops(for: ride, at: timeline.date)
                 List {
                     Section {
                         if let plate = model.onboardPlate(for: ride) {
@@ -494,7 +493,7 @@ private struct OnboardStopsView: View {
                                     if stop.id == ride.alighting.id { Text("在這裡下車").liveFont(.caption).foregroundStyle(.orange) }
                                 }
                                 Spacer(minLength: 4)
-                                Text(bus.map { model.arrivalDisplay($0, stopID: stop.id, at: timeline.date, onboard: true).label } ?? "—")
+                                Text(bus.map { model.onboardTimeLabel($0, ride: ride, stopID: stop.id, at: timeline.date) } ?? "—")
                                     .liveFont(.subheadline, weight: .semibold).monospacedDigit().fixedSize()
                             }.frame(minHeight: 40).accessibilityIdentifier("onboard-stop-" + stop.id)
                         }

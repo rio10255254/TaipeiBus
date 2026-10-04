@@ -449,6 +449,23 @@ final class TransitAppModel: ObservableObject {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
     }
 
+    /// Boarding is confirmed by the rider. A delayed GPS fix must not put the
+    /// boarding platform back into the remaining stops or continue past alighting.
+    func onboardStops(for ride: TransitRide, at date: Date) -> [BusStop] {
+        let planned = Array(ride.stops.dropFirst())
+        guard let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
+              let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
+              journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil else { return planned }
+        let upcoming = Set(journey.upcoming(vehicle: bus, at: date).map { $0.stop.id })
+        return planned.filter { upcoming.contains($0.id) }
+    }
+    func onboardTimeLabel(_ bus: BusVehicle, ride: TransitRide, stopID: String, at date: Date) -> String {
+        let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
+        guard display.prediction == nil, display.label.hasPrefix("還有 "),
+              let index = onboardStops(for: ride, at: date).firstIndex(where: { $0.id == stopID }) else { return display.label }
+        return "還有 \(index + 1) 站"
+    }
+
     func returnToWaiting() {
         boardedVehicle = nil; planner.returnToWaiting()
         boardedAt = nil

@@ -82,6 +82,7 @@ struct TransitHomeView: View {
                             let timing = model.journeyDuration(option, at: timeline.date)
                             return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
                                 "transfers": max(0, option.rides.count - 1),
+                                "boarding_name": option.rides.first?.boarding.name ?? "", "ride_stop_count": option.rides.first?.stopCount ?? 0,
                                 "total": timing?.totalSeconds ?? -1, "travel": timing?.travelSeconds ?? -1,
                                 "walking": timing?.walkingSeconds ?? -1, "waiting": timing?.waitingSeconds ?? -1,
                                 "riding": timing?.ridingSeconds ?? -1, "unknown": timing?.unknownWaits ?? -1,
