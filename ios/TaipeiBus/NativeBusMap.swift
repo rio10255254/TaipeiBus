@@ -378,6 +378,7 @@ struct NativeBusMap: UIViewRepresentable {
             if lastStationID != model.mapLabelStation?.id {
                 stationSource?.shape = point(model.mapLabelStation?.coordinate)
                 lastStationID = model.mapLabelStation?.id
+                updateNearbyStations(force: true)
             }
             if model.stationWalk.isActive || model.selectedVehicleID == nil && model.mapLabelStation == nil { overlay.update(nil) }
             buses.setNeedsDisplay()
@@ -430,7 +431,7 @@ struct NativeBusMap: UIViewRepresentable {
             let features = stations.map { station -> MLNPointFeature in
                 let feature = MLNPointFeature()
                 feature.coordinate = station.coordinate.locationCoordinate
-                feature.attributes = ["stationID": station.id, "name": station.bilingualName + " · " + station.localizedBearing]
+                feature.attributes = ["stationID": station.id, "name": station.id == model.mapLabelStation?.id ? "" : station.bilingualName + " · " + station.localizedBearing]
                 return feature
             }
             nearbySource?.shape = MLNShapeCollectionFeature(shapes: features)
