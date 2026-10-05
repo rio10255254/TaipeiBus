@@ -9,13 +9,12 @@
   "privacyPolicyUrl": "https://rio10255254.github.io/TaipeiBus/privacy.html",
   "copyright": "2026 Rio",
   "screenshotOrder": [
-    "store-07-live-bus-in-3d.png",
-    "store-08-bus-first-navigation.png",
-    "store-10-time-at-each-stop.png",
-    "store-09-onboard-live-guidance.png",
-    "store-05-boarding-map.png",
-    "store-06-full-itinerary.png",
-    "store-03-route-keypad.png"
+    "01-live-bus.png",
+    "02-waiting.png",
+    "03-walking.png",
+    "04-onboard.png",
+    "05-plan.png",
+    "06-search.png"
   ],
   "reviewNotes": "No account or login is required. Location permission is optional: users can select a departure stop manually. The app serves Taipei city public bus routes, so nearby results require a location in the service area. For review outside Taipei: open destination search, choose departure manually, search 捷運市政府站 as origin and 臺北車站 as destination. Route and stop search also work without location permission.\n\nLive buses and official arrival estimates come from Taipei's public transport feeds; service availability depends on local operating hours. The official next-arrival estimate does not identify a vehicle. Per-vehicle estimates are clearly distinguished from the official estimate and may vary with traffic and source freshness. Select a vehicle plate on the map to follow it; confirm the actual onboard plate to view upcoming stops.\n\nThe app uses MapLibre with OpenFreeMap/OpenStreetMap attribution and bundled open-source licenses. Apple MapKit provides place search and walking directions. Remote JSON content only updates existing strings, search aliases, appearance and bounded feature settings; no executable code or new app functionality is downloaded. Privacy policy and support links are available under the information button. No advertising, tracking, subscriptions or in-app purchases.\n\nUpdate 1.1.8: retains the selected physical stop when browsing its route, supports in-app walking to a stop, adds English with Chinese sign-name comparison, and improves native map transitions and readability. No new account, payment, advertising, tracking or regulated services. Public-transit data remains the same Taipei service. The previously approved purpose, regional coverage and privacy practices are unchanged.",
   "whatsNew": "這次把候車和走到站牌的流程整理得更清楚。\n\n• 從站牌查看路線時，會保留原本選的上車站，先列出往此站行駛的車。\n• 步行導航留在 App 內，顯示指引、剩餘距離和時間。\n• 站牌改成可展開的小型標籤，縮遠會收小，靠近邊緣會換邊。\n• 新增 English 切換，站名同時保留中文對照。\n• 改善縮放、跟車及面板切換，調整深色文字與按鈕間距。"

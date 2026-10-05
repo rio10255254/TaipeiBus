@@ -4,7 +4,7 @@ const shots=[
  ['store-07-live-bus-in-3d.png','01-live-bus.png','公車現在到哪了','點車牌，跟著這一輛看。'],
  ['store-08-bus-first-navigation.png','02-waiting.png','下一班還要等多久','先看官方時間，再看往站牌開來的車。'],
  ['store-12-in-app-walking.png','03-walking.png','走到站牌，不用換 App','路線、指引和剩餘時間，都在這裡。'],
- ['store-09-onboard-live-guidance.png','04-onboard.png','還剩幾站，多久下車','上車後繼續看同一輛公車的行程。'],
+ ['store-09-onboard-live-guidance.png','04-onboard.png','下一站在哪，還有多久','上車後，沿途站牌與行程接著看。'],
  ['store-02-trip-choices.png','05-plan.png','要去哪裡，先看怎麼搭','比較走路、候車和搭車的時間。'],
  ['store-03-route-keypad.png','06-search.png','常用路線，幾下就找到','用公車專用鍵盤找路線，也能搜站名。']
 ];

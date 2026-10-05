@@ -1,0 +1,80 @@
+[
+  {
+    "file": "01-live-bus.png",
+    "title": "公車現在到哪了",
+    "caption": "點車牌，跟著這一輛看。",
+    "source": "store-07-live-bus-in-3d.png",
+    "source_sha256": "201c96ffe4640fa4e6a0f33186dd69864528efde1f3eb71814a392a045b1219a",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37301023367,
+    "capture_source": "c85bc57",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  },
+  {
+    "file": "02-waiting.png",
+    "title": "下一班還要等多久",
+    "caption": "先看官方時間，再看往站牌開來的車。",
+    "source": "store-08-bus-first-navigation.png",
+    "source_sha256": "f6bc853c6364924e747652fe621e1d5f032d4fe13979f7fef234b88310549607",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37298412846,
+    "capture_source": "7230eea",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  },
+  {
+    "file": "03-walking.png",
+    "title": "走到站牌，不用換 App",
+    "caption": "路線、指引和剩餘時間，都在這裡。",
+    "source": "store-12-in-app-walking.png",
+    "source_sha256": "61c56db8d795927f4d99dc41d16b217f61061d01cb41c8c749c3d844d5d8e3ff",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37298412846,
+    "capture_source": "7230eea",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  },
+  {
+    "file": "04-onboard.png",
+    "title": "下一站在哪，還有多久",
+    "caption": "上車後，沿途站牌與行程接著看。",
+    "source": "store-09-onboard-live-guidance.png",
+    "source_sha256": "6e75f0bb242c5396820f4f235eb703c6a6d5108764f4f61aa00d48ef03ef83bd",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37298412846,
+    "capture_source": "7230eea",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  },
+  {
+    "file": "05-plan.png",
+    "title": "要去哪裡，先看怎麼搭",
+    "caption": "比較走路、候車和搭車的時間。",
+    "source": "store-02-trip-choices.png",
+    "source_sha256": "e897ad0372e352c5df6a8485b5cfdb1bcc0f9804f9f755d77d4b7bae837432bf",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37298412846,
+    "capture_source": "7230eea",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  },
+  {
+    "file": "06-search.png",
+    "title": "常用路線，幾下就找到",
+    "caption": "用公車專用鍵盤找路線，也能搜站名。",
+    "source": "store-03-route-keypad.png",
+    "source_sha256": "e99f716b6dbcb5c79addd48180b26d1463358ec863982de8d32aed6e0184512a",
+    "width": 1320,
+    "height": 2868,
+    "capture_run": 37298412846,
+    "capture_source": "7230eea",
+    "app_version": "1.1.8",
+    "exact_build": "40.1.0"
+  }
+]
