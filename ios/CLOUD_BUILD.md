@@ -4,7 +4,7 @@
 
 ## 公開 App Store 發佈
 
-正式版 `1.0.0 (23.1.0)` 已簽名上傳並完成 Apple 處理，加入既有 TestFlight 內部群組，且上架資料已指定此版本；已於 2026-10-04 00:59（台灣時間）提交 App Review，目前等待 Apple 審查；尚未公開下載。已設定免費、僅台灣、審核後自動發佈。公開支援及隱私頁由 GitHub Pages 的 `docs` 目錄提供：
+正式版 `1.0.0 (23.1.0)` 已通過 Apple 審核並公開下載；2026-10-05 的唯讀核對確認狀態為 `READY_FOR_SALE`。已設定免費、僅台灣、審核後自動發佈。公開支援及隱私頁由 GitHub Pages 的 `docs` 目錄提供：
 
 - [支援與聯絡](https://rio10255254.github.io/TaipeiBus/support.html)
 - [隱私政策](https://rio10255254.github.io/TaipeiBus/privacy.html)
@@ -14,13 +14,23 @@
 - [七張截圖及台灣免費設定核對](https://github.com/rio10255254/TaipeiBus/actions/runs/37138719534)
 - [Apple 審查紀錄](https://appstoreconnect.apple.com/apps/6818475740/distribution/reviewsubmissions/details/c422d760-5efa-4bd4-a7ba-2bb4adbdb6d7)
 
-`TestFlight` 工作流程支援 `store-audit`（唯讀）、`store-prepare`（將文案及指定有效 build 寫入可編輯版本）、`store-verify`（驗證台灣零元供應及完成處理的截圖）。`store-prepare` 必須提供 `resume_build`，審查聯絡資料來自 `APP_STORE_REVIEW_CONTACT` Secret；回條及製作紀錄不輸出私人聯絡內容。Apple 的 App 隱私權問卷仍需網站操作。
+`TestFlight` 工作流程支援 `store-audit`（唯讀）、`store-prepare`（文案與指定有效 build）、`store-assets`（上傳已核對的商店圖片）、`store-verify`（核對保存的文案、圖片、台灣免費供應），以及 `store-submit`（驗證後提交指定版本供 Apple 審查）。`store-prepare` 必須提供 `resume_build`，審查聯絡資料來自 `APP_STORE_REVIEW_CONTACT` Secret；回條及製作紀錄不輸出私人聯絡內容。Apple 的 App 隱私權問卷仍需網站操作。
 
-商店前三張依序為 3D 跟車、公車導航、沿途逐站時間，總共七張圖片均已完成 Apple 處理。商店圖片以 iPhone 17 Pro Max 真正執行 App 拍攝，1320 × 2868 RGB；公車位置和時間使用官方即時資料，僅乘客定位由模擬器提供。`app-store-features` 拍攝實際公車的 3D 跟車、搭車引導及沿途到站預估；不使用測試公車或編造到站資料。沒有即時營運車輛時應等待有效資料，不以測試資料替代。Apple API 的 `APP_IPHONE_67` 對應目前網站的 6.9 吋截圖欄位。
+## 正式更新 1.1.8：已提交 Apple 審查
+
+`1.1.8 (40.1.0)` 已於 2026-10-05 19:23（台灣時間）提交正式 App Review，Apple 確認 `WAITING_FOR_REVIEW`；通過後自動公開，維持僅台灣、免費下載。選用既有已驗證 Beta 的同一個有效 build `325e4527-bf9f-4904-b574-fb70a00f5bbe`。1.1.8 尚未公開；[送審確認](https://github.com/rio10255254/TaipeiBus/actions/runs/37302565694)與 `release/app-store-1.1.8-receipt.json` 保存正式回條。
+
+商店說明改為日常語句，六張新圖片依序展示 3D 公車追蹤、官方候車時間、App 內步行、上車後下一站、緊湊路線比較及專用搜尋鍵盤。圖片由實際介面與官方公車資料拍攝，1320 × 2868；只在介面之外加入短標題、背景及外框，未改寫車牌、時間或位置。原始圖片及來源雜湊一併保存，[製作方式](release/STORE_GALLERY.md)可重現。Apple 已確認六張 `COMPLETE`，保存的文案、圖片順序、雜湊、尺寸、價格與地區皆通過[核對](https://github.com/rio10255254/TaipeiBus/actions/runs/37302418085)。`APP_IPHONE_67` 是 Apple API 的現行大型 iPhone 圖片欄位名稱。
+
+[動畫與操作檢查](https://github.com/rio10255254/TaipeiBus/actions/runs/37293445726)通過淺色八項與深色四項主要流程、同程序外觀切換、135 項核心案例（129 通過、6 項即時資料案例略過）、另外五項實際官方資料核對、424 個英文模板與 Debug／Release 製作。檢視了操作錄影、過渡視角、密集車流、深色站牌與步行，以及英文上車資訊。2,500 輛的連續 GPS 取樣均保持移動，未超過已收到位置；淺／深色逐幀資料準備時間 P95 分別為 24.93／19.08 ms。這些是模擬器與驗證負擔的記錄，不能當成實際 iPhone 顯示幀率或完全不卡頓的保證。
+
+[原始四項商店操作](https://github.com/rio10255254/TaipeiBus/actions/runs/37295079093)通過；[後續重拍](https://github.com/rio10255254/TaipeiBus/actions/runs/37298412846)確認查詢完成後的三種實際方案、可信候車預估、上車後資訊與真正步行路線。該輪事先指定的路線已無可用車輛，3D 拍攝因此失敗；改為在執行中的 App 直接選取新鮮官方車輛後，[獨立 3D 補拍](https://github.com/rio10255254/TaipeiBus/actions/runs/37301023367)通過。商店圖片從未使用測試公車或編造時間。
+
+App 發佈程式維持 `e93bf25` 的已驗證內容；後續只改拍攝／發佈流程、說明與圖片，以及 Release 不含的隱藏驗證文字。共享內容與公開網站未修改。未建立自動提交未來版本的排程，後續實驗仍可先經 TestFlight 驗證。
 
 ## TestFlight 1.1.8：站牌脈絡、輕巧標籤與 App 內步行
 
-`1.1.8 (40.1.0)` 已於 2026-10-05 09:22（台灣時間）上傳，完成 Apple 處理並加入既有內部測試群組。來源 `836560985236bdc0674ac5f3a3b9f6c6742d1aab`，[發布回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37250933543)確認版本、App、群組、`upload_confirmed=true` 和 `status=internal_group_assigned`。仍僅供 TestFlight，草稿 PR 保留未合併，正式商店設定、公開網站和共享內容設定未修改。
+`1.1.8 (40.1.0)` 已於 2026-10-05 09:22（台灣時間）上傳，完成 Apple 處理並加入既有內部測試群組。來源 `836560985236bdc0674ac5f3a3b9f6c6742d1aab`，[發布回條](https://github.com/rio10255254/TaipeiBus/actions/runs/37250933543)確認版本、App、群組、`upload_confirmed=true` 和 `status=internal_group_assigned`。上傳當時僅供 TestFlight；依使用者後續授權，同一版本已提交正式更新，詳見上方送審紀錄。公開網站和共享內容設定仍未修改。
 
 從站牌進入路線會保留確切站位；官方下一班時間獨立顯示，車牌依可確認的道路進度排列。最近三輛往此站的車先顯示，後續車輛、已過站、不經此站及位置待確認分開收合；不把官方時間指定給某個車牌。路線圖保留整條路線的車輛，選定方向的車身加入藍色強調，其他方向保留灰色；進出追蹤能返回同一路線及原站牌。
 
