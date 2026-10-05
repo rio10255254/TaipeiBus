@@ -9,5 +9,5 @@
   "minimum_upload_sdk": 26,
   "description_file": "beta-description.zh-Hant.txt",
   "what_to_test_file": "what-to-test.zh-Hant.txt",
-  "distribution": "testflight-only"
+  "distribution": "app-store-and-testflight"
 }
