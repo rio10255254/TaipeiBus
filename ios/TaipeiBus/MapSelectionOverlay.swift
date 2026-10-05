@@ -119,13 +119,14 @@ private struct MapContextLabelContent: View, Equatable {
                                 Text(station.localizedName).font(.caption.weight(.semibold)).lineLimit(1)
                                 if let first { Text(EstimateFeed.label(first.estimateSeconds)).font(.caption).monospacedDigit() }
                             } else {
+                                Image(systemName: "mappin.circle.fill").foregroundStyle(Color.accentColor)
                                 VStack(alignment: .leading, spacing: 1) {
                                     BilingualName(station).font(.headline).lineLimit(2)
                                     Text(station.localizedBearing).font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                                 }
                             }
                             Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
-                        }.frame(minHeight: 44).contentShape(Rectangle()).mapLabelInk()
+                        }.frame(minHeight: 44).contentShape(Rectangle()).mapLabelSurface()
                     }.buttonStyle(.plain).accessibilityIdentifier("map-station-expand")
                         .accessibilityValue(expanded ? AppText.text("已展開") : AppText.text("已收合"))
                     if !compact || expanded, let first {
@@ -156,7 +157,7 @@ private struct MapContextLabelContent: View, Equatable {
                                         let estimate = model.arrivalDisplay(approach.vehicle, stopID: row.stop.id, at: timeline.date)
                                         Text(estimate.prediction != nil ? estimate.label : AppText.text("時間待確認")).monospacedDigit()
                                         Image(systemName: "scope").foregroundStyle(Color.accentColor)
-                                    }.font(.caption).frame(minHeight: 30).padding(.horizontal, 10).mapLabelInk()
+                                    }.font(.caption).frame(minHeight: 30).padding(.horizontal, 10).mapLabelSurface()
                                 }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("map-station-bus-" + approach.vehicle.plate)
                             }
                         }
@@ -186,17 +187,19 @@ private struct MapContextLabelContent: View, Equatable {
     }
 }
 
-private struct MapLabelInk: ViewModifier {
+private struct MapLabelSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
-        content.foregroundStyle(Color(uiColor: .label))
-            .shadow(color: Color(uiColor: .systemBackground), radius: 0.7, x: -1, y: -1)
-            .shadow(color: Color(uiColor: .systemBackground), radius: 0.7, x: 1, y: -1)
-            .shadow(color: Color(uiColor: .systemBackground), radius: 0.7, x: -1, y: 1)
-            .shadow(color: Color(uiColor: .systemBackground), radius: 0.7, x: 1, y: 1)
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        content.foregroundStyle(Color(uiColor: .label)).padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color(uiColor: .secondarySystemBackground).opacity(0.92), in: shape)
+            .phoneGlass(in: shape)
+            .overlay { shape.stroke(Color.primary.opacity(scheme == .dark ? 0.22 : 0.12), lineWidth: 0.75) }
+            .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.18), radius: 8, y: 3)
     }
 }
 private extension View {
-    func mapLabelInk() -> some View { modifier(MapLabelInk()) }
+    func mapLabelSurface() -> some View { modifier(MapLabelSurface()) }
 }
 
 private struct MapLabelSizeKey: PreferenceKey {
