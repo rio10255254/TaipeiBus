@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'store-audit', 'store-prepare', 'store-verify', 'register-app-id', 'upload', 'finish-processing']
+        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing']
         default: 'check-only'
       bundle_id:
         description: 'Leave empty to use BUS_BUNDLE_ID repository variable / release config'
@@ -92,6 +92,25 @@ jobs:
         run: |
           ruby -c ios/release/store_prepare.rb
           ruby ios/release/store_prepare.rb
+      - name: Upload prepared screenshots to the editable update
+        if: inputs.operation == 'store-assets'
+        run: |
+          ruby -c ios/release/store_assets.rb
+          ruby ios/release/store_assets.rb
+          ruby ios/release/store_verify.rb
+      - name: Verify and submit the exact public update for review
+        if: inputs.operation == 'store-submit'
+        run: |
+          ruby ios/release/store_verify.rb
+          ruby -c ios/release/store_submit.rb
+          ruby ios/release/store_submit.rb
+      - name: Preserve Apple review submission confirmation
+        if: inputs.operation == 'store-submit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-submitted-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-submitted.json
+          retention-days: 30
       - name: Preserve public release preparation receipt
         if: inputs.operation == 'store-prepare'
         uses: actions/upload-artifact@v4

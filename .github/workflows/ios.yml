@@ -471,7 +471,9 @@ jobs:
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-features' ]; then
-            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreHomeAndRouteSearch'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreStationAndInAppWalking'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
               '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealDestinationAndItinerary')
             # Pick a currently moving public-feed bus near buildings in Taipei.
             # Only simulator passenger location is controlled; bus GPS/ETAs remain live.

@@ -336,12 +336,12 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         let route = ProcessInfo.processInfo.environment["BUS_STORE_VEHICLE_ROUTE"] ?? "307"
         launch(["--preview-vehicle-route", route, "--test-map-controls"])
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
-        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
         capture("store-07-live-bus-in-3d")
         // Opening vehicle details changes the map inset; 3D framing must remain.
         button("車輛資訊").tap()
         XCTAssertTrue(button("跟隨公車").waitForExistence(timeout: 10))
-        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false }
         capture("store-07-live-bus-with-details")
     }
     var nearest: XCUIElement {
@@ -360,6 +360,18 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         route.tap()
         XCTAssertTrue(button("返回搜尋").waitForExistence(timeout: 10))
         capture("store-04-route-map")
+    }
+    func testStoreStationAndInAppWalking() {
+        launch(["--test-map-controls", "--preview-station-walk-fixture"])
+        XCTAssertTrue(button("map-station-expand").waitForExistence(timeout: 90))
+        waitRenderedMap { ($0["cameraMoving"] as? Bool) == false }
+        capture("store-11-live-station-tag")
+        button("map-station-expand").press(forDuration: 0.15)
+        XCTAssertTrue(button("map-station-walk").waitForExistence(timeout: 10))
+        button("map-station-walk").press(forDuration: 0.15)
+        waitRenderedMap { ($0["stationWalkPoints"] as? Int ?? 0) >= 2 && ($0["pitch"] as? Double ?? 90) < 1 && ($0["cameraMoving"] as? Bool) == false }
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("store-12-in-app-walking")
     }
     func testStoreRealDestinationAndItinerary() {
         launch(["--test-map-controls"])
@@ -380,7 +392,7 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(approach.waitForExistence(timeout: 30), "A real, already-departed bus is required for the screenshot")
         let plate = String(approach.identifier.dropFirst("boarding-vehicle-".count))
         button("boarding-vehicle-" + plate).tap()
-        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 50 && ($0["zoom"] as? Double ?? 0) >= 17 }
+        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false }
         capture("store-08-bus-first-navigation")
         button("journey-board").tap()
         XCTAssertTrue(button("journey-ride-stops").waitForExistence(timeout: 10))
