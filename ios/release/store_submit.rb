@@ -13,13 +13,16 @@ abort 'Expected build is missing.' unless build_id
 build = client.request(:get, "/v1/builds/#{build_id}").fetch('data')
 abort 'The selected build differs from the authorized exact build.' unless build.dig('attributes', 'version') == ENV.fetch('BUS_BUILD_NUMBER') && build.dig('attributes', 'processingState') == 'VALID' && build.dig('attributes', 'expired') == false
 submissions = client.all("/v1/apps/#{verification.fetch('app_id')}/reviewSubmissions")
+items_by_submission = {}
 submission = submissions.find do |s|
   %w[READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW].include?(s.dig('attributes', 'state')) &&
-    client.all("/v1/reviewSubmissions/#{s.fetch('id')}/items").any? { |i| i.dig('relationships', 'appStoreVersion', 'data', 'id') == version_id }
+    (items_by_submission[s.fetch('id')] = client.all("/v1/reviewSubmissions/#{s.fetch('id')}/items", include: 'appStoreVersion'))
+      .any? { |i| i.dig('relationships', 'appStoreVersion', 'data', 'id') == version_id }
 end
 unless submission
   abort 'Update is not editable for submission.' unless version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
-  submission = client.request(:post, '/v1/reviewSubmissions', {}, data: {
+  submission = submissions.find { |s| s.dig('attributes', 'platform') == 'IOS' && s.dig('attributes', 'state') == 'READY_FOR_REVIEW' && items_by_submission[s.fetch('id')] == [] }
+  submission ||= client.request(:post, '/v1/reviewSubmissions', {}, data: {
     type: 'reviewSubmissions', attributes: { platform: 'IOS' }, relationships: { app: { data: { type: 'apps', id: verification.fetch('app_id') } } }
   }).fetch('data')
   client.request(:post, '/v1/reviewSubmissionItems', {}, data: {
