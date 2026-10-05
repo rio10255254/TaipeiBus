@@ -337,6 +337,10 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         launch(["--preview-vehicle-route", route, "--test-map-controls"])
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
         waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
+        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
+        map.rotate(byRotation: .pi / 4, withVelocity: 1)
+        map.pinch(withScale: 1.45, velocity: 1)
+        waitRenderedMap { ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
         capture("store-07-live-bus-in-3d")
         // Opening vehicle details changes the map inset; 3D framing must remain.
         button("車輛資訊").tap()
@@ -374,10 +378,16 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         capture("store-12-in-app-walking")
     }
     func testStoreRealDestinationAndItinerary() {
-        launch(["--test-map-controls"])
+        launch(["--test-map-controls", "--test-journey-selection"])
         XCTAssertTrue(nearest.waitForExistence(timeout: 90))
         button("搜尋目的地").tap(); chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let data = self.app.staticTexts["journey-timing-state"].label.data(using: .utf8),
+                  let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+            return (state["checking"] as? Bool) == false
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 150), .completed)
         capture("store-02-trip-choices")
         let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
         button("journey-option-" + selectedID).tap()
@@ -390,13 +400,22 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         button("返回地圖").tap()
         let approach = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "boarding-vehicle-")).firstMatch
         XCTAssertTrue(approach.waitForExistence(timeout: 30), "A real, already-departed bus is required for the screenshot")
-        let plate = String(approach.identifier.dropFirst("boarding-vehicle-".count))
+        // Allow successive real GPS reports to establish direction and progress.
+        // Prefer a supported estimate; never invent a time for a marketing image.
+        let supported = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND NOT label CONTAINS %@", "boarding-vehicle-", "分", "待確認")).firstMatch
+        let usable = supported.waitForExistence(timeout: 60) && supported.isHittable ? supported : approach
+        let plate = String(usable.identifier.dropFirst("boarding-vehicle-".count))
         button("boarding-vehicle-" + plate).tap()
         waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false }
         capture("store-08-bus-first-navigation")
         button("journey-board").tap()
         XCTAssertTrue(button("journey-ride-stops").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-onboard-vehicle").label.contains(plate))
+        let onboardTime = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let label = self.app.staticTexts["journey-alighting-time"].label
+            return label.contains("分") && !label.contains("待確認")
+        }, object: nil)
+        _ = XCTWaiter.wait(for: [onboardTime], timeout: 45)
         capture("store-09-onboard-live-guidance")
         button("journey-ride-stops").tap()
         XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
