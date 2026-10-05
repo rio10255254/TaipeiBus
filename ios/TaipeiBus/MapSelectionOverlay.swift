@@ -72,7 +72,12 @@ struct MapContextLabels: View {
                     .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
                 MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
                     expanded: expanded, compact: overlay.compactStation,
-                    toggle: { expandedStationID = expanded ? nil : model.mapLabelStation?.id }, showDetails: showDetails)
+                    toggle: {
+#if DEBUG
+                        model.recordMapTap(expanded ? "station-collapse" : "station-expand")
+#endif
+                        expandedStationID = expanded ? nil : model.mapLabelStation?.id
+                    }, showDetails: showDetails)
                     .equatable().frame(width: width).fixedSize(horizontal: false, vertical: true)
                     .background { GeometryReader { body in Color.clear.preference(key: MapLabelSizeKey.self, value: body.size) } }
                     .position(x: placement.midX, y: placement.midY)
@@ -120,7 +125,7 @@ private struct MapContextLabelContent: View, Equatable {
                                 }
                             }
                             Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
-                        }.frame(minHeight: compact && !expanded ? 36 : 44).mapLabelInk()
+                        }.frame(minHeight: 44).contentShape(Rectangle()).mapLabelInk()
                     }.buttonStyle(.plain).accessibilityIdentifier("map-station-expand")
                         .accessibilityValue(expanded ? AppText.text("已展開") : AppText.text("已收合"))
                     if !compact || expanded, let first {
