@@ -338,7 +338,7 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
         waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
         let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
-        map.rotate(byRotation: .pi / 4, withVelocity: 1)
+        map.rotate(.pi / 4, withVelocity: 1)
         map.pinch(withScale: 1.45, velocity: 1)
         waitRenderedMap { ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
         capture("store-07-live-bus-in-3d")

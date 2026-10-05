@@ -124,7 +124,7 @@ jobs:
           ruby -c ios/release/store_verify.rb
           ruby ios/release/store_verify.rb
       - name: Preserve public store verification
-        if: inputs.operation == 'store-verify'
+        if: inputs.operation == 'store-verify' || inputs.operation == 'store-assets'
         uses: actions/upload-artifact@v4
         with:
           name: AppStore-verified-${{ github.run_id }}
