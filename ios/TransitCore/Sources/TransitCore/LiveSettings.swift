@@ -13,6 +13,11 @@ public struct LiveSettings: Codable, Equatable, Sendable {
     public var refresh = Refresh()
     public var display = Display()
     public var quickDestinations = ["臺北車站", "臺北101", "西門町"]
+    public var language = AppLanguage.current
+    // Presentation language belongs to this phone, not the shared download.
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, revision, minimumAppVersion, copy, search, appearance, planning, refresh, display, quickDestinations
+    }
     public init() {}
     public static let defaults = LiveSettings()
 
@@ -50,6 +55,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
     }
     public struct Refresh: Codable, Equatable, Sendable {
         public var vehicleSeconds = 15.0
+        public var trackingSeconds = 5.0
         public var metadataHours = 24.0
         public var settingsSeconds = 300.0
         public init() {}
@@ -62,7 +68,11 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public init() {}
     }
 
-    public func text(_ original: String) -> String { copy[original] ?? original }
+    public func text(_ original: String) -> String {
+        let key = AppText.canonical(original)
+        if language == .english { return copy["en:" + key] ?? AppText.text(key, language: .english) }
+        return copy[key] ?? key
+    }
     public func supports(appVersion: String) -> Bool {
         guard let minimum = Self.version(minimumAppVersion), let current = Self.version(appVersion) else { return false }
         return !current.lexicographicallyPrecedes(minimum)
@@ -136,6 +146,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         try bounded(planning.waitingWeight, 0.5...2, "planning.waitingWeight")
         try bounded(planning.transferPenaltySeconds, 180...900, "planning.transferPenaltySeconds")
         try bounded(refresh.vehicleSeconds, 10...30, "refresh.vehicleSeconds")
+        try bounded(refresh.trackingSeconds, 5...10, "refresh.trackingSeconds")
         try bounded(refresh.metadataHours, 6...24, "refresh.metadataHours")
         try bounded(refresh.settingsSeconds, 60...900, "refresh.settingsSeconds")
         try require((1...6).contains(quickDestinations.count) && quickDestinations.allSatisfy { shortText($0, maximum: 40) }, "quickDestinations")

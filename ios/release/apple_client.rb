@@ -40,7 +40,7 @@ module TaipeiBusRelease
       attempts = 0
       loop do
         value = uri(path, query)
-        klass = { get: Net::HTTP::Get, post: Net::HTTP::Post, patch: Net::HTTP::Patch }.fetch(method)
+        klass = { get: Net::HTTP::Get, post: Net::HTTP::Post, patch: Net::HTTP::Patch, delete: Net::HTTP::Delete }.fetch(method)
         request = klass.new(value)
         request['Authorization'] = "Bearer #{token}"
         request['Accept'] = 'application/json'

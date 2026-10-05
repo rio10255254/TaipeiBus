@@ -48,15 +48,21 @@ public struct LineMatch: Sendable {
 public struct RouteLine: Sendable {
     public let coordinates: [Coordinate]
     public let cumulative: [Double]
-    public var length: Double { cumulative.last ?? 0 }
+    public let length: Double
+    private let segmentBearings: [Double]
 
     public init(coordinates: [Coordinate]) {
         self.coordinates = coordinates
         var distances = [0.0]
+        var bearings: [Double] = []
+        bearings.reserveCapacity(max(0, coordinates.count - 1))
         for i in coordinates.indices.dropFirst() {
             distances.append(distances.last! + coordinates[i - 1].distance(to: coordinates[i]))
+            bearings.append(coordinates[i - 1].bearing(to: coordinates[i]))
         }
         cumulative = distances
+        length = distances.last ?? 0
+        segmentBearings = bearings
     }
 
     public static func parse(wkt: String) -> RouteLine? {
@@ -158,8 +164,8 @@ public struct RouteLine: Sendable {
             let span = cumulative[i] - cumulative[i - 1]
             let t = span > 0 ? (distance - cumulative[i - 1]) / span : 1
             return (coordinates[i - 1].interpolate(to: coordinates[i], fraction: t),
-                    coordinates[i - 1].bearing(to: coordinates[i]))
+                    segmentBearings[i - 1])
         }
-        return (coordinates.last!, coordinates[coordinates.count - 2].bearing(to: coordinates.last!))
+        return (coordinates.last!, segmentBearings.last!)
     }
 }

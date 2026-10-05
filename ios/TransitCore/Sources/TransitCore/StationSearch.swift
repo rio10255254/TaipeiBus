@@ -4,10 +4,21 @@ public struct StationResultGroup: Identifiable, Sendable {
     public let name: String
     public let stations: [Station]
     public var id: String { name }
+    public var localizedName: String { AppLanguage.current == .english ? stations.first?.localizedName ?? name : name }
 }
 
 /// Shared matching for official platforms and native place results.
 public enum StationSearch {
+    public static func englishNames(_ name: String) -> [String] {
+        guard !name.isEmpty else { return [] }
+        var full = name
+        for (short, long) in [("sta", "Station"), ("rd", "Road"), ("st", "Street"), ("ave", "Avenue"), ("sec", "Section")] {
+            full = full.replacingOccurrences(of: "\\b" + short + "\\.?(?=\\s|$|[(),])", with: long, options: [.regularExpression, .caseInsensitive])
+        }
+        let simple = full.replacingOccurrences(of: "\\b(MRT|Station)\\b", with: "", options: [.regularExpression, .caseInsensitive])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return Array(Set([name, full, simple].filter { !$0.isEmpty }))
+    }
     private static let familiarNames = [
         ["台北車站", "台北站", "北車", "Taipei Main Station"],
         ["台北101", "101", "Taipei 101", "台北101購物中心"],

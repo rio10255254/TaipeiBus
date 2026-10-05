@@ -15,6 +15,9 @@ enum MapFocus {
     case route(String)
     case vehicle(String)
     case journey([Coordinate])
+    case cityOverview
+    case returnToCity
+    case leaveCity
 }
 
 enum UserMapMode: String { case free, north, heading }
@@ -46,6 +49,20 @@ final class TransitAppModel: ObservableObject {
     @Published var query = ""
     @Published var selectedStationID: String?
     @Published var selectedRouteID: String?
+    @Published private(set) var routeBoardingStopID: String?
+    private var routeOverviewReturn: (route: String, direction: String, variants: Bool, stop: String?)?
+    private var routeOriginStationID: String?
+    var canReturnToRouteOverview: Bool { selectedVehicleID != nil && routeOverviewReturn != nil }
+    var canReturnToRouteStation: Bool { selectedVehicleID == nil && selectedRouteID != nil && routeOriginStationID != nil }
+    func returnToRouteStation() {
+        guard let id = routeOriginStationID, let station = metadata.stations[id] else { return }
+        selectStation(station)
+    }
+    func returnToRouteOverview() {
+        guard let saved = routeOverviewReturn, let route = metadata.route(saved.route) else { return }
+        selectRoute(route, direction: saved.direction, variantOnly: !saved.variants, boardingStopID: saved.stop)
+        routeOverviewReturn = nil
+    }
     @Published private(set) var allRouteVariants = true
     @Published var selectedVehicleID: String?
     struct BoardedVehicle {
@@ -54,9 +71,10 @@ final class TransitAppModel: ObservableObject {
         let plate: String
     }
     @Published private(set) var boardedVehicle: BoardedVehicle?
-    private var boardedDuration: (optionID: String, duration: JourneyDuration)?
+    private var boardedAt: Date?
     @Published var direction = "0"
     @Published var following = false
+    @Published private(set) var cityFleetMode = false
     @Published var highlightVehicle = true
     @Published var sheetDetent: PresentationDetent = .height(330)
     @Published var focus: MapFocus?
@@ -74,10 +92,55 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var recentStationIDs: [String]
     @Published private(set) var recentRouteIDs: [String]
     @Published private(set) var liveSettings = LiveSettings.defaults
+    @Published private(set) var language = AppLanguage.current
+    var presentationSettings: LiveSettings {
+        var settings = liveSettings; settings.language = language; return settings
+    }
+    func setLanguage(_ value: AppLanguage) {
+        guard value != language else { return }
+#if DEBUG
+        debugActions.append("language:" + value.rawValue)
+#endif
+        defaults.set(value.rawValue, forKey: AppLanguage.preferenceKey)
+        language = value
+        location.updateSettings(presentationSettings)
+    }
     private(set) var vocabulary = SearchVocabulary()
 
     let location = LocationService()
     let planner = JourneyPlannerModel()
+    let stationWalk = StationWalkingNavigation()
+    private struct WalkReturnSelection {
+        let station: String?, route: String?, vehicle: String?, boarding: String?
+        let direction: String, variants: Bool, following: Bool, focus: MapFocus?
+        let originStation: String?, walkingIndex: Int?, detent: PresentationDetent
+    }
+    private var walkReturnSelection: WalkReturnSelection?
+    func startStationWalk(_ station: Station) {
+        guard !stationWalk.isActive else { return }
+        walkReturnSelection = WalkReturnSelection(station: selectedStationID, route: selectedRouteID,
+            vehicle: selectedVehicleID, boarding: routeBoardingStopID, direction: direction,
+            variants: allRouteVariants, following: following, focus: focus,
+            originStation: routeOriginStationID, walkingIndex: walkingMapIndex, detent: sheetDetent)
+        following = false; stopUserTracking()
+        location.setWalkingNavigation(true); location.request()
+        stationWalk.begin(station, location: location)
+    }
+    func showStationWalkOverview() {
+        guard !stationWalk.coordinates.isEmpty else { return }
+        focusMap(.journey(stationWalk.coordinates))
+    }
+    func finishStationWalk() {
+        stationWalk.cancel()
+        if let saved = walkReturnSelection {
+            selectedStationID = saved.station; selectedRouteID = saved.route; selectedVehicleID = saved.vehicle
+            routeBoardingStopID = saved.boarding; direction = saved.direction; allRouteVariants = saved.variants
+            following = saved.following
+            routeOriginStationID = saved.originStation; walkingMapIndex = saved.walkingIndex; sheetDetent = saved.detent
+            if let focus = saved.focus { focusMap(focus) }
+        }
+        walkReturnSelection = nil; updateWalkingLocation()
+    }
     private let service = TransitService()
     private var updateTask: Task<Void, Never>?
     private var settingsTask: Task<Void, Never>?
@@ -86,11 +149,23 @@ final class TransitAppModel: ObservableObject {
     private let defaults = UserDefaults.standard
     private var arrivalForecast = VehicleArrivalForecast()
 #if DEBUG
+    private(set) var debugActions: [String] = []
+    func recordMapTap(_ value: String) { debugActions.append(value) }
     private var previewSelectionApplied = false
+    private var cityFixtureTask: Task<Void, Never>?
     @Published private(set) var previewNotice: String?
 #endif
 
     init() {
+        let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
+        var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
+#if DEBUG
+        let languageArguments = ProcessInfo.processInfo.arguments
+        if let index = languageArguments.firstIndex(of: "--test-language"), languageArguments.indices.contains(index + 1),
+           let forced = AppLanguage(rawValue: languageArguments[index + 1]) { chosen = forced }
+#endif
+        UserDefaults.standard.set(chosen.rawValue, forKey: AppLanguage.preferenceKey)
+        language = chosen
         favorites = Set(UserDefaults.standard.stringArray(forKey: "favoriteStations") ?? [])
         recentStationIDs = UserDefaults.standard.stringArray(forKey: "recentStations") ?? []
         recentRouteIDs = UserDefaults.standard.stringArray(forKey: "recentRoutes") ?? []
@@ -108,7 +183,7 @@ final class TransitAppModel: ObservableObject {
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
-    var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.name : $0.displayName } }
+    var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.localizedName : $0.localizedDisplayName } }
     var routeVariants: [BusRoute] { selectedRouteID.map { metadata.variants(routeID: $0) } ?? [] }
     var routeDirections: [String] {
         selectedRouteID.map { metadata.directions(routeID: $0, allVariants: allRouteVariants) } ?? ["0", "1"]
@@ -118,6 +193,26 @@ final class TransitAppModel: ObservableObject {
     }
     var routePaths: [[Coordinate]] {
         selectedRouteID.map { metadata.displayPaths(routeID: $0, direction: direction, allVariants: allRouteVariants) } ?? []
+    }
+    var routeBoardingStop: BusStop? {
+        guard let id = routeBoardingStopID, let stop = metadata.stops[id],
+              stop.direction == direction, let route = selectedRoute, stop.routeID == route.parentID else { return nil }
+        return stop
+    }
+    var mapLabelStation: Station? {
+        if stationWalk.isActive || selectedVehicleID != nil { return nil }
+        return selectedStation ?? routeBoardingStop.flatMap { metadata.stations[$0.stationID] }
+    }
+    var routeMapVehicles: [BusVehicle] {
+        guard let id = selectedRouteID else { return [] }
+        var seen = Set<String>()
+        return routeDirections.flatMap { metadata.vehicles(routeID: id, direction: $0, allVariants: allRouteVariants, in: snapshot.vehicles) }
+            .filter { seen.insert($0.id).inserted }
+    }
+    func chooseRouteBoardingStop(_ stop: BusStop) {
+        routeBoardingStopID = stop.id
+        focusMap(.station(stop.stationID))
+        UISelectionFeedbackGenerator().selectionChanged()
     }
 
     func setActive(_ active: Bool) {
@@ -152,13 +247,16 @@ final class TransitAppModel: ObservableObject {
                 loading = false; loadError = nil
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
+                    let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    try await Task.sleep(for: .seconds(liveSettings.refresh.vehicleSeconds))
+                    let interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
+                    let elapsed = ProcessInfo.processInfo.systemUptime - requestStartedAt
+                    try await Task.sleep(for: .seconds(max(0.25, interval - elapsed)))
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
                     metadataNotice = await service.metadataNotice
@@ -203,7 +301,7 @@ final class TransitAppModel: ObservableObject {
         guard result.revision > snapshot.revision else { return }
         snapshot = result
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
-        planner.updateSnapshot(result)
+        planner.updateSnapshot(result, forecast: arrivalForecast)
 #if DEBUG
         markLiveSettingsPreview()
 #endif
@@ -216,13 +314,39 @@ final class TransitAppModel: ObservableObject {
     }
 
     @Published private(set) var walkingMapIndex: Int?
-    func clearWalkingMap() { walkingMapIndex = nil }
+    var activeWalkingIndex: Int? {
+        if stationWalk.isActive { return nil }
+        if let walkingMapIndex { return walkingMapIndex }
+        if planner.started, case .walk(let index) = planner.currentStep { return index }
+        return nil
+    }
+    func updateWalkingLocation() {
+        if stationWalk.isActive {
+            location.setWalkingNavigation(true)
+            stationWalk.update(location: location)
+            return
+        }
+        let index = activeWalkingIndex
+        location.setWalkingNavigation(index != nil)
+        guard let index else {
+            if planner.walkingLegIndex != nil { planner.endWalkingGuidance() }
+            return
+        }
+        guard let position = location.usableCoordinate, let accuracy = location.accuracy,
+              let timestamp = location.updatedAt else { return }
+        planner.updateWalking(index: index, coordinate: position, accuracy: accuracy, timestamp: timestamp, now: Date())
+    }
+    func clearWalkingMap() {
+        walkingMapIndex = nil; planner.endWalkingGuidance(); location.setWalkingNavigation(false)
+        if planner.started, case .walk = planner.currentStep { updateWalkingLocation() }
+    }
     func focusMap(_ target: MapFocus) {
         if case .userLocation = target {} else { stopUserTracking() }
         mapWasMoved = false; focus = target; focusRevision += 1
     }
     func stopUserTracking() { userMapMode = .free }
     func cycleUserTracking() {
+        cityFleetMode = false
         let next: UserMapMode = userMapMode == .north ? .heading : .north
         if planner.selected == nil { clearSelection() }
         following = false; walkingMapIndex = nil
@@ -262,20 +386,28 @@ final class TransitAppModel: ObservableObject {
         let walk = option.walks[index]
         walkingMapIndex = index
         following = false
-        focusMap(.journey(walk.coordinates.isEmpty ? [walk.from, walk.to] : walk.coordinates))
+        updateWalkingLocation()
+        let points = planner.walkingCoordinates(at: index)
+        focusMap(.journey(points.isEmpty ? [walk.from, walk.to] : points))
     }
     func selectStation(_ station: Station) {
+        routeOverviewReturn = nil; routeOriginStationID = nil
         if selectedStationID == nil { browseQuery = query }
         stationBrowsing = false
         recentStationIDs = [station.id] + Array(recentStationIDs.filter { $0 != station.id }.prefix(7))
         defaults.set(recentStationIDs, forKey: "recentStations")
         selectedStationID = station.id
-        selectedRouteID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
+        selectedRouteID = nil; routeBoardingStopID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
         focusMap(.station(station.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
-    func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false) {
+    func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
+        if let station = selectedStationID { routeOriginStationID = station }
+        else if selectedRoute?.parentID != route.parentID { routeOriginStationID = nil }
+        let context = boardingStopID ?? selectedStation?.stopIDs.first {
+            metadata.stops[$0].map { $0.routeID == route.parentID && $0.direction == direction } == true
+        } ?? (selectedRoute?.parentID == route.parentID ? routeBoardingStopID : nil)
         recentRouteIDs = [route.parentID] + Array(recentRouteIDs.filter { $0 != route.parentID }.prefix(7))
         defaults.set(recentRouteIDs, forKey: "recentRoutes")
         if selectedRouteID == nil { browseQuery = query }
@@ -283,17 +415,38 @@ final class TransitAppModel: ObservableObject {
         selectedRouteID = route.id; allRouteVariants = !variantOnly
         let available = metadata.directions(routeID: route.id, allVariants: !variantOnly)
         self.direction = available.contains(direction) ? direction : available.first ?? "0"
+        routeBoardingStopID = context
+        if let previous = context.flatMap({ metadata.stops[$0] }), previous.direction != self.direction {
+            routeBoardingStopID = routeStops.first { $0.name == previous.name && $0.coordinate.distance(to: previous.coordinate) < 250 }?.id
+        }
         selectedStationID = nil; selectedVehicleID = nil; following = false; query = ""
-        focusMap(.route(route.id)); sheetDetent = .height(330)
+        focusMap(.route(route.id)); sheetDetent = .height(520)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectVehicle(_ vehicle: BusVehicle) {
+        if selectedVehicleID == nil, let routeID = selectedRouteID {
+            routeOverviewReturn = (routeID, direction, allRouteVariants, routeBoardingStopID)
+        }
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
         selectedStationID = nil; direction = vehicle.direction; following = true; query = ""
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
+    }
+    func toggleCityFleet() {
+        if cityFleetMode {
+            cityFleetMode = false; clearSelection(); focusMap(.leaveCity)
+        } else {
+            clearSelection(); stationBrowsing = false; cityFleetMode = true
+            focusMap(.cityOverview)
+        }
+        UISelectionFeedbackGenerator().selectionChanged()
+    }
+    func leaveCityForJourney() { cityFleetMode = false }
+    var cityVehicles: [BusVehicle] {
+        let now = Date()
+        return snapshot.vehicles.filter { $0.hasReliablePosition(at: now) }
     }
     func changeRouteVariant(_ variant: BusRoute?) {
         guard let selected = selectedRoute else { return }
@@ -306,8 +459,14 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
-        selectedVehicleID = nil; selectedRouteID = nil; allRouteVariants = true; selectedStationID = nil; following = false
+        routeOverviewReturn = nil; routeOriginStationID = nil
+#if DEBUG
+        debugActions.append("clear-selection")
+#endif
+        let returningToCity = cityFleetMode && (selectedVehicleID != nil || selectedRouteID != nil || selectedStationID != nil)
+        selectedVehicleID = nil; selectedRouteID = nil; routeBoardingStopID = nil; allRouteVariants = true; selectedStationID = nil; following = false
         sheetDetent = .height(330)
+        if returningToCity { focusMap(.returnToCity) }
     }
     func toggleFavorite(_ station: Station) {
         if favorites.contains(station.id) { favorites.remove(station.id) } else { favorites.insert(station.id) }
@@ -341,53 +500,130 @@ final class TransitAppModel: ObservableObject {
         arrivalForecast.prediction(vehicle, stopID: stopID, metadata: metadata, at: date, allowTypicalWhenStopped: onboard)
     }
 
+    func arrivalDisplay(_ vehicle: BusVehicle, stopID: String, at date: Date, onboard: Bool = false) -> VehicleArrivalDisplay {
+        let official = onboard ? nil : snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: stopID, at: date)
+        return arrivalForecast.display(vehicle, stopID: stopID, metadata: metadata, at: date,
+            officialSeconds: official, allowTypicalWhenStopped: onboard)
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
-        if planner.started, let boardedDuration, boardedDuration.optionID == option.id { return boardedDuration.duration }
-        guard option.verified else { return nil }
-        return JourneyDuration(riding: option.rides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) },
-            walking: option.walks.compactMap(\.duration),
-            arrivals: option.rides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
-            minimumServiceWaits: option.rides.map {
-                $0.route.minimumServiceWait(direction: $0.direction, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), fullRouteSeconds: $0.fullRouteSeconds)
-            })
+        guard option.verified, option.walkIssue == nil else { return nil }
+        if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
+            return planner.duration(option, at: date)
+        }
+        if planner.arrived { return JourneyDuration(riding: [], walking: [0], arrivals: [], at: date) }
+        let index: Int
+        let onboard: Bool
+        switch planner.currentStep {
+        case .ride(let i): index = i; onboard = true
+        case .walk(let i): index = i; onboard = false
+        case nil: return planner.duration(option, at: date)
+        }
+        let remainingRides = Array(option.rides.dropFirst(index))
+        var riding = remainingRides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) }
+        var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
+        if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
+           let progress = planner.walkingProgress, progress.locationConfirmed,
+           let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
+            walking[0] = progress.remainingSeconds
+        }
+        var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
+        var positionUncertain = false
+        if onboard, let first = remainingRides.first, !riding.isEmpty {
+            if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
+               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
+               let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
+                if progress.distance < -20 { riding[0] = 0 }
+                else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
+                    riding[0] = prediction.seconds
+                } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
+                          let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
+                    let total = abs(alight.match.along - board.match.along)
+                    if total > 1 { riding[0] *= min(1.5, max(0, progress.distance / total)) }
+                }
+            } else if let boardedAt {
+                riding[0] = max(60, riding[0] - max(0, date.timeIntervalSince(boardedAt)))
+                positionUncertain = true
+            } else {
+                positionUncertain = true
+            }
+            walking[0] = 0; arrivals[0] = 0
+        }
+        var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
+            minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
+            services: remainingRides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
+            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
+        duration.positionUncertain = positionUncertain
+        return duration
     }
 
     func boardCurrentRide() {
         guard let ride = planner.activeRide else { return }
-        if !planner.started, let option = planner.selected, let duration = journeyDuration(option, at: Date()) {
-            boardedDuration = (option.id, duration)
-        }
+        clearWalkingMap()
+#if DEBUG
+        debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
+#endif
+        boardedAt = Date()
         boardedVehicle = nil
-        if let bus = selectedVehicle, bus.routeID == ride.route.id, bus.direction == ride.direction {
+        if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
             confirmBoardedVehicle(bus, ride: ride)
         }
         planner.boardCurrentRide()
     }
 
     func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
-        guard bus.routeID == ride.route.id, bus.direction == ride.direction else { return }
+        guard metadata.canServe(ride, vehicle: bus) else { return }
         boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
         trackApproachingVehicle(bus)
     }
 
     func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
         guard let boardedVehicle, boardedVehicle.rideID == ride.id else { return nil }
-        return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && $0.routeID == ride.route.id && $0.direction == ride.direction }
+        return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) }
     }
 
     func onboardPlate(for ride: TransitRide) -> String? {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
     }
 
+    /// Boarding is confirmed by the rider. A delayed GPS fix must not put the
+    /// boarding platform back into the remaining stops or continue past alighting.
+    func onboardStops(for ride: TransitRide, at date: Date) -> [BusStop] {
+        let planned = Array(ride.stops.dropFirst())
+        guard let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
+              let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
+              journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil else { return planned }
+        // Keep unmapped intermediate platforms in the list until a later known
+        // platform is passed. Missing geometry must not silently remove a stop.
+        let passed = planned.indices.filter { index in
+            journey.progress(stopID: planned[index].id, vehicle: bus, at: date).map { $0.distance < -20 } == true
+        }
+        return Array(planned.dropFirst((passed.max() ?? -1) + 1))
+    }
+    func onboardTimeLabel(_ bus: BusVehicle, ride: TransitRide, stopID: String, at date: Date) -> String {
+        let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
+        guard let index = onboardStops(for: ride, at: date).firstIndex(where: { $0.id == stopID }) else { return display.label }
+        let count = AppText.remainingStops(index + 1)
+        return count + " · " + onboardEstimateLabel(bus, stopID: stopID, at: date)
+    }
+    func onboardEstimateLabel(_ bus: BusVehicle, stopID: String, at date: Date) -> String {
+        let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
+        return display.prediction != nil ? display.label : AppText.text("時間待確認")
+    }
+
     func returnToWaiting() {
         boardedVehicle = nil; planner.returnToWaiting()
-        if !planner.started { boardedDuration = nil }
+        boardedAt = nil
     }
-    func alight() { boardedVehicle = nil; following = false; planner.advance() }
-    func finishJourney() { boardedVehicle = nil; boardedDuration = nil; planner.finish(); clearSelection() }
+    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
+        routeOverviewReturn = nil; routeBoardingStopID = nil
+#if DEBUG
+        debugActions.append("track:" + vehicle.plate)
+#endif
         walkingMapIndex = nil
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
         selectedStationID = nil; direction = vehicle.direction; following = true
@@ -421,6 +657,9 @@ final class TransitAppModel: ObservableObject {
     }
     func routeVehicles() -> [BusVehicle] {
         guard let id = selectedRouteID else { return [] }
+        if let ride = planner.activeRide, metadata.routeIDs(serving: ride).contains(id), direction == ride.direction {
+            return BoardingGuide.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: Date(), approachingOnly: false).map(\.vehicle)
+        }
         return metadata.vehicles(routeID: id, direction: direction, allVariants: allRouteVariants, in: snapshot.vehicles)
     }
 
@@ -455,7 +694,30 @@ final class TransitAppModel: ObservableObject {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
         }
-        if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
+        if arguments.contains("--preview-walking-guidance") {
+            previewSelectionApplied = true
+            previewNotice = "介面驗證用資料 · 非即時車輛"
+            Task { [weak self] in
+                guard let self else { return }
+                await planner.prepareWalkingPreview()
+                if planner.selected != nil { showWalkOnMap(0) }
+            }
+            return
+        }
+        if arguments.contains("--city-fleet-fixture") {
+            previewSelectionApplied = true
+            previewNotice = "2500 輛壓力測試資料"
+            updateCityFixture(tick: 0)
+            cityFixtureTask = Task { [weak self] in
+                var tick = 0
+                while !Task.isCancelled {
+                    let seconds = arguments.contains("--continuous-gps-fixture") ? 5.0 : 2.0
+                    do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
+                    guard let self, self.isActive else { return }
+                    tick += 1; self.updateCityFixture(tick: tick)
+                }
+            }
+        } else if let id = value(after: "--preview-station"), let station = metadata.stations[id] {
             selectStation(station); previewSelectionApplied = true
         } else if let name = value(after: "--preview-route"), let result = metadata.routeCatalog.search(name).first {
             selectRoute(result.route, direction: value(after: "--preview-direction") ?? "0", variantOnly: result.matchedVariant != nil)
@@ -466,9 +728,23 @@ final class TransitAppModel: ObservableObject {
             previewSelectionApplied = true
             Task { await auditPlaces(token: value(after: "--preview-capture") ?? "", group: value(after: "--preview-audit-group") ?? "transit") }
             return
-        } else if arguments.contains("--preview-boarding-fixture") {
+        } else if arguments.contains("--preview-neihu-planning") {
+            guard let station = metadata.stationSearch.search("內湖站", near: Coordinate(latitude: 25.0837, longitude: 121.5947)).first else { return }
+            planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate, englishName: station.englishName), metadata: metadata)
+            let target = Coordinate(latitude: 25.0416, longitude: 121.5438)
+            let english = metadata.stationSearch.search("捷運忠孝復興站", near: target).first?.englishName
+            planner.setDestination(TravelPlace(name: "忠孝復興站", address: "", coordinate: target, englishName: english), metadata: metadata, currentLocation: nil)
+            previewSelectionApplied = true
+        } else if arguments.contains("--preview-station-walk-fixture") {
+            if let station = metadata.stations.values.filter({
+                (200...800).contains($0.coordinate.distance(to: .taipei)) && !oppositeStations(to: $0).isEmpty
+            }).min(by: { $0.coordinate.distance(to: .taipei) < $1.coordinate.distance(to: .taipei) }) {
+                selectStation(station); previewSelectionApplied = true
+            }
+        } else if arguments.contains("--preview-route-stop-fixture") || arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
             previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"))
+                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
+                browse: arguments.contains("--preview-browse-fixture"))
             if let token = value(after: "--preview-capture"), previewSelectionApplied,
                let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
                 try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
@@ -481,7 +757,7 @@ final class TransitAppModel: ObservableObject {
             let origin = Coordinate.taipei
             planner.useLocation(origin, metadata: metadata)
             if let id = value(after: "--preview-origin-station"), let station = metadata.stations[id] {
-                planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate), metadata: metadata)
+                planner.setOrigin(TravelPlace(name: station.name, address: station.bearingLabel, coordinate: station.coordinate, englishName: station.englishName), metadata: metadata)
             }
             Task {
                 let search = PlaceSearch()
@@ -507,6 +783,33 @@ final class TransitAppModel: ObservableObject {
            let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
         }
+    }
+
+    private func updateCityFixture(tick: Int) {
+        let now = Date()
+        let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "Asia/Taipei"); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let timestamp = formatter.string(from: now)
+        var fixtureMetadata = TransitMetadata()
+        for row in 0..<50 {
+            let latitude = 25.015 + Double(row) * 0.0015
+            fixtureMetadata.lines["route:CITY-\(row)"] = RouteLine(coordinates: [
+                Coordinate(latitude: latitude, longitude: 121.44), Coordinate(latitude: latitude, longitude: 121.64)])
+        }
+        let rows: [[String: Any]] = (0..<2500).map { index in
+            let latitude = 25.015 + Double(index / 50) * 0.0015
+            let distance = ProcessInfo.processInfo.arguments.contains("--continuous-gps-fixture") ? 0.00006 : 0.000025
+            let longitude = 121.45 + Double(index % 50) * 0.003 + Double(tick) * distance
+            return ["BusID": "CITY-\(index)", "CarID": "CITY-\(index)", "RouteID": "CITY-\(index / 50)", "GoBack": "0",
+                    "Latitude": latitude, "Longitude": longitude, "Azimuth": 90, "Speed": 5,
+                    "DutyStatus": "1", "BusStatus": "0", "CarType": "1", "DataTime": timestamp]
+        }
+        let payload: [String: Any] = ["EssentialInfo": ["UpdateTime": timestamp], "BusInfo": rows]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let decoded = try? FeedDecoder.vehicles(data, metadata: fixtureMetadata,
+                    previous: snapshot.vehicles.filter { $0.plate.hasPrefix("CITY-") }, now: now) else { return }
+        snapshot = TransitSnapshot(vehicles: decoded.vehicles, sourceUpdatedAt: now, receivedAt: now,
+                                   estimates: EstimateFeed(), revision: snapshot.revision + 1)
     }
     func markJourneyPreviewReady() {
         let arguments = ProcessInfo.processInfo.arguments
@@ -578,8 +881,13 @@ final class TransitAppModel: ObservableObject {
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false) -> Bool {
-        let network = TripPlanner(metadata: metadata)
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {
+        var planningMetadata = metadata
+        if cooperated {
+            planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
+            planningMetadata.rebuildRouteCatalog()
+        }
+        let network = TripPlanner(metadata: planningMetadata)
         var chosen: TransitTrip?
         if transfer {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
@@ -594,8 +902,8 @@ final class TransitAppModel: ObservableObject {
                 if chosen != nil { break }
             }
         } else {
-        for route in metadata.variants(routeID: metadata.routeCatalog.search("307").first?.route.id ?? "") {
-            guard let journey = metadata.journey(routeID: route.id, direction: "0"), journey.anchors.count > 10 else { continue }
+        for route in metadata.variants(routeID: metadata.routeCatalog.search(cooperated ? "630" : "307").first?.route.id ?? "") {
+            guard let journey = metadata.journey(routeID: route.id, direction: cooperated ? "1" : "0"), journey.anchors.count > 10 else { continue }
             let middle = journey.anchors.count / 2
             let trips = network.plan(from: journey.anchors[middle].stop.coordinate,
                 to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20)
@@ -603,6 +911,9 @@ final class TransitAppModel: ObservableObject {
                 guard trip.rides.count == 1, let ride = trip.rides.first,
                       let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
                       let boarding = pattern.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
+                if cooperated && !metadata.routeIDs(serving: ride).contains(where: {
+                    $0 != ride.route.id && metadata.routes[$0] != nil && metadata.journey(routeID: $0, direction: ride.direction) != nil
+                }) { return false }
                 return (boarding.match.along - pattern.anchors[0].match.along) * Double(pattern.direction) > 1_000
             }
             if chosen != nil { break }
@@ -613,24 +924,74 @@ final class TransitAppModel: ObservableObject {
               let line = metadata.line(ride.route.id, direction: ride.direction),
               let boarding = journey.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
         let date = Date()
+        let alternate = metadata.routeIDs(serving: ride).sorted().first {
+            $0 != ride.route.id && metadata.routes[$0] != nil && metadata.journey(routeID: $0, direction: ride.direction) != nil
+        }
+        if cooperated && alternate == nil { return false }
+        let vehicleRouteID = cooperated ? alternate! : ride.route.id
+        let vehicleJourney = metadata.journey(routeID: vehicleRouteID, direction: ride.direction) ?? journey
+        let vehicleLine = metadata.line(vehicleRouteID, direction: ride.direction) ?? line
+        let vehicleBoarding = vehicleJourney.anchors.first { $0.stop.id == ride.boarding.id } ?? boarding
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 28_800); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        let rows = [100.0, 450, 900, 950].enumerated().map { index, distance -> [String: Any] in
-            let sample = line.sample(fraction: (boarding.match.along - distance * Double(journey.direction)) / line.length)
-            return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": ride.route.id,
+        let integrity = ProcessInfo.processInfo.arguments.contains("--preview-arrival-integrity")
+        let distances = integrity ? [100.0, 800, 2_400, 3_000] : ProcessInfo.processInfo.arguments.contains("--preview-route-stop-fixture") ? [100.0, 450, 900, 950, -180] : [100.0, 450, 900, 950]
+        let rows = distances.enumerated().map { index, distance -> [String: Any] in
+            let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along - distance * Double(vehicleJourney.direction)) / vehicleLine.length)
+            return ["BusID": "TEST-0\(index + 1)", "CarID": "preview-\(index)", "RouteID": vehicleRouteID,
                 "GoBack": ride.direction, "Latitude": sample.0.latitude, "Longitude": sample.0.longitude,
-                "Speed": 25, "Azimuth": (sample.1 + (journey.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360),
+                "Speed": 25, "Azimuth": (sample.1 + (vehicleJourney.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360),
                 "BusStatus": "0", "DutyStatus": "0", "DataTime": formatter.string(from: date)]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: ["BusInfo": rows,
             "EssentialInfo": ["UpdateTime": formatter.string(from: date)]]),
               let result = try? FeedDecoder.vehicles(data, metadata: metadata, previous: [], now: date) else { return false }
+        if integrity {
+            // One moving bus with three genuine timed observations; the other buses have only one fix.
+            arrivalForecast = VehicleArrivalForecast()
+            for age in [180.0, 90] {
+                let past = date.addingTimeInterval(-age)
+                let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along -
+                    (distances[2] + age * (600 / 180.0)) * Double(vehicleJourney.direction)) / vehicleLine.length)
+                var row = rows[2]
+                row["Latitude"] = sample.0.latitude; row["Longitude"] = sample.0.longitude
+                row["Speed"] = 12
+                row["Azimuth"] = (sample.1 + (vehicleJourney.direction < 0 ? 180 : 0)).truncatingRemainder(dividingBy: 360)
+                row["DataTime"] = formatter.string(from: past)
+                guard let bytes = try? JSONSerialization.data(withJSONObject: ["BusInfo": [row],
+                    "EssentialInfo": ["UpdateTime": formatter.string(from: past)]]),
+                      let history = try? FeedDecoder.vehicles(bytes, metadata: metadata, previous: [], now: past) else { return false }
+                arrivalForecast.ingest(history.vehicles, metadata: metadata, at: past)
+            }
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-onboard-time-fixture") {
+            for age in [90.0, 45] {
+                let past = date.addingTimeInterval(-age)
+                let sample = vehicleLine.sample(fraction: (vehicleBoarding.match.along -
+                    (distances[0] + age * 5) * Double(vehicleJourney.direction)) / vehicleLine.length)
+                var row = rows[0]
+                row["Latitude"] = sample.0.latitude; row["Longitude"] = sample.0.longitude
+                row["DataTime"] = formatter.string(from: past)
+                guard let bytes = try? JSONSerialization.data(withJSONObject: ["BusInfo": [row],
+                    "EssentialInfo": ["UpdateTime": formatter.string(from: past)]]),
+                      let history = try? FeedDecoder.vehicles(bytes, metadata: metadata, previous: [], now: past) else { return false }
+                arrivalForecast.ingest(history.vehicles, metadata: metadata, at: past)
+            }
+        }
         let estimates = EstimateFeed(seconds: Dictionary(uniqueKeysWithValues: trip.rides.map {
-            ("\($0.route.parentID):\($0.boarding.id)", 120)
+            ("\($0.route.parentID):\($0.boarding.id)", integrity ? 750 : 120)
         }), updatedAt: date)
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"
+        if ProcessInfo.processInfo.arguments.contains("--preview-route-stop-fixture") {
+            if let station = metadata.stations[ride.boarding.stationID] { selectStation(station) }
+            return selectedStation != nil
+        }
+        if browse {
+            if let bus = snapshot.vehicles.first(where: { $0.plate == "TEST-01" }) { selectVehicle(bus) }
+            return true
+        }
         planner.prepareBoardingPreview(trip)
         if track, let vehicle = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: date).approaches.first?.vehicle {
             trackApproachingVehicle(vehicle)

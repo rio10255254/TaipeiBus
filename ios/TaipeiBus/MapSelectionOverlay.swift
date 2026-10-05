@@ -6,6 +6,7 @@ import TransitCore
 final class MapSelectionOverlay: ObservableObject {
     @Published private(set) var windowPoint: CGPoint?
     private var lastUpdate: CFTimeInterval = 0
+    @Published private(set) var compactStation = false
 #if DEBUG
     @Published private(set) var cameraState = ""
     private var lastCameraUpdate: CFTimeInterval = 0
@@ -17,7 +18,11 @@ final class MapSelectionOverlay: ObservableObject {
         if cameraState != text { cameraState = text }
     }
 #endif
-    func update(_ point: CGPoint?) {
+    func update(_ point: CGPoint?, zoom: Double? = nil) {
+        if let zoom {
+            if zoom < 13.2, !compactStation { compactStation = true }
+            else if zoom > 13.8, compactStation { compactStation = false }
+        }
         let time = CACurrentMediaTime()
         guard point == nil || time - lastUpdate > 1.0 / 30 else { return }
         if let old = windowPoint, let point, hypot(old.x - point.x, old.y - point.y) < 0.25 { return }
@@ -26,122 +31,178 @@ final class MapSelectionOverlay: ObservableObject {
     }
 }
 
+#if DEBUG
+struct DebugMapCameraText: View {
+    @ObservedObject var overlay: MapSelectionOverlay
+    var body: some View {
+        Text("Map state").font(.system(size: 1)).foregroundStyle(.clear).accessibilityLabel(overlay.cameraState)
+            .frame(width: 1, height: 1).accessibilityIdentifier("map-camera-state").allowsHitTesting(false)
+    }
+}
+#endif
+
 struct MapContextLabels: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var overlay: MapSelectionOverlay
+    var bottomClearance: CGFloat = 210
+    @State private var expandedStationID: String?
+    @State private var labelSize = CGSize(width: 280, height: 86)
     let showDetails: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
 
     var body: some View {
         GeometryReader { geometry in
-            if let point = overlay.windowPoint, model.selectedStationID != nil || model.selectedVehicleID != nil {
+            if let point = overlay.windowPoint, model.mapLabelStation != nil || model.selectedVehicleID != nil {
                 let frame = geometry.frame(in: .global)
                 let anchor = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
-                let width = min(290.0, geometry.size.width - 32)
-                let x = min(geometry.size.width - width / 2 - 16, max(width / 2 + 16, anchor.x))
-                let y = min(geometry.size.height - 210, max(160, anchor.y - 108))
-                Path { path in
-                    path.move(to: anchor)
-                    path.addLine(to: CGPoint(x: anchor.x, y: anchor.y - 18))
-                    path.addLine(to: CGPoint(x: x, y: y + 44))
-                }
-                .stroke(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1.2, lineCap: .round))
-                .allowsHitTesting(false)
-                label.frame(width: width).position(x: x, y: y)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: x)
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.06), value: y)
+                let vehicle = model.selectedVehicleID != nil
+                let expanded = expandedStationID == model.mapLabelStation?.id && expandedStationID != nil
+                let width = min(!vehicle && overlay.compactStation && !expanded ? 200.0 : 280.0, geometry.size.width - 32)
+                let freeTop: CGFloat = model.routeBoardingStop != nil && !vehicle ? 170 : vehicle ? 64 : 140
+                let available = CGRect(x: 16, y: freeTop, width: geometry.size.width - 32,
+                    height: max(1, geometry.size.height - bottomClearance - 12 - freeTop))
+                let obstacles = [CGRect(x: geometry.size.width - 84, y: 110, width: 68, height: 82),
+                    CGRect(x: geometry.size.width - 84, y: geometry.size.height - bottomClearance - 58, width: 68, height: 58)]
+                let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
+                    inside: available, avoiding: obstacles)
+                let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
+                                  y: min(placement.maxY, max(placement.minY, anchor.y)))
+                Path { path in path.move(to: anchor); path.addLine(to: tip) }
+                    .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
+                    expanded: expanded, compact: overlay.compactStation,
+                    toggle: {
+#if DEBUG
+                        model.recordMapTap(expanded ? "station-collapse" : "station-expand")
+#endif
+                        expandedStationID = expanded ? nil : model.mapLabelStation?.id
+                    }, showDetails: showDetails)
+                    .equatable().frame(width: width).fixedSize(horizontal: false, vertical: true)
+                    .background { GeometryReader { body in Color.clear.preference(key: MapLabelSizeKey.self, value: body.size) } }
+                    .position(x: placement.midX, y: placement.midY)
                     .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottom)))
             }
         }
+        .onPreferenceChange(MapLabelSizeKey.self) { size in if size.height > 0, abs(size.height - labelSize.height) > 0.5 { labelSize = size } }
+        .onChange(of: model.mapLabelStation?.id) { _, _ in expandedStationID = nil }
+        .onChange(of: overlay.compactStation) { _, compact in if compact { expandedStationID = nil } }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: overlay.windowPoint != nil)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: expandedStationID)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: overlay.compactStation)
     }
 
-    @ViewBuilder private var label: some View {
-        if let station = model.selectedStation {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 8) {
-                    Button(action: showDetails) {
-                        Text(station.name).font(.headline).foregroundStyle(.primary)
-                            .shadow(color: .white, radius: 4)
-                    }.buttonStyle(.plain).frame(minHeight: 44)
-                        .contextMenu {
-                            Button { model.toggleFavorite(station) } label: {
-                                Label(model.favorites.contains(station.id) ? "移除收藏" : "收藏站牌", systemImage: "star")
-                            }
-                            ForEach(model.oppositeStations(to: station)) { opposite in
-                                Button("改看\(opposite.bearingLabel)站牌") { model.selectStation(opposite) }
-                            }
-                        }
-                    Text(station.bearingLabel).font(.caption).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
-                    Spacer(minLength: 0)
-                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .phoneGlass(in: Circle()).accessibilityLabel("此站所有路線與到站預估")
-                }
-                TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                    let arrivals = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
-                    HStack(spacing: 8) {
-                        ForEach(Array(arrivals.prefix(2))) { arrival in
-                            Button {
-                                if let route = arrival.route { model.selectRoute(route, direction: arrival.stop.direction) }
-                            } label: {
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text(arrival.route?.name ?? arrival.stop.routeID).font(.caption.weight(.semibold))
-                                    Text(EstimateFeed.label(arrival.estimateSeconds)).font(.body.weight(.bold)).monospacedDigit()
-                                        .contentTransition(reduceMotion ? .identity : .numericText())
-                                        .animation(reduceMotion ? nil : .easeOut(duration: 0.25), value: arrival.estimateSeconds)
+}
+
+private struct MapContextLabelContent: View, Equatable {
+    @ObservedObject var model: TransitAppModel
+    let signature: String
+    let expanded: Bool
+    let compact: Bool
+    let toggle: () -> Void
+    let showDetails: () -> Void
+    static func == (lhs: Self, rhs: Self) -> Bool { lhs.signature == rhs.signature }
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
+
+    @ViewBuilder var body: some View {
+        if let station = model.mapLabelStation {
+            TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                let all = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
+                let arrivals = model.routeBoardingStop.map { stop in all.filter { $0.stop.id == stop.id } } ?? all
+                let first = arrivals.first
+                VStack(spacing: 4) {
+                    Button(action: toggle) {
+                        HStack(spacing: 6) {
+                            if compact && !expanded {
+                                Circle().fill(Color.accentColor).frame(width: 6, height: 6)
+                                Text(station.localizedName).font(.caption.weight(.semibold)).lineLimit(1)
+                                if let first { Text(EstimateFeed.label(first.estimateSeconds)).font(.caption).monospacedDigit() }
+                            } else {
+                                Image(systemName: "mappin.circle.fill").foregroundStyle(Color.accentColor)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    BilingualName(station).font(.headline).lineLimit(2)
+                                    Text(station.localizedBearing).font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                                 }
-                                .padding(.horizontal, 13).padding(.vertical, 8).frame(minHeight: 48)
-                                .foregroundStyle(arrival.estimateSeconds == nil ? Color.secondary : Color.accentColor)
-                                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 17))
-                            }.buttonStyle(PhonePressStyle())
-                        }
-                        if arrivals.isEmpty { Text("暫無到站資訊").font(.subheadline).shadow(color: .white, radius: 3) }
+                            }
+                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
+                        }.frame(minHeight: 44).contentShape(Rectangle()).mapLabelSurface()
+                    }.buttonStyle(.plain).accessibilityIdentifier("map-station-expand")
+                        .accessibilityValue(expanded ? AppText.text("已展開") : AppText.text("已收合"))
+                    if !compact || expanded, let first {
+                        Button {
+                            if let route = first.route { model.selectRoute(route, direction: first.stop.direction, boardingStopID: first.stop.id) }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(first.route?.localizedName ?? first.stop.routeID).fontWeight(.semibold)
+                                Text(EstimateFeed.label(first.estimateSeconds)).monospacedDigit()
+                                Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                            }.font(.caption).padding(.horizontal, 10).frame(minHeight: 30)
+                                .background(.regularMaterial, in: Capsule())
+                                .overlay { Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5) }
+                        }.buttonStyle(PhonePressStyle()).accessibilityHint(AppText.text("官方下一班時間"))
                     }
-                }
-                Text("官方路線預估").font(.caption2).foregroundStyle(.secondary).shadow(color: .white, radius: 3)
+                    if expanded {
+                        if let row = first, let route = row.route {
+                            let fleet = model.metadata.vehicles(routeID: route.id, direction: row.stop.direction, allVariants: true, in: model.snapshot.vehicles)
+                            let group = RouteBoardingVehicles(stop: row.stop, vehicles: fleet, metadata: model.metadata, at: timeline.date)
+                            ForEach(Array(group.approaching.prefix(2))) { approach in
+                                Button {
+                                    model.selectRoute(route, direction: row.stop.direction, boardingStopID: row.stop.id)
+                                    model.selectVehicle(approach.vehicle)
+                                } label: {
+                                    HStack(spacing: 8) {
+                                        Text(approach.vehicle.plate).monospaced().fontWeight(.semibold)
+                                        Spacer(minLength: 4)
+                                        let estimate = model.arrivalDisplay(approach.vehicle, stopID: row.stop.id, at: timeline.date)
+                                        Text(estimate.prediction != nil ? estimate.label : AppText.text("時間待確認")).monospacedDigit()
+                                        Image(systemName: "scope").foregroundStyle(Color.accentColor)
+                                    }.font(.caption).frame(minHeight: 30).padding(.horizontal, 10).mapLabelSurface()
+                                }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("map-station-bus-" + approach.vehicle.plate)
+                            }
+                        }
+                        HStack(spacing: 12) {
+                            Button(action: showDetails) {
+                                Label(AppText.text("到站車輛"), systemImage: "bus").font(.caption.weight(.medium)).padding(.horizontal, 9).frame(minHeight: 36)
+                            }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule()).accessibilityIdentifier("map-station-details")
+                            Button { model.startStationWalk(station) } label: {
+                                Label(AppText.text("步行"), systemImage: "figure.walk").font(.caption.weight(.medium)).padding(.horizontal, 9).frame(minHeight: 36)
+                            }.buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule()).accessibilityIdentifier("map-station-walk")
+                        }
+                    }
+                }.accessibilityElement(children: .contain).accessibilityIdentifier("map-station-inline-label")
             }
         } else if let bus = model.selectedVehicle {
-            if model.planner.selected != nil {
-                HStack(spacing: 8) {
-                    Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
-                    Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
-                        .accessibilityLabel("車輛資訊")
-                }.padding(.horizontal, 12).phoneGlass(in: Capsule()).fixedSize()
-            } else {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text(bus.routeName).font(.system(.title, design: .rounded).weight(.bold)).foregroundStyle(Color.accentColor)
-                    Text("往 \(bus.destination)").font(.subheadline).lineLimit(2)
-                    Spacer(minLength: 0)
-                    Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44) }
-                        .phoneGlass(in: Circle()).accessibilityLabel("車輛資訊")
+            HStack(spacing: 8) {
+                Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
+                if model.planner.selected == nil {
+                    Text(model.metadata.route(bus.routeID)?.localizedName ?? bus.localizedRouteName)
+                        .font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor).lineLimit(1)
                 }
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(bus.hasReliablePosition(at: timeline.date) ? "GPS \(bus.speedLabel) · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前" : "最後回報 · \(max(0, Int(timeline.date.timeIntervalSince(bus.observedAt)))) 秒前")
-                            .font(.caption).foregroundStyle(.secondary).monospacedDigit()
-                        if let state = bus.trackingLabel(at: timeline.date) {
-                            Text(state).font(.caption).foregroundStyle(bus.trackingIssue == nil && bus.isFresh(at: timeline.date) ? Color.secondary : Color.orange)
-                        }
-                        if let next = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)?.upcoming(vehicle: bus, at: timeline.date).first {
-                            Button {
-                                if let station = model.metadata.stations[next.stop.stationID] { model.selectStation(station) }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: "mappin").font(.caption)
-                                    Text(next.distance <= 25 ? "\(next.stop.name)附近" : "前方 · \(next.stop.name)").lineLimit(1)
-                                    Spacer(minLength: 0)
-                                    if next.distance > 25 { Text(next.distance >= 1_000 ? String(format: "%.1f km", next.distance / 1_000) : "\(Int(next.distance.rounded())) m").monospacedDigit() }
-                                }.font(.caption.weight(.medium)).frame(minHeight: 44)
-                            }.buttonStyle(.plain).accessibilityHint("查看前方站牌的官方到站預估")
-                        }
-                    }
-                }
-            }
-            .shadow(color: .white.opacity(0.95), radius: 4)
-            }
+                Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                    .accessibilityLabel(AppText.text("車輛資訊"))
+            }.padding(.horizontal, 12).readableMapSurface().fixedSize()
         }
     }
+}
+
+private struct MapLabelSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        content.foregroundStyle(Color(uiColor: .label)).padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Color(uiColor: .secondarySystemBackground).opacity(0.92), in: shape)
+            .phoneGlass(in: shape)
+            .overlay { shape.stroke(Color.primary.opacity(scheme == .dark ? 0.22 : 0.12), lineWidth: 0.75) }
+            .shadow(color: .black.opacity(scheme == .dark ? 0.35 : 0.18), radius: 8, y: 3)
+    }
+}
+private extension View {
+    func mapLabelSurface() -> some View { modifier(MapLabelSurface()) }
+}
+
+private struct MapLabelSizeKey: PreferenceKey {
+    static let defaultValue: CGSize = .zero
+    static func reduce(value: inout CGSize, nextValue: () -> CGSize) { value = nextValue() }
 }

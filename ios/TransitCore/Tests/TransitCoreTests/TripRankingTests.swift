@@ -32,13 +32,13 @@ final class TripRankingTests: XCTestCase {
     }
     func testNearbyTimesFavorDirectOverAnExtraConnection() {
         let direct = TripRanking.assess(riding: [1_200], walking: [60, 60], arrivals: [300])
-        let transfer = TripRanking.assess(riding: [450, 450], walking: [60, 90, 60], arrivals: [90, 780])
+        let transfer = TripRanking.assess(riding: [450, 450], walking: [60, 90, 60], arrivals: [180, 960])
         XCTAssertLessThan(transfer.elapsedSeconds, direct.elapsedSeconds)
         XCTAssertLessThan(direct.score, transfer.score, "A small time saving should not outweigh a transfer")
     }
     func testAMuchFasterTransferCanStillBeRecommendedFirst() {
         let direct = TripRanking.assess(riding: [2_400], walking: [60, 60], arrivals: [600])
-        let transfer = TripRanking.assess(riding: [450, 450], walking: [60, 90, 60], arrivals: [90, 780])
+        let transfer = TripRanking.assess(riding: [450, 450], walking: [60, 90, 60], arrivals: [180, 960])
         XCTAssertLessThan(transfer.score, direct.score)
     }
     func testUnknownDirectArrivalIsNotAutomaticallyWorseThanAKnownTransfer() {

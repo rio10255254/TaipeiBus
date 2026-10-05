@@ -12,6 +12,7 @@ public struct RouteSearchResult: Identifiable, Sendable {
     public let matchedVariant: BusRoute?
     public var route: BusRoute { matchedVariant ?? group.route }
     public var name: String { matchedVariant?.displayName ?? group.route.name }
+    public var localizedName: String { matchedVariant?.localizedDisplayName ?? group.route.localizedName }
 }
 
 /// A complete, stable catalog built once per metadata update, independent of live vehicle availability.
@@ -48,7 +49,7 @@ public struct RouteCatalog: Sendable {
             Entry(group: group,
                   names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName] }
                     .flatMap(Self.searchNames).filter { !$0.isEmpty })),
-                  destinations: Array(Set(group.variants.flatMap { [$0.departure, $0.destination] }
+                  destinations: Array(Set(group.variants.flatMap { [$0.departure, $0.destination, $0.englishDeparture, $0.englishDestination] }
                     .map(Self.normalize).filter { !$0.isEmpty })),
                   variants: group.variants.map { ($0, [$0.displayName, $0.englishVariantName]
                     .flatMap(Self.searchNames).filter { !$0.isEmpty }) })
@@ -75,10 +76,20 @@ public struct RouteCatalog: Sendable {
     }
 
     private static func normalize(_ value: String) -> String {
-        value.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive],
+        let name = value.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive],
                       locale: Locale(identifier: "zh_TW"))
             .replacingOccurrences(of: "臺", with: "台")
             .filter { !$0.isWhitespace }
+        // Localized keypad tokens still address the same canonical route names.
+        for (english, chinese) in [("neihutech", "內科"), ("nangangsw", "南軟"), ("civic", "市民"),
+            ("huai-en", "懷恩"), ("maokong", "貓空"), ("minibus", "小"), ("metrobus", "幹線"),
+            ("red", "紅"), ("blue", "藍"), ("brown", "棕"), ("green", "綠"), ("orange", "橘"), ("yellow", "黃")] {
+            if name.hasPrefix(english) {
+                let suffix = String(name.dropFirst(english.count))
+                if suffix.isEmpty || suffix.allSatisfy(\.isNumber) { return chinese + suffix }
+            }
+        }
+        return name
     }
     private static func searchNames(_ value: String) -> [String] {
         let name = normalize(value)

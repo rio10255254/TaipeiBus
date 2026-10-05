@@ -1,0 +1,46 @@
+{
+  "run": 37293445726,
+  "source": "648b4dba1acd4b3701b6fdc76845a26464559d49",
+  "light_ui_cases": 8,
+  "dark_ui_cases": 4,
+  "appearance_switch": "same process, plate, zoom 17.971774335578143",
+  "core": 135,
+  "core_passed": 129,
+  "core_live_gated_skipped": 6,
+  "live_audit_cases": 5,
+  "english_templates": 424,
+  "dense_motion": [
+    {
+      "appearance": "usability-dark-screenshots",
+      "frames": 14,
+      "models": 2500,
+      "encode_p95_ms": 19.078916666785517,
+      "frame_median_ms": 18.819749999920532,
+      "frame_p95_ms": 37.863624999999956,
+      "moving_fraction": 1.0,
+      "max_degrees_per_second": 1.244907821913227e-05
+    },
+    {
+      "appearance": "usability-screenshots",
+      "frames": 14,
+      "models": 2500,
+      "encode_p95_ms": 24.92708333329574,
+      "frame_median_ms": 30.469208333329334,
+      "frame_p95_ms": 65.91774999992595,
+      "moving_fraction": 1.0,
+      "max_degrees_per_second": 1.249701990736862e-05
+    }
+  ],
+  "limits": "Simulator and UI-test diagnostics; native render callbacks and recorded video are not physical-device display-frame-rate measurements. Cold tile loading and test instrumentation affect timings.",
+  "visual_review": [
+    "recorded native map and user flows",
+    "light and dark station labels",
+    "dark orange walking geometry with readable bilingual instructions",
+    "English onboard next-stop/alighting time with stop counts"
+  ],
+  "commercial_capture": {
+    "four_original_cases_passed": 37295079093,
+    "improved_search_journey_walking_cases_passed": 37298412846,
+    "fresh_live_3d_case_passed": 37301023367
+  }
+}

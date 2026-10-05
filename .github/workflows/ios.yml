@@ -14,6 +14,10 @@ on:
         description: 'Also launch iPhone 17 and capture native live-data screenshots'
         type: boolean
         default: false
+      live_audit:
+        description: 'Recheck the live official fleet (disable for UI-only reruns after a passed data audit)'
+        type: boolean
+        default: true
       preview_scope:
         description: 'Choose which iPhone screens to capture'
         type: choice
@@ -26,7 +30,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -48,7 +52,7 @@ env:
 jobs:
   simulator:
     runs-on: macos-15
-    timeout-minutes: 30
+    timeout-minutes: ${{ (inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness') && 45 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -58,6 +62,7 @@ jobs:
           ruby -c ios/apple-connect.rb
           ruby ios/release/apple_client_test.rb
           python3 ios/release-check.py
+          python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
         if: inputs.usability_scope != 'routing-only'
@@ -83,8 +88,9 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: Audit complete official route catalog
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.live_audit != false
         run: |
+          set -euo pipefail
           export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/live-transit-feeds"
           python3 - <<'PY'
           import concurrent.futures, gzip, os
@@ -103,6 +109,10 @@ jobs:
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
+          swift test --package-path ios/TransitCore --filter CooperatedRouteTests.testLiveAllPublishedRoutesAndCooperatedVehicleCoverage | tee -a "$RUNNER_TEMP/routing-audit.log"
+          if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
+            swift test --package-path ios/TransitCore --filter RouteRecommendationAuditTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+          fi
       - name: iPhone 17 launch and screenshots
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
         timeout-minutes: 12
@@ -119,11 +129,11 @@ jobs:
           try:
               subprocess.run(command, check=True, timeout=timeout)
           except subprocess.TimeoutExpired:
-              if command[1] != 'install':
+              if command[1] not in ('install', 'get_app_container'):
                   raise
               # A freshly booted hosted simulator can stall its installation RPC.
               # Restart only this disposable device, then retry the same app once.
-              print('Installation timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
+              print('Simulator installation/container RPC timed out; restarting this test simulator once.', file=sys.stderr, flush=True)
               simulator, device = command[0], command[2]
               subprocess.run([simulator, 'shutdown', device], check=True, timeout=60)
               subprocess.run([simulator, 'boot', device], check=True, timeout=60)
@@ -371,9 +381,13 @@ jobs:
           sim io "$device" screenshot "$RUNNER_TEMP/phone-screenshots/iPhone17-vehicle-later.png"
           fi
       - name: Tap through native user journeys
+        id: native_journeys
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_fixture_pid=$!
+          trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           gem install xcodeproj -v 1.27.0 --no-document --user-install
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
@@ -387,49 +401,147 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'app-store' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'city-fleet' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/CityFleetUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-appearance' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'continuous-gps' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/CityFleetUsabilityTests/testDenseFleetZoomTrackingAndReturn'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-optimization' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testLargerTextKeepsTheMainActionsVisible')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-details' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-onboard' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'english-mode' ] || [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'walking-clarity' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'walking-controls' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/WalkingAndReadabilityUsabilityTests/testOcclusionTurnsCameraAndWaitingActionsRemainSeparate')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'stop-focus' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests' '-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testLanguageSwitchPreservesFollowingAndPersistsAfterRelaunch')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'english-final' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-features' ]; then
-            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreHomeAndRouteSearch'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreStationAndInAppWalking'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
               '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealDestinationAndItinerary')
-            # Pick a currently moving public-feed bus near buildings in Taipei.
-            # Only simulator passenger location is controlled; bus GPS/ETAs remain live.
-            export BUS_STORE_VEHICLE_ROUTE=$(python3 - <<'PY'
-          import concurrent.futures, gzip, json, math
-          from urllib.request import urlopen
-          def fetch(name):
-              raw = urlopen(f'https://tcgbusfs.blob.core.windows.net/blobbus/{name}.gz', timeout=30).read()
-              return json.loads(gzip.decompress(raw))['BusInfo']
-          with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
-              vehicles, routes = list(pool.map(fetch, ['GetBusData', 'GetRoute']))
-          catalog = {str(route['pathAttributeId']): route for route in routes}
-          choices = []
-          for bus in vehicles:
-              route = catalog.get(str(bus.get('RouteID')))
-              if not route or str(bus.get('DutyStatus')) != '1' or float(bus.get('Speed') or 0) < 8:
-                  continue
-              lat, lon = float(bus['Latitude']), float(bus['Longitude'])
-              if not (25.025 < lat < 25.07 and 121.53 < lon < 121.59):
-                  continue
-              distance = math.hypot(lat - 25.038, (lon - 121.56) * 0.9)
-              choices.append((distance, route['nameZh']))
-          if not choices:
-              raise RuntimeError('No actual moving city-centre bus is available for this capture.')
-          print(min(choices)[1])
-          PY
-            )
-            test -n "$BUS_STORE_VEHICLE_ROUTE"
-            export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE="$BUS_STORE_VEHICLE_ROUTE"
+            # Select a fresh moving bus from the feed inside the running app.
+            # A route chosen before launch may have no active vehicle by capture time.
+            export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
           fi
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+          # macOS Bash 3.2 treats an empty array as unset under set -u.
+          recorder=(env)
+          if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             -resultBundlePath "$RUNNER_TEMP/usability.xcresult" \
             "${selection[@]}" \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
+      - name: Verify system dark appearance with native journeys
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness')
+        run: |
+          set -euo pipefail
+          xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_fixture_pid=$!
+          trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
+          export TEST_RUNNER_BUS_TEST_DARK=true
+          selection=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'continuous-gps' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-optimization' ] || [ '${{ inputs.usability_scope }}' = 'navigation-details' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'navigation-onboard' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'english-mode' ] || [ '${{ inputs.usability_scope }}' = 'english-final' ] || [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishBrowsingShowsOfficialTimesWithBilingualStops'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'walking-clarity' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/WalkingAndReadabilityUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'stop-focus' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
+              '-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests/testDenseFleetMovesAcrossWholeGPSIntervalsWithoutCatchUpBursts')
+          fi
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            -resultBundlePath "$RUNNER_TEMP/usability-dark.xcresult" \
+            "${selection[@]}" \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/usability-dark.log"
+      - name: Verify appearance switches without resetting the active bus
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness')
+        run: |
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_fixture_pid=$!
+          trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
+          python3 ios/usability/verify-appearance.py
       - name: Verify manual departure without location permission
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'all' || inputs.usability_scope == 'journey-selection')
         run: |
@@ -445,6 +557,10 @@ jobs:
       - name: Export native walkthrough screenshots
         if: always() && github.event_name == 'workflow_dispatch' && inputs.preview_scope == 'usability'
         run: |
+          if [ -d "$RUNNER_TEMP/usability-motion.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-motion.xcresult" \
+              --output-path "$RUNNER_TEMP/usability-motion-screenshots"
+          fi
           if [ -d "$RUNNER_TEMP/usability.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability.xcresult" \
               --output-path "$RUNNER_TEMP/usability-screenshots"
@@ -453,12 +569,16 @@ jobs:
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-no-location.xcresult" \
               --output-path "$RUNNER_TEMP/usability-no-location-screenshots"
           fi
+          if [ -d "$RUNNER_TEMP/usability-dark.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/usability-dark.xcresult" \
+              --output-path "$RUNNER_TEMP/usability-dark-screenshots"
+          fi
           python3 - <<'PY'
           import json, os, re, shutil
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP'])
           names = set(re.findall(r'capture\("([^"]+)"\)', Path('ios/usability/JourneyUsabilityTests.swift').read_text()))
-          for folder in ['usability-screenshots', 'usability-no-location-screenshots']:
+          for folder in ['usability-screenshots', 'usability-no-location-screenshots', 'usability-dark-screenshots']:
               manifest = root / folder / 'manifest.json'
               if not manifest.exists():
                   continue
@@ -469,7 +589,7 @@ jobs:
                   keep = []
                   for item in record.get('attachments', []):
                       label = item.get('suggestedHumanReadableName', '')
-                      if item.get('isAssociatedWithFailure') or any(label.startswith(name) for name in names):
+                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-', 'continuous-', 'navigation-')) or any(label.startswith(name) for name in names):
                           filename = Path(item['exportedFileName']).name
                           shutil.copyfile(manifest.parent / filename, target / filename)
                           keep.append(item)
@@ -620,6 +740,14 @@ jobs:
             ${{ runner.temp }}/usability-preview
             ${{ runner.temp }}/usability-tests.log
             ${{ runner.temp }}/usability-no-location.log
+            ${{ runner.temp }}/usability-dark.log
+            ${{ runner.temp }}/usability-motion-screenshots
+            ${{ runner.temp }}/usability-motion.log
+            ${{ runner.temp }}/iPhone17-interactions.mp4
+            ${{ runner.temp }}/iPhone17-interactions-record.log
+            ${{ runner.temp }}/iPhone17-camera-transitions.mp4
+            ${{ runner.temp }}/iPhone17-camera-transitions-record.log
+            ${{ runner.temp }}/appearance-switches
           if-no-files-found: ignore
           retention-days: 7
       - uses: actions/upload-artifact@v4

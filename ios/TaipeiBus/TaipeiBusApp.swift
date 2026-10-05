@@ -1,4 +1,5 @@
 import SwiftUI
+import TransitCore
 
 @main
 struct TaipeiBusApp: App {
@@ -8,10 +9,10 @@ struct TaipeiBusApp: App {
     var body: some Scene {
         WindowGroup {
             TransitHomeView(model: model)
-                .environment(\.liveSettings, model.liveSettings)
+                .environment(\.liveSettings, model.presentationSettings)
+                .environment(\.locale, model.language.locale)
                 .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
-                .preferredColorScheme(.light)
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     model.setActive(phase == .active)
                 }

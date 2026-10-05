@@ -1,4 +1,5 @@
 require_relative 'apple_client'
+require 'digest'
 
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
 copy = JSON.parse(File.read(File.join(__dir__, 'app-store.zh-Hant.json')))
@@ -24,6 +25,9 @@ end
 
 localization = client.all("/v1/appStoreVersions/#{version.fetch('id')}/appStoreVersionLocalizations").find { |l| l.dig('attributes', 'locale') == config.fetch('locale') }
 abort 'Traditional Chinese metadata missing.' unless localization
+%w[description keywords promotionalText supportUrl marketingUrl whatsNew].each do |field|
+  abort "Saved #{field} differs from the prepared update." unless localization.dig('attributes', field) == copy.fetch(field)
+end
 sets = client.all("/v1/appStoreVersionLocalizations/#{localization.fetch('id')}/appScreenshotSets")
 # Apple's public API still names the current 6.9-inch media slot APP_IPHONE_67.
 set = sets.find { |s| s.dig('attributes', 'screenshotDisplayType') == 'APP_IPHONE_67' }
@@ -36,6 +40,12 @@ abort 'Screenshots are still processing or failed.' unless shots.all? { |s| s.di
 abort 'Screenshots must match the actual 6.9-inch simulator capture.' unless shots.all? do |s|
   [s.dig('attributes', 'imageAsset', 'width'), s.dig('attributes', 'imageAsset', 'height')] == [1320, 2868]
 end
+desired = copy.fetch('screenshotOrder')
+abort 'Saved screenshots differ from the prepared gallery.' unless shots.map { |s| s.dig('attributes', 'fileName') }.sort == desired.sort
+shots.each do |shot|
+  file = File.join(__dir__, 'screenshots', shot.dig('attributes', 'fileName'))
+  abort 'Uploaded screenshot checksum differs from the reviewed image.' unless File.file?(file) && Digest::MD5.file(file).hexdigest == shot.dig('attributes', 'sourceFileChecksum')
+end
 if ENV['BUS_ORDER_SCREENSHOTS'] == 'true'
   desired = copy.fetch('screenshotOrder')
   names = shots.map { |s| s.dig('attributes', 'fileName') }
@@ -47,13 +57,16 @@ if ENV['BUS_ORDER_SCREENSHOTS'] == 'true'
   shots = client.all(shots_path)
   abort 'Saved screenshot order mismatch.' unless shots.first(desired.length).map { |s| s.dig('attributes', 'fileName') } == desired
 end
+abort 'Saved screenshot order differs from the reviewed gallery.' unless shots.map { |s| s.dig('attributes', 'fileName') } == desired
 report = { app_id: app_id, version: release.version, version_id: version.fetch('id'),
   state: version.dig('attributes', 'appStoreState'), enabled_territories: enabled,
   price: 0, currency: 'TWD', automatic_release: version.dig('attributes', 'releaseType') == 'AFTER_APPROVAL',
   screenshot_set_id: set.fetch('id'), screenshots: shots.map { |s|
     { id: s.fetch('id'), file_name: s.dig('attributes', 'fileName'), state: s.dig('attributes', 'assetDeliveryState', 'state'),
-      width: s.dig('attributes', 'imageAsset', 'width'), height: s.dig('attributes', 'imageAsset', 'height') }
+      width: s.dig('attributes', 'imageAsset', 'width'), height: s.dig('attributes', 'imageAsset', 'height'),
+      checksum: s.dig('attributes', 'sourceFileChecksum') }
   },
+  metadata_verified: true,
   checked_at: Time.now.utc.iso8601 }
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-verification.json'), JSON.pretty_generate(report) + "\n")
 puts "Verified free Taiwan availability and #{shots.length} fully processed native screenshots; state #{report[:state]}."

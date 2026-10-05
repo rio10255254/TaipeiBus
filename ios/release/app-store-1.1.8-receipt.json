@@ -1,0 +1,70 @@
+{
+  "app_id": "6818475740",
+  "version": "1.1.8",
+  "version_id": "dad5a834-4deb-435a-9132-711ecd4c4a57",
+  "state": "PREPARE_FOR_SUBMISSION",
+  "enabled_territories": [
+    "TWN"
+  ],
+  "price": 0,
+  "currency": "TWD",
+  "automatic_release": true,
+  "screenshot_set_id": "af1c2da3-c18b-440e-bac0-491d65dad382",
+  "screenshots": [
+    {
+      "id": "36c00019-669a-8edc-800e-f659dc1d791e",
+      "file_name": "01-live-bus.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "c887dbaeb5589756ddcd89261429e380"
+    },
+    {
+      "id": "cfc00019-669a-8edc-8001-15b3ba86f947",
+      "file_name": "02-waiting.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "f0331ab8c0f8cb8696d36b349a98b1ac"
+    },
+    {
+      "id": "a6400019-669a-8edc-8001-3a6af4e54e1c",
+      "file_name": "03-walking.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "1edea6707ff6f926fb87ea1281603481"
+    },
+    {
+      "id": "86400019-669a-8edc-8012-7b7c32815580",
+      "file_name": "04-onboard.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "2930a674600b3bb028922eeda1c99718"
+    },
+    {
+      "id": "6dc00019-669a-8edc-802a-b8005330ec4a",
+      "file_name": "05-plan.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "1e09b3ff61a58553381d6acf051abd50"
+    },
+    {
+      "id": "40c00019-669a-8edc-8001-3562043cfe57",
+      "file_name": "06-search.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "14b408bb4164e46a2e0e9ac00b876098"
+    }
+  ],
+  "metadata_verified": true,
+  "checked_at": "2026-10-05T11:23:14Z",
+  "status": "submitted_for_app_review",
+  "submission_id": "8e173af1-fac5-4ad5-8687-4784721f006a",
+  "submission_state": "WAITING_FOR_REVIEW",
+  "build_id": "325e4527-bf9f-4904-b574-fb70a00f5bbe",
+  "submitted_at": "2026-10-05T11:23:23Z"
+}

@@ -113,7 +113,7 @@ final class TripPlannerTests: XCTestCase {
         let all = planner.plan(from: a, to: c, maximumWalk: 100, limit: 18)
         let ranked = TripRanking.recommended(all, estimates: EstimateFeed(), at: Date(), limit: 3)
         XCTAssertEqual(ranked.first?.transfers, 1)
-        XCTAssertTrue(ranked.contains { $0.transfers == 0 })
+        XCTAssertFalse(ranked.contains { $0.transfers == 0 }, "Do not force an extreme direct detour into the useful shortlist")
     }
 
     func testRankingUsesRoadGeometryAndVerifiedWalkingTime() throws {
@@ -129,6 +129,23 @@ final class TripPlannerTests: XCTestCase {
         XCTAssertFalse(quickWalk.missedFirstArrival)
         XCTAssertTrue(actualDetour.missedFirstArrival)
         XCTAssertGreaterThan(actualDetour.score, quickWalk.score)
+    }
+
+    func testAnExtraTransferForTenSecondsDoesNotFillTheShortlist() throws {
+        let source = metadata([("direct", "direct", "0", [a, c]),
+            ("first", "first", "0", [a, b]), ("second", "second", "0", [b, c])])
+        let all = TripPlanner(metadata: source).plan(from: a, to: c, maximumWalk: 100, limit: 18)
+        let direct = try XCTUnwrap(all.first { $0.transfers == 0 })
+        let transfer = try XCTUnwrap(all.first { $0.transfers == 1 })
+        let date = Date(), estimates = EstimateFeed(seconds: ["direct:direct:0": 300,
+            "first:first:0": 120, "second:second:0": 800], updatedAt: date)
+        let walks: [String: [Double?]] = [direct.id: [0, 0], transfer.id: [0, 0, 0]]
+        let similar = TripRanking.recommended([direct, transfer], estimates: estimates, at: date,
+            walkingDurations: walks, ridingDurations: [direct.id: [1200], transfer.id: [500, 690]])
+        XCTAssertEqual(similar.map(\.id), [direct.id])
+        let faster = TripRanking.recommended([direct, transfer], estimates: estimates, at: date,
+            walkingDurations: walks, ridingDurations: [direct.id: [2400], transfer.id: [200, 200]])
+        XCTAssertEqual(faster.first?.id, transfer.id, "A meaningful saving should still win")
     }
 
     func testMissingGeometryDoesNotInventAWalkingOrBusPolyline() throws {

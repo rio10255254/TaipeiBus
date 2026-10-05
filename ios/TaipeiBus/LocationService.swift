@@ -22,7 +22,19 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private let cacheKey = "recentDeviceLocation.v1"
     private var settings = LiveSettings.defaults
     private var lastRestart = Date.distantPast
+    private var walkingNavigation = false
+    var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
+    func setWalkingNavigation(_ enabled: Bool) {
+        guard walkingNavigation != enabled else { return }
+        walkingNavigation = enabled
+        manager.desiredAccuracy = enabled ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = enabled ? 3 : 20
+        manager.activityType = enabled ? .fitness : .otherNavigation
+        manager.pausesLocationUpdatesAutomatically = !enabled
+        if enabled, active, authorized { manager.startUpdatingLocation(); updating = true }
+    }
 #if DEBUG
+    var walkingAccuracyConfigured: Bool { manager.desiredAccuracy == kCLLocationAccuracyBestForNavigation && manager.distanceFilter == 3 }
     private(set) var requestStartedAt: Date?
     private(set) var firstUsableMilliseconds: Double?
 #endif
@@ -63,7 +75,12 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         manager.activityType = .otherNavigation
         manager.pausesLocationUpdatesAutomatically = true
     }
-    func updateSettings(_ settings: LiveSettings) { self.settings = settings }
+    func updateSettings(_ settings: LiveSettings) {
+        self.settings = settings
+        if let sample, sample.accuracy > 120, sample.canDisplay(at: Date()), sample.coordinate.isInServiceArea {
+            message = AppText.text("位置約 ±%@ 公尺", Int(sample.accuracy.rounded()))
+        } else if let value = message { message = settings.text(value) }
+    }
     func setActive(_ active: Bool) {
         self.active = active
         if active { requestIfAuthorized(); updateHeadingActivity() }
@@ -98,7 +115,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             }
             updating = true
             lastRestart = Date()
-            manager.desiredAccuracy = kCLLocationAccuracyHundredMeters
+            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyHundredMeters
             manager.startUpdatingLocation()
             updateHeadingActivity()
             timeoutTask?.cancel()
@@ -130,7 +147,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if displayCoordinate != nil {
             requesting = false; timeoutTask?.cancel(); timeoutTask = nil
             // Refinement happens after publishing the first useful position.
-            manager.desiredAccuracy = kCLLocationAccuracyNearestTenMeters
+            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateHeading value: CLHeading) {
@@ -152,7 +169,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if let bytes = try? JSONEncoder().encode(value) { UserDefaults.standard.set(bytes, forKey: cacheKey) }
         if !value.coordinate.isInServiceArea { message = settings.text("目前在服務範圍外，可手動選擇台北出發地") }
         else if Date().timeIntervalSince(value.timestamp) > 60 { message = settings.text("上次位置，正在更新") }
-        else if value.accuracy > 120 { message = "位置約 ±\(Int(value.accuracy.rounded())) 公尺" }
+        else if value.accuracy > 120 { message = AppText.text("位置約 ±%@ 公尺", Int(value.accuracy.rounded())) }
         else { message = nil }
         revision += 1
 #if DEBUG

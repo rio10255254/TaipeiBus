@@ -1,21 +1,21 @@
 {
   "name": "台北公車動態",
-  "subtitle": "附近站牌、到站倒數與公車追蹤",
-  "description": "找到上車站，知道搭哪班、多久到。\n\n台北公車動態以公車為主角，結合 3D 地圖跟車、搭車導航與即時到站資訊。從找站牌、等車到下車，在同一張地圖上掌握行程。\n\n【3D 公車追蹤】\n在 3D 地圖跟隨實際公車，查看車輛位置、路線方向與前方站牌。選定車牌，讓地圖持續跟著這輛車移動。\n\n【我要去哪裡】\n搜尋地點、地址或站名，使用目前位置或手動選擇出發地。比較直達與一次轉乘方案，查看整趟預估時長、上車站、下車站與步行路線。\n\n【到站倒數與時間推估】\n查看官方下一班到站預估，以及已發車的後續車輛。點選車牌即可在地圖追蹤，也能查看個別車輛到上車站的推估時間。結合近期行駛、沿線距離與站序推估到站時間，清楚區分官方倒數與個別車輛預估。\n\n【上車後看沿途】\n確認實際搭乘的車牌後，查看下一站、預估下車時間及沿途各站的到站時間。\n\n【站牌與路線搜尋】\n在地圖查看附近站牌，保留最近查看與收藏。使用公車專用鍵盤快速輸入路線，也可搜尋起訖站、路線名稱及不同走法。\n\n免費、無需登入。定位權限為選用，拒絕定位也能手動搜尋。支援 iOS 17 以上。\n\n公車資料來自臺北市公開資料服務，服務範圍以收錄的路線為準。本 App 為獨立開發，並非政府或公車業者官方 App。官方下一班預估未附車牌；個別車輛時間由公開行駛資料推估，會受交通、停站及資料延遲影響，請以現場與官方資訊為準。步行路線由 Apple 地圖提供。",
+  "subtitle": "公車在哪、多久到，打開就知道",
+  "description": "公車現在在哪？下一班還要等多久？\n\n台北公車動態把附近站牌、官方到站預估和公車位置放在同一張地圖上。選好站牌，再看往這一站行駛的車，等車時心裡更有底。\n\n點一個車牌，就能在 3D 地圖上跟著公車看。想看整條路線，也能拉遠地圖，分辨同方向的車輛與沿線站牌。\n\n輸入想去的地方，看看哪裡上車、搭哪一班、在哪裡下車。比較直達與轉乘方案時，走路、候車和搭車時間分開呈現，也能查看預估抵達時刻。\n\n走到站牌不必切換 App。步行路線、下一步指引、剩餘距離和時間，都能直接在地圖上看。上車後確認實際搭乘的車牌，就能查看下一站、剩餘站數及下車時間預估。\n\n找路線時，可以用公車專用鍵盤輸入號碼，也可以搜尋站名、起訖站或地點。常用站牌能收藏，最近看過的路線和站牌會保留。支援系統深色模式與 English，英文站名旁也保留中文，方便對照站牌。\n\n免費使用，無需登入。定位為選用權限，未開啟定位也能手動搜尋站牌與路線。\n\n公車資料來自臺北市公開資料服務，服務範圍依收錄路線而定。這是獨立開發的 App，並非政府或公車業者官方 App。官方到站預估未指定車牌；個別車輛的時間推估會受交通、停站與資料延遲影響。步行路線由 Apple 地圖提供。",
   "keywords": "3D,公車,台北,臺北,站牌,到站,倒數,路線,搭車,轉乘,通勤,捷運,地圖,追蹤,內湖,目的地",
-  "promotionalText": "3D 地圖即時跟車，以公車為主角規劃搭車行程。看上車站、到站倒數、整趟時間，上車後繼續查看同一輛車的沿途站牌與預估。",
+  "promotionalText": "先看下一班還要等多久，再追蹤往站牌開來的公車。走到站牌、確認上車、查看沿途站名，都留在同一張地圖。",
   "supportUrl": "https://rio10255254.github.io/TaipeiBus/support.html",
   "marketingUrl": "https://rio10255254.github.io/TaipeiBus/",
   "privacyPolicyUrl": "https://rio10255254.github.io/TaipeiBus/privacy.html",
   "copyright": "2026 Rio",
   "screenshotOrder": [
-    "store-07-live-bus-in-3d.png",
-    "store-08-bus-first-navigation.png",
-    "store-10-time-at-each-stop.png",
-    "store-09-onboard-live-guidance.png",
-    "store-05-boarding-map.png",
-    "store-06-full-itinerary.png",
-    "store-03-route-keypad.png"
+    "01-live-bus.png",
+    "02-waiting.png",
+    "03-walking.png",
+    "04-onboard.png",
+    "05-plan.png",
+    "06-search.png"
   ],
-  "reviewNotes": "No account or login is required. Location permission is optional: users can select a departure stop manually. The app serves Taipei city public bus routes, so nearby results require a location in the service area. For review outside Taipei: open destination search, choose departure manually, search 捷運市政府站 as origin and 臺北車站 as destination. Route and stop search also work without location permission.\n\nLive buses and official arrival estimates come from Taipei's public transport feeds; service availability depends on local operating hours. The official next-arrival estimate does not identify a vehicle. Per-vehicle estimates are clearly distinguished from the official estimate and may vary with traffic and source freshness. Select a vehicle plate on the map to follow it; confirm the actual onboard plate to view upcoming stops.\n\nThe app uses MapLibre with OpenFreeMap/OpenStreetMap attribution and bundled open-source licenses. Apple MapKit provides place search and walking directions. Remote JSON content only updates existing strings, search aliases, appearance and bounded feature settings; no executable code or new app functionality is downloaded. Privacy policy and support links are available under the information button. No advertising, tracking, subscriptions or in-app purchases."
+  "reviewNotes": "No account or login is required. Location permission is optional: users can select a departure stop manually. The app serves Taipei city public bus routes, so nearby results require a location in the service area. For review outside Taipei: open destination search, choose departure manually, search 捷運市政府站 as origin and 臺北車站 as destination. Route and stop search also work without location permission.\n\nLive buses and official arrival estimates come from Taipei's public transport feeds; service availability depends on local operating hours. The official next-arrival estimate does not identify a vehicle. Per-vehicle estimates are clearly distinguished from the official estimate and may vary with traffic and source freshness. Select a vehicle plate on the map to follow it; confirm the actual onboard plate to view upcoming stops.\n\nThe app uses MapLibre with OpenFreeMap/OpenStreetMap attribution and bundled open-source licenses. Apple MapKit provides place search and walking directions. Remote JSON content only updates existing strings, search aliases, appearance and bounded feature settings; no executable code or new app functionality is downloaded. Privacy policy and support links are available under the information button. No advertising, tracking, subscriptions or in-app purchases.\n\nUpdate 1.1.8: retains the selected physical stop when browsing its route, supports in-app walking to a stop, adds English with Chinese sign-name comparison, and improves native map transitions and readability. No new account, payment, advertising, tracking or regulated services. Public-transit data remains the same Taipei service. The previously approved purpose, regional coverage and privacy practices are unchanged.",
+  "whatsNew": "這次把候車和走到站牌的流程整理得更清楚。\n\n• 從站牌查看路線時，會保留原本選的上車站，先列出往此站行駛的車。\n• 步行導航留在 App 內，顯示指引、剩餘距離和時間。\n• 站牌改成可展開的小型標籤，縮遠會收小，靠近邊緣會換邊。\n• 新增 English 切換，站名同時保留中文對照。\n• 改善縮放、跟車及面板切換，調整深色文字與按鈕間距。"
 }

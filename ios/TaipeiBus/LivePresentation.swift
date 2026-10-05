@@ -19,7 +19,16 @@ extension UIColor {
     }
 }
 extension Color {
-    init(liveHex: String) { self.init(uiColor: UIColor(liveHex: liveHex)) }
+    init(liveHex: String) {
+        self.init(uiColor: UIColor { traits in
+            let base = UIColor(liveHex: liveHex)
+            guard traits.userInterfaceStyle == .dark else { return base }
+            if liveHex.uppercased() == "#007AFF" { return UIColor.systemBlue.resolvedColor(with: traits) }
+            var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+            base.getRed(&r, green: &g, blue: &b, alpha: &a)
+            return UIColor(red: r + (1-r)*0.18, green: g + (1-g)*0.18, blue: b + (1-b)*0.18, alpha: a)
+        })
+    }
 }
 private struct LiveFontModifier: ViewModifier {
     @Environment(\.liveSettings) private var live
@@ -54,5 +63,75 @@ private struct LiveFontModifier: ViewModifier {
 extension View {
     func liveFont(_ style: Font.TextStyle, weight: Font.Weight = .regular, design: Font.Design = .default) -> some View {
         modifier(LiveFontModifier(style: style, weight: weight, design: design))
+    }
+}
+
+/// Animate discrete interface changes without animating every GPS or countdown update.
+enum InterfaceMotion {
+    static func reduced(_ system: Bool) -> Bool {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--test-reduce-motion") { return true }
+#endif
+        return system
+    }
+}
+private struct SmoothChange<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
+    let value: Value
+    func body(content: Content) -> some View {
+        content.contentTransition(reduceMotion ? .identity : .opacity)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.28), value: value)
+    }
+}
+extension View {
+    func smoothChanges<Value: Equatable>(_ value: Value) -> some View { modifier(SmoothChange(value: value)) }
+    func secondaryAction() -> some View {
+        modifier(NativeActionSurface(prominent: false)).buttonBorderShape(.capsule).controlSize(.small)
+    }
+    func primaryAction() -> some View { modifier(NativeActionSurface(prominent: true)).buttonBorderShape(.capsule) }
+    func readableMapSurface() -> some View { modifier(ReadableMapSurface()) }
+}
+
+private struct NativeActionSurface: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let prominent: Bool
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            if prominent { content.buttonStyle(.glassProminent) }
+            else { content.buttonStyle(.glass) }
+        } else {
+            if prominent { content.buttonStyle(.borderedProminent) }
+            else { content.buttonStyle(.bordered) }
+        }
+    }
+}
+
+private struct ReadableMapSurface: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        content.foregroundStyle(.primary)
+            .background(Color(uiColor: .secondarySystemBackground).opacity(0.97), in: RoundedRectangle(cornerRadius: 19))
+            .overlay { RoundedRectangle(cornerRadius: 19).stroke(Color.primary.opacity(scheme == .dark ? 0.18 : 0.09), lineWidth: 0.7) }
+            .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.12), radius: 9, y: 3)
+    }
+}
+
+/// Published English names keep their Chinese sign text visible as a smaller
+/// second line. Route/stop identifiers and search keys never change language.
+struct BilingualName: View {
+    @Environment(\.liveSettings) private var live
+    let chinese: String
+    let english: String
+    init(_ station: Station) { chinese = station.name; english = station.englishName }
+    init(_ stop: BusStop) { chinese = stop.name; english = stop.englishName }
+    init(chinese: String, english: String) { self.chinese = chinese; self.english = english }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(live.language == .english && !english.isEmpty ? english : chinese)
+            if live.language == .english, !english.isEmpty, english != chinese {
+                Text(chinese).liveFont(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
+            }
+        }.accessibilityElement(children: .combine).smoothChanges(live.language)
     }
 }

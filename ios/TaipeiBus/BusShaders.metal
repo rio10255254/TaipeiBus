@@ -13,6 +13,15 @@ struct BusFragment {
     float selection;
 };
 
+// Keep the original 3D bus readable at city scale. Only its projected footprint
+// grows; depth remains tied to the real road, rather than becoming a giant bus.
+inline float4 readableBus(float4 clip, float4 center, float scale) {
+    if (scale <= 1.001) { return clip; }
+    const float2 anchor = center.xy * (clip.w / center.w);
+    clip.xy = anchor + (clip.xy - anchor) * scale;
+    return clip;
+}
+
 vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[instance_id]],
                             constant BusVertex *vertices [[buffer(0)]],
                             constant BusUniforms &uniforms [[buffer(1)]],
@@ -32,14 +41,18 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     // Local east/north/up, clockwise bearing. Camera handles pitch, rotation and scale.
     float3 p = float3(c * local.x + s * local.y, -s * local.x + c * local.y, local.z) + bus.position.xyz;
     BusFragment out;
-    out.position = uniforms.matrix * float4(p, 1);
+    out.position = readableBus(uniforms.matrix * float4(p, 1),
+                               uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.color = v.color;
+    if (uniforms.mode.x == 0) { out.color.a *= max(uniforms.mode.z, bus.style.y) * uniforms.mode.w; }
     out.normal = float3(c * normal.x + s * normal.y, -s * normal.x + c * normal.y, normal.z);
     out.material = v.normal.w;
     out.selection = bus.style.y;
     out.uv = float2(0);
     if (uniforms.mode.x == 1) { out.color.a *= bus.style.y; }
-    if (uniforms.mode.x == 2) { out.color = float4(0.12, 0.42, 0.96, bus.style.y * 0.9); }
+    if (uniforms.mode.x == 2) {
+        out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.10,0.57,1.0) : float3(0.12,0.42,0.96), bus.style.y * 0.9);
+    }
     else if (bus.style.z > 0) { out.color.a *= 0.48; }
     return out;
 }
@@ -58,6 +71,14 @@ fragment float4 busFragment(BusFragment in [[stage_in]], constant BusUniforms &u
         color += rim * float3(0.035, 0.042, 0.050);
     }
     if (in.material > 2.5) { color = in.color.rgb; }
+    // Far-away buses retain their body geometry, but lose harsh window/roof
+    // contrast smoothly so many vehicles read as a quiet neutral-gray flow.
+    if (uniforms.mode.x == 0 && uniforms.mode.y > 0) {
+        color = mix(color, float3(0.73) * diffuse, uniforms.mode.y * 0.55);
+    }
+    if (uniforms.mode.x == 0 && in.material < 0.5) {
+        color = mix(color, uniforms.viewDirection.w > 0 ? float3(0.24,0.64,0.96) : float3(0.31,0.59,0.85), in.selection * 0.55);
+    }
     return float4(color, in.color.a);
 }
 
@@ -70,9 +91,11 @@ vertex BusFragment busShadowVertex(uint vertexID [[vertex_id]], uint instanceID 
     const float c = cos(bus.style.x), s = sin(bus.style.x);
     float3 p = float3(c * v.position.x + s * v.position.y, -s * v.position.x + c * v.position.y, 0.035) + bus.position.xyz;
     BusFragment out;
-    out.position = uniforms.matrix * float4(p, 1);
+    out.position = readableBus(uniforms.matrix * float4(p, 1),
+                               uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.uv = v.normal.xy;
-    out.color = float4(0.10, 0.12, 0.15, bus.style.z > 0 ? 0.10 : 0.22);
+    out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.025) : float3(0.10,0.12,0.15), bus.style.z > 0 ? 0.10 : 0.22);
+    out.color.a *= max(uniforms.mode.z, bus.style.y);
     out.normal = float3(0, 0, 1);
     out.material = 0;
     out.selection = bus.style.y;
