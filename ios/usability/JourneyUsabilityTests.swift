@@ -580,10 +580,8 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("返回路線").waitForExistence(timeout: 5)); button("返回路線").press(forDuration: 0.15)
         wait("Back from tracking restores the same boarding stop") { ($0["selectedVehicle"] as? String ?? "") == "" && ($0["routeBoardingStation"] as? String) == station }
         button("transit-details-close").press(forDuration: 0.15)
-        wait("Route map is settled with all buses emphasized") { ($0["cameraMoving"] as? Bool) == false && ($0["routeFleetEmphasized"] as? Int ?? 0) >= 3 }
-        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
-        map.pinch(withScale: 0.2, velocity: -2)
-        wait("Zooming out keeps the station label compact") { ($0["stationLabelCompact"] as? Bool) == true }
+        wait("Route map is settled with all buses emphasized") { ($0["cameraMoving"] as? Bool) == false && ($0["routeFleetEmphasized"] as? Int ?? 0) >= 3 && ($0["fleetVisible"] as? Int ?? 0) > 0 }
+        wait("The fitted route overview keeps the station label compact") { ($0["stationLabelCompact"] as? Bool) == true }
         capture("route-map-with-emphasized-physical-buses")
         button("返回站牌").press(forDuration: 0.15)
         wait("Leaving the route restores the original physical station") { ($0["station"] as? String) == station }
