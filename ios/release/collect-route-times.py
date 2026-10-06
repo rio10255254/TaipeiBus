@@ -4,10 +4,14 @@ from pathlib import Path
 
 BASE = 'https://tdx.transportdata.tw'
 
-def read(url, headers=None, data=None):
+def read(url, headers=None, data=None, accounting=None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
+    if accounting is not None:
+        accounting['requests'] += 1
     with urllib.request.urlopen(req, timeout=45) as response:
         raw = response.read(16 * 1024 * 1024 + 1)
+        if accounting is not None:
+            accounting['transferred_bytes'] += len(raw)
         if len(raw) > 16 * 1024 * 1024:
             raise ValueError('Response exceeds the per-request budget')
         if response.headers.get('Content-Encoding') == 'gzip' or raw[:2] == b'\x1f\x8b':
@@ -41,11 +45,14 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--routes', default='')
     parser.add_argument('--maximum-routes', type=int, default=450)
-    parser.add_argument('--maximum-decoded-mb', type=int, default=300)
+    parser.add_argument('--maximum-transferred-mb', type=int, default=100)
+    parser.add_argument('--maximum-decoded-mb', type=int, default=2000)
     args = parser.parse_args()
-    if not (1 <= args.maximum_routes <= 450 and 1 <= args.maximum_decoded_mb <= 300):
+    if not (1 <= args.maximum_routes <= 450 and 1 <= args.maximum_transferred_mb <= 100 and 1 <= args.maximum_decoded_mb <= 2000):
         raise ValueError('Request and byte budgets cannot exceed the fixed limit')
     client_id, client_secret = os.environ.get('TDX_CLIENT_ID', '').strip(), os.environ.get('TDX_CLIENT_SECRET', '').strip()
+    if any(c in client_id + client_secret for c in '*＊•'):
+        raise ValueError('The visible website field contains a mask; use its normal Copy control for the existing key')
     if not client_id or not client_secret:
         raise ValueError('Existing TDX credentials are required in encrypted GitHub Secrets; no subscription is created')
     raw = read('https://tcgbusfs.blob.core.windows.net/blobbus/GetRoute.gz')
@@ -54,7 +61,8 @@ def main():
     if any(x not in published for x in requested) or len(requested) > args.maximum_routes:
         raise ValueError('Requested routes do not fit the published catalog or request budget')
     token, token_at = None, 0
-    profiles, missing, failure = [], [], []
+    profiles, missing = [], []
+    accounting = {'transferred_bytes': 0, 'requests': 0}
     used = 0
     for index, route in enumerate(requested):
         if index:
@@ -64,9 +72,11 @@ def main():
             answer = json.loads(read(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token',
                                      {'Content-Type': 'application/x-www-form-urlencoded'}, payload))
             token, token_at = answer['access_token'], time.monotonic()
+        if accounting['transferred_bytes'] + 16 * 1024 * 1024 > args.maximum_transferred_mb * 1024 * 1024:
+            raise ValueError('Fixed compressed-transfer budget exhausted; no overage or subscription is requested')
         url = BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/' + urllib.parse.quote(route) + '?$format=JSON'
         try:
-            raw = read(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'})
+            raw = read(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'}, accounting=accounting)
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 missing.append(route)
@@ -75,7 +85,7 @@ def main():
             raise
         used += len(raw)
         if used > args.maximum_decoded_mb * 1024 * 1024:
-            raise ValueError('Fixed transfer budget exhausted; no overage or subscription is requested')
+            raise ValueError('Fixed decoded-processing budget exhausted; no overage or subscription is requested')
         rows = json.loads(raw)
         decoded = [x for row in rows if str(row.get('RouteID')) == route for x in [compact(row)] if x]
         if decoded:
@@ -90,6 +100,7 @@ def main():
         raise ValueError('Empty or oversized catalog; existing public data must remain unchanged')
     args.out.parent.mkdir(parents=True, exist_ok=True);args.out.write_bytes(blob)
     report = {'requested_routes': requested, 'loaded_patterns': len(profiles), 'missing_routes': missing,
+              **accounting, 'maximum_transferred_bytes': args.maximum_transferred_mb * 1024 * 1024,
               'decoded_bytes': used, 'output_bytes': len(blob), 'request_budget': args.maximum_routes,
               'source': result['source'], 'generated_at': result['generatedAt']}
     args.out.with_name('coverage.json').write_text(json.dumps(report, indent=2) + '\n')
