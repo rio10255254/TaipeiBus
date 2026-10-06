@@ -55,12 +55,14 @@ struct JourneyPlanningView: View {
                 if !searchingPlaces, showingItinerary, !planner.started, planner.selected != nil {
                     Button {
                         planner.begin()
+                        guard planner.started else { return }
                         if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
                         dismiss()
                     } label: {
                         Label(AppText.text("開始導航"), systemImage: "location.fill")
                             .frame(maxWidth: .infinity, minHeight: 48)
                     }.primaryAction().accessibilityIdentifier("journey-start-navigation")
+                        .disabled(planner.selected.map { !$0.verified || $0.walkIssue != nil || planner.unavailableBoarding($0) != nil } ?? true)
                         .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
                 }
             }

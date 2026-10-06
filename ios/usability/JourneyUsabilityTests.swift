@@ -1187,7 +1187,7 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 10)); XCTAssertTrue(firstOption.isHittable)
         XCTAssertTrue(firstOption.label.lowercased().contains("min"))
-        XCTAssertNotNil(firstOption.label.range(of: "[\u3400-\u9fff]", options: .regularExpression))
+        XCTAssertTrue(firstOption.label.unicodeScalars.contains { (0x3400...0x9fff).contains($0.value) })
         capture("clear-english-route-choices")
         firstOption.tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))

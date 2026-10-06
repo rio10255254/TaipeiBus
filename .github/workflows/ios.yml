@@ -58,6 +58,7 @@ jobs:
       - name: Xcode and core tests
         run: |
           xcodebuild -version
+          xcrun swiftc -parse ios/usability/JourneyUsabilityTests.swift
           swift test --package-path ios/TransitCore
           ruby -c ios/apple-connect.rb
           ruby ios/release/apple_client_test.rb
