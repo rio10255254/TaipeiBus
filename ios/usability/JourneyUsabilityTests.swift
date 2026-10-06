@@ -1166,7 +1166,7 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["journey-ride-time-0"].label.contains("站"))
         capture("clear-real-walk-bus-alight-steps")
         button("journey-time-info").tap()
-        XCTAssertTrue(app.staticTexts["一般車程估計"].exists || app.staticTexts["依目前路線車流"].exists || app.staticTexts["依近期站間紀錄"].exists)
+        XCTAssertTrue(app.staticTexts["一般車程估計"].exists || app.staticTexts["依目前路線車流"].exists || app.staticTexts["依近期站間紀錄"].exists || app.staticTexts["依官方分時段車程"].exists)
         capture("clear-real-time-sources")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.2)).tap()
         button("journey-back").tap()

@@ -891,6 +891,7 @@ private struct JourneyWalkingStep: View {
 }
 
 private struct JourneyRideStep: View {
+    @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let option: JourneyOption
@@ -931,12 +932,14 @@ private struct JourneyRideStep: View {
                 }
                 VStack(alignment: .leading, spacing: 7) {
                     Label(ride.boarding.localizedName, systemImage: "circle")
+                    if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(.secondary).padding(.leading, 26) }
                     TimelineView(.periodic(from: .now, by: 15)) { timeline in
                         let estimate = model.plannedRideTime(ride, at: timeline.date)
                         Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(estimate.seconds / 60)))))
                             .foregroundStyle(.blue).accessibilityIdentifier("journey-ride-time-\(index)")
                     }.padding(.leading, 26)
                     Label(AppText.text("在「%@」下車", ride.alighting.localizedName), systemImage: "circle.fill")
+                    if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(.secondary).padding(.leading, 26) }
                 }.liveFont(.subheadline).fixedSize(horizontal: false, vertical: true)
             }
         }.padding(.vertical, 16)

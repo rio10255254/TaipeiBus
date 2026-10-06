@@ -437,5 +437,6 @@
   "步行至 ": "Walk to ",
   "搭乘 %@ 公車": "Take bus %@",
   "可搭後續班次 · ": "A later bus can be caught · ",
-  "搭乘 %@ 站 · 約 %@ 分鐘": "%@ stops · ~%@ min"
+  "搭乘 %@ 站 · 約 %@ 分鐘": "%@ stops · ~%@ min",
+  "依官方分時段車程": "Based on official time-of-day ride data"
 }

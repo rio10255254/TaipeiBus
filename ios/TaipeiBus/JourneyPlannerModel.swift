@@ -162,19 +162,26 @@ final class JourneyPlannerModel: ObservableObject {
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
+    func ridingEstimates(_ option: JourneyOption, at date: Date) -> [RidingTimeEstimate] {
+        if let trip = option.trip, let metadata = lastMetadata {
+            return forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
+                walkingDurations: option.walks.map(\.duration), preferences: preferences, at: date)
+        }
+        return option.rides.enumerated().map { index, _ in
+            RidingTimeEstimate(seconds: option.trip?.rideSeconds[index] ?? 0, evidence: .typical, observedVehicles: 0)
+        }
+    }
     func duration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
-        let estimates = option.rides.enumerated().map { index, ride in
-            lastMetadata.map { forecast.ridingEstimate(ride, metadata: $0, at: date) } ??
-                RidingTimeEstimate(seconds: option.trip?.rideSeconds[index] ?? 0, evidence: .typical, observedVehicles: 0)
-        }
+        let estimates = ridingEstimates(option, at: date)
         let riding = estimates.map(\.seconds)
         if let trip = option.trip {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding)
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
-                estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic : .stationHistory
+                estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
+                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
             return duration
         }
         return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
@@ -184,7 +191,7 @@ final class JourneyPlannerModel: ObservableObject {
         let trips = valid.compactMap(\.trip)
         let walks = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) })
         let rides = Dictionary(uniqueKeysWithValues: valid.filter { !$0.walkingOnly }.map { option in
-            (option.id, option.rides.map { ride in lastMetadata.map { forecast.ridingSeconds(ride, metadata: $0, at: date) } ?? 0 })
+            (option.id, ridingEstimates(option, at: date).map(\.seconds))
         })
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
             preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides)
@@ -332,8 +339,12 @@ final class JourneyPlannerModel: ObservableObject {
             guard !Task.isCancelled, token == generation else { return }
             verifiedPool = []; optionLabels = [:]
             let date = Date()
+            let initialRiding = Dictionary(uniqueKeysWithValues: trips.map { trip in
+                (trip.id, forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
+                    walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
+            })
             let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, limit: 36, diverse: false)
+                preferences: preferences, limit: 36, ridingDurations: initialRiding, diverse: false)
             func option(_ trip: TransitTrip) -> JourneyOption {
                 var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
                 for index in trip.rides.indices.dropFirst() {

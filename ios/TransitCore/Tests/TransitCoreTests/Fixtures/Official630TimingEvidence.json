@@ -1,0 +1,42 @@
+{
+  "source": "https://tdx.transportdata.tw/api/basic/v2/Bus/S2STravelTime/City/Taipei/10861?$format=JSON&$top=1",
+  "retrieved_via": "Official Swagger visitor UI, HTTP 200, one request",
+  "route_id": "10861",
+  "subroute_id": "160878",
+  "direction": 1,
+  "weekday": 2,
+  "start_hour": 10,
+  "end_hour": 11,
+  "source_updated_at": "2026-10-05T05:26:38+08:00",
+  "boarding": {
+    "id": "23640",
+    "name": "捷運內湖站"
+  },
+  "alighting": {
+    "id": "23658",
+    "name": "忠孝敦化路口"
+  },
+  "stop_to_stop_seconds": [
+    86,
+    110,
+    70,
+    58,
+    51,
+    88,
+    57,
+    107,
+    57,
+    190,
+    64,
+    57,
+    200,
+    65,
+    112,
+    76,
+    110,
+    77
+  ],
+  "seconds": 1635,
+  "minutes": 27.25,
+  "limits": "Published time-of-day station statistics. Not a replay of the passenger GPS or the physical bus in the screenshot; not evidence Apple uses this dataset."
+}

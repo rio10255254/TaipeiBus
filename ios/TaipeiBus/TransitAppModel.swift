@@ -507,7 +507,11 @@ final class TransitAppModel: ObservableObject {
     }
 
     func plannedRideTime(_ ride: TransitRide, at date: Date) -> RidingTimeEstimate {
-        arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
+        if !planner.started, let option = planner.selected, let index = option.rides.firstIndex(where: { $0.id == ride.id }) {
+            let values = planner.ridingEstimates(option, at: date)
+            if values.indices.contains(index) { return values[index] }
+        }
+        return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
     }
 
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
@@ -560,7 +564,8 @@ final class TransitAppModel: ObservableObject {
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
-            rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic : .stationHistory
+            rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
+            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
         return duration
     }
 

@@ -54,7 +54,7 @@ public struct VehicleArrivalDisplay: Equatable, Sendable {
 
 /// A whole-ride planning estimate, never the official arrival time of a named bus.
 public struct RidingTimeEstimate: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case stationHistory, recentTraffic, typical }
+    public enum Evidence: String, Sendable { case stationHistory, officialProfile, recentTraffic, typical }
     public let seconds: Double
     public let evidence: Evidence
     public let observedVehicles: Int
@@ -64,6 +64,7 @@ public struct RidingTimeEstimate: Equatable, Sendable {
     public var sourceLabel: String {
         switch evidence {
         case .stationHistory: return AppText.text("依近期站間紀錄")
+        case .officialProfile: return AppText.text("依官方分時段車程")
         case .recentTraffic: return AppText.text("依目前路線車流")
         case .typical: return AppText.text("一般車程估計")
         }
@@ -273,7 +274,28 @@ public struct VehicleArrivalForecast: Sendable {
         ridingEstimate(ride, metadata: metadata, at: date).seconds
     }
 
-    public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date) -> RidingTimeEstimate {
+    /// Walk and waiting time determine the hour in which each ride actually starts.
+    /// Observation freshness stays anchored to now, even for a later transfer.
+    public func plannedRidingEstimates(_ trip: TransitTrip, metadata: TransitMetadata, estimates: EstimateFeed,
+                                      walkingDurations: [Double?], preferences: LiveSettings.Planning = .init(),
+                                      at date: Date) -> [RidingTimeEstimate] {
+        let distances = [trip.accessDistance] + (trip.transfers > 0 ? [trip.transferDistance] : []) + [trip.egressDistance]
+        let walks = distances.enumerated().map { index, distance in
+            walkingDurations.indices.contains(index) ? walkingDurations[index] ?? distance * 1.25 / 1.2 : distance * 1.25 / 1.2
+        }
+        var durations = trip.rideSeconds, result: [RidingTimeEstimate] = [], elapsed = 0.0
+        for (index, ride) in trip.rides.enumerated() {
+            let assessment = TripRanking.assessment(trip, estimates: estimates, at: date, preferences: preferences,
+                walkingDurations: walkingDurations, ridingDurations: durations)
+            elapsed += max(0, walks[index]) + assessment.waits[index].seconds
+            let value = ridingEstimate(ride, metadata: metadata, at: date, travellingAt: date.addingTimeInterval(elapsed))
+            durations[index] = value.seconds; result.append(value); elapsed += value.seconds
+        }
+        return result
+    }
+
+    public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
+                              travellingAt: Date? = nil) -> RidingTimeEstimate {
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
               let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
@@ -283,7 +305,7 @@ public struct VehicleArrivalForecast: Sendable {
                 evidence: .typical, observedVehicles: 0)
         }
         let traffic = observedRidePace(ride, journey: journey, first: first, last: last, at: date)
-        var seconds = 0.0, measured = 0, fallback = 0
+        var seconds = 0.0, measured = 0, published = 0, fallback = 0
         for index in (first + 1)...last {
             let records = (segments[segmentKey(ride.route.id, ride.direction, journey, index, metadata)] ?? [])
                 .filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
@@ -291,6 +313,11 @@ public struct VehicleArrivalForecast: Sendable {
             let distance = abs(journey.anchors[index].match.along - journey.anchors[index - 1].match.along)
             if Set(records.map(\.vehicleID)).count >= 3 {
                 seconds += median(samples); measured += 1
+            } else if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
+                        subroute: ride.route.id, direction: ride.direction,
+                        from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
+                        travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
+                seconds += official; published += 1
             } else if let traffic {
                 // The observed elapsed time already contains signals, congestion
                 // and dwell. Adding another 20 seconds per stop would count it twice.
@@ -300,7 +327,7 @@ public struct VehicleArrivalForecast: Sendable {
             }
         }
         return RidingTimeEstimate(seconds: seconds,
-            evidence: fallback == 0 && measured > 0 ? .stationHistory : traffic != nil ? .recentTraffic : .typical,
+            evidence: fallback == 0 && published > 0 ? .officialProfile : fallback == 0 && measured > 0 ? .stationHistory : traffic != nil ? .recentTraffic : .typical,
             observedVehicles: traffic?.count ?? 0)
     }
 
