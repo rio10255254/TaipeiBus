@@ -175,6 +175,8 @@ enum MapChrome {
     static let walkingDark = "#5AA2FF"
     static let destructive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FF6961") : UIColor(liveHex: "#C4151C") })
     static let positive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#5EDB86") : UIColor(liveHex: "#1A7F37") })
+    /// Apple Maps' green Go action, dark enough for white text.
+    static let go = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#30A14E") : UIColor(liveHex: "#1E7F3C") })
     static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
 }
 
@@ -197,4 +199,37 @@ struct MapActionStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
             .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
     }
+}
+
+/// Apple Maps place-card action tiles: icon above a short label.
+struct MapTileStyle: ButtonStyle {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    var prominent = false
+    func makeBody(configuration: Configuration) -> some View {
+        let accent = Color(liveHex: live.appearance.accentColor)
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        return configuration.label
+            .labelStyle(.tile)
+            .foregroundStyle(prominent ? Color.white : accent)
+            .frame(maxWidth: .infinity, minHeight: 58)
+            .background(prominent ? AnyShapeStyle(accent) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: shape)
+            .contentShape(shape)
+            .opacity(configuration.isPressed ? 0.8 : 1)
+            .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
+            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+    }
+}
+
+struct TileLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(spacing: 4) {
+            configuration.icon.font(.system(size: 19, weight: .semibold))
+            configuration.title.liveFont(.caption, weight: .semibold).lineLimit(1).minimumScaleFactor(0.75)
+        }.padding(.horizontal, 6)
+    }
+}
+extension LabelStyle where Self == TileLabelStyle {
+    static var tile: TileLabelStyle { TileLabelStyle() }
 }

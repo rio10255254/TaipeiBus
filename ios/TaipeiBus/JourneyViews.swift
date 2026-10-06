@@ -62,8 +62,8 @@ struct JourneyPlanningView: View {
                         dismiss()
                     } label: {
                         Label(AppText.text("開始導航"), systemImage: "location.fill")
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                    }.primaryAction().accessibilityIdentifier("journey-start-navigation")
+                            .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
+                    }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
                         .disabled(planner.selected.map { !$0.verified || $0.walkIssue != nil || planner.unavailableBoarding($0) != nil } ?? true)
                         .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
                 }
@@ -160,7 +160,7 @@ struct JourneyPlanningView: View {
             Divider().padding(.leading, 40)
             Button { edit(origin: false) } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "mappin.circle.fill").foregroundStyle(.green).liveFont(.title2).frame(width: 28)
+                    Image(systemName: "mappin.circle.fill").foregroundStyle(.red).liveFont(.title2).frame(width: 28)
                     Text(planner.destination?.localizedName ?? AppText.text("目的地"))
                         .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
                     Image(systemName: "chevron.down").liveFont(.caption).foregroundStyle(.secondary)
@@ -709,8 +709,12 @@ private struct JourneyRouteChain: View {
             ForEach(option.walks.indices, id: \.self) { index in
                 if let duration = option.walks[index].duration, duration >= 30 {
                     if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-                    Label("\(max(1, Int(ceil(duration / 60))))", systemImage: "figure.walk")
-                        .liveFont(.subheadline).monospacedDigit()
+                    HStack(spacing: 1) {
+                        Image(systemName: "figure.walk")
+                        Text("\(max(1, Int(ceil(duration / 60))))")
+                    }
+                    .liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
+                    .accessibilityElement(children: .combine)
                 }
                 if option.rides.indices.contains(index) {
                     if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
@@ -765,10 +769,15 @@ struct JourneyOptionsView: View {
                         }.accessibilityIdentifier("journey-all-options")
                     }
                 } else {
-                    VStack(spacing: 0) {
+                    VStack(spacing: 8) {
                         ForEach(planner.options) { option in
                             optionRow(option, at: timeline.date)
-                            Divider()
+                                .padding(.horizontal, 14)
+                                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                        .strokeBorder(option.id == planner.selectedID ? Color(liveHex: live.appearance.accentColor) : Color.clear, lineWidth: 2)
+                                }
                         }
                     }
                 }
@@ -799,9 +808,16 @@ struct JourneyOptionsView: View {
             planner.select(option); collapse()
         } label: {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(timing?.conciseLabel ?? AppText.text("確認接駁中"))
                         .liveFont(.title2, weight: .bold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                    if let label = planner.optionLabels[option.id] {
+                        Text(live.text(label)).liveFont(.caption, weight: .bold)
+                            .foregroundStyle(planner.options.first?.id == option.id ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background((planner.options.first?.id == option.id ? Color(liveHex: live.appearance.accentColor) : Color.secondary).opacity(0.13), in: Capsule())
+                            .lineLimit(1).fixedSize()
+                    }
                     Spacer(minLength: 4)
                     if let timing {
                         VStack(alignment: .trailing, spacing: 2) {
@@ -814,9 +830,6 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 8) {
                     JourneyRouteChain(option: option)
                     Spacer(minLength: 0)
-                    if let label = planner.optionLabels[option.id] {
-                        Text(live.text(label)).liveFont(.caption, weight: .medium).foregroundStyle(.secondary)
-                    }
                 }
                 if live.language == .english, let first = option.rides.first, let last = option.rides.last {
                     Text(first.boarding.name + " → " + last.alighting.name).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)

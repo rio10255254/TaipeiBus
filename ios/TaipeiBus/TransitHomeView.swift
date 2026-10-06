@@ -47,11 +47,20 @@ struct TransitHomeView: View {
             .sorted { $0.coordinate.distance(to: position) < $1.coordinate.distance(to: position) }.prefix(2).map { $0 }
     }
 
+    private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
+        let panel: CGFloat
+        if showJourney && planner.selected != nil { panel = journeyDetent == .height(420) ? 420 : 560 }
+        else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
+        else if showSearch { panel = 390 }
+        else { panel = bottomControlsHeight }
+        return panel + geometry.safeAreaInsets.bottom + 24
+    }
+
     private var mapContent: some View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, stationWalk: stationWalk, location: location.displayCoordinate,
-                             bottomInset: (showJourney && planner.selected != nil ? (journeyDetent == .height(420) ? 420 : 560) : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? (model.sheetDetent == .height(520) ? 520 : 330) : showSearch ? 390 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
+                             bottomInset: mapBottomInset(geometry),
                              topInset: geometry.safeAreaInsets.top + 64 + bannerOffset,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -62,38 +71,8 @@ struct TransitHomeView: View {
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail && !stationWalk.isActive {
                     MapContextLabels(model: model, overlay: selectionOverlay, bottomClearance: bottomControlsHeight, topClearance: bannerOffset) { showDetails = true }
                 }
-                VStack(spacing: 10) {
-                if showsBanner {
-                    Group {
-                        if stationWalk.isActive { StationWalkBanner(navigation: stationWalk) }
-                        else { JourneyInstructionBanner(model: model, planner: planner) }
-                    }
-                        .background { GeometryReader { banner in Color.clear.preference(key: InstructionBannerHeightKey.self, value: banner.size.height) } }
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                }
-                HStack(alignment: .top, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        SourceStatusView(snapshot: model.snapshot, loading: model.loading) {
-                            if model.loadError != nil { model.retry() }
-                            else { Task { await model.refresh() } }
-                        }
-                        if model.cityFleetMode, planner.selected == nil, !stationWalk.isActive {
-                            Label(AppText.text("全城 %@", model.cityVehicles.count), systemImage: "globe.asia.australia.fill")
-                                .liveFont(.subheadline, weight: .semibold).monospacedDigit()
-                                .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
-                                .phoneGlass(in: Capsule())
-                                .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
-                        }
-                    }
-                    Spacer(minLength: 0)
-                    MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive) {
-                        showInformation = true
-                    }
-                }
-                }
-                .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
-                .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: model.cityFleetMode)
-                .animation(reduceMotion ? nil : .spring(response: 0.44, dampingFraction: 0.88), value: showsBanner)
+                topChrome
+
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
                     Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
@@ -126,93 +105,9 @@ struct TransitHomeView: View {
                 }
 #endif
 
-                if !stationWalk.isActive, !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
-                    HStack(spacing: 10) {
-                        RouteBadge(name: model.selectedRouteName ?? route.localizedName, tintName: route.name, compact: true)
-                        Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.subheadline, weight: .medium).lineLimit(1)
-                        Spacer(minLength: 0)
-                        if model.routeDirections.count > 1 {
-                            Button { model.switchDirection() } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44) }
-                                .accessibilityLabel(AppText.text("切換路線方向"))
-                        }
-                        Button { showDetails = true } label: {
-                            Label(String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
-                                .liveFont(.subheadline, weight: .medium).monospacedDigit().frame(minWidth: 44, minHeight: 44)
-                        }.accessibilityLabel(AppText.text("查看此路線公車")).accessibilityIdentifier("route-map-vehicles")
-                    }.padding(.leading, 10).padding(.trailing, 8).phoneGlass(in: Capsule())
-                        .padding(.leading, 16 * CGFloat(live.appearance.spacingScale)).padding(.trailing, 76)
-                        .padding(.top, 60 * CGFloat(live.appearance.spacingScale))
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                }
-                if model.selectedVehicleID != nil, model.selectedVehicle == nil {
-                    Button { showDetails = true } label: {
-                        Label(live.text("此車目前沒有定位 · 查看路線車輛"), systemImage: "location.slash")
-                            .liveFont(.subheadline).padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
-                    }
-                    .phoneGlass(in: Capsule()).padding(.leading, 16).padding(.trailing, 76).padding(.top, 60 * CGFloat(live.appearance.spacingScale) + bannerOffset)
-                }
+                selectionCapsules
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
-                VStack(spacing: 0) {
-                    Spacer()
-                PhoneGlassGroup {
-                VStack(spacing: 10) {
-                    if let message = location.message, !hasSelection {
-                        Text(live.text(message)).liveFont(.caption).padding(.horizontal, 14).padding(.vertical, 9)
-                            .phoneGlass(in: Capsule())
-                    }
-                    Group {
-                    if stationWalk.isActive {
-                        StationWalkingDock(model: model, navigation: stationWalk)
-                    } else if planner.started || planner.selected?.walkingOnly == true {
-                        JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
-                    } else if planner.selected != nil {
-                        JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
-                    }
-                    }
-                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
-                    .smoothChanges(planner.currentStep)
-                    .smoothChanges(planner.started)
-                    .smoothChanges(planner.selectedID)
-                    .smoothChanges(model.language)
-                    if !nearbyStations.isEmpty, let position = location.usableCoordinate {
-                        HStack(spacing: 10) {
-                            ForEach(nearbyStations) { station in
-                                Button { model.selectStation(station) } label: {
-                                    HStack(spacing: 10) {
-                                        Image(systemName: "bus.fill").liveFont(.caption, weight: .semibold)
-                                            .foregroundStyle(RouteTint.color(for: ""))
-                                            .frame(width: 28, height: 28)
-                                            .background(Circle().strokeBorder(RouteTint.color(for: ""), lineWidth: 1.6))
-                                        VStack(alignment: .leading, spacing: 2) {
-                                            BilingualName(station).liveFont(.subheadline, weight: .semibold).lineLimit(1)
-                                            Text(AppText.text("%@ · 直線 %@", station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
-                                                .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        }
-                                        Spacer(minLength: 0)
-                                    }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale))
-                                        .frame(maxWidth: .infinity, minHeight: 52)
-                                }
-                                .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-                                .accessibilityIdentifier("nearby-station-" + station.id)
-                                .accessibilityLabel(AppText.text("附近站牌 %@ %@，直線距離 %@", station.localizedName, station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
-                            }
-                        }.transition(.opacity.combined(with: .move(edge: .bottom)))
-                    }
-                    if planner.selected == nil && !stationWalk.isActive {
-                        HomeSearchRow(model: model, hasSelection: hasSelection,
-                                      search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
-                                      browse: openBrowse)
-                    }
-                }
-                }
-                .background {
-                    GeometryReader { controls in Color.clear.preference(key: MapBottomControlsHeightKey.self, value: controls.size.height) }
-                }
-                }
-                .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
-                .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
-                .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: planner.selectedID)
-                .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: stationWalk.isActive)
+                    bottomChrome
                 }
                 if let error = model.mapError ?? model.loadError {
                     Text(live.text(error)).liveFont(.caption).padding(12)
@@ -222,6 +117,134 @@ struct TransitHomeView: View {
             }
         }
     }
+
+    @ViewBuilder private var topChrome: some View {
+        VStack(spacing: 10) {
+        if showsBanner {
+            Group {
+                if stationWalk.isActive { StationWalkBanner(navigation: stationWalk) }
+                else { JourneyInstructionBanner(model: model, planner: planner) }
+            }
+                .background { GeometryReader { banner in Color.clear.preference(key: InstructionBannerHeightKey.self, value: banner.size.height) } }
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 8) {
+                SourceStatusView(snapshot: model.snapshot, loading: model.loading) {
+                    if model.loadError != nil { model.retry() }
+                    else { Task { await model.refresh() } }
+                }
+                if model.cityFleetMode, planner.selected == nil, !stationWalk.isActive {
+                    Label(AppText.text("全城 %@", model.cityVehicles.count), systemImage: "globe.asia.australia.fill")
+                        .liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                        .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
+                        .phoneGlass(in: Capsule())
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
+                }
+            }
+            Spacer(minLength: 0)
+            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive) {
+                showInformation = true
+            }
+        }
+        }
+        .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
+        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: model.cityFleetMode)
+        .animation(reduceMotion ? nil : .spring(response: 0.44, dampingFraction: 0.88), value: showsBanner)
+    }
+
+    @ViewBuilder private var selectionCapsules: some View {
+        if !stationWalk.isActive, !showDetails, !showSearch, !planner.started, planner.selected == nil, model.selectedVehicleID == nil, model.selectedStationID == nil, let route = model.selectedRoute {
+            HStack(spacing: 10) {
+                RouteBadge(name: model.selectedRouteName ?? route.localizedName, tintName: route.name, compact: true)
+                Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.subheadline, weight: .medium).lineLimit(1)
+                Spacer(minLength: 0)
+                if model.routeDirections.count > 1 {
+                    Button { model.switchDirection() } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44) }
+                        .accessibilityLabel(AppText.text("切換路線方向"))
+                }
+                Button { showDetails = true } label: {
+                    Label(String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
+                        .liveFont(.subheadline, weight: .medium).monospacedDigit().frame(minWidth: 44, minHeight: 44)
+                }.accessibilityLabel(AppText.text("查看此路線公車")).accessibilityIdentifier("route-map-vehicles")
+            }.padding(.leading, 10).padding(.trailing, 8).phoneGlass(in: Capsule())
+                .padding(.leading, 16 * CGFloat(live.appearance.spacingScale)).padding(.trailing, 76)
+                .padding(.top, 60 * CGFloat(live.appearance.spacingScale))
+                .transition(.opacity.combined(with: .move(edge: .top)))
+        }
+        if model.selectedVehicleID != nil, model.selectedVehicle == nil {
+            Button { showDetails = true } label: {
+                Label(live.text("此車目前沒有定位 · 查看路線車輛"), systemImage: "location.slash")
+                    .liveFont(.subheadline).padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
+            }
+            .phoneGlass(in: Capsule()).padding(.leading, 16).padding(.trailing, 76).padding(.top, 60 * CGFloat(live.appearance.spacingScale) + bannerOffset)
+        }
+    }
+
+    private var bottomChrome: some View {
+    VStack(spacing: 0) {
+        Spacer()
+    PhoneGlassGroup {
+    VStack(spacing: 10) {
+        if let message = location.message, !hasSelection {
+            Text(live.text(message)).liveFont(.caption).padding(.horizontal, 14).padding(.vertical, 9)
+                .phoneGlass(in: Capsule())
+        }
+        Group {
+        if stationWalk.isActive {
+            StationWalkingDock(model: model, navigation: stationWalk)
+        } else if planner.started || planner.selected?.walkingOnly == true {
+            JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
+        } else if planner.selected != nil {
+            JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
+        }
+        }
+        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
+        .smoothChanges(planner.currentStep)
+        .smoothChanges(planner.started)
+        .smoothChanges(planner.selectedID)
+        .smoothChanges(model.language)
+        if !nearbyStations.isEmpty, let position = location.usableCoordinate {
+            HStack(spacing: 10) {
+                ForEach(nearbyStations) { station in
+                    Button { model.selectStation(station) } label: {
+                        HStack(spacing: 10) {
+                            Image(systemName: "bus.fill").liveFont(.caption, weight: .semibold)
+                                .foregroundStyle(RouteTint.color(for: ""))
+                                .frame(width: 28, height: 28)
+                                .background(Circle().strokeBorder(RouteTint.color(for: ""), lineWidth: 1.6))
+                            VStack(alignment: .leading, spacing: 2) {
+                                BilingualName(station).liveFont(.subheadline, weight: .semibold).lineLimit(1)
+                                Text(AppText.text("%@ · 直線 %@", station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
+                                    .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            Spacer(minLength: 0)
+                        }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale))
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                    }
+                    .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .accessibilityIdentifier("nearby-station-" + station.id)
+                    .accessibilityLabel(AppText.text("附近站牌 %@ %@，直線距離 %@", station.localizedName, station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
+                }
+            }.transition(.opacity.combined(with: .move(edge: .bottom)))
+        }
+        if planner.selected == nil && !stationWalk.isActive {
+            HomeSearchRow(model: model, hasSelection: hasSelection,
+                          search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
+                          browse: openBrowse)
+        }
+    }
+    }
+    .background {
+        GeometryReader { controls in Color.clear.preference(key: MapBottomControlsHeightKey.self, value: controls.size.height) }
+    }
+    }
+    .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
+    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
+    .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: planner.selectedID)
+    .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: stationWalk.isActive)
+    }
+
 
     var body: some View {
         mapContent
@@ -899,16 +922,20 @@ private struct StationDetails: View {
             let rows = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
             VStack(alignment: .leading, spacing: 0) {
                 Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
-                VStack(alignment: .leading, spacing: 12) {
-                ForEach(model.oppositeStations(to: station)) { opposite in
-                    Button { model.selectStation(opposite) } label: {
-                        Label(AppText.text("改看%@站牌", opposite.localizedBearing), systemImage: "arrow.left.arrow.right")
-                            .liveFont(.subheadline).frame(minHeight: 44)
-                    }.secondaryAction().accessibilityIdentifier("station-opposite-" + opposite.id)
-                }
-                Button { model.startStationWalk(station) } label: {
-                    Label(live.text("步行到這個站牌"), systemImage: "figure.walk").liveFont(.subheadline, weight: .medium).frame(minHeight: 44)
-                }.secondaryAction().accessibilityIdentifier("station-start-walk")
+                HStack(spacing: 8) {
+                    Button { model.startStationWalk(station) } label: {
+                        Label(live.text("步行"), systemImage: "figure.walk")
+                    }
+                    .buttonStyle(MapTileStyle(prominent: true))
+                    .accessibilityLabel(live.text("步行到這個站牌")).accessibilityIdentifier("station-start-walk")
+                    ForEach(model.oppositeStations(to: station)) { opposite in
+                        Button { model.selectStation(opposite) } label: {
+                            Label(opposite.localizedBearing, systemImage: "arrow.left.arrow.right")
+                        }
+                        .buttonStyle(MapTileStyle())
+                        .accessibilityLabel(AppText.text("改看%@站牌", opposite.localizedBearing))
+                        .accessibilityIdentifier("station-opposite-" + opposite.id)
+                    }
                 }.padding(.bottom, 18 * CGFloat(live.appearance.spacingScale))
                 HStack {
                     Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
@@ -924,7 +951,7 @@ private struct StationDetails: View {
                             if let route = row.route { model.selectRoute(route, direction: row.stop.direction, boardingStopID: row.stop.id) }
                         } label: {
                             HStack(spacing: 12) {
-                                RouteBadge(name: row.route?.name ?? row.stop.routeID)
+                                RouteBadge(name: row.route?.localizedName ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)

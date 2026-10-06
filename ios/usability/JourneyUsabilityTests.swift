@@ -635,7 +635,7 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         let opposite = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "station-opposite-")).firstMatch
         let walk = button("station-start-walk")
         XCTAssertTrue(opposite.exists); XCTAssertTrue(opposite.isHittable); XCTAssertTrue(walk.isHittable)
-        XCTAssertGreaterThanOrEqual(walk.frame.minY - opposite.frame.maxY, 10)
+        XCTAssertGreaterThanOrEqual(opposite.frame.minX - walk.frame.maxX, 8)
         capture("separate-station-direction-and-walking-controls")
         walk.press(forDuration: 0.15)
         wait("The real pedestrian route renders inside this app") {
