@@ -780,6 +780,11 @@ struct JourneyOptionsView: View {
                             }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
                         }
                         Spacer(minLength: 0)
+                        if planner.comparisonChanged, !planner.checkingWalks {
+                            Button { planner.refreshRecommendations() } label: {
+                                Image(systemName: "arrow.clockwise").frame(width: 36, height: 36)
+                            }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
+                        }
                         Button(action: expand) {
                             Label(AppText.text("全部路線"), systemImage: "list.bullet").liveFont(.subheadline).frame(minHeight: 36)
                         }.accessibilityIdentifier("journey-all-options")
@@ -794,7 +799,7 @@ struct JourneyOptionsView: View {
                 }
             }
             if planner.checkingWalks { ProgressView().padding(.vertical, 8).accessibilityLabel(AppText.text("確認接駁與其他方案")) }
-            if planner.comparisonChanged, !planner.checkingWalks {
+            if planner.comparisonChanged, !planner.checkingWalks, !compact {
                 Button { planner.refreshRecommendations() } label: {
                     Label(AppText.text("更新推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-refresh-options")
