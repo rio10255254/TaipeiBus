@@ -1,8 +1,7 @@
 const fs=require('fs'),path=require('path');
 const {chromium}=require('playwright');
 const shots=[
- ['store-07-live-bus-in-3d.png','01-live-bus.png','公車現在到哪了','點車牌，跟著這一輛看。'],
- ['store-08-bus-first-navigation.png','02-waiting.png','上車前，先看下一步','上車站、官方時間，留在地圖上。'],
+ ['store-07-live-bus-with-details.png','01-live-bus.png','公車現在到哪了','點車牌，跟著這一輛看。'],
  ['store-12-in-app-walking.png','03-walking.png','走到站牌，不用換 App','路線、指引和剩餘時間，都在這裡。'],
  ['store-09-onboard-live-guidance.png','04-onboard.png','哪站下車，沿途接著看','確認車牌，查看下一站與下車時間。'],
  ['store-02-trip-choices.png','05-plan.png','要去哪裡，先看怎麼搭','比較走路、候車和搭車的時間。'],
