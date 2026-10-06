@@ -597,14 +597,12 @@ private struct MapControlStack: View {
                     Button { model.toggleCityFleet() } label: {
                         Image(systemName: model.cityFleetMode ? "globe.asia.australia.fill" : "globe.asia.australia")
                             .liveFont(.title3).frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
-                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     }
                     .foregroundStyle(model.cityFleetMode ? accent : Color.primary)
                     .phoneGlass(in: Circle())
                     .accessibilityIdentifier("city-fleet-toggle")
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
-                    .transition(.opacity)
                 }
                 Button {
                     model.cycleUserTracking()
@@ -614,7 +612,6 @@ private struct MapControlStack: View {
                         else {
                             Image(systemName: model.userMapMode == .heading ? "location.north.line.fill" : model.userMapMode == .north ? "location.fill" : "location")
                                 .liveFont(.title3)
-                                .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                         }
                     }.frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                 }
@@ -625,8 +622,6 @@ private struct MapControlStack: View {
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
             }
-        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: showsCityFleet)
     }
 }
 
