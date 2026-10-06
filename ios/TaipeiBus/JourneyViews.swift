@@ -1262,7 +1262,7 @@ private struct RidingBannerContent: View {
                         if live.language == .english, let next { Text(next.name).liveFont(.caption) }
                     }
                     Spacer(minLength: 4)
-                    if let next, let bus {
+                    if let next {
                         Text(model.onboardEstimateLabel(bus, stopID: next.id, at: date) + " · " + AppText.remainingStops(1))
                             .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
                     }
