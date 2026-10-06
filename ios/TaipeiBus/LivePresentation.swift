@@ -156,6 +156,10 @@ enum RouteTint {
         return general
     }
     static func color(for name: String) -> Color { Color(liveHex: hex(for: name)) }
+    /// The route colour for text and lines on a sheet, lifted in dark mode to stay readable.
+    static func accent(for name: String) -> Color {
+        Color(uiColor: UIColor { UIColor(liveHex: mapHex(for: name, dark: $0.userInterfaceStyle == .dark)) })
+    }
     /// Map lines draw on a dark basemap in dark mode, so lift them toward white.
     static func mapHex(for name: String, dark: Bool) -> String {
         guard dark else { return hex(for: name) }

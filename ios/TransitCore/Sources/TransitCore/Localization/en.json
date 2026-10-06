@@ -448,5 +448,7 @@
   "結束": "End",
   "接著 · ": "Then · ",
   "下一站下車 · ": "Get off next · ",
-  "依你的定位即時更新": "Live from your location"
+  "依你的定位即時更新": "Live from your location",
+  "出發": "Go",
+  "%@ 上車": "Board at %@"
 }

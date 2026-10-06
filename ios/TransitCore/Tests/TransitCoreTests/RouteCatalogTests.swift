@@ -157,6 +157,12 @@ final class RouteCatalogTests: XCTestCase {
             XCTAssertLessThan(abs(point.mercator.x - center.x) * scale, (378 - 48) / 2)
             XCTAssertLessThan(abs(point.mercator.y - center.y) * scale, (278 - 48) / 2)
         }
+        // The route nearly fills the limiting dimension instead of sitting small in the middle.
+        let height = abs(points[0].mercator.y - points[1].mercator.y) * scale
+        let width = abs(points[0].mercator.x - points[1].mercator.x) * scale
+        XCTAssertGreaterThan(max(width / 378, height / 278), 0.62)
+        let flat = try XCTUnwrap(RouteOverview(coordinates: points, viewportWidth: 378, viewportHeight: 278, pitch: 0))
+        XCTAssertGreaterThan(flat.zoom, overview.zoom, "A flat camera needs no tilt allowance")
         let full = try XCTUnwrap(RouteOverview(coordinates: points, viewportWidth: 378, viewportHeight: 700))
         XCTAssertGreaterThanOrEqual(full.zoom, overview.zoom)
         XCTAssertEqual(full.center, overview.center)

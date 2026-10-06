@@ -205,9 +205,19 @@ struct NativeBusMap: UIViewRepresentable {
             style.addSource(tripStops); tripStopsSource = tripStops
             installMarkerImages(style)
             let tripDots = MLNSymbolStyleLayer(identifier: "journey-stop-dots", source: tripStops)
+            tripDots.predicate = NSPredicate(format: "waypoint != 1")
             tripDots.iconImageName = NSExpression(forKeyPath: "icon")
             tripDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(tripDots)
+            // Boarding, transfer and alighting stops always show. Intermediate stops appear once
+            // the street is close enough and only where they do not crowd each other or an endpoint.
+            let waypointDots = MLNSymbolStyleLayer(identifier: "journey-waypoint-dots", source: tripStops)
+            waypointDots.predicate = NSPredicate(format: "waypoint == 1")
+            waypointDots.minimumZoomLevel = 12.5
+            waypointDots.iconImageName = NSExpression(forKeyPath: "icon")
+            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: false)
+            waypointDots.iconPadding = NSExpression(forConstantValue: 4)
+            style.insertLayer(waypointDots, below: tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
             tripNames.predicate = NSPredicate(format: "waypoint == 0")
             tripNames.text = NSExpression(forKeyPath: "name")
@@ -220,7 +230,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(tripNames)
             let waypointNames = MLNSymbolStyleLayer(identifier: "journey-waypoint-names", source: tripStops)
             waypointNames.predicate = NSPredicate(format: "waypoint == 1")
-            waypointNames.minimumZoomLevel = 10.5
+            waypointNames.minimumZoomLevel = 14.5
             waypointNames.text = NSExpression(forKeyPath: "name")
             waypointNames.textFontSize = NSExpression(forConstantValue: 11)
             waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
@@ -326,12 +336,24 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
-        private func journeyStopIcon() -> UIImage {
+        private func journeyStopIcon(color: UIColor? = nil) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 14, height: 14)).image { _ in
                 let circle = UIBezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 9, height: 9))
                 UIColor(liveHex: darkMode ? "#2C2C2E" : "#FFFFFF").setFill(); circle.fill()
-                markerBlue.setStroke(); circle.lineWidth = 2.2; circle.stroke()
+                (color ?? markerBlue).setStroke(); circle.lineWidth = 2.2; circle.stroke()
             }
+        }
+        /// Stop markers take the colour of the route that serves them, like its line.
+        private var tintedTripIcons: Set<String> = []
+        private func tripIcon(_ kind: String, route: String) -> String {
+            let hex = RouteTint.mapHex(for: route, dark: darkMode)
+            let name = "journey-\(kind)-\(hex)"
+            guard !tintedTripIcons.contains(name), let style = map?.style else { return name }
+            let color = UIColor(liveHex: hex)
+            let image = kind == "waypoint" ? journeyStopIcon(color: color)
+                : journeyEndpointIcon(symbol: kind == "alighting" ? "arrow.down" : "bus.fill", color: color)
+            style.setImage(image, forName: name); tintedTripIcons.insert(name)
+            return name
         }
 
         private func journeyEndpointIcon(symbol: String, color: UIColor) -> UIImage {
@@ -356,6 +378,7 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func installMarkerImages(_ style: MLNStyle) {
+            tintedTripIcons = []
             style.setImage(stationIcon(size: 22), forName: "station-marker")
             style.setImage(pinIcon(symbol: "bus.fill", color: markerBlue), forName: "selected-station-marker")
             style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "destination-marker")
@@ -522,13 +545,16 @@ struct NativeBusMap: UIViewRepresentable {
                 !model.planner.started || model.planner.activeRide?.id == ride.id
             }
             for (index, ride) in visibleRides {
+                let route = ride.route.name
                 for stop in ride.stops.dropFirst().dropLast() where features[stop.stationID] == nil {
                     add(stop.coordinate, id: stop.stationID, title: stop.bilingualName, waypoint: true)
+                    features[stop.stationID]?.attributes["icon"] = tripIcon("waypoint", route: route)
                 }
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: AppText.text(index == 0 ? "上車" : "轉乘") + " · " + ride.boarding.bilingualName)
+                features[ride.boarding.stationID]?.attributes["icon"] = tripIcon("boarding", route: route)
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
                     title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
-                features[ride.alighting.stationID]?.attributes["icon"] = "journey-alighting"
+                features[ride.alighting.stationID]?.attributes["icon"] = tripIcon("alighting", route: route)
             }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
@@ -791,10 +817,10 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
+            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return nil }
-            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: pitch) else { return nil }
             // Convert the existing verified framing to one camera, so center, zoom,
             // tilt and padding travel together instead of two instantaneous moves.
             let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)
@@ -829,7 +855,7 @@ struct NativeBusMap: UIViewRepresentable {
             else { coordinates = model.routePaths.flatMap { $0 } }
             let expected = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom))
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: Double(map.camera.pitch))
             let state: [String: Any] = ["token": arguments[index + 1], "route": model.selectedRouteName ?? model.planner.destination?.name ?? "",
                 "latitude": center.latitude, "longitude": center.longitude, "zoom": map.zoomLevel, "fully_rendered": true,
                 "expected_latitude": expected?.center.latitude ?? center.latitude,
@@ -1076,7 +1102,7 @@ struct NativeBusMap: UIViewRepresentable {
             model.recordMapTap("map-tap:\(Int(point.x)),\(Int(point.y))")
 #endif
             let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
-            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-waypoint-dots", "journey-stop-names"]))
             let station = features.compactMap { feature -> Station? in
                 guard let id = feature.attribute(forKey: "stationID") as? String else { return nil }
                 return model.metadata.stations[id]
