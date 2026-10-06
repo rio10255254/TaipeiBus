@@ -66,12 +66,12 @@ final class RidingTrafficTests: XCTestCase {
     }
     func testPhotographedTimingDifferenceIsNotAReasonToReassignAnAppleETA() {
         let walking = 10.0 * 60
-        let ours = TripRanking.assess(riding: [37 * 60], walking: [walking / 2, walking / 2], arrivals: [11 * 60], at: now)
-        XCTAssertEqual(ours.elapsedSeconds, 53 * 60)
-        XCTAssertEqual(ours.waitingSeconds, 6 * 60)
+        let ours = TripRanking.assess(riding: [37.0 * 60], walking: [walking / 2, walking / 2], arrivals: [11 * 60], at: now)
+        XCTAssertEqual(ours.elapsedSeconds, 53.0 * 60)
+        XCTAssertEqual(ours.waitingSeconds, 6.0 * 60)
         XCTAssertEqual(ours.walkingSeconds, walking)
         let appleStyleRide = 29.0 * 60
-        XCTAssertEqual(37 * 60 - appleStyleRide, 8 * 60)
+        XCTAssertEqual(37.0 * 60 - appleStyleRide, 8.0 * 60)
         // Apple route identity, actual source time and walking position are not
         // supplied by the whole-trip ETA response, so it cannot replace this ride.
     }

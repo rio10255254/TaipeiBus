@@ -1140,7 +1140,7 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
     }
     func waitForChoices() {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            self.app.staticTexts["journey-timing-state"].exists && self.ready()["checking"] as? Bool == false &&
+            self.app.staticTexts["journey-timing-state"].exists && (self.ready()["checking"] as? Bool) == false &&
                 !(self.ready()["options"] as? [[String: Any]] ?? []).isEmpty
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 160), .completed)
