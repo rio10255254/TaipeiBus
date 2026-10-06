@@ -1170,6 +1170,10 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         capture("clear-real-time-sources")
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.2)).tap()
         button("journey-back").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-edit-origin").exists && button("journey-edit-destination").exists)
+        capture("clear-compact-map-route-preview")
+        button("journey-all-options").tap()
         XCTAssertEqual((0..<choices.count).map { choices.element(boundBy: $0).identifier }, ids)
         XCTAssertFalse(button("journey-start-navigation").exists)
         firstOption.tap(); button("journey-start-navigation").tap()
@@ -1195,6 +1199,9 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["內湖"].exists || app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "內湖")).firstMatch.exists)
         capture("clear-english-bilingual-steps")
         button("journey-back").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
+        capture("clear-english-compact-map-preview")
+        button("journey-all-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 10))
     }
 }

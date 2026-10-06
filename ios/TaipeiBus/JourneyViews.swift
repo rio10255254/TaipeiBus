@@ -34,7 +34,8 @@ struct JourneyPlanningView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    if searchingPlaces || (!planner.started && !showingItinerary) { originButton }
+                    if searchingPlaces { originButton }
+                    else if !planner.started && !showingItinerary { routeEndpoints }
                     if searchingPlaces { placeSearch }
                     else {
                         if planner.started || showingItinerary {
@@ -42,7 +43,7 @@ struct JourneyPlanningView: View {
                         } else {
                             JourneyOptionsView(model: model, planner: planner, collapse: {
                                 showingItinerary = true; expand()
-                            })
+                            }, compact: compact, expand: expand)
                         }
                     }
                 }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 16 * CGFloat(live.appearance.spacingScale))
@@ -142,6 +143,30 @@ struct JourneyPlanningView: View {
             stationResults = matches; stationResultQuery = text
             search.setStationHints(matches)
         }
+    }
+    private var routeEndpoints: some View {
+        VStack(spacing: 0) {
+            Button { edit(origin: true) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: planner.usingLocation ? "location.circle.fill" : "circle.fill")
+                        .foregroundStyle(.blue).liveFont(.title2).frame(width: 28)
+                    Text(planner.origin?.localizedName ?? AppText.text("選擇出發地"))
+                        .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
+                    Image(systemName: "chevron.down").liveFont(.caption).foregroundStyle(.secondary)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.accessibilityIdentifier("journey-edit-origin")
+            Divider().padding(.leading, 40)
+            Button { edit(origin: false) } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: "mappin.circle.fill").foregroundStyle(.green).liveFont(.title2).frame(width: 28)
+                    Text(planner.destination?.localizedName ?? AppText.text("目的地"))
+                        .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
+                    Image(systemName: "chevron.down").liveFont(.caption).foregroundStyle(.secondary)
+                }.frame(minHeight: 44).contentShape(Rectangle())
+            }.accessibilityIdentifier("journey-edit-destination")
+        }.liveFont(.subheadline, weight: .medium).foregroundStyle(.primary).buttonStyle(PhonePressStyle())
+            .padding(.horizontal, 12).padding(.vertical, 4)
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 18))
     }
     private var originButton: some View {
         HStack(spacing: 10) {
@@ -723,6 +748,8 @@ struct JourneyOptionsView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let collapse: () -> Void
+    var compact = false
+    var expand: () -> Void = {}
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if planner.planning || model.loading {
@@ -730,10 +757,32 @@ struct JourneyOptionsView: View {
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                VStack(spacing: 0) {
-                    ForEach(planner.options) { option in
-                        optionRow(option, at: timeline.date)
-                        Divider()
+                if compact, !planner.options.isEmpty {
+                    TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first!.id }, set: { id in
+                        if let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
+                    })) {
+                        ForEach(planner.options) { option in optionRow(option, at: timeline.date).tag(option.id) }
+                    }
+                    .tabViewStyle(.page(indexDisplayMode: .never)).frame(height: live.language == .english ? 146 : 122)
+                    .accessibilityIdentifier("journey-preview-pages")
+                    HStack(spacing: 8) {
+                        ForEach(Array(planner.options.enumerated()), id: \.element.id) { index, option in
+                            Button { planner.select(option) } label: {
+                                Circle().fill(option.id == planner.selectedID ? Color.primary : Color.secondary.opacity(0.3))
+                                    .frame(width: 6, height: 6).frame(width: 26, height: 36)
+                            }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
+                        }
+                        Spacer(minLength: 0)
+                        Button(action: expand) {
+                            Label(AppText.text("全部路線"), systemImage: "list.bullet").liveFont(.subheadline).frame(minHeight: 36)
+                        }.accessibilityIdentifier("journey-all-options")
+                    }
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(planner.options) { option in
+                            optionRow(option, at: timeline.date)
+                            Divider()
+                        }
                     }
                 }
             }
@@ -743,7 +792,7 @@ struct JourneyOptionsView: View {
                     Label(AppText.text("更新推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-refresh-options")
             }
-            if planner.destination != nil, !planner.planning {
+            if planner.destination != nil, !planner.planning, !compact {
                 Button { planner.openAppleTransit() } label: {
                     HStack {
                         Label(AppText.text("Apple 地圖"), systemImage: "map")

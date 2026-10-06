@@ -45,7 +45,7 @@ struct TransitHomeView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 NativeBusMap(model: model, planner: planner, stationWalk: stationWalk, location: location.displayCoordinate,
-                             bottomInset: (showJourney && planner.selected != nil ? 460 : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? (model.sheetDetent == .height(520) ? 520 : 330) : showSearch ? 390 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
+                             bottomInset: (showJourney && planner.selected != nil ? (journeyDetent == .height(420) ? 420 : 560) : showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) ? (model.sheetDetent == .height(520) ? 520 : 330) : showSearch ? 390 : bottomControlsHeight) + geometry.safeAreaInsets.bottom + 24,
                              topInset: geometry.safeAreaInsets.top + 64,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
@@ -276,12 +276,12 @@ struct TransitHomeView: View {
         }) {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 showingItinerary: $showJourneyItinerary,
-                                compact: journeyDetent != .large,
+                                compact: journeyDetent == .height(420),
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(560) } })
-                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(560), .large], selection: $journeyDetent)
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
-                .presentationDragIndicator(.visible).presentationCornerRadius(30)
+                .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .onChange(of: location.revision, initial: true) { _, _ in

@@ -438,5 +438,7 @@
   "搭乘 %@ 公車": "Take bus %@",
   "可搭後續班次 · ": "A later bus can be caught · ",
   "搭乘 %@ 站 · 約 %@ 分鐘": "%@ stops · ~%@ min",
-  "依官方分時段車程": "Based on official time-of-day ride data"
+  "依官方分時段車程": "Based on official time-of-day ride data",
+  "全部路線": "All routes",
+  "路線方案 %@": "Route option %@"
 }
