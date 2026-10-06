@@ -164,13 +164,18 @@ final class JourneyPlannerModel: ObservableObject {
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
     func duration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
-        let riding = option.rides.map { ride in
-            lastMetadata.map { forecast.ridingSeconds(ride, metadata: $0, at: date) } ?? option.trip?.rideSeconds[option.rides.firstIndex(where: { $0.id == ride.id }) ?? 0] ?? 0
+        let estimates = option.rides.enumerated().map { index, ride in
+            lastMetadata.map { forecast.ridingEstimate(ride, metadata: $0, at: date) } ??
+                RidingTimeEstimate(seconds: option.trip?.rideSeconds[index] ?? 0, evidence: .typical, observedVehicles: 0)
         }
+        let riding = estimates.map(\.seconds)
         if let trip = option.trip {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding)
-            return JourneyDuration(assessment: assessment, riding: riding)
+            var duration = JourneyDuration(assessment: assessment, riding: riding)
+            duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
+                estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic : .stationHistory
+            return duration
         }
         return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
     }

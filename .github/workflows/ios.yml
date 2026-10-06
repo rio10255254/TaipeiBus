@@ -30,7 +30,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -52,7 +52,7 @@ env:
 jobs:
   simulator:
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness') && 45 || 30 }}
+    timeout-minutes: ${{ (inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -466,6 +466,12 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'clear-journey' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
+              '-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
@@ -490,7 +496,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify system dark appearance with native journeys
-        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -523,6 +529,9 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'stop-focus' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'clear-journey' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests'
               '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishNavigationHasAlightingTimeAndStopCount'
@@ -536,7 +545,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
         run: |
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!

@@ -506,6 +506,10 @@ final class TransitAppModel: ObservableObject {
             officialSeconds: official, allowTypicalWhenStopped: onboard)
     }
 
+    func plannedRideTime(_ ride: TransitRide, at date: Date) -> RidingTimeEstimate {
+        arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
@@ -520,7 +524,8 @@ final class TransitAppModel: ObservableObject {
         case nil: return planner.duration(option, at: date)
         }
         let remainingRides = Array(option.rides.dropFirst(index))
-        var riding = remainingRides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) }
+        let rideEstimates = remainingRides.map { arrivalForecast.ridingEstimate($0, metadata: metadata, at: date) }
+        var riding = rideEstimates.map(\.seconds)
         var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
            let progress = planner.walkingProgress, progress.locationConfirmed,
@@ -554,6 +559,8 @@ final class TransitAppModel: ObservableObject {
             services: remainingRides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
         duration.positionUncertain = positionUncertain
+        duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
+            rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic : .stationHistory
         return duration
     }
 

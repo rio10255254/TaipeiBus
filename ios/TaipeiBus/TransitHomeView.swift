@@ -278,9 +278,9 @@ struct TransitHomeView: View {
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent != .large,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(460) } })
-                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(460), .large], selection: $journeyDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(460)))
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(560) } })
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(560), .large], selection: $journeyDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
@@ -321,7 +321,7 @@ struct TransitHomeView: View {
             model.markJourneyPreviewReady()
             if ProcessInfo.processInfo.arguments.contains("--preview-destination"), planner.selected != nil {
                 showJourney = !planner.started
-                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") ? .large : .height(460)
+                journeyDetent = ProcessInfo.processInfo.arguments.contains("--preview-journey-expanded") || model.language == .english ? .large : .height(560)
             }
 #endif
         }

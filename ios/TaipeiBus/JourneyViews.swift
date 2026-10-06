@@ -34,13 +34,15 @@ struct JourneyPlanningView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    originButton
+                    if searchingPlaces || (!planner.started && !showingItinerary) { originButton }
                     if searchingPlaces { placeSearch }
                     else {
                         if planner.started || showingItinerary {
-                            JourneyItineraryView(model: model, planner: planner)
+                            JourneyItineraryView(model: model, planner: planner, showMap: { dismiss() })
                         } else {
-                            JourneyOptionsView(model: model, planner: planner, collapse: { dismiss() })
+                            JourneyOptionsView(model: model, planner: planner, collapse: {
+                                showingItinerary = true; expand()
+                            })
                         }
                     }
                 }.padding(.horizontal, 20 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 16 * CGFloat(live.appearance.spacingScale))
@@ -49,17 +51,32 @@ struct JourneyPlanningView: View {
                     .smoothChanges(model.language)
             }
             .scrollDismissesKeyboard(.interactively)
-            .navigationTitle(editingOrigin ? AppText.text("出發地") : searchingPlaces ? AppText.text("目的地") : planner.started || showingItinerary ? AppText.text("行程") : planner.destination?.localizedName ?? AppText.text("路線"))
+            .safeAreaInset(edge: .bottom) {
+                if !searchingPlaces, showingItinerary, !planner.started, planner.selected != nil {
+                    Button {
+                        planner.begin()
+                        if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
+                        dismiss()
+                    } label: {
+                        Label(AppText.text("開始導航"), systemImage: "location.fill")
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                    }.primaryAction().accessibilityIdentifier("journey-start-navigation")
+                        .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
+                }
+            }
+            .navigationTitle(editingOrigin ? AppText.text("出發地") : searchingPlaces ? AppText.text("目的地") : planner.started || showingItinerary ? AppText.text("行程") : AppText.text("路線"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(live.text(searchingPlaces ? "取消" : "返回地圖")) {
-                        if searchingPlaces, planner.destination != nil {
+                    Button(live.text(searchingPlaces ? "取消" : showingItinerary && !planner.started ? "返回路線" : "返回地圖")) {
+                        if showingItinerary && !planner.started && !searchingPlaces {
+                            showingItinerary = false; collapse()
+                        } else if searchingPlaces, planner.destination != nil {
                             focused = false; resolveTask?.cancel(); search.cancel()
                             resolving = false; editingOrigin = false; editingDestination = false
                             if !planner.started { collapse() }
                         } else { dismiss() }
-                    }
+                    }.accessibilityIdentifier("journey-back")
                 }
                 if !searchingPlaces {
                     ToolbarItem(placement: .confirmationAction) {
@@ -678,6 +695,27 @@ private struct JourneyWaitingActions: View {
     }
 }
 
+private struct JourneyRouteChain: View {
+    let option: JourneyOption
+    var body: some View {
+        HStack(spacing: 7) {
+            ForEach(option.walks.indices, id: \.self) { index in
+                if let duration = option.walks[index].duration, duration >= 30 {
+                    if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
+                    Label("\(max(1, Int(ceil(duration / 60))))", systemImage: "figure.walk")
+                        .liveFont(.subheadline).monospacedDigit()
+                }
+                if option.rides.indices.contains(index) {
+                    if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
+                        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    RouteBadge(name: option.rides[index].route.localizedName)
+                }
+            }
+        }.lineLimit(1).minimumScaleFactor(0.8)
+    }
+}
+
 struct JourneyOptionsView: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
@@ -689,60 +727,15 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
-            ForEach(planner.options) { option in
-                Button { planner.select(option); collapse() } label: {
-                    VStack(alignment: .leading, spacing: 4) {
-                        if live.language == .english, let label = planner.optionLabels[option.id], !option.walkingOnly {
-                            Text(live.text(label)).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-                        }
-                        HStack(spacing: 6) {
-                            if live.language != .english, let label = planner.optionLabels[option.id], !option.walkingOnly {
-                                Text(live.text(label)).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
-                            }
-                            if option.walkingOnly { Label(live.text("步行即可"), systemImage: "figure.walk").liveFont(.headline) }
-                            else {
-                                ForEach(Array(option.rides.enumerated()), id: \.element.id) { index, ride in
-                                    if index > 0 { Image(systemName: "arrow.right").liveFont(.caption).foregroundStyle(.secondary) }
-                                    RouteBadge(name: ride.route.localizedName)
-                                }
-                            }
-                            Spacer(minLength: 4)
-                            TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                                Text(model.journeyDuration(option, at: timeline.date)?.comparisonLabel ?? AppText.text("確認接駁中"))
-                                    .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
-                            }
-                            Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
-                        }
-                        if let first = option.rides.first, let last = option.rides.last {
-                            Text(first.boarding.localizedName + " → " + last.alighting.localizedName)
-                                .liveFont(.subheadline).lineLimit(live.language == .english ? 2 : 1).minimumScaleFactor(0.8)
-                            if live.language == .english {
-                                Text(first.boarding.name + " → " + last.alighting.name).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
-                        HStack(spacing: 4) {
-                            Text((option.walkingOnly ? "" : option.rides.count > 1 ? AppText.text("轉乘 1 次 · ") : AppText.text("直達 · ")) + option.walkingTimeLabel)
-                        }.liveFont(.caption).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.8)
-                        TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                            if let timing = model.journeyDuration(option, at: timeline.date) {
-                                HStack(spacing: 6) {
-                                    Text(option.walkingOnly ? "" : AppText.text("行程 %@ 分 · ", max(1, Int(ceil(timing.travelSeconds / 60)))) + timing.waitingLabel)
-                                    Spacer(minLength: 2)
-                                    Text(timing.arrivalLabel).monospacedDigit()
-                                }.liveFont(.caption).foregroundStyle(timing.unknownWaits > 0 ? Color.orange : Color.secondary)
-                            }
-                        }
-                        if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange).lineLimit(2) }
-                        if let unavailable = planner.unavailableBoarding(option) {
-                            Text(unavailable.route + " · " + EstimateFeed.label(unavailable.status))
-                                .liveFont(.caption).foregroundStyle(.secondary)
-                        }
-                    }.padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(PhonePressStyle()).disabled(!option.verified || option.walkIssue != nil || planner.unavailableBoarding(option) != nil)
-                    .accessibilityIdentifier("journey-option-" + option.id)
-                Divider()
+            TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                VStack(spacing: 0) {
+                    ForEach(planner.options) { option in
+                        optionRow(option, at: timeline.date)
+                        Divider()
+                    }
+                }
             }
-            if planner.checkingWalks { HStack(spacing: 8) { ProgressView(); Text(AppText.text("確認接駁與其他方案")).liveFont(.caption).foregroundStyle(.secondary) }.padding(.vertical, 8) }
+            if planner.checkingWalks { ProgressView().padding(.vertical, 8).accessibilityLabel(AppText.text("確認接駁與其他方案")) }
             if planner.comparisonChanged, !planner.checkingWalks {
                 Button { planner.refreshRecommendations() } label: {
                     Label(AppText.text("更新推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
@@ -751,18 +744,58 @@ struct JourneyOptionsView: View {
             if planner.destination != nil, !planner.planning {
                 Button { planner.openAppleTransit() } label: {
                     HStack {
-                        Label(live.text("其他交通方式"), systemImage: "map")
+                        Label(AppText.text("Apple 地圖"), systemImage: "map")
                         Spacer()
-                        if let seconds = planner.freshAlternativeTransitSeconds,
-                           planner.options.first.flatMap({ model.journeyDuration($0, at: Date())?.totalSeconds }).map({ seconds < $0 - 300 }) ?? true {
-                            Text(AppText.text("Apple 公運約 %@ 分", max(1, Int(ceil(seconds / 60))))).monospacedDigit()
+                        if let seconds = planner.freshAlternativeTransitSeconds {
+                            Text(AppText.text("約 %@ 分鐘", max(1, Int(ceil(seconds / 60))))).monospacedDigit()
                         }
                         Image(systemName: "arrow.up.right")
                     }.liveFont(.subheadline).frame(minHeight: 44)
-                }
-                .accessibilityIdentifier("journey-other-transit")
+                }.accessibilityIdentifier("journey-other-transit")
             }
         }
+    }
+    private func optionRow(_ option: JourneyOption, at date: Date) -> some View {
+        let timing = model.journeyDuration(option, at: date)
+        return Button {
+            planner.select(option); collapse()
+        } label: {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Text(timing?.conciseLabel ?? AppText.text("確認接駁中"))
+                        .liveFont(.title2, weight: .bold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                    Spacer(minLength: 4)
+                    if let timing {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(timing.arrivalClockLabel).monospacedDigit()
+                            Text(AppText.text("抵達")).liveFont(.caption2)
+                        }.liveFont(.caption).foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
+                }
+                HStack(spacing: 8) {
+                    JourneyRouteChain(option: option)
+                    Spacer(minLength: 0)
+                    if let label = planner.optionLabels[option.id] {
+                        Text(live.text(label)).liveFont(.caption, weight: .medium).foregroundStyle(.secondary)
+                    }
+                }
+                if live.language == .english, let first = option.rides.first, let last = option.rides.last {
+                    Text(first.boarding.name + " → " + last.alighting.name).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if !option.walkingOnly, let timing {
+                    Text(timing.waitingLabel + (timing.ridingEvidence == .typical ? " · " + AppText.text("車程估計") : ""))
+                        .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(.orange) }
+                if let unavailable = planner.unavailableBoarding(option) {
+                    Text(unavailable.route + " · " + EstimateFeed.label(unavailable.status)).liveFont(.caption).foregroundStyle(.secondary)
+                }
+            }.padding(.vertical, 10).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+        }.buttonStyle(PhonePressStyle()).foregroundStyle(Color(uiColor: .label))
+            .disabled(!option.verified || option.walkIssue != nil || planner.unavailableBoarding(option) != nil)
+            .accessibilityIdentifier("journey-option-" + option.id)
+            .accessibilityHint(AppText.text("查看搭乘步驟"))
     }
 }
 
@@ -770,85 +803,141 @@ struct JourneyItineraryView: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
+    var showMap: () -> Void = {}
+    @State private var showTimingInfo = false
     var body: some View {
         if let option = planner.selected {
-            VStack(alignment: .leading, spacing: 14) {
-                TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                    if let duration = model.journeyDuration(option, at: timeline.date) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(planner.started ? duration.summaryLabel(remaining: true) : duration.label)
-                                .liveFont(.title2, weight: .bold).monospacedDigit()
-                            Text(duration.arrivalLabel).liveFont(.subheadline, weight: .semibold).monospacedDigit()
-                            HStack(spacing: 14) {
-                                Label(AppText.text("%@ 分", Int(ceil(duration.walkingSeconds / 60))), systemImage: "figure.walk")
-                                Label(planner.started && duration.waitingSeconds < 30 && duration.unknownWaits == 0 ? AppText.text("無需再候車") : duration.waitingLabel, systemImage: "clock")
-                                Label(AppText.text("%@ 分", Int(ceil(duration.ridingSeconds / 60))), systemImage: "bus.fill")
-                            }.liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
-                            if duration.uncertainWaits > 0 {
-                                Text(AppText.text("含估計候車時間，班次更新後會調整")).liveFont(.caption).foregroundStyle(.secondary)
-                            }
-                        }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
-                    }
-                }
-                ForEach(option.walks.indices, id: \.self) { index in
-                    let walk = option.walks[index]
-                    let walked = planner.started && (planner.steps.firstIndex(of: .walk(index)) ?? Int.max) < planner.stepIndex
-                    HStack(alignment: .top, spacing: 12) {
-                        Image(systemName: "figure.walk").liveFont(.title3).foregroundStyle(.secondary).frame(width: 30)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text((walked ? AppText.text("已走到 ") : AppText.text("走到 ")) + (index < option.rides.count ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地")))
-                                .liveFont(.subheadline, weight: .semibold).lineLimit(2)
-                                .accessibilityIdentifier("journey-walk-status-\(index)")
-                            if live.language == .english, index < option.rides.count { Text(option.rides[index].boarding.name).liveFont(.caption).foregroundStyle(.secondary) }
-                            Text(walked ? AppText.text("已完成") : walk.timeLabel + (walk.distance.map { " · \(distanceLabel($0))" } ?? ""))
-                                .liveFont(.caption).foregroundStyle(.secondary)
-                        }
-                        Spacer(minLength: 0)
-                        if !walked {
-                        Button { model.showWalkOnMap(index) } label: { Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44) }
-                            .accessibilityLabel(AppText.text("步行導航到%@", index < option.rides.count ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地")))
-                            .accessibilityIdentifier("journey-in-app-walk-\(index)")
-                        }
-                    }
-                    if index < option.rides.count {
-                        let ride = option.rides[index]
-                        let aboard = planner.started && planner.currentStep == .ride(index)
-                        let ridden = planner.started && (planner.steps.firstIndex(of: .ride(index)) ?? Int.max) < planner.stepIndex
-                        VStack(alignment: .leading, spacing: 7) {
-                            HStack(spacing: 12) {
-                                RouteBadge(name: ride.route.localizedName)
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(planner.destination?.localizedName ?? AppText.text("目的地"))
+                        .liveFont(.title2, weight: .bold).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("journey-destination-title")
+                    if live.language == .english, let name = planner.destination?.name { Text(name).liveFont(.subheadline).foregroundStyle(.secondary) }
+                    TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                        if let duration = model.journeyDuration(option, at: timeline.date) {
+                            HStack(alignment: .top, spacing: 8) {
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text(AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction))).liveFont(.subheadline, weight: .semibold)
-                                    Text(AppText.text("搭 %@ 站，在「%@」下車", ride.stopCount, ride.alighting.localizedName)).liveFont(.subheadline).lineLimit(2)
-                                }
-                            }
-                            if ride.route.displayName != ride.route.name { Text(ride.route.localizedDisplayName).liveFont(.caption).foregroundStyle(.secondary) }
-                            if aboard {
-                                Text(AppText.text("搭乘中") + (model.onboardPlate(for: ride).map { " · " + $0 } ?? ""))
-                                    .liveFont(.subheadline, weight: .semibold).accessibilityIdentifier("journey-ride-status-\(index)")
-                                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                                    OnboardSummary(model: model, ride: ride, date: timeline.date)
-                                }
-                            } else if ridden {
-                                Text(AppText.text("已下車")).liveFont(.caption).foregroundStyle(.secondary)
-                                    .accessibilityIdentifier("journey-ride-status-\(index)")
-                            } else { JourneyArrivalView(model: model, ride: ride, walk: walk) }
-                            HStack {
-                                if !aboard, !ridden {
-                                Button {
-                                    if let station = model.metadata.stations[ride.boarding.stationID] { model.selectStation(station) }
-                                } label: { Label(live.text("看上車站預估"), systemImage: "mappin.and.ellipse").frame(minHeight: 44) }.secondaryAction()
-                                }
+                                    Text(planner.started ? duration.summaryLabel(remaining: true) : duration.conciseLabel)
+                                        .liveFont(.headline).monospacedDigit()
+                                    Text(duration.arrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary)
+                                }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
                                 Spacer()
-                                Button { model.selectRoute(ride.route, direction: ride.direction, variantOnly: true) } label: {
-                                    Label(live.text("看公車"), systemImage: "bus.fill").frame(minHeight: 44)
-                                }.secondaryAction()
-                            }.liveFont(.subheadline)
-                        }.padding(14).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 18 * CGFloat(live.appearance.cornerScale)))
+                                Button { showTimingInfo = true } label: { Image(systemName: "info.circle").frame(width: 40, height: 40) }
+                                    .accessibilityLabel(AppText.text("行程時間說明")).accessibilityIdentifier("journey-time-info")
+                                    .popover(isPresented: $showTimingInfo) {
+                                        VStack(alignment: .leading, spacing: 10) {
+                                            Text(duration.breakdownLabel).liveFont(.headline)
+                                            Text(duration.waitingLabel)
+                                            Text(duration.ridingSourceLabel)
+                                            Text(AppText.text("總時間包含步行、可搭班次的候車及車程。官方下一班若早於你走到站牌，會改估後續班次；車程與表定時間都可能隨路況改變。"))
+                                        }.liveFont(.subheadline).padding(20).frame(maxWidth: 320).presentationCompactAdaptation(.popover)
+                                    }
+                            }
+                        }
+                    }
+                }.padding(.bottom, 18)
+                ForEach(option.walks.indices, id: \.self) { index in
+                    JourneyWalkingStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
+                    Divider().padding(.leading, 48)
+                    if option.rides.indices.contains(index) {
+                        JourneyRideStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
+                        Divider().padding(.leading, 48)
                     }
                 }
-            }.padding(.top, 6 * CGFloat(live.appearance.spacingScale))
+                HStack(alignment: .top, spacing: 14) {
+                    Image(systemName: "mappin.circle.fill").liveFont(.title2).foregroundStyle(.red).frame(width: 34)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(AppText.text("抵達")).liveFont(.headline)
+                        Text(planner.destination?.localizedName ?? AppText.text("目的地")).liveFont(.subheadline).foregroundStyle(.secondary)
+                    }
+                }.padding(.vertical, 16)
+            }
         }
+    }
+}
+
+private struct JourneyWalkingStep: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    let option: JourneyOption
+    let index: Int
+    let showMap: () -> Void
+    private var leg: WalkingLeg { option.walks[index] }
+    private var walked: Bool { planner.started && (planner.steps.firstIndex(of: .walk(index)) ?? .max) < planner.stepIndex }
+    private var target: String { option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地") }
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "figure.walk").liveFont(.title2).foregroundStyle(.primary).frame(width: 34)
+            VStack(alignment: .leading, spacing: 5) {
+                Text((walked ? AppText.text("已走到 ") : AppText.text("步行至 ")) + target)
+                    .liveFont(.headline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("journey-walk-status-\(index)")
+                if live.language == .english, option.rides.indices.contains(index) {
+                    Text(option.rides[index].boarding.name).liveFont(.caption).foregroundStyle(.secondary)
+                }
+                Text(walked ? AppText.text("已完成") : (leg.distance.map { distanceLabel($0) + " · " } ?? "") + leg.timeLabel)
+                    .liveFont(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if !walked, planner.currentStep == .walk(index) {
+                Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index); showMap() } label: {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 40, height: 44)
+                }.accessibilityLabel(AppText.text("步行導航到%@", target)).accessibilityIdentifier("journey-in-app-walk-\(index)")
+            }
+        }.padding(.vertical, 16)
+    }
+}
+
+private struct JourneyRideStep: View {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    let option: JourneyOption
+    let index: Int
+    let showMap: () -> Void
+    private var ride: TransitRide { option.rides[index] }
+    private var aboard: Bool { planner.started && planner.currentStep == .ride(index) }
+    private var ridden: Bool { planner.started && (planner.steps.firstIndex(of: .ride(index)) ?? .max) < planner.stepIndex }
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "bus.fill").liveFont(.title2).foregroundStyle(.blue).frame(width: 34)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .top, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(AppText.text("搭乘 %@ 公車", ride.route.localizedName)).liveFont(.headline)
+                        Text(AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction))).liveFont(.subheadline).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        model.selectRoute(ride.route, direction: ride.direction, variantOnly: true, boardingStopID: ride.boarding.id); showMap()
+                    } label: { Text(AppText.text("看公車")).liveFont(.subheadline).frame(minHeight: 40) }
+                }
+                if aboard {
+                    Text(AppText.text("搭乘中") + (model.onboardPlate(for: ride).map { " · " + $0 } ?? ""))
+                        .liveFont(.subheadline).accessibilityIdentifier("journey-ride-status-\(index)")
+                    TimelineView(.periodic(from: .now, by: 1)) { timeline in OnboardSummary(model: model, ride: ride, date: timeline.date) }
+                } else if ridden {
+                    Text(AppText.text("已下車")).liveFont(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("journey-ride-status-\(index)")
+                } else {
+                    TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                        VStack(alignment: .leading, spacing: 5) {
+                            JourneyArrivalView(model: model, ride: ride, walk: option.walks[index])
+                            if let duration = planner.duration(option, at: timeline.date), duration.waits.indices.contains(index), duration.waits[index].missedNext {
+                                Text(AppText.text("可搭後續班次 · ") + duration.waits[index].label).liveFont(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+                VStack(alignment: .leading, spacing: 7) {
+                    Label(ride.boarding.localizedName, systemImage: "circle")
+                    TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                        let estimate = model.plannedRideTime(ride, at: timeline.date)
+                        Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(estimate.seconds / 60)))))
+                            .foregroundStyle(.blue).accessibilityIdentifier("journey-ride-time-\(index)")
+                    }.padding(.leading, 26)
+                    Label(AppText.text("在「%@」下車", ride.alighting.localizedName), systemImage: "circle.fill")
+                }.liveFont(.subheadline).fixedSize(horizontal: false, vertical: true)
+            }
+        }.padding(.vertical, 16)
     }
 }
 
