@@ -62,6 +62,14 @@ final class OfficialTravelTimeTests: XCTestCase {
         let now = date("2026-10-06T10:50:00+08:00"), forecast = VehicleArrivalForecast()
         let estimate = forecast.ridingEstimate(ride, metadata: metadata, at: now)
         XCTAssertEqual(estimate.seconds, 400); XCTAssertEqual(estimate.evidence, .officialProfile)
+        var withoutGeometry = metadata
+        withoutGeometry.lines = [:]; withoutGeometry.directionalLines = [:]; withoutGeometry.journeys = [:]
+        let noRoad = forecast.ridingEstimate(ride, metadata: withoutGeometry, at: now)
+        XCTAssertEqual(noRoad.seconds, 400); XCTAssertEqual(noRoad.evidence, .officialProfile)
+        withoutGeometry.officialTravelTimes = OfficialTravelTimes()
+        let uncertain = forecast.ridingEstimate(ride, metadata: withoutGeometry, at: now)
+        XCTAssertGreaterThan(uncertain.seconds, Double(ride.stopCount) * 20)
+        XCTAssertEqual(uncertain.evidence, .typical)
         // The walk and official departure cross into 11:00 before boarding.
         let trip = TransitTrip(rides: [ride], accessDistance: 100, egressDistance: 0, transferDistance: 0,
                                score: 0, rideSeconds: [400])

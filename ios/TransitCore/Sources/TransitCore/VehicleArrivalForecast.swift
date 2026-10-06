@@ -301,8 +301,22 @@ public struct VehicleArrivalForecast: Sendable {
               let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
             let points = ride.coordinates.count >= 2 ? ride.coordinates : ride.stops.map(\.coordinate)
             let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
-            return RidingTimeEstimate(seconds: distance / 4.5 + Double(ride.stopCount) * 20,
-                evidence: .typical, observedVehicles: 0)
+            let spans = zip(ride.stops, ride.stops.dropFirst()).map { $0.coordinate.distance(to: $1.coordinate) }
+            let totalSpan = spans.reduce(0, +)
+            var seconds = 0.0, published = 0
+            for index in ride.stops.indices.dropFirst() {
+                let from = ride.stops[index - 1], to = ride.stops[index]
+                if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
+                    subroute: ride.route.id, direction: ride.direction, from: from.id, to: to.id,
+                    travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
+                    seconds += official; published += 1
+                } else {
+                    let share = totalSpan > 1 ? spans[index - 1] / totalSpan : 1 / Double(max(1, ride.stopCount))
+                    seconds += distance * share / 4.5 + 20
+                }
+            }
+            return RidingTimeEstimate(seconds: seconds,
+                evidence: published == ride.stopCount && published > 0 ? .officialProfile : .typical, observedVehicles: 0)
         }
         let traffic = observedRidePace(ride, journey: journey, first: first, last: last, at: date)
         var seconds = 0.0, measured = 0, published = 0, fallback = 0
