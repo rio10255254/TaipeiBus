@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -485,6 +485,9 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/EnglishModeUsabilityTests/testEnglishRealNeihuOptionsFitAndShowTravelWaitAndArrival')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'clear-copy' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests/testRealRouteChoicesOpenStepsAndReturnBeforeStarting')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'clear-journey' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests'
               '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
@@ -547,6 +550,9 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'stop-focus' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'clear-copy' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests/testRealRouteChoicesOpenStepsAndReturnBeforeStarting')
           fi
           if [ '${{ inputs.usability_scope }}' = 'clear-journey' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/ClearJourneyUsabilityTests')

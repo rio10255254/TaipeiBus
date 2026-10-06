@@ -892,7 +892,7 @@ struct JourneyItineraryView: View {
                                             Text(duration.breakdownLabel).liveFont(.headline)
                                             Text(duration.waitingLabel)
                                             if duration.ridingSeconds > 0 { Text(duration.ridingSourceLabel) }
-                                            Text(AppText.text("總時間包含步行、可搭班次的候車及車程。官方下一班若早於你走到站牌，會改估後續班次；車程與表定時間都可能隨路況改變。"))
+                                            Text(AppText.text("總時間已包含步行、候車與搭車。")).fixedSize(horizontal: false, vertical: true)
                                         }.liveFont(.subheadline).padding(20).frame(maxWidth: 320).presentationCompactAdaptation(.popover)
                                     }
                             }
