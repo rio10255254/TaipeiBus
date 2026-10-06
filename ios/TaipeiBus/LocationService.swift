@@ -24,14 +24,26 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private var lastRestart = Date.distantPast
     private var walkingNavigation = false
     var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
+    private var ridingNavigation = false
+    /// Walking and riding both want continuous, navigation-grade fixes; otherwise save power.
+    private var precise: Bool { walkingNavigation || ridingNavigation }
     func setWalkingNavigation(_ enabled: Bool) {
         guard walkingNavigation != enabled else { return }
         walkingNavigation = enabled
-        manager.desiredAccuracy = enabled ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = enabled ? 3 : 20
-        manager.activityType = enabled ? .fitness : .otherNavigation
-        manager.pausesLocationUpdatesAutomatically = !enabled
-        if enabled, active, authorized { manager.startUpdatingLocation(); updating = true }
+        applyPrecision()
+    }
+    /// On board, the phone's own fix is the freshest reading of the confirmed bus.
+    func setRidingNavigation(_ enabled: Bool) {
+        guard ridingNavigation != enabled else { return }
+        ridingNavigation = enabled
+        applyPrecision()
+    }
+    private func applyPrecision() {
+        manager.desiredAccuracy = precise ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
+        manager.distanceFilter = walkingNavigation ? 3 : ridingNavigation ? 5 : 20
+        manager.activityType = walkingNavigation ? .fitness : ridingNavigation ? .automotiveNavigation : .otherNavigation
+        manager.pausesLocationUpdatesAutomatically = !precise
+        if precise, active, authorized { manager.startUpdatingLocation(); updating = true }
     }
 #if DEBUG
     var walkingAccuracyConfigured: Bool { manager.desiredAccuracy == kCLLocationAccuracyBestForNavigation && manager.distanceFilter == 3 }
@@ -115,7 +127,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             }
             updating = true
             lastRestart = Date()
-            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyHundredMeters
+            manager.desiredAccuracy = precise ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyHundredMeters
             manager.startUpdatingLocation()
             updateHeadingActivity()
             timeoutTask?.cancel()
@@ -147,7 +159,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if displayCoordinate != nil {
             requesting = false; timeoutTask?.cancel(); timeoutTask = nil
             // Refinement happens after publishing the first useful position.
-            manager.desiredAccuracy = walkingNavigation ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
+            manager.desiredAccuracy = precise ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
         }
     }
     func locationManager(_ manager: CLLocationManager, didUpdateHeading value: CLHeading) {

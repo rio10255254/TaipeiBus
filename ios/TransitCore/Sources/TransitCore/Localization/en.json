@@ -446,5 +446,7 @@
   "站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。": "Stop-to-stop travel times come from the MOTC Transport Data eXchange (TDX). Missing data is shown as an estimate.",
   "總時間已包含步行、候車與搭車。": "Total time includes walking, waiting and riding.",
   "結束": "End",
-  "接著 · ": "Then · "
+  "接著 · ": "Then · ",
+  "下一站下車 · ": "Get off next · ",
+  "依你的定位即時更新": "Live from your location"
 }

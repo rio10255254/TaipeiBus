@@ -1216,6 +1216,7 @@ private struct RidingBannerContent: View {
         let progress = bus.flatMap { vehicle in journey?.progress(stopID: ride.alighting.id, vehicle: vehicle, at: date) }
         let stops = bus == nil ? [] : model.onboardStops(for: ride, at: date)
         let next = progress != nil ? stops.first : nil
+        let alightNext = next?.id == ride.alighting.id
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 RouteBadge(name: ride.route.localizedName, tintName: ride.route.name)
@@ -1232,8 +1233,10 @@ private struct RidingBannerContent: View {
                         Text(model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date))
                             .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.7)
                             .multilineTextAlignment(.trailing)
+                            .contentTransition(.numericText())
                         if let count = stops.firstIndex(where: { $0.id == ride.alighting.id }) {
                             Text(AppText.remainingStops(count + 1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
+                                .contentTransition(.numericText())
                         }
                     }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)
                 }
@@ -1241,10 +1244,18 @@ private struct RidingBannerContent: View {
             .padding(.horizontal, 16).padding(.vertical, 13)
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             BannerStrip {
-                if bus != nil {
-                    Circle().fill(Color(liveHex: "#6EA8FF")).frame(width: 8, height: 8)
+                if let bus {
+                    if model.isRiderAnchored(bus) {
+                        // The bus follows the rider's own fix, so its position is live rather than delayed.
+                        Image(systemName: "location.fill").font(.caption2.weight(.bold)).foregroundStyle(Color(liveHex: "#6EA8FF"))
+                            .frame(width: 12).accessibilityLabel(AppText.text("依你的定位即時更新"))
+                    } else {
+                        Circle().fill(Color(liveHex: "#6EA8FF")).frame(width: 8, height: 8).frame(width: 12)
+                    }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(next.map { AppText.text("下一站 · ") + $0.localizedName } ?? AppText.text("位置更新中")).lineLimit(1)
+                        Text(next.map { ($0.id == ride.alighting.id ? AppText.text("下一站下車 · ") : AppText.text("下一站 · ")) + $0.localizedName } ?? AppText.text("位置更新中")).lineLimit(1)
+                            .fontWeight(alightNext ? .semibold : nil)
+                            .foregroundStyle(alightNext ? Color(liveHex: "#FFD60A") : Color.white.opacity(0.8))
                         if live.language == .english, let next { Text(next.name).liveFont(.caption) }
                     }
                     Spacer(minLength: 4)
@@ -1259,6 +1270,7 @@ private struct RidingBannerContent: View {
             }
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")
         }
+        .sensoryFeedback(.warning, trigger: alightNext) { _, new in new }
     }
 }
 

@@ -304,7 +304,8 @@ final class TransitAppModel: ObservableObject {
         guard result.revision > snapshot.revision else { return }
         snapshot = result
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
-        planner.updateSnapshot(result, forecast: arrivalForecast)
+        anchorBoardedVehicle(publish: false)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
 #if DEBUG
         markLiveSettingsPreview()
 #endif
@@ -597,6 +598,51 @@ final class TransitAppModel: ObservableObject {
         return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) }
     }
 
+    /// The feed reports each bus only every 20–60 s, so on board the rider's phone is ahead of
+    /// the reported bus. While the plate is confirmed, a precise fix on that bus's route replaces
+    /// the delayed report. Nothing is extrapolated; every position is a real reading.
+    @Published private(set) var anchorRevision = 0
+    private var riderAnchored: BusVehicle?
+    func anchorBoardedVehicle(publish: Bool = true) {
+        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
+              let boardedVehicle, boardedVehicle.rideID == ride.id,
+              let index = snapshot.vehicles.firstIndex(where: { $0.id == boardedVehicle.vehicleID }) else {
+            riderAnchored = nil; location.setRidingNavigation(false); return
+        }
+        location.setRidingNavigation(true)
+        let bus = snapshot.vehicles[index]
+        let now = Date()
+        if riderAnchored?.id != bus.id { riderAnchored = nil }
+        var next: BusVehicle?
+        if let position = location.usableCoordinate, let accuracy = location.accuracy, let fixedAt = location.updatedAt,
+           let line = metadata.line(bus.routeID, direction: bus.direction) {
+            next = RiderAnchor.anchor(bus, rider: position, accuracy: accuracy, fixedAt: fixedAt,
+                                      previous: riderAnchored?.roadMatch, line: line,
+                                      journey: metadata.journey(routeID: bus.routeID, direction: bus.direction), now: now)
+        }
+        if next == nil, var held = riderAnchored, now.timeIntervalSince(held.observedAt) < 90,
+           let anchored = held.roadMatch, let reported = bus.roadMatch, bus.travelDirection != 0,
+           (anchored.along - reported.along) * Double(bus.travelDirection) > 0 {
+            // A stationary phone sends no new fix; keep the rider's last reading instead of
+            // stepping back to an older feed report that is behind the bus.
+            held.path = [held.coordinate]
+            next = held
+        }
+        guard let next else { riderAnchored = nil; return }
+        if riderAnchored?.observedAt == next.observedAt, riderAnchored?.coordinate == next.coordinate,
+           snapshot.vehicles[index].observedAt == next.observedAt { return }
+        riderAnchored = next
+        snapshot.vehicles[index] = next
+        guard publish else { return }
+        anchorRevision += 1
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+    }
+
+    /// True while the boarded bus is drawn from the rider's own fix rather than the delayed feed.
+    func isRiderAnchored(_ bus: BusVehicle) -> Bool {
+        riderAnchored.map { $0.id == bus.id && $0.observedAt == bus.observedAt } ?? false
+    }
+
     func onboardPlate(for ride: TransitRide) -> String? {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
     }
@@ -628,10 +674,10 @@ final class TransitAppModel: ObservableObject {
 
     func returnToWaiting() {
         boardedVehicle = nil; planner.returnToWaiting()
-        boardedAt = nil
+        boardedAt = nil; anchorBoardedVehicle()
     }
-    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection() }
+    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection(); anchorBoardedVehicle() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {

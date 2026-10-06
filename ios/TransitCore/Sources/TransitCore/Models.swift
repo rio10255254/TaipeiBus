@@ -71,7 +71,7 @@ public struct BusVehicle: Identifiable, Sendable {
     public let rawCoordinate: Coordinate
     public var heading: Double
     public let speed: Double
-    public let observedAt: Date
+    public var observedAt: Date
     public let status: String
     public let lowFloor: Bool
     public let provider: String?

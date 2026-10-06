@@ -275,11 +275,19 @@ struct TransitHomeView: View {
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        // Light, Maps-like confirmation for state the rider caused. Haptics never move a view under a finger.
+        .sensoryFeedback(.selection, trigger: model.selectedStationID) { _, new in new != nil }
+        .sensoryFeedback(.selection, trigger: model.selectedVehicleID) { old, new in new != nil && !planner.started && old != new }
+        .sensoryFeedback(.selection, trigger: model.userMapMode)
+        .sensoryFeedback(.selection, trigger: model.cityFleetMode)
+        .sensoryFeedback(.impact(weight: .medium), trigger: planner.currentStep) { old, new in planner.started && old != nil && new != nil }
+        .sensoryFeedback(.success, trigger: planner.arrived) { _, new in new }
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
         .onChange(of: location.revision, initial: true) { _, _ in
             model.updateWalkingLocation()
+            model.anchorBoardedVehicle()
             if let position = location.usableCoordinate { planner.locationArrived(position, metadata: model.metadata) }
             if model.userMapMode != .free, let position = location.displayCoordinate, lastLocationFocus != position {
                 lastLocationFocus = position; model.focusMap(.userLocation)
