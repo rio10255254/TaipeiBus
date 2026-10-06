@@ -71,7 +71,10 @@ final class RouteRecommendationAuditTests: XCTestCase {
         for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape", "GetEstimateTime"] {
             feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
         }
-        let metadata = try FeedDecoder.metadata(feeds: feeds)
+        var metadata = try FeedDecoder.metadata(feeds: feeds)
+        if let path = ProcessInfo.processInfo.environment["BUS_OFFICIAL_TRAVEL_TIMES"] {
+            metadata.officialTravelTimes = try OfficialTravelTimes(data: Data(contentsOf: URL(fileURLWithPath: path))).matching(metadata)
+        }
         let estimates = try FeedDecoder.estimates(feeds["GetEstimateTime"]!)
         let date = try XCTUnwrap(estimates.updatedAt)
         let destination = Coordinate(latitude: 25.0416, longitude: 121.5438)
@@ -110,12 +113,15 @@ final class RouteRecommendationAuditTests: XCTestCase {
                     actualWalks.append(await walking(from, to))
                     try await Task.sleep(for: .seconds(1))
                 }
-                let result = TripRanking.assessment(trip, estimates: estimates, at: date, walkingDurations: actualWalks)
+                let riding = VehicleArrivalForecast().plannedRidingEstimates(trip, metadata: metadata, estimates: estimates,
+                    walkingDurations: actualWalks, at: date)
+                let result = TripRanking.assessment(trip, estimates: estimates, at: date, walkingDurations: actualWalks,
+                    ridingDurations: riding.map(\.seconds))
                 let row: [String: Any] = ["origin": name, "destination": "忠孝復興站附近", "origin_latitude": origin.latitude,
                     "origin_longitude": origin.longitude, "routes": trip.rides.map(\.route.name), "transfers": trip.transfers,
                     "boarding": trip.rides[0].boarding.name, "alighting": trip.rides.last!.alighting.name,
                     "total_minutes": result.elapsedSeconds / 60, "walking_minutes": result.walkingSeconds / 60,
-                    "waiting_minutes": result.waitingSeconds / 60, "riding_minutes": trip.rideSeconds.reduce(0,+) / 60,
+                    "waiting_minutes": result.waitingSeconds / 60, "riding_minutes": riding.map(\.seconds).reduce(0,+) / 60, "riding_source": riding.map { $0.evidence.rawValue },
                     "walking_verified": actualWalks.allSatisfy { $0 != nil }, "uncertain_waits": result.uncertainWaits,
                     "missed_first_arrival": result.missedFirstArrival,
                     "candidate_count_800": narrow.count, "candidate_count_1200": wider.count,

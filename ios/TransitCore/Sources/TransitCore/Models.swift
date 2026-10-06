@@ -122,6 +122,7 @@ public struct StopReference: Sendable {
 }
 
 public struct TransitMetadata: Sendable {
+    public var officialTravelTimes = OfficialTravelTimes()
     public let revision = UUID()
     public var routes: [String: BusRoute] = [:]
     public var parents: [String: BusRoute] = [:]

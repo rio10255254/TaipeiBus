@@ -1,0 +1,51 @@
+{
+  "version": "1.2.0",
+  "build_number": "52.1.0",
+  "build_id": "e2596246-9ca5-4410-bd87-fc404d191fba",
+  "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
+  "claude_branch": "claude/loving-wright-v1hj8c",
+  "source_equivalence": "Release preparation changes metadata, screenshots, workflow capture scopes and tests only. App, TransitCore and project source remain identical to the valid uploaded build.",
+  "distribution": {"territory": "TWN", "price": 0, "automatic_release_after_approval": true},
+  "validation": [
+    {
+      "run": 37458183038,
+      "source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
+      "result": "success",
+      "coverage": "Four native light tests cover continuous map camera transitions, Reduce Motion, route stop focus and in-app station walking. Two dark tests and appearance switching also pass."
+    },
+    {
+      "run": 37458185534,
+      "source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
+      "result": "partial",
+      "coverage": "Five of six light journey tests and all three dark tests passed, including remaining journey duration, confirmed onboard plate, real Neihu choices and waiting/tracking/transfer flows.",
+      "failure_review": "The live search/compare test retained an option that became closed during late service. The failure screenshot shows the correct disabled closed-service option. Test preparation now waits for confirmed choices; this exact search/compare case was not rerun. No unavailable option was forced selectable."
+    },
+    {
+      "run": 37469439911,
+      "source": "124a246",
+      "result": "partial",
+      "coverage": "Core tests and Debug/Release compilation passed. Real live 3D bus, destination/itinerary/onboard and in-app walking screenshot flows passed.",
+      "failure_review": "The new home route-control tap did not trigger the route sheet. The capture test now identifies the exact control and uses the same 0.15-second press verified by the native control tests."
+    },
+    {
+      "run": 37472675590,
+      "source": "62bfc41",
+      "result": "success",
+      "coverage": "Core tests and Debug/Release compilation passed. The exact new home route control opens search; the route keypad finds Blue 27 and opens its route map."
+    }
+  ],
+  "store_gallery": {
+    "count": 5,
+    "dimensions": [1320, 2868],
+    "manifest": "screenshots/manifest.json",
+    "capture_runs": [37469439911, 37472675590],
+    "review": "Every composed image was visually inspected. Native app pixels and displayed values are unchanged. Original captures and their hashes are preserved.",
+    "excluded_capture": "The waiting screenshot was omitted because the simulator passenger was at City Hall while the selected manual departure was Neihu. Beginning navigation correctly recalculated a long approach from the passenger GPS; that setup is unsuitable for marketing.",
+    "live_data": "Public bus GPS and arrival feeds are real. Passenger position is simulated. Station-walking capture uses a controlled passenger/stop setup; it does not inject bus plates or ETAs."
+  },
+  "limits": [
+    "Simulator functional and camera checks do not measure physical-device frame rates or observed arrival accuracy.",
+    "Official next-arrival estimates are not tied to a particular vehicle plate. Unsupported individual-vehicle times remain pending confirmation."
+  ],
+  "submission_receipt": "app-store-1.2.0-receipt.json"
+}

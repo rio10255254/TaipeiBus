@@ -1,0 +1,17 @@
+{
+  "checked_at": "2026-10-06T06:23:47Z",
+  "audit_run": "https://github.com/rio10255254/TaipeiBus/actions/runs/37423383939",
+  "source_commit": "1c08aa6",
+  "families_checked": 416,
+  "source_families": 359,
+  "source_profiles": 595,
+  "full_current_patterns": 1009,
+  "partial_current_patterns": 16,
+  "missing_current_patterns": 189,
+  "official_stop_pairs": 36227,
+  "published_stop_pairs": 41408,
+  "official_pair_fraction": 0.8748792503863988,
+  "baseline_matching_pairs": 6334,
+  "baseline_matching_fraction": 0.15296561051004637,
+  "scope": "Whole current Taipei catalog at the audit hour. Source availability and mapping coverage are not physical arrival-accuracy measurements."
+}

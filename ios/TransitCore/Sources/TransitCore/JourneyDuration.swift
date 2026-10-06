@@ -11,6 +11,7 @@ public struct JourneyDuration: Equatable, Sendable {
     public let lowerTotalSeconds: Double
     public let upperTotalSeconds: Double
     public var positionUncertain = false
+    public var ridingEvidence: RidingTimeEstimate.Evidence = .typical
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
     public var travelSeconds: Double { walkingSeconds + ridingSeconds }
     public var totalSeconds: Double { walkingSeconds + waitingSeconds + ridingSeconds }
@@ -22,6 +23,19 @@ public struct JourneyDuration: Equatable, Sendable {
         return AppText.text(key, minutes(unknownWaits > 0 ? travelSeconds : totalSeconds))
     }
     public var comparisonLabel: String { unknownWaits > 0 ? AppText.text("全程待確認") : label }
+    public var conciseLabel: String {
+        unknownWaits > 0 ? AppText.text("時間待確認") : AppText.text("約 %@ 分鐘", minutes(totalSeconds))
+    }
+    public var arrivalClockLabel: String {
+        if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
+        if upperTotalSeconds - lowerTotalSeconds >= 120 {
+            return clock(referenceDate.addingTimeInterval(lowerTotalSeconds)) + "–" + clock(referenceDate.addingTimeInterval(upperTotalSeconds))
+        }
+        return clock(referenceDate.addingTimeInterval(totalSeconds))
+    }
+    public var ridingSourceLabel: String {
+        RidingTimeEstimate(seconds: ridingSeconds, evidence: ridingEvidence, observedVehicles: 0).sourceLabel
+    }
     public var breakdownLabel: String { AppText.text("步行 %@ 分 · 搭車 %@ 分", minutes(walkingSeconds), minutes(ridingSeconds)) }
     public var waitingLabel: String {
         if waits.isEmpty { return AppText.text("步行即可") }

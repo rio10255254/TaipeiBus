@@ -68,10 +68,10 @@ public struct BoardingWait: Equatable, Sendable {
     public let missedNext: Bool
     public var isEstimated: Bool { evidence == .headway || evidence == .unknown }
     public var label: String {
-        if evidence == .unknown { return "候車待確認" }
+        if evidence == .unknown { return AppText.text("候車待確認") }
         let lower = max(1, Int(ceil(lowerSeconds / 60))), upper = max(lower, Int(ceil(upperSeconds / 60)))
-        if seconds < 30 { return "即將可搭" }
-        return upper - lower >= 2 ? "候車約 \(lower)–\(upper) 分" : "候車約 \(max(1, Int(ceil(seconds / 60)))) 分"
+        if seconds < 30 { return AppText.text("即將可搭") }
+        return upper - lower >= 2 ? AppText.text("候車約 %@–%@ 分", lower, upper) : AppText.text("候車約 %@ 分", max(1, Int(ceil(seconds / 60))))
     }
 }
 

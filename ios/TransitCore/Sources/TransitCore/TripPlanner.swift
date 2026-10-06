@@ -133,6 +133,20 @@ public struct TripPlanner: Sendable {
                 exits[occurrence.pattern, default: []].append(Exit(index: occurrence.index, walk: station.distance))
             }
         }
+        // Use source-specific times before limiting candidates.
+        let routeTimes = patterns.map { pattern -> [Double] in
+            var values = [0.0]
+            for index in pattern.stops.indices.dropFirst() {
+                let previous = values.last!
+                let official = metadata.officialTravelTimes.seconds(route: pattern.route.parentID,
+                    subroute: pattern.route.id, direction: pattern.direction,
+                    from: pattern.stops[index - 1].id, to: pattern.stops[index].id,
+                    travellingAt: date.addingTimeInterval(previous), observedAt: date)
+                values.append(previous + (official ??
+                    ((pattern.distances[index] - pattern.distances[index - 1]) / 4.5 + 20)))
+            }
+            return values
+        }
         // The final ride's best alighting stop is independent of when the passenger
         // boards it. Cache that suffix once instead of enumerating every destination
         // platform for every possible transfer. Keep a second distinct platform for
@@ -140,7 +154,7 @@ public struct TripPlanner: Sendable {
         let bestExits: [[[Exit]]] = patterns.enumerated().map { patternIndex, pattern in
             let byIndex = Dictionary(grouping: exits[patternIndex] ?? [], by: \.index)
             func exitCost(_ exit: Exit) -> Double {
-                pattern.distances[exit.index] / 4.5 + Double(exit.index) * 20 + exit.walk * 1.25 / 1.2 * preferences.walkingWeight
+                routeTimes[patternIndex][exit.index] + exit.walk * 1.25 / 1.2 * preferences.walkingWeight
             }
             var best: [Exit] = []
             var result = Array(repeating: [Exit](), count: pattern.stops.count)
@@ -169,9 +183,9 @@ public struct TripPlanner: Sendable {
         let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
         let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
         let services = patterns.map { $0.route.servicePlans[$0.direction]?.service(at: date) }
-        let serviceWaits = patterns.map { pattern in
+        let serviceWaits = patterns.enumerated().map { index, pattern in
             pattern.route.minimumServiceWait(direction: pattern.direction, at: date,
-                fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20)
+                fullRouteSeconds: routeTimes[index].last ?? 0)
         }
         var candidates: [String: [Candidate]] = [:]
         func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
@@ -184,15 +198,14 @@ public struct TripPlanner: Sendable {
             // platforms before pedestrian routing can reveal barriers and detours.
             let key = segments.map { families[$0.pattern] }.joined(separator: "|")
             let riding = segments.map { segment in
-                let p = patterns[segment.pattern]
-                return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
+                return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
             }
             let walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
             let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
                 minimumServiceWaits: segments.map { serviceWaits[$0.pattern] },
                 services: segments.map { services[$0.pattern] },
-                boardingOffsets: segments.map { patterns[$0.pattern].distances[$0.board] / 4.5 + Double($0.board) * 20 }, at: date,
+                boardingOffsets: segments.map { routeTimes[$0.pattern][$0.board] }, at: date,
                 serviceTimeOfDay: timeOfDay).score
             if !preservePlatforms {
                 if let best = candidates[key]?.first, best.score <= score { return }
@@ -279,14 +292,13 @@ public struct TripPlanner: Sendable {
                 }
                 // Do not draw straight segments across buildings when the official road geometry is unavailable.
                 return TransitRide(route: pattern.route, direction: pattern.direction, stops: stops, coordinates: coordinates,
-                    fullRouteSeconds: (pattern.distances.last ?? 0) / 4.5 + Double(pattern.stops.count - 1) * 20,
-                    boardingOffsetSeconds: pattern.distances[segment.board] / 4.5 + Double(segment.board) * 20)
+                    fullRouteSeconds: routeTimes[segment.pattern].last ?? 0,
+                    boardingOffsetSeconds: routeTimes[segment.pattern][segment.board])
             }
             return TransitTrip(rides: rides, accessDistance: candidate.access, egressDistance: candidate.egress,
                 transferDistance: candidate.transfer, score: candidate.score,
                 rideSeconds: candidate.segments.map { segment in
-                    let p = patterns[segment.pattern]
-                    return (p.distances[segment.alight] - p.distances[segment.board]) / 4.5 + Double(segment.alight - segment.board) * 20
+                    return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
                 })
         }
     }

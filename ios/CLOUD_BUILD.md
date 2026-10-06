@@ -347,3 +347,22 @@ TestFlight 可供 Beta 安裝，不等於已在 App Store 公開上架。正式�
 本機可先跑 `python ios/release-check.py`；發布腳本測試使用 `ruby ios/release/apple_client_test.rb`。Mac 可執行 `swift test --package-path ios/TransitCore` 或 `ios/verify-on-mac.sh`。
 
 需要新原生照片時，執行 `iPhone app` workflow，勾選 `capture_preview=true` 並選擇所需畫面；選用影片只在可驗證有效時保留。普通提交不啟動模擬器、不打包預覽 App，TestFlight 上傳也不等待截圖／影片。單純檢查不需在自動檢查之後再手動重跑。
+
+
+## 2026-10-06：1.1.9 官方車程與地圖行程預覽
+
+`1.1.9 (51.1.0)` 已完成 Apple 處理，加入既有 TestFlight 內部群組。來源 `6011c9f8f587594c372e8c0fbe5b6fa0bad9be58`，回條 `release/testflight-1.1.9-receipt.json`，發布工作 https://github.com/rio10255254/TaipeiBus/actions/runs/37428103181 。此分支仍為 TestFlight-only，未合併 main，也未修改正式版上架資料、網站或 runtime/settings.json。
+
+全路線來源與配對覆蓋見 `release/official-time-collection-1.1.9.json`、`release/official-time-coverage-1.1.9.json`；原生操作與限制見 `release/navigation-1.1.9-readiness.json`。核心 150 案例通過，七個需要即時環境的案例在一般階段略過，完整資料另以明確的即時查验執行；最後淺色五案、深色兩案及同一程序外觀切換通過。最後說明短句另以一次原生行程操作通過並查看截圖。這些結果不是實機 FPS 或實際到達誤差測量。
+
+官方資料集中取得目前 416 路線，359 路線有來源、57 缺漏，共 595 組。公開資料標籤 `travel-time-data` 已由擁有者權限初始化；後續工作流程先確認既有資料發布，再取用 TDX 額度及更新附件。不要重新建立標籤而使發佈卡在工作流程權限，亦不要為重新上傳附件再下載整批。下載 48,978,167 bytes（壓縮傳輸），416 次基本資料查詢，按公告公式估算約 0.604 點；平台結算為準，未訂閱或付款。App 內建同一資料，每日快取共用資料；TDX 金鑰保留於 GitHub Secrets，不放入 App 或公開附件。
+
+1.1.9 的 `50.1.0` 在縮短說明文字前已送達 Apple，工作隨後取消，沒有完成群組分配回條；最終指定及發布的是 `51.1.0`。不要把取消狀態解讀為 Apple 未曾收到舊構建。
+
+## 2026-10-06：Claude 1.2.0 正式更新
+
+本次使用者已明確要求將 Claude 新版提交正式 App Store，取代先前僅測試版的發布範圍。沿用已處理完成的 `1.2.0 (52.1.0)`，來源 `bb7bc0ae1a3d622190060700191afa25a419dc24`，Apple build ID `e2596246-9ca5-4410-bd87-fc404d191fba`。發布準備僅調整商店說明、實際截圖、測試與工作流程選項；App 及核心程式與上傳版本相同，未重新上傳不同內容。
+
+商店主文、宣傳文字、更新說明與審查備註已改為新版實際功能；五張 1320 × 2868 截圖展示車輛資訊、App 內步行、上車後指引、行程選擇及路線鍵盤。原始畫面保存在 `release/screenshot-sources`，各張來源與雜湊見 `release/screenshots/manifest.json`。模擬乘客位置與真實公車即時資料分開記錄，未編造到站時間。
+
+檢查範圍、先前失敗原因與驗證限制見 `release/app-store-1.2.0-readiness.json`；正式送審回條見 `release/app-store-1.2.0-receipt.json`。免費、台灣限定、審核通過後自動發布。送審不代表已公開更新；以 Apple 回條的審查狀態與之後實際正式版本為準。

@@ -143,3 +143,11 @@ PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
 LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
 NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+
+Official travel-time data
+Provider: Ministry of Transportation and Communications, TDX / Taipei City bus data.
+Public station-to-station time-of-day profiles are compacted for use in TaipeiBus.
+Source: https://tdx.transportdata.tw/api-service/swagger
+Data authorization: https://tdx.transportdata.tw/term
+The data does not identify a particular arriving vehicle and is not a guaranteed arrival.

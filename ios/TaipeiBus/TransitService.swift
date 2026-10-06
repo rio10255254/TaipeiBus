@@ -9,6 +9,8 @@ actor TransitService {
     private var snapshot = TransitSnapshot()
     private var refreshTask: Task<TransitSnapshot, Never>?
     private var metadataLoadedAt: Date?
+    private var bundledOfficial: OfficialTravelTimes?
+    private var checkedBundledOfficial = false
     private var settings = LiveSettings.defaults
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
@@ -42,8 +44,12 @@ actor TransitService {
             feeds[name] = bytes
         }
         guard let value = try? FeedDecoder.metadata(feeds: feeds), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
-        metadata = value
-        return value
+        var loaded = value
+        let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
+            .flatMap { try? OfficialTravelTimes(data: $0) }
+        loaded.officialTravelTimes = (preferredOfficial(cached, bundledOfficialTravelTimes()) ?? .init()).matching(loaded)
+        metadata = loaded
+        return loaded
     }
 
     func prepare(force: Bool = false) async throws -> TransitMetadata {
@@ -52,6 +58,7 @@ actor TransitService {
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         var feeds: [String: Data] = [:]
         var notices: [String] = []
+        async let official = officialTravelTimes(force: force)
         // Independent metadata requests; failure of shapes does not disable station arrivals.
         await withTaskGroup(of: (String, Data?, String?).self) { group in
             for name in Self.metadataNames {
@@ -63,12 +70,50 @@ actor TransitService {
             }
         }
         try Task.checkCancellation()
-        let decoded = try FeedDecoder.metadata(feeds: feeds)
+        var decoded = try FeedDecoder.metadata(feeds: feeds)
+        decoded.officialTravelTimes = await official.matching(decoded)
         if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append(AppText.text("路線軌跡／站序")) }
         metadata = decoded
         metadataLoadedAt = Date()
         metadataNotice = notices.isEmpty ? nil : AppText.text("部分路線資料暫用快取或未取得")
-        return decoded
+        return metadata
+    }
+
+    private func bundledOfficialTravelTimes() -> OfficialTravelTimes? {
+        guard !checkedBundledOfficial else { return bundledOfficial }
+        checkedBundledOfficial = true
+        if let url = Bundle.main.url(forResource: "OfficialTravelTimes", withExtension: "json"),
+           let bytes = try? Data(contentsOf: url), let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 {
+            bundledOfficial = catalog
+        }
+        return bundledOfficial
+    }
+
+    private func preferredOfficial(_ cached: OfficialTravelTimes?, _ bundled: OfficialTravelTimes?) -> OfficialTravelTimes? {
+        [cached, bundled].compactMap { $0 }.max { ($0.generatedAt ?? .distantPast) < ($1.generatedAt ?? .distantPast) }
+    }
+
+    private func officialTravelTimes(force: Bool) async -> OfficialTravelTimes {
+        let file = cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")
+        let cached = (try? Data(contentsOf: file)).flatMap { try? OfficialTravelTimes(data: $0) }
+        let bundled = bundledOfficialTravelTimes()
+        let saved = preferredOfficial(cached, bundled)
+        let modified = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date
+        if !force, let modified, Date().timeIntervalSince(modified) < 86400, let saved { return saved }
+        if !force, cached == nil, let bundled, let generated = bundled.generatedAt,
+           (-300...86400).contains(Date().timeIntervalSince(generated)) { return bundled }
+        // A shared, public, bounded dataset is fetched once per device/day. TDX
+        // credentials and the owner's account quota are never sent to the phone.
+        let url = URL(string: "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json")!
+        var request = URLRequest(url: url); request.timeoutInterval = 4
+        do {
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+                  let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { return saved ?? .init() }
+            if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { return saved }
+            try? bytes.write(to: file, options: .atomic)
+            return catalog
+        } catch { return saved ?? .init() }
     }
 
     private func metadataFeed(_ name: String, force: Bool) async -> (String, Data?, String?) {

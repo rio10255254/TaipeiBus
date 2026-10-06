@@ -28,8 +28,11 @@ struct NativeBusMap: UIViewRepresentable {
         map.showsLogoView = false
         map.attributionButtonPosition = .bottomLeft
         map.attributionButtonMargins = CGPoint(x: 16, y: 12)
+        // Keep the OpenStreetMap credit, but as quiet as Apple's legal link.
+        map.attributionButton.tintColor = .tertiaryLabel
+        // The compass appears under the right-hand control stack, as in Apple Maps.
         map.compassViewPosition = .topRight
-        map.compassViewMargins = CGPoint(x: 16, y: 12)
+        map.compassViewMargins = CGPoint(x: 20, y: 116)
         map.compassView.accessibilityIdentifier = "map-compass"
         // An altitude camera needs a laid-out viewport; zoom is safe before SwiftUI sizes the view.
         map.setCenter(Coordinate.taipei.locationCoordinate, zoomLevel: 17.2, animated: false)
@@ -151,36 +154,62 @@ struct NativeBusMap: UIViewRepresentable {
             buildingOpacity = 1; buildingOpacityTarget = 1
             let route = MLNShapeSource(identifier: "selected-route", shape: nil, options: nil)
             style.addSource(route); routeSource = route
+            // Apple Maps style transit line: a white casing, the route's own sign
+            // colour, and direction chevrons once the street is readable.
+            func zoomed(_ stops: [(Double, Double)]) -> NSExpression {
+                var json: [Any] = ["interpolate", ["linear"], ["zoom"]]
+                for (zoom, value) in stops { json.append(zoom); json.append(value) }
+                return NSExpression(mglJSONObject: json)
+            }
             let line = MLNLineStyleLayer(identifier: "selected-route-line", source: route)
-            line.lineColor = NSExpression(forConstantValue: UIColor.systemBlue)
-            line.lineWidth = NSExpression(forConstantValue: 4)
-            line.lineOpacity = NSExpression(forConstantValue: 0.5)
-            if let building = style.layer(withIdentifier: "building-3d") { style.insertLayer(line, below: building) }
-            else { style.addLayer(line) }
+            line.lineColor = NSExpression(mglJSONObject: ["to-color", ["coalesce", ["get", "color"], RouteTint.general]])
+            line.lineWidth = zoomed([(11, 3), (14, 5), (17, 7), (20, 10)])
+            line.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            line.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            let routeCasing = MLNLineStyleLayer(identifier: "selected-route-casing", source: route)
+            routeCasing.lineWidth = zoomed([(11, 5.5), (14, 8), (17, 11), (20, 15)])
+            routeCasing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            routeCasing.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            routeCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            style.addLayer(routeCasing); style.addLayer(line)
+            style.setImage(routeChevron(), forName: "route-chevron")
+            let chevrons = MLNSymbolStyleLayer(identifier: "selected-route-arrows", source: route)
+            chevrons.minimumZoomLevel = 14.5
+            chevrons.symbolPlacement = NSExpression(forConstantValue: NSValue(mlnSymbolPlacement: .line))
+            chevrons.symbolSpacing = NSExpression(forConstantValue: 90)
+            chevrons.iconImageName = NSExpression(forConstantValue: "route-chevron")
+            chevrons.iconRotationAlignment = NSExpression(forConstantValue: NSValue(mlnIconRotationAlignment: .map))
+            chevrons.iconAllowsOverlap = NSExpression(forConstantValue: true)
+            chevrons.iconIgnoresPlacement = NSExpression(forConstantValue: true)
+            chevrons.iconScale = zoomed([(14.5, 0.7), (17, 0.95), (20, 1.3)])
+            style.addLayer(chevrons)
             let walking = MLNShapeSource(identifier: "journey-walking", shape: nil, options: nil)
             style.addSource(walking); walkingSource = walking
+            // Round caps on a zero-length dash draw Apple Maps style walking dots.
+            // Both layers repeat every 12 pt so each dot keeps a white rim.
             let walkingLine = MLNLineStyleLayer(identifier: "journey-walking-line", source: walking)
-            walkingLine.lineColor = NSExpression(forConstantValue: UIColor.systemOrange)
-            walkingLine.lineWidth = NSExpression(forConstantValue: 4)
-            walkingLine.lineDashPattern = NSExpression(forConstantValue: [1.5, 1])
+            walkingLine.lineColor = NSExpression(forConstantValue: UIColor(liveHex: MapChrome.walkingLight))
+            walkingLine.lineWidth = NSExpression(forConstantValue: 6)
+            walkingLine.lineDashPattern = NSExpression(forConstantValue: [0, 2])
             walkingLine.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            walkingLine.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
             let walkingCasing = MLNLineStyleLayer(identifier: "journey-walking-casing", source: walking)
-            walkingCasing.lineWidth = NSExpression(forConstantValue: 7)
+            walkingCasing.lineWidth = NSExpression(forConstantValue: 9)
+            walkingCasing.lineDashPattern = NSExpression(forConstantValue: [0, 12.0 / 9.0])
             walkingCasing.lineColor = NSExpression(forConstantValue: UIColor.white)
-            walkingCasing.lineOpacity = NSExpression(forConstantValue: 0.9)
             walkingCasing.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            walkingCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
             // Walking guidance must remain legible over roofs and dense road colours.
             style.addLayer(walkingCasing); style.addLayer(walkingLine)
             let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
             style.addSource(tripStops); tripStopsSource = tripStops
-            style.setImage(stationIcon(size: 20), forName: "station-marker")
-            style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
-            style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
+            installMarkerImages(style)
             let tripDots = MLNSymbolStyleLayer(identifier: "journey-stop-dots", source: tripStops)
             tripDots.iconImageName = NSExpression(forKeyPath: "icon")
             tripDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
+            tripNames.predicate = NSPredicate(format: "waypoint == 0")
             tripNames.text = NSExpression(forKeyPath: "name")
             tripNames.textFontSize = NSExpression(forConstantValue: 12)
             tripNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
@@ -189,6 +218,23 @@ struct NativeBusMap: UIViewRepresentable {
             tripNames.textHaloWidth = NSExpression(forConstantValue: 2)
             tripNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -16)))
             style.addLayer(tripNames)
+            let waypointNames = MLNSymbolStyleLayer(identifier: "journey-waypoint-names", source: tripStops)
+            waypointNames.predicate = NSPredicate(format: "waypoint == 1")
+            waypointNames.minimumZoomLevel = 10.5
+            waypointNames.text = NSExpression(forKeyPath: "name")
+            waypointNames.textFontSize = NSExpression(forConstantValue: 11)
+            waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
+            waypointNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -12)))
+            // Boarding and alighting names take priority over intermediate labels.
+            style.insertLayer(waypointNames, below: tripNames)
+            let destinationNames = MLNSymbolStyleLayer(identifier: "journey-destination-name", source: tripStops)
+            destinationNames.predicate = NSPredicate(format: "waypoint == 2")
+            destinationNames.minimumZoomLevel = 13
+            destinationNames.text = NSExpression(forKeyPath: "name")
+            destinationNames.textFontSize = NSExpression(forConstantValue: 12)
+            destinationNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
+            destinationNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -16)))
+            style.insertLayer(destinationNames, below: tripNames)
 
             let layer = NativeBusLayer(identifier: "native-buses")
             layer.onError = { [weak self] message in
@@ -236,16 +282,87 @@ struct NativeBusMap: UIViewRepresentable {
             return source
         }
 
+        private var markerBlue: UIColor { UIColor(liveHex: darkMode ? MapChrome.walkingDark : RouteTint.general) }
+
+        /// Street-level stop: a white disc with a blue rim and bus glyph, like Apple Maps transit stops.
         private func stationIcon(size: CGFloat, symbol: String = "bus.fill") -> UIImage {
-            UIGraphicsImageRenderer(size: CGSize(width: size + 4, height: size + 4)).image { _ in
-                let rect = CGRect(x: 2, y: 2, width: size, height: size)
-                let shape = UIBezierPath(roundedRect: rect, cornerRadius: size * 0.25)
-                UIColor(liveHex: darkMode ? "#242E3B" : "#FFFFFF").setFill(); shape.fill()
-                UIColor(red: 0.36, green: 0.46, blue: 0.57, alpha: 0.55).setStroke(); shape.lineWidth = 1; shape.stroke()
-                let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.57, weight: .medium))?
-                    .withTintColor(darkMode ? UIColor(liveHex: "#B4C5DB") : UIColor(red: 0.28, green: 0.40, blue: 0.53, alpha: 1), renderingMode: .alwaysOriginal)
-                glyph?.draw(in: rect.insetBy(dx: size * 0.23, dy: size * 0.23))
+            UIGraphicsImageRenderer(size: CGSize(width: size + 6, height: size + 6)).image { context in
+                let rect = CGRect(x: 3, y: 3, width: size, height: size)
+                context.cgContext.setShadow(offset: CGSize(width: 0, height: 1), blur: 2.5, color: UIColor.black.withAlphaComponent(0.25).cgColor)
+                let disc = UIBezierPath(ovalIn: rect)
+                UIColor(liveHex: darkMode ? "#2C2C2E" : "#FFFFFF").setFill(); disc.fill()
+                context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                markerBlue.setStroke(); disc.lineWidth = max(1.5, size * 0.09); disc.stroke()
+                let glyph = UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: size * 0.48, weight: .semibold))?
+                    .withTintColor(markerBlue, renderingMode: .alwaysOriginal)
+                glyph?.draw(in: rect.insetBy(dx: size * 0.25, dy: size * 0.25))
             }
+        }
+
+        /// A teardrop pin whose tip sits at the image centre, so every symbol layer
+        /// can keep its default centre anchor and existing hit testing.
+        private func pinIcon(symbol: String, color: UIColor, width: CGFloat = 30) -> UIImage {
+            let height = width * 1.3
+            return UIGraphicsImageRenderer(size: CGSize(width: width + 6, height: height * 2)).image { context in
+                let tip = CGPoint(x: 3 + width / 2, y: height)
+                let radius = width / 2
+                let center = CGPoint(x: tip.x, y: tip.y - height + radius + 1)
+                let path = UIBezierPath()
+                path.move(to: tip)
+                path.addCurve(to: CGPoint(x: center.x - radius, y: center.y), controlPoint1: CGPoint(x: tip.x - radius * 0.35, y: tip.y - radius * 0.45),
+                              controlPoint2: CGPoint(x: center.x - radius, y: center.y + radius * 0.75))
+                path.addArc(withCenter: center, radius: radius, startAngle: .pi, endAngle: 0, clockwise: true)
+                path.addCurve(to: tip, controlPoint1: CGPoint(x: center.x + radius, y: center.y + radius * 0.75),
+                              controlPoint2: CGPoint(x: tip.x + radius * 0.35, y: tip.y - radius * 0.45))
+                path.close()
+                context.cgContext.setShadow(offset: CGSize(width: 0, height: 1.5), blur: 3, color: UIColor.black.withAlphaComponent(0.3).cgColor)
+                color.setFill(); path.fill()
+                context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.white.setStroke(); path.lineWidth = 1.5; path.stroke()
+                let glyphSize = radius * 1.05
+                UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: glyphSize, weight: .bold))?
+                    .withTintColor(.white, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(x: center.x - glyphSize / 2, y: center.y - glyphSize / 2, width: glyphSize, height: glyphSize))
+            }
+        }
+
+        private func journeyStopIcon() -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 14, height: 14)).image { _ in
+                let circle = UIBezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 9, height: 9))
+                UIColor(liveHex: darkMode ? "#2C2C2E" : "#FFFFFF").setFill(); circle.fill()
+                markerBlue.setStroke(); circle.lineWidth = 2.2; circle.stroke()
+            }
+        }
+
+        private func journeyEndpointIcon(symbol: String, color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 30, height: 30)).image { context in
+                let circle = UIBezierPath(ovalIn: CGRect(x: 4, y: 4, width: 22, height: 22))
+                context.cgContext.setShadow(offset: CGSize(width: 0, height: 1), blur: 2.5, color: UIColor.black.withAlphaComponent(0.28).cgColor)
+                color.setFill(); circle.fill()
+                context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
+                UIColor.white.setStroke(); circle.lineWidth = 2; circle.stroke()
+                UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .bold))?
+                    .withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 9.5, y: 9.5, width: 11, height: 11))
+            }
+        }
+
+        /// Direction marks drawn along the selected line; the image points along +x.
+        private func routeChevron() -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 12, height: 12)).image { _ in
+                let path = UIBezierPath()
+                path.move(to: CGPoint(x: 4, y: 2.5)); path.addLine(to: CGPoint(x: 8.5, y: 6)); path.addLine(to: CGPoint(x: 4, y: 9.5))
+                UIColor.white.setStroke(); path.lineWidth = 2; path.lineCapStyle = .round; path.lineJoinStyle = .round; path.stroke()
+            }
+        }
+
+        private func installMarkerImages(_ style: MLNStyle) {
+            style.setImage(stationIcon(size: 22), forName: "station-marker")
+            style.setImage(pinIcon(symbol: "bus.fill", color: markerBlue), forName: "selected-station-marker")
+            style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "destination-marker")
+            style.setImage(journeyStopIcon(), forName: "journey-waypoint")
+            style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: markerBlue), forName: "journey-boarding")
+            style.setImage(journeyEndpointIcon(symbol: "arrow.down", color: markerBlue), forName: "journey-alighting")
+            style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "journey-destination")
         }
 
         func requestInset(_ inset: UIEdgeInsets, map: MLNMapView) -> Bool {
@@ -311,7 +428,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
-            let routeKey = "\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
+            let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
             let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil)"
             if lastSnapshotRevision != model.snapshot.revision || vehicleKey != lastVehicleKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
@@ -332,10 +449,14 @@ struct NativeBusMap: UIViewRepresentable {
             }
             if routeKey != lastRouteKey {
                 let tripRides = model.planner.started ? model.planner.activeRide.map { [$0] } ?? [] : model.planner.selected?.rides ?? []
-                let paths: [[Coordinate]] = model.selectedRouteID != nil ? model.routePaths : tripRides.map(\.coordinates).filter { $0.count >= 2 }
-                let features = paths.map { path -> MLNPolylineFeature in
-                    var coordinates = path.map(\.locationCoordinate)
-                    return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
+                let lines: [(path: [Coordinate], name: String)] = model.selectedRouteID != nil
+                    ? model.routePaths.map { (path: $0, name: model.selectedRoute?.name ?? "") }
+                    : tripRides.filter { $0.coordinates.count >= 2 }.map { (path: $0.coordinates, name: $0.route.name) }
+                let features = lines.map { line -> MLNPolylineFeature in
+                    var coordinates = line.path.map(\.locationCoordinate)
+                    let feature = MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
+                    feature.attributes = ["color": RouteTint.mapHex(for: line.name, dark: darkMode)]
+                    return feature
                 }
                 routeSource?.shape = features.isEmpty ? nil : MLNShapeCollectionFeature(shapes: features)
                 var displayedWalks = model.planner.selected?.walks ?? []
@@ -388,22 +509,26 @@ struct NativeBusMap: UIViewRepresentable {
         private func updateTripStops() {
             if let station = model.stationWalk.target {
                 let feature = MLNPointFeature(); feature.coordinate = station.coordinate.locationCoordinate
-                feature.attributes = ["name": station.bilingualName, "stationID": station.id, "icon": "destination-marker"]
+                feature.attributes = ["name": station.bilingualName, "stationID": station.id, "icon": "destination-marker", "waypoint": 0]
                 tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: [feature]); return
             }
             guard let option = model.planner.selected else { tripStopsSource?.shape = nil; return }
             var features: [String: MLNPointFeature] = [:]
-            func add(_ coordinate: Coordinate, id: String, title: String) {
+            func add(_ coordinate: Coordinate, id: String, title: String, waypoint: Bool = false) {
                 let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
-                feature.attributes = ["name": title, "stationID": id, "icon": id == "destination" ? "destination-marker" : "station-marker"]; features[id] = feature
+                feature.attributes = ["name": title, "stationID": id, "icon": waypoint ? "journey-waypoint" : id == "destination" ? "journey-destination" : "journey-boarding", "waypoint": waypoint ? 1 : id == "destination" ? 2 : 0]; features[id] = feature
             }
             let visibleRides = option.rides.enumerated().filter { _, ride in
                 !model.planner.started || model.planner.activeRide?.id == ride.id
             }
             for (index, ride) in visibleRides {
+                for stop in ride.stops.dropFirst().dropLast() where features[stop.stationID] == nil {
+                    add(stop.coordinate, id: stop.stationID, title: stop.bilingualName, waypoint: true)
+                }
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: AppText.text(index == 0 ? "上車" : "轉乘") + " · " + ride.boarding.bilingualName)
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
                     title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
+                features[ride.alighting.stationID]?.attributes["icon"] = "journey-alighting"
             }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
@@ -497,7 +622,7 @@ struct NativeBusMap: UIViewRepresentable {
                     }
                 }
                 state["darkMode"] = darkMode
-                state["themeBackground"] = darkMode ? "#10151D" : "light"
+                state["themeBackground"] = darkMode ? "#1C1D20" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
                 state["fleetSampled"] = buses?.sampledVehicleCount ?? 0
@@ -514,7 +639,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["walkingConfirmed"] = model.planner.walkingProgress?.locationConfirmed ?? false
                 state["walkingRemainingMeters"] = model.planner.walkingProgress?.remainingDistance ?? -1
                 state["walkingRecalculating"] = model.planner.walkingRecalculating
-                state["walkingLineColor"] = darkMode ? "#FFB340" : model.liveSettings.appearance.walkingColor
+                state["walkingLineColor"] = darkMode ? MapChrome.walkingDark : MapChrome.walkingLight
                 state["walkingPointCount"] = model.activeWalkingIndex.map { model.planner.walkingCoordinates(at: $0).count } ?? 0
                 let layerIDs = mapView.style?.layers.map(\.identifier) ?? []
                 state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
@@ -879,33 +1004,34 @@ struct NativeBusMap: UIViewRepresentable {
             for (id, day) in dayPaints {
                 guard let layer = style.layer(withIdentifier: id) else { continue }
                 if let layer = layer as? MLNBackgroundStyleLayer {
-                    layer.backgroundColor = darkMode ? color("#10151D") : day["background"]
+                    layer.backgroundColor = darkMode ? color("#1C1D20") : day["background"]
                 }
                 if let layer = layer as? MLNFillStyleLayer {
                     let shade: String
-                    if id.contains("water") { shade = "#102937" }
-                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch"].contains(where: id.contains) { shade = "#18281F" }
-                    else if id.contains("building") { shade = "#28323F" }
-                    else if id.contains("hospital") { shade = "#29232E" }
-                    else if id.contains("sand") { shade = "#29281F" }
-                    else { shade = "#1B2430" }
+                    if id.contains("water") { shade = "#1D3A52" }
+                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch"].contains(where: id.contains) { shade = "#21352A" }
+                    else if id.contains("building") { shade = "#2E3035" }
+                    else if id.contains("hospital") { shade = "#33282B" }
+                    else if id.contains("sand") { shade = "#2F2D25" }
+                    else { shade = "#222327" }
                     layer.fillColor = darkMode ? color(shade) : day["fill"]
                     layer.fillOutlineColor = darkMode ? color(shade) : day["outline"]
                     layer.fillPattern = darkMode ? nil : day["pattern"]
                 }
                 if let layer = layer as? MLNLineStyleLayer {
                     let shade: String
-                    if id.contains("casing") { shade = "#141B24" }
-                    else if id.contains("water") { shade = "#204454" }
-                    else if id.contains("boundary") { shade = "#536174" }
-                    else if id.contains("motorway") || id.contains("trunk") { shade = "#776341" }
-                    else if id.contains("rail") { shade = "#536071" }
-                    else { shade = "#455261" }
+                    if id.contains("casing") { shade = "#151618" }
+                    else if id.contains("water") { shade = "#24465F" }
+                    else if id.contains("boundary") { shade = "#5A5D66" }
+                    else if id.contains("motorway") { shade = "#7B6838" }
+                    else if id.contains("trunk") { shade = "#5E5A4C" }
+                    else if id.contains("rail") { shade = "#4A4C52" }
+                    else { shade = "#45474D" }
                     layer.lineColor = darkMode ? color(shade) : day["line"]
                 }
                 if let layer = layer as? MLNSymbolStyleLayer {
-                    layer.textColor = darkMode ? color(id.contains("water") ? "#7DA2B8" : "#CAD3DF") : day["text"]
-                    layer.textHaloColor = darkMode ? color("#10151D") : day["halo"]
+                    layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
+                    layer.textHaloColor = darkMode ? color("#1C1D20") : day["halo"]
                 }
             }
         }
@@ -913,31 +1039,20 @@ struct NativeBusMap: UIViewRepresentable {
         private func applyAppearance(_ style: MLNStyle) {
             applyBasePalette(style)
             applyLabelLanguage(style)
-            let theme = model.liveSettings.appearance
-            let traits = UITraitCollection(userInterfaceStyle: darkMode ? .dark : .light)
-            let blue = darkMode && theme.accentColor.uppercased() == "#007AFF" ? UIColor.systemBlue.resolvedColor(with: traits) : UIColor(liveHex: theme.accentColor)
-            let accent = NSExpression(forConstantValue: blue)
-            (style.layer(withIdentifier: "selected-route-line") as? MLNLineStyleLayer)?.lineColor = accent
-            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#FFB340" : theme.walkingColor))
-            (style.layer(withIdentifier: "journey-walking-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#21170B" : "#FFFFFF"))
-            (style.layer(withIdentifier: "water") as? MLNFillStyleLayer)?.fillColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#102937" : theme.waterColor))
-            if let park = style.layer(withIdentifier: "park") as? MLNFillStyleLayer {
-                let color = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#18281F" : theme.parkColor))
-                park.fillColor = color; park.fillOutlineColor = color
-            }
-            let building = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#354152" : theme.buildingColor))
-            (style.layer(withIdentifier: "building") as? MLNFillStyleLayer)?.fillColor = building
-            (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = building
-            for id in ["journey-stop-names", "nearby-station-names"] {
+            // Light map colours come from the bundled style; dark mode uses the
+            // neutral palette in applyBasePalette. Route lines carry their own tint.
+            (style.layer(withIdentifier: "selected-route-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
+            (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? MapChrome.walkingDark : MapChrome.walkingLight))
+            (style.layer(withIdentifier: "journey-walking-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
+            (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#34363C" : "#E6E3DB"))
+            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names"] {
                 if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
-                    names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F3F6FB" : "#252B32"))
-                    names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#10151D" : "#FFFFFF"))
+                    names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F2F2F7" : "#1F3F66"))
+                    names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#1C1D20" : "#FFFFFF"))
                     names.textHaloWidth = NSExpression(forConstantValue: 2)
                 }
             }
-            style.setImage(stationIcon(size: 20), forName: "station-marker")
-            style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
-            style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
+            installMarkerImages(style)
         }
 
         private func applyLabelLanguage(_ style: MLNStyle) {

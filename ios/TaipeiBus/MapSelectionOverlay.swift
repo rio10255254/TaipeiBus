@@ -45,6 +45,8 @@ struct MapContextLabels: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var overlay: MapSelectionOverlay
     var bottomClearance: CGFloat = 210
+    /// Space taken by the navigation banner above the map controls.
+    var topClearance: CGFloat = 0
     @State private var expandedStationID: String?
     @State private var labelSize = CGSize(width: 280, height: 86)
     let showDetails: () -> Void
@@ -59,11 +61,11 @@ struct MapContextLabels: View {
                 let vehicle = model.selectedVehicleID != nil
                 let expanded = expandedStationID == model.mapLabelStation?.id && expandedStationID != nil
                 let width = min(!vehicle && overlay.compactStation && !expanded ? 200.0 : 280.0, geometry.size.width - 32)
-                let freeTop: CGFloat = model.routeBoardingStop != nil && !vehicle ? 170 : vehicle ? 64 : 140
+                let freeTop: CGFloat = (model.routeBoardingStop != nil && !vehicle ? 170 : vehicle ? 64 : 140) + topClearance
                 let available = CGRect(x: 16, y: freeTop, width: geometry.size.width - 32,
                     height: max(1, geometry.size.height - bottomClearance - 12 - freeTop))
-                let obstacles = [CGRect(x: geometry.size.width - 84, y: 110, width: 68, height: 82),
-                    CGRect(x: geometry.size.width - 84, y: geometry.size.height - bottomClearance - 58, width: 68, height: 58)]
+                // The right-hand glass control stack and the compass beneath it.
+                let obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
                 let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
                     inside: available, avoiding: obstacles)
                 let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
@@ -134,10 +136,10 @@ private struct MapContextLabelContent: View, Equatable {
                             if let route = first.route { model.selectRoute(route, direction: first.stop.direction, boardingStopID: first.stop.id) }
                         } label: {
                             HStack(spacing: 5) {
-                                Text(first.route?.localizedName ?? first.stop.routeID).fontWeight(.semibold)
-                                Text(EstimateFeed.label(first.estimateSeconds)).monospacedDigit()
+                                RouteBadge(name: first.route?.localizedName ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
+                                Text(EstimateFeed.label(first.estimateSeconds)).fontWeight(.semibold).monospacedDigit()
                                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
-                            }.font(.caption).padding(.horizontal, 10).frame(minHeight: 30)
+                            }.font(.caption).padding(.leading, 4).padding(.trailing, 10).frame(minHeight: 32)
                                 .background(.regularMaterial, in: Capsule())
                                 .overlay { Capsule().stroke(Color.primary.opacity(0.1), lineWidth: 0.5) }
                         }.buttonStyle(PhonePressStyle()).accessibilityHint(AppText.text("官方下一班時間"))
@@ -174,11 +176,8 @@ private struct MapContextLabelContent: View, Equatable {
             }
         } else if let bus = model.selectedVehicle {
             HStack(spacing: 8) {
-                Image(systemName: "bus.fill").foregroundStyle(Color.accentColor)
-                if model.planner.selected == nil {
-                    Text(model.metadata.route(bus.routeID)?.localizedName ?? bus.localizedRouteName)
-                        .font(.subheadline.weight(.bold)).foregroundStyle(Color.accentColor).lineLimit(1)
-                }
+                let route = model.metadata.route(bus.routeID)
+                RouteBadge(name: route?.localizedName ?? bus.localizedRouteName, tintName: route?.name ?? bus.routeName, compact: true)
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))

@@ -60,6 +60,17 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
     require(int(info["DTPlatformVersion"].split(".")[0]) >= minimum_sdk, "Upload SDK is too old.")
     require((app / "PrivacyInfo.xcprivacy").is_file(), "Privacy manifest missing from the actual archive.")
     require(info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {}).get("CFBundleIconName") == "AppIcon", "Compiled app icon missing.")
+    if tuple(map(int, version.split("."))) >= (1, 1, 9):
+        catalog_file = app / "OfficialTravelTimes.json"
+        require(catalog_file.is_file(), "The actual archive is missing shared official travel times.")
+        require(catalog_file.stat().st_size <= 32 * 1024 * 1024, "Bundled official data exceeds its verified size limit.")
+        catalog = json.loads(catalog_file.read_text(encoding="utf-8"))
+        require(catalog.get("schema") == 1 and len(catalog.get("routes", [])) >= 100,
+                "The archive does not contain the verified full-route catalog.")
+        require(str(catalog.get("source", "")).startswith("https://tdx.transportdata.tw/"), "Official source attribution missing.")
+        require(not any(key in catalog for key in ("client_id", "client_secret", "access_token", "password")),
+                "Authentication fields are not allowed in the public travel-time data.")
+        print(f"Bundled official travel profiles: {len(catalog['routes'])}")
     executable = (app / info["CFBundleExecutable"]).read_bytes()
     require(b"--preview-capture" not in executable, "Debug preview flags leaked into the Release binary.")
     subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], check=True)

@@ -6,8 +6,16 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing']
+        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times']
         default: 'check-only'
+      route_ids:
+        description: 'For official travel times: comma-separated published route IDs; empty uses every route'
+        type: string
+        default: ''
+      publish_data:
+        description: 'Publish validated public travel-time data for the beta app'
+        type: boolean
+        default: false
       bundle_id:
         description: 'Leave empty to use BUS_BUNDLE_ID repository variable / release config'
         type: string
@@ -38,6 +46,7 @@ env:
 
 jobs:
   release:
+    if: inputs.operation != 'collect-route-times'
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -213,3 +222,32 @@ jobs:
         if: always()
         run: |
           python3 ios/release/signing.py cleanup
+
+  official_times:
+    if: inputs.operation == 'collect-route-times'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+    env:
+      TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+      TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the existing shared data release before using account quota
+        if: inputs.publish_data
+        run: gh release view travel-time-data --repo "$GITHUB_REPOSITORY" >/dev/null
+      - name: Collect bounded shared public time profiles
+        env:
+          REQUESTED_ROUTES: ${{ inputs.route_ids }}
+        run: python3 ios/release/collect-route-times.py --routes "$REQUESTED_ROUTES" --out "$RUNNER_TEMP/route-times/official-times.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-route-times-${{ github.run_id }}
+          path: ${{ runner.temp }}/route-times/
+          retention-days: 30
+      - name: Publish validated source data for the beta app
+        if: inputs.publish_data
+        run: |
+          gh release upload travel-time-data "$RUNNER_TEMP/route-times/official-times.json" "$RUNNER_TEMP/route-times/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"

@@ -77,6 +77,9 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var cityFleetMode = false
     @Published var highlightVehicle = true
     @Published var sheetDetent: PresentationDetent = .height(330)
+    /// The arriving-bus list is presented from the root view, so rebuilding the
+    /// waiting card while it settles cannot drop the request.
+    @Published var showingArrivingVehicles = false
     @Published var focus: MapFocus?
     @Published var focusRevision = 0
     @Published var selectionRevision = 0
@@ -506,6 +509,14 @@ final class TransitAppModel: ObservableObject {
             officialSeconds: official, allowTypicalWhenStopped: onboard)
     }
 
+    func plannedRideTime(_ ride: TransitRide, at date: Date) -> RidingTimeEstimate {
+        if !planner.started, let option = planner.selected, let index = option.rides.firstIndex(where: { $0.id == ride.id }) {
+            let values = planner.ridingEstimates(option, at: date)
+            if values.indices.contains(index) { return values[index] }
+        }
+        return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
@@ -520,7 +531,8 @@ final class TransitAppModel: ObservableObject {
         case nil: return planner.duration(option, at: date)
         }
         let remainingRides = Array(option.rides.dropFirst(index))
-        var riding = remainingRides.map { arrivalForecast.ridingSeconds($0, metadata: metadata, at: date) }
+        let rideEstimates = remainingRides.map { arrivalForecast.ridingEstimate($0, metadata: metadata, at: date) }
+        var riding = rideEstimates.map(\.seconds)
         var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
            let progress = planner.walkingProgress, progress.locationConfirmed,
@@ -554,6 +566,9 @@ final class TransitAppModel: ObservableObject {
             services: remainingRides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
         duration.positionUncertain = positionUncertain
+        duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
+            rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
+            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
         return duration
     }
 

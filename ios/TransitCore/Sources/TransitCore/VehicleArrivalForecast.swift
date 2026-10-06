@@ -52,6 +52,25 @@ public struct VehicleArrivalDisplay: Equatable, Sendable {
     public let prediction: VehicleArrivalPrediction?
 }
 
+/// A whole-ride planning estimate, never the official arrival time of a named bus.
+public struct RidingTimeEstimate: Equatable, Sendable {
+    public enum Evidence: String, Sendable { case stationHistory, officialProfile, recentTraffic, typical }
+    public let seconds: Double
+    public let evidence: Evidence
+    public let observedVehicles: Int
+    public init(seconds: Double, evidence: Evidence, observedVehicles: Int) {
+        self.seconds = seconds; self.evidence = evidence; self.observedVehicles = observedVehicles
+    }
+    public var sourceLabel: String {
+        switch evidence {
+        case .stationHistory: return AppText.text("依近期站間紀錄")
+        case .officialProfile: return AppText.text("依官方分時段車程")
+        case .recentTraffic: return AppText.text("依目前路線車流")
+        case .typical: return AppText.text("一般車程估計")
+        }
+    }
+}
+
 /// Predictions belong to a physical vehicle. Official route/stop ETAs have no vehicle identifier.
 public struct VehicleArrivalForecast: Sendable {
     private struct Observation: Sendable {
@@ -252,20 +271,110 @@ public struct VehicleArrivalForecast: Sendable {
     }
 
     public func ridingSeconds(_ ride: TransitRide, metadata: TransitMetadata, at date: Date) -> Double {
+        ridingEstimate(ride, metadata: metadata, at: date).seconds
+    }
+
+    /// Walk and waiting time determine the hour in which each ride actually starts.
+    /// Observation freshness stays anchored to now, even for a later transfer.
+    public func plannedRidingEstimates(_ trip: TransitTrip, metadata: TransitMetadata, estimates: EstimateFeed,
+                                      walkingDurations: [Double?], preferences: LiveSettings.Planning = .init(),
+                                      at date: Date) -> [RidingTimeEstimate] {
+        let distances = [trip.accessDistance] + (trip.transfers > 0 ? [trip.transferDistance] : []) + [trip.egressDistance]
+        let walks = distances.enumerated().map { index, distance in
+            walkingDurations.indices.contains(index) ? walkingDurations[index] ?? distance * 1.25 / 1.2 : distance * 1.25 / 1.2
+        }
+        var durations = trip.rideSeconds, result: [RidingTimeEstimate] = [], elapsed = 0.0
+        for (index, ride) in trip.rides.enumerated() {
+            let assessment = TripRanking.assessment(trip, estimates: estimates, at: date, preferences: preferences,
+                walkingDurations: walkingDurations, ridingDurations: durations)
+            elapsed += max(0, walks[index]) + assessment.waits[index].seconds
+            let value = ridingEstimate(ride, metadata: metadata, at: date, travellingAt: date.addingTimeInterval(elapsed))
+            durations[index] = value.seconds; result.append(value); elapsed += value.seconds
+        }
+        return result
+    }
+
+    public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
+                              travellingAt: Date? = nil) -> RidingTimeEstimate {
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
               let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
             let points = ride.coordinates.count >= 2 ? ride.coordinates : ride.stops.map(\.coordinate)
             let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
-            return distance / 4.5 + Double(ride.stopCount) * 20
+            let spans = zip(ride.stops, ride.stops.dropFirst()).map { $0.coordinate.distance(to: $1.coordinate) }
+            let totalSpan = spans.reduce(0, +)
+            var seconds = 0.0, published = 0
+            for index in ride.stops.indices.dropFirst() {
+                let from = ride.stops[index - 1], to = ride.stops[index]
+                if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
+                    subroute: ride.route.id, direction: ride.direction, from: from.id, to: to.id,
+                    travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
+                    seconds += official; published += 1
+                } else {
+                    let share = totalSpan > 1 ? spans[index - 1] / totalSpan : 1 / Double(max(1, ride.stopCount))
+                    seconds += distance * share / 4.5 + 20
+                }
+            }
+            return RidingTimeEstimate(seconds: seconds,
+                evidence: published == ride.stopCount && published > 0 ? .officialProfile : .typical, observedVehicles: 0)
         }
-        return ((first + 1)...last).reduce(0) { result, index in
+        let traffic = observedRidePace(ride, journey: journey, first: first, last: last, at: date)
+        var seconds = 0.0, measured = 0, published = 0, fallback = 0
+        for index in (first + 1)...last {
             let records = (segments[segmentKey(ride.route.id, ride.direction, journey, index, metadata)] ?? [])
                 .filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
             let samples = records.map(\.seconds)
             let distance = abs(journey.anchors[index].match.along - journey.anchors[index - 1].match.along)
-            return result + (Set(records.map(\.vehicleID)).count >= 3 ? median(samples) : distance / 4.5 + 20)
+            if Set(records.map(\.vehicleID)).count >= 3 {
+                seconds += median(samples); measured += 1
+            } else if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
+                        subroute: ride.route.id, direction: ride.direction,
+                        from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
+                        travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
+                seconds += official; published += 1
+            } else if let traffic {
+                // The observed elapsed time already contains signals, congestion
+                // and dwell. Adding another 20 seconds per stop would count it twice.
+                seconds += distance / traffic.speed; fallback += 1
+            } else {
+                seconds += distance / 4.5 + 20; fallback += 1
+            }
         }
+        return RidingTimeEstimate(seconds: seconds,
+            evidence: fallback == 0 && published > 0 ? .officialProfile : fallback == 0 && measured > 0 ? .stationHistory : traffic != nil ? .recentTraffic : .typical,
+            observedVehicles: traffic?.count ?? 0)
+    }
+
+    private func observedRidePace(_ ride: TransitRide, journey: RouteJourney, first: Int, last: Int,
+                                  at date: Date) -> (speed: Double, count: Int)? {
+        let start = journey.anchors[first].match.along * Double(journey.direction)
+        let end = journey.anchors[last].match.along * Double(journey.direction)
+        let span = end - start
+        guard span >= 800 else { return nil }
+        let terminalStart = journey.anchors.first!.match.along * Double(journey.direction)
+        let terminalEnd = journey.anchors.last!.match.along * Double(journey.direction)
+        var durations = 0.0, distance = 0.0, positions: [Double] = []
+        for records in history.values {
+            guard let latest = records.last, latest.route == ride.route.id, latest.direction == ride.direction,
+                  (-5...30).contains(date.timeIntervalSince(latest.date)) else { continue }
+            let samples = records.filter { latest.date.timeIntervalSince($0.date) <= 180 }
+            guard samples.count >= 3, let earliest = samples.first else { continue }
+            let elapsed = latest.date.timeIntervalSince(earliest.date)
+            let moved = max(0, latest.along - earliest.along)
+            let midpoint = (latest.along + earliest.along) / 2
+            guard elapsed >= 45, moved / elapsed <= 18,
+                  earliest.along >= start - 20, latest.along <= end + 20,
+                  midpoint > terminalStart + 75, midpoint < terminalEnd - 75 else { continue }
+            // Include stationary vehicles inside the ride, not terminal layovers.
+            durations += elapsed; distance += moved; positions.append(midpoint)
+        }
+        guard positions.count >= 3,
+              (positions.max()! - positions.min()!) / span >= 0.35,
+              Set(positions.map { min(7, max(0, Int(($0 - start) / span * 8))) }).count >= 3,
+              durations > 0 else { return nil }
+        let speed = distance / durations
+        guard (0.6...18).contains(speed) else { return nil }
+        return (speed, positions.count)
     }
 
     private func segmentKey(_ route: String, _ direction: String, _ journey: RouteJourney, _ index: Int,
