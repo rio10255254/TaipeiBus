@@ -225,8 +225,6 @@ jobs:
 
   official_times:
     if: inputs.operation == 'collect-route-times'
-    permissions:
-      contents: write
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
