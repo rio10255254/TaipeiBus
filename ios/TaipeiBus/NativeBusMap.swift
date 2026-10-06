@@ -896,11 +896,12 @@ struct NativeBusMap: UIViewRepresentable {
         private func updateLocationMarker(_ map: MLNMapView, elapsed: Double) {
             locationMotion.update(coordinate: model.location.displayCoordinate, heading: model.location.currentHeading,
                                   elapsed: elapsed, reduceMotion: reduceMotion)
-            guard let point = locationMotion.coordinate else { locationMarker.isHidden = true; return }
+            guard let point = locationMotion.coordinate else { locationMarker.isHidden = true; overlay.userPoint = nil; return }
             let screen = map.convert(point.locationCoordinate, toPointTo: map)
             guard screen.x.isFinite, screen.y.isFinite else { locationMarker.isHidden = true; return }
             locationMarker.isHidden = !map.bounds.insetBy(dx: -48, dy: -48).contains(screen)
             locationMarker.center = screen
+            overlay.userPoint = locationMarker.isHidden ? nil : map.convert(screen, to: nil)
             var angle: Double?
             if let bearing = locationMotion.heading {
                 let radians = bearing * .pi / 180

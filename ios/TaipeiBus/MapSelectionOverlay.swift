@@ -5,6 +5,8 @@ import TransitCore
 @MainActor
 final class MapSelectionOverlay: ObservableObject {
     @Published private(set) var windowPoint: CGPoint?
+    /// The rider's location dot in window space; a label should not hide where the rider is.
+    var userPoint: CGPoint?
     private var lastUpdate: CFTimeInterval = 0
     @Published private(set) var compactStation = false
 #if DEBUG
@@ -65,7 +67,10 @@ struct MapContextLabels: View {
                 let available = CGRect(x: 16, y: freeTop, width: geometry.size.width - 32,
                     height: max(1, geometry.size.height - bottomClearance - 12 - freeTop))
                 // The right-hand glass control stack and the compass beneath it.
-                let obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
+                var obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
+                if let user = overlay.userPoint {
+                    obstacles.append(CGRect(x: user.x - frame.minX - 28, y: user.y - frame.minY - 28, width: 56, height: 56))
+                }
                 let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
                     inside: available, avoiding: obstacles)
                 let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
