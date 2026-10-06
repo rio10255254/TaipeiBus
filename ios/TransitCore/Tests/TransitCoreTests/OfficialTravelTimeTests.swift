@@ -114,6 +114,48 @@ final class OfficialTravelTimeTests: XCTestCase {
         XCTAssertEqual(result.first?.rideSeconds.first, 200)
     }
 
+    func testCombinedLoopProfilesBindEachDirectionWithoutOppositeStopEdges() throws {
+        let pair = RidingTrafficTests().source()
+        var metadata = pair.0
+        for index in 0...4 {
+            let stop = BusStop(id: "b\(index)", routeID: "family", stationID: "back-\(index)", name: "返程\(index)",
+                direction: "1", sequence: index, coordinate: pair.1.stops[4 - index].coordinate)
+            metadata.stops[stop.id] = stop
+            metadata.paths["observed", default: []].append(StopReference(stopID: stop.id, sequence: 5 + index))
+        }
+        metadata.rebuildJourneys()
+        let edges = (0..<4).map { ["s\($0)", "s\($0 + 1)"] } + [["s4", "b0"]] +
+                    (0..<4).map { ["b\($0)", "b\($0 + 1)"] }
+        let object: [String: Any] = ["schema": 1, "routes": [["route": "family", "subroute": "observed", "direction": "2",
+            "updated": "2026-10-05T05:26:38+08:00", "edges": edges,
+            "periods": [["weekday": 2, "startHour": 10, "endHour": 11, "seconds": [30,30,30,30,999,60,60,60,60]]]]]]
+        let catalog = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: object)).matching(metadata)
+        let at = date("2026-10-06T10:15:00+08:00")
+        XCTAssertEqual(catalog.seconds(route: "family", subroute: "observed", direction: "0", from: "s0", to: "s1", travellingAt: at, observedAt: at), 30)
+        XCTAssertEqual(catalog.seconds(route: "family", subroute: "observed", direction: "1", from: "b0", to: "b1", travellingAt: at, observedAt: at), 60)
+        XCTAssertNil(catalog.seconds(route: "family", subroute: "observed", direction: "0", from: "b0", to: "b1", travellingAt: at, observedAt: at))
+        XCTAssertNil(catalog.seconds(route: "family", subroute: "observed", direction: "1", from: "s0", to: "s1", travellingAt: at, observedAt: at))
+        XCTAssertNil(catalog.seconds(route: "family", subroute: "observed", direction: "0", from: "s4", to: "b0", travellingAt: at, observedAt: at))
+    }
+
+    func testOldIdentifiersRequireTheEntireConsecutiveCurrentStopChain() throws {
+        let pair = RidingTrafficTests().source()
+        let edges = (0..<4).map { ["s\($0)", "s\($0 + 1)"] }
+        func profile(_ edges: [[String]], seconds: [Int]) -> [String: Any] {
+            ["route": "family", "subroute": "old-source-id", "direction": "0", "updated": "2026-10-05T05:26:38+08:00",
+             "edges": edges, "periods": [["weekday": 2, "startHour": 10, "endHour": 11, "seconds": seconds]]]
+        }
+        let at = date("2026-10-06T10:15:00+08:00")
+        for (rows, expected) in [([profile(edges, seconds: [30,30,30,30])], 30.0),
+                                 ([profile(Array(edges.dropLast()), seconds: [30,30,30])], -1.0),
+                                 ([profile([edges[1],edges[0],edges[2],edges[3]], seconds: [30,30,30,30])], -1.0),
+                                 ([profile(edges, seconds: [30,30,30,30]), profile(edges, seconds: [60,60,60,60])], -1.0)] {
+            let catalog = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: ["schema": 1, "routes": rows])).matching(pair.0)
+            let value = catalog.seconds(route: "family", subroute: "observed", direction: "0", from: "s0", to: "s1", travellingAt: at, observedAt: at)
+            if expected > 0 { XCTAssertEqual(value, expected) } else { XCTAssertNil(value) }
+        }
+    }
+
     func testLiveFullCatalogReportsCoverageAcrossEveryPublishedRoute() throws {
         guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"],
               let catalogPath = ProcessInfo.processInfo.environment["BUS_OFFICIAL_TRAVEL_TIMES"] else {
@@ -125,7 +167,7 @@ final class OfficialTravelTimeTests: XCTestCase {
             feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
         }
         var metadata = try FeedDecoder.metadata(feeds: feeds)
-        metadata.officialTravelTimes = try OfficialTravelTimes(data: data)
+        metadata.officialTravelTimes = try OfficialTravelTimes(data: data).matching(metadata)
         let document = try JSONDecoder().decode(Document.self, from: data), at = Date()
         XCTAssertGreaterThan(metadata.officialTravelTimes.patternCount, 100)
         XCTAssertGreaterThan(document.routes.count, 100)

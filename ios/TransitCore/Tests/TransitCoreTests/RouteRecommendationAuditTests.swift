@@ -73,7 +73,7 @@ final class RouteRecommendationAuditTests: XCTestCase {
         }
         var metadata = try FeedDecoder.metadata(feeds: feeds)
         if let path = ProcessInfo.processInfo.environment["BUS_OFFICIAL_TRAVEL_TIMES"] {
-            metadata.officialTravelTimes = try OfficialTravelTimes(data: Data(contentsOf: URL(fileURLWithPath: path)))
+            metadata.officialTravelTimes = try OfficialTravelTimes(data: Data(contentsOf: URL(fileURLWithPath: path))).matching(metadata)
         }
         let estimates = try FeedDecoder.estimates(feeds["GetEstimateTime"]!)
         let date = try XCTUnwrap(estimates.updatedAt)

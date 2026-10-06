@@ -47,7 +47,7 @@ actor TransitService {
         var loaded = value
         let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
             .flatMap { try? OfficialTravelTimes(data: $0) }
-        loaded.officialTravelTimes = preferredOfficial(cached, bundledOfficialTravelTimes()) ?? .init()
+        loaded.officialTravelTimes = (preferredOfficial(cached, bundledOfficialTravelTimes()) ?? .init()).matching(loaded)
         metadata = loaded
         return loaded
     }
@@ -71,7 +71,7 @@ actor TransitService {
         }
         try Task.checkCancellation()
         var decoded = try FeedDecoder.metadata(feeds: feeds)
-        decoded.officialTravelTimes = await official
+        decoded.officialTravelTimes = await official.matching(decoded)
         if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append(AppText.text("路線軌跡／站序")) }
         metadata = decoded
         metadataLoadedAt = Date()
