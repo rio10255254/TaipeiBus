@@ -346,12 +346,17 @@ private struct JourneyBoardingContent: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button { model.showingArrivingVehicles = true } label: {
+                Button {
+#if DEBUG
+                    model.recordMapTap("show-arrivals")
+#endif
+                    model.showingArrivingVehicles = true
+                } label: {
                     HStack(spacing: 4) {
                         Text(AppText.text("到站車輛"))
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                     }.liveFont(.subheadline, weight: .semibold).frame(minHeight: 32).contentShape(Rectangle())
-                }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary).accessibilityIdentifier("journey-all-vehicles")
+                }.buttonStyle(.plain).foregroundStyle(.primary).accessibilityIdentifier("journey-all-vehicles")
                 Spacer()
                 Button { showTimingInfo = true } label: { Image(systemName: "info.circle").liveFont(.subheadline).frame(width: 32, height: 32) }
                     .foregroundStyle(.secondary)

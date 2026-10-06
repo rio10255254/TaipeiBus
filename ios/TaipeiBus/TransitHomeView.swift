@@ -199,7 +199,6 @@ struct TransitHomeView: View {
             JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
         }
         }
-        .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity), removal: .opacity))
         .smoothChanges(planner.currentStep)
         .smoothChanges(planner.started)
         .smoothChanges(planner.selectedID)
@@ -241,8 +240,6 @@ struct TransitHomeView: View {
     }
     .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
-    .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: planner.selectedID)
-    .animation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.88), value: stationWalk.isActive)
     }
 
 
