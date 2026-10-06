@@ -177,3 +177,24 @@ enum MapChrome {
     static let positive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#5EDB86") : UIColor(liveHex: "#1A7F37") })
     static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
 }
+
+/// Filled or tinted capsule actions used by the trip cards, matching the
+/// large rounded buttons in Apple Maps place cards and navigation.
+struct MapActionStyle: ButtonStyle {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    var prominent = false
+    var tint: Color? = nil
+    func makeBody(configuration: Configuration) -> some View {
+        let color = tint ?? Color(liveHex: live.appearance.accentColor)
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        return configuration.label
+            .foregroundStyle(prominent ? Color.white : color)
+            .background(prominent ? AnyShapeStyle(color) : AnyShapeStyle(color.opacity(0.13)), in: Capsule())
+            .contentShape(Capsule())
+            .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.42)
+            .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
+            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+    }
+}

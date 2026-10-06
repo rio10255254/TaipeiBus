@@ -444,5 +444,7 @@
   "站間車程使用交通部 TDX 公布的分時段資料；來源不足時仍標示估計。": "Stop-to-stop travel times use time-of-day data published by TDX. Missing data is shown as an estimate.",
   "搜尋別名、文字、外觀、既有搭車設定與共用車程資料會從 GitHub 下載。這個請求不包含定位或搜尋文字；GitHub 會收到一般網路連線資訊。": "Search aliases, text, appearance, trip settings and shared travel-time data download from GitHub. These requests contain no location or search text; GitHub receives standard connection information.",
   "站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。": "Stop-to-stop travel times come from the MOTC Transport Data eXchange (TDX). Missing data is shown as an estimate.",
-  "總時間已包含步行、候車與搭車。": "Total time includes walking, waiting and riding."
+  "總時間已包含步行、候車與搭車。": "Total time includes walking, waiting and riding.",
+  "結束": "End",
+  "接著 · ": "Then · "
 }

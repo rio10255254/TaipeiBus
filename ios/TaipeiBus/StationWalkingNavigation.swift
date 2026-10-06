@@ -116,6 +116,7 @@ final class StationWalkingNavigation: ObservableObject {
 }
 
 struct StationWalkingDock: View {
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject var model: TransitAppModel
     @ObservedObject var navigation: StationWalkingNavigation
     var body: some View {
@@ -123,12 +124,15 @@ struct StationWalkingDock: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 12) {
                     VStack(alignment: .leading, spacing: 3) {
-                        BilingualName(station).liveFont(.headline).lineLimit(2)
-                        Text(station.localizedBearing).liveFont(.caption).foregroundStyle(.secondary)
+                        BilingualName(station).liveFont(.headline, weight: .bold).lineLimit(2)
+                        Text(station.localizedBearing).liveFont(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
-                    Button { model.finishStationWalk() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
-                        .secondaryAction().accessibilityLabel(AppText.text("返回站牌")).accessibilityIdentifier("station-walk-close")
+                    Button { model.finishStationWalk() } label: {
+                        Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 40, height: 40)
+                    }
+                    .buttonStyle(MapActionStyle(tint: Color.primary))
+                    .accessibilityLabel(AppText.text("返回站牌")).accessibilityIdentifier("station-walk-close")
                 }
                 if navigation.calculating {
                     HStack { ProgressView(); Text(AppText.text("正在規劃步行路線")) }.liveFont(.subheadline)
@@ -142,28 +146,57 @@ struct StationWalkingDock: View {
                         Button(AppText.text("重試")) { navigation.retry(location: model.location) }.secondaryAction()
                     }
                 } else if navigation.leg != nil {
-                    Text(navigation.currentInstruction).liveFont(.title3, weight: .semibold).lineLimit(2)
-                        .accessibilityIdentifier("station-walk-instruction")
-                    if let next = navigation.nextInstruction { Text(next).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2) }
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        HStack(spacing: 8) {
-                            Text(navigation.remainingDistance.map(distanceLabel) ?? "—").monospacedDigit()
-                            Text("·")
-                            Text(navigation.remainingSeconds.map { AppText.text("約 %@ 分", max(1, Int(ceil($0 / 60)))) } ?? "—").monospacedDigit()
+                        HStack(alignment: .firstTextBaseline, spacing: 18) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(navigation.remainingSeconds.map { AppText.text("約 %@ 分", max(1, Int(ceil($0 / 60)))) } ?? "—")
+                                    .liveFont(.title3, weight: .bold).monospacedDigit().contentTransition(.numericText())
+                                Text(navigation.remainingDistance.map(distanceLabel) ?? "—").liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                            }
                             if !navigation.locationConfirmed { Text(AppText.text("定位確認中")).liveFont(.caption).foregroundStyle(.secondary) }
-                        }.liveFont(.subheadline).accessibilityIdentifier("station-walk-progress")
+                        }.accessibilityElement(children: .combine).accessibilityIdentifier("station-walk-progress")
                     }
-                    HStack(spacing: 16) {
+                    HStack(spacing: 12) {
                         Button { model.showStationWalkOverview() } label: {
-                            Label(AppText.text("全程"), systemImage: "map").frame(maxWidth: .infinity, minHeight: 44)
-                        }.secondaryAction().accessibilityIdentifier("station-walk-overview")
+                            Label(AppText.text("全程"), systemImage: "map").lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
+                        }.buttonStyle(MapActionStyle()).accessibilityIdentifier("station-walk-overview")
                         Button { model.finishStationWalk() } label: {
-                            Text(AppText.text("已到站牌")).frame(maxWidth: .infinity, minHeight: 44)
-                        }.primaryAction().accessibilityIdentifier("station-walk-arrive")
+                            Text(AppText.text("已到站牌")).lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
+                        }.buttonStyle(MapActionStyle(prominent: true)).accessibilityIdentifier("station-walk-arrive")
+                    }.liveFont(.body, weight: .semibold)
+                }
+            }
+            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
+            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: MapChrome.cardRadius, style: .continuous))
+            .overlay { RoundedRectangle(cornerRadius: MapChrome.cardRadius, style: .continuous).strokeBorder(Color.primary.opacity(scheme == .dark ? 0.16 : 0.07), lineWidth: 0.6) }
+            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.14), radius: 18, y: 6)
+                .accessibilityElement(children: .contain).accessibilityIdentifier("station-walk-navigation")
+        }
+    }
+}
+
+/// Turn-by-turn walking guidance in the same dark banner as bus navigation.
+struct StationWalkBanner: View {
+    @ObservedObject var navigation: StationWalkingNavigation
+    var body: some View {
+        if navigation.target != nil, navigation.leg != nil, !navigation.calculating, navigation.issue == nil {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 14) {
+                    Image(systemName: "figure.walk").font(.system(size: 30, weight: .semibold)).frame(width: 40)
+                    Text(navigation.currentInstruction).liveFont(.title3, weight: .bold).lineLimit(3).minimumScaleFactor(0.8)
+                        .accessibilityIdentifier("station-walk-instruction")
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                if let next = navigation.nextInstruction {
+                    BannerStrip {
+                        Image(systemName: "arrow.turn.down.right").font(.caption.weight(.bold))
+                        Text(AppText.text("接著 · ") + next).lineLimit(2)
                     }
                 }
-            }.padding(16).background(Color(uiColor: .secondarySystemBackground), in: UnevenRoundedRectangle(topLeadingRadius: 26, topTrailingRadius: 26))
-                .accessibilityElement(children: .contain).accessibilityIdentifier("station-walk-navigation")
+            }
+            .modifier(InstructionBannerSurface())
+            .smoothChanges(navigation.currentInstruction)
         }
     }
 }
