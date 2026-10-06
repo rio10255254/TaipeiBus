@@ -77,6 +77,9 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var cityFleetMode = false
     @Published var highlightVehicle = true
     @Published var sheetDetent: PresentationDetent = .height(330)
+    /// The arriving-bus list is presented from the root view, so rebuilding the
+    /// waiting card while it settles cannot drop the request.
+    @Published var showingArrivingVehicles = false
     @Published var focus: MapFocus?
     @Published var focusRevision = 0
     @Published var selectionRevision = 0

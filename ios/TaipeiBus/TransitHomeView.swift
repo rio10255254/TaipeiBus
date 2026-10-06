@@ -278,6 +278,9 @@ struct TransitHomeView: View {
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .sheet(isPresented: $model.showingArrivingVehicles) {
+            if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
+        }
         .onChange(of: location.revision, initial: true) { _, _ in
             model.updateWalkingLocation()
             if let position = location.usableCoordinate { planner.locationArrived(position, metadata: model.metadata) }

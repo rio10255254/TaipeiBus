@@ -329,14 +329,10 @@ struct JourneyBoardingView: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
-    // Presentation state lives outside the per-second timeline so a redraw
-    // during the tap cannot drop the sheet.
-    @State private var showVehicles = false
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            JourneyBoardingContent(model: model, ride: ride, date: timeline.date, showVehicles: $showVehicles)
+            JourneyBoardingContent(model: model, ride: ride, date: timeline.date)
         }
-        .sheet(isPresented: $showVehicles) { VehicleArrivalsView(model: model, ride: ride) }
     }
 }
 
@@ -345,13 +341,12 @@ private struct JourneyBoardingContent: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
     let date: Date
-    @Binding var showVehicles: Bool
     @State private var showTimingInfo = false
     private var guide: BoardingGuide { BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date) }
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Button { showVehicles = true } label: {
+                Button { model.showingArrivingVehicles = true } label: {
                     HStack(spacing: 4) {
                         Text(AppText.text("到站車輛"))
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -387,7 +382,7 @@ private struct JourneyBoardingContent: View {
     }
 }
 
-private struct VehicleArrivalsView: View {
+struct VehicleArrivalsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
