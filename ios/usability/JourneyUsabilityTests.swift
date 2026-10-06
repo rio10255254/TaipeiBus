@@ -372,7 +372,7 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         launch()
         XCTAssertTrue(nearest.waitForExistence(timeout: 90))
         capture("store-01-nearby-map")
-        button("路線").tap()
+        button("point.topleft.down.to.point.bottomright.curvepath").press(forDuration: 0.15)
         XCTAssertTrue(button("route-key-藍").waitForExistence(timeout: 15))
         button("route-key-藍").tap(); button("route-key-2").tap(); button("route-key-7").tap()
         let route = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "route-result-", "藍27")).firstMatch
