@@ -1178,6 +1178,22 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
         XCTAssertTrue(button("journey-edit-origin").exists && button("journey-edit-destination").exists)
         capture("clear-compact-map-route-preview")
+        if ids.count > 1 {
+            let before = ready()["selected"] as? String
+            let pages = app.descendants(matching: .any).matching(identifier: "journey-preview-pages").firstMatch
+            pages.swipeLeft()
+            let changed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (self.ready()["selected"] as? String) != before
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 15), .completed)
+            XCTAssertEqual(ready()["started"] as? Bool, false, "Comparing a map preview must not start navigation")
+            capture("clear-second-route-preview-on-map")
+            pages.swipeRight()
+            let restored = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                (self.ready()["selected"] as? String) == before
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [restored], timeout: 15), .completed)
+        }
         button("journey-all-options").tap()
         XCTAssertEqual((0..<choices.count).map { choices.element(boundBy: $0).identifier }, ids)
         XCTAssertFalse(button("journey-start-navigation").exists)
