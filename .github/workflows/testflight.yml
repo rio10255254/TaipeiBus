@@ -235,6 +235,9 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
+      - name: Verify the existing shared data release before using account quota
+        if: inputs.publish_data
+        run: gh release view travel-time-data --repo "$GITHUB_REPOSITORY" >/dev/null
       - name: Collect bounded shared public time profiles
         env:
           REQUESTED_ROUTES: ${{ inputs.route_ids }}
@@ -247,7 +250,4 @@ jobs:
       - name: Publish validated source data for the beta app
         if: inputs.publish_data
         run: |
-          if ! gh release view travel-time-data --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create travel-time-data --repo "$GITHUB_REPOSITORY" --title "Shared official station travel times" --notes "Public station time profiles from TDX. Credentials and passenger information are excluded. See coverage.json for source gaps." --target "$GITHUB_SHA"
-          fi
           gh release upload travel-time-data "$RUNNER_TEMP/route-times/official-times.json" "$RUNNER_TEMP/route-times/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
