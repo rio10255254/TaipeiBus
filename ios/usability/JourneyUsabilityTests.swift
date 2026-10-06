@@ -38,6 +38,14 @@ class JourneyUsabilityTestBase: XCTestCase {
     var firstOption: XCUIElement {
         app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND enabled == true", "journey-option-")).firstMatch
     }
+    func waitForConfirmedChoices() {
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard let bytes = self.app.staticTexts["journey-timing-state"].label.data(using: .utf8),
+                  let state = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return false }
+            return state["checking"] as? Bool == false && self.firstOption.exists
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 160), .completed)
+    }
 }
 
 final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
@@ -262,6 +270,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 10)); button("搜尋目的地").tap()
         chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
+        waitForConfirmedChoices()
+        if button("journey-all-options").exists { button("journey-all-options").tap() }
         XCTAssertTrue(app.navigationBars["路線"].exists)
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
         XCTAssertTrue((1...3).contains(options.count))
@@ -385,9 +395,9 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         capture("store-12-in-app-walking")
     }
     func testStoreRealDestinationAndItinerary() {
-        launch(["--test-map-controls", "--test-journey-selection"])
-        XCTAssertTrue(nearest.waitForExistence(timeout: 90))
-        button("搜尋目的地").tap(); chooseNeihu()
+        launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
+        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 90))
+        button("journey-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard let data = self.app.staticTexts["journey-timing-state"].label.data(using: .utf8),
@@ -401,7 +411,7 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
         waitRenderedMap { ($0["zoom"] as? Double ?? 0) >= 10 && ($0["zoom"] as? Double ?? 99) < 16 }
         capture("store-05-boarding-map")
-        button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
+        button("journey-options").tap()
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
         capture("store-06-full-itinerary")
         button("返回地圖").tap()
