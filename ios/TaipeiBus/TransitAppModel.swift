@@ -575,6 +575,11 @@ final class TransitAppModel: ObservableObject {
             } else {
                 positionUncertain = true
             }
+            // Without new movement the bus is at worst where it was, so a fallback never exceeds the
+            // last movement-based remaining time; that is what jumped from 23 to 83 min and back.
+            if let last = onboardArrival, last.rideID == first.id, last.at != date {
+                riding[0] = min(riding[0], max(60, last.arrival.timeIntervalSince(last.at)))
+            }
             walking[0] = 0; arrivals[0] = 0
         }
         var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
