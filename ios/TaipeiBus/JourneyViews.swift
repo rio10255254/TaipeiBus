@@ -736,7 +736,7 @@ private struct JourneyRouteChain: View {
                     if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
                         Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     }
-                    RouteBadge(name: option.rides[index].route.localizedName)
+                    RouteBadge(name: option.rides[index].route.localizedName, compact: true)
                 }
             }
         }.lineLimit(1).minimumScaleFactor(0.8)
@@ -764,7 +764,7 @@ struct JourneyOptionsView: View {
                     })) {
                         ForEach(planner.options) { option in optionRow(option, at: timeline.date).tag(option.id) }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never)).frame(height: live.language == .english ? 146 : 122)
+                    .tabViewStyle(.page(indexDisplayMode: .never)).frame(height: (live.language == .english ? 146 : 122) * CGFloat(max(1, live.appearance.textScale)))
                     .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
                     .accessibilityIdentifier("journey-preview-pages")
                     HStack(spacing: 8) {

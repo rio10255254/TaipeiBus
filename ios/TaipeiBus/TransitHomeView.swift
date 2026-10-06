@@ -278,7 +278,7 @@ struct TransitHomeView: View {
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent == .height(420),
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(560) } })
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(420) } })
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
@@ -1112,9 +1112,11 @@ struct VehicleRow: View {
 struct RouteBadge: View {
     @Environment(\.liveSettings) private var live
     let name: String
+    var compact = false
     var body: some View {
-        Text(name).liveFont(.subheadline, weight: .bold).lineLimit(2)
-            .padding(.horizontal, 10 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale)).frame(minWidth: 56)
+        Text(name).liveFont(.subheadline, weight: .bold).lineLimit(compact ? 1 : 2).minimumScaleFactor(compact ? 0.75 : 1)
+            .padding(.horizontal, (compact ? 8 : 10) * CGFloat(live.appearance.spacingScale))
+            .padding(.vertical, (compact ? 4 : 8) * CGFloat(live.appearance.spacingScale)).frame(minWidth: compact ? 30 : 56)
             .foregroundStyle(Color(liveHex: live.appearance.accentColor))
             .background(Color(liveHex: live.appearance.accentColor).opacity(0.09), in: RoundedRectangle(cornerRadius: 11 * CGFloat(live.appearance.cornerScale)))
     }
