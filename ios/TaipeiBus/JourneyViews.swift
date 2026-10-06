@@ -745,6 +745,7 @@ private struct JourneyRouteChain: View {
 
 struct JourneyOptionsView: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let collapse: () -> Void
@@ -764,6 +765,7 @@ struct JourneyOptionsView: View {
                         ForEach(planner.options) { option in optionRow(option, at: timeline.date).tag(option.id) }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never)).frame(height: live.language == .english ? 146 : 122)
+                    .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
                     .accessibilityIdentifier("journey-preview-pages")
                     HStack(spacing: 8) {
                         ForEach(Array(planner.options.enumerated()), id: \.element.id) { index, option in

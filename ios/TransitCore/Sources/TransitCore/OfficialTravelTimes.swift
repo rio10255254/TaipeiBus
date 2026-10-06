@@ -16,7 +16,8 @@ public struct OfficialTravelTimes: Sendable {
         public let edges: [[String]]
         public let periods: [Period]
     }
-    private struct Document: Decodable { let schema: Int; let routes: [Route] }
+    private struct Document: Decodable { let schema: Int; let generatedAt: String?; let routes: [Route] }
+    public let generatedAt: Date?
     private struct Edge: Hashable, Sendable { let from: String; let to: String }
     private struct Profile: Sendable {
         let route: String
@@ -25,13 +26,14 @@ public struct OfficialTravelTimes: Sendable {
         let hours: [Int: [Int]]
     }
     private var indexed: [String: [Profile]] = [:]
-    public init() {}
+    public init() { generatedAt = nil }
     public init(data: Data) throws {
         guard data.count <= 32 * 1024 * 1024 else { throw FeedError.invalid("Official travel-time size") }
         let document = try JSONDecoder().decode(Document.self, from: data)
         guard document.schema == 1, document.routes.count <= 10_000 else { throw FeedError.invalid("Official travel-time schema") }
         let plain = ISO8601DateFormatter(), fractional = ISO8601DateFormatter()
         fractional.formatOptions.insert(.withFractionalSeconds)
+        generatedAt = document.generatedAt.flatMap { plain.date(from: $0) ?? fractional.date(from: $0) }
         for route in document.routes {
             guard !route.route.isEmpty, !route.subroute.isEmpty, ["0", "1", "2"].contains(route.direction),
                   route.edges.count <= 400, !route.edges.isEmpty,

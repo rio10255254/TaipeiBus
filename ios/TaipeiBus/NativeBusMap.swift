@@ -198,7 +198,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(tripNames)
             let waypointNames = MLNSymbolStyleLayer(identifier: "journey-waypoint-names", source: tripStops)
             waypointNames.predicate = NSPredicate(format: "waypoint == 1")
-            waypointNames.minimumZoomLevel = 12.8
+            waypointNames.minimumZoomLevel = 10.5
             waypointNames.text = NSExpression(forKeyPath: "name")
             waypointNames.textFontSize = NSExpression(forConstantValue: 11)
             waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
