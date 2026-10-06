@@ -320,6 +320,7 @@ struct JourneyPlanningView: View {
         editingOrigin = false; editingDestination = planner.destination == nil; query = ""
         search.cancel()
         if planner.destination != nil, planner.origin == nil { edit(origin: true) }
+        else if planner.destination != nil { collapse() }
     }
 }
 

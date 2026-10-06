@@ -182,6 +182,9 @@ struct NativeBusMap: UIViewRepresentable {
             style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
             style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
             style.setImage(journeyStopIcon(), forName: "journey-waypoint")
+            style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: .systemBlue), forName: "journey-boarding")
+            style.setImage(journeyEndpointIcon(symbol: "arrow.down", color: .systemBlue), forName: "journey-alighting")
+            style.setImage(journeyEndpointIcon(symbol: "flag.fill", color: .systemGreen), forName: "journey-destination")
             let tripDots = MLNSymbolStyleLayer(identifier: "journey-stop-dots", source: tripStops)
             tripDots.iconImageName = NSExpression(forKeyPath: "icon")
             tripDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
@@ -203,7 +206,16 @@ struct NativeBusMap: UIViewRepresentable {
             waypointNames.textFontSize = NSExpression(forConstantValue: 11)
             waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
             waypointNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -12)))
-            style.addLayer(waypointNames)
+            // Boarding and alighting names take priority over intermediate labels.
+            style.insertLayer(waypointNames, below: tripNames)
+            let destinationNames = MLNSymbolStyleLayer(identifier: "journey-destination-name", source: tripStops)
+            destinationNames.predicate = NSPredicate(format: "waypoint == 2")
+            destinationNames.minimumZoomLevel = 13
+            destinationNames.text = NSExpression(forKeyPath: "name")
+            destinationNames.textFontSize = NSExpression(forConstantValue: 12)
+            destinationNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
+            destinationNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -16)))
+            style.insertLayer(destinationNames, below: tripNames)
 
             let layer = NativeBusLayer(identifier: "native-buses")
             layer.onError = { [weak self] message in
@@ -268,6 +280,15 @@ struct NativeBusMap: UIViewRepresentable {
                 let circle = UIBezierPath(ovalIn: CGRect(x: 2, y: 2, width: 8, height: 8))
                 UIColor(liveHex: darkMode ? "#19222E" : "#FFFFFF").setFill(); circle.fill()
                 UIColor.systemBlue.setStroke(); circle.lineWidth = 2; circle.stroke()
+            }
+        }
+
+        private func journeyEndpointIcon(symbol: String, color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 26, height: 26)).image { _ in
+                let circle = UIBezierPath(ovalIn: CGRect(x: 3, y: 3, width: 20, height: 20))
+                color.setFill(); circle.fill(); UIColor.white.setStroke(); circle.lineWidth = 2; circle.stroke()
+                UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 10, weight: .bold))?
+                    .withTintColor(.white, renderingMode: .alwaysOriginal).draw(in: CGRect(x: 8, y: 8, width: 10, height: 10))
             }
         }
 
@@ -418,7 +439,7 @@ struct NativeBusMap: UIViewRepresentable {
             var features: [String: MLNPointFeature] = [:]
             func add(_ coordinate: Coordinate, id: String, title: String, waypoint: Bool = false) {
                 let feature = MLNPointFeature(); feature.coordinate = coordinate.locationCoordinate
-                feature.attributes = ["name": title, "stationID": id, "icon": waypoint ? "journey-waypoint" : id == "destination" ? "destination-marker" : "station-marker", "waypoint": waypoint ? 1 : 0]; features[id] = feature
+                feature.attributes = ["name": title, "stationID": id, "icon": waypoint ? "journey-waypoint" : id == "destination" ? "journey-destination" : "journey-boarding", "waypoint": waypoint ? 1 : id == "destination" ? 2 : 0]; features[id] = feature
             }
             let visibleRides = option.rides.enumerated().filter { _, ride in
                 !model.planner.started || model.planner.activeRide?.id == ride.id
@@ -430,6 +451,7 @@ struct NativeBusMap: UIViewRepresentable {
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: AppText.text(index == 0 ? "上車" : "轉乘") + " · " + ride.boarding.bilingualName)
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
                     title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
+                features[ride.alighting.stationID]?.attributes["icon"] = "journey-alighting"
             }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
@@ -955,7 +977,7 @@ struct NativeBusMap: UIViewRepresentable {
             let building = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#354152" : theme.buildingColor))
             (style.layer(withIdentifier: "building") as? MLNFillStyleLayer)?.fillColor = building
             (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = building
-            for id in ["journey-stop-names", "journey-waypoint-names", "nearby-station-names"] {
+            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names"] {
                 if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
                     names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F3F6FB" : "#252B32"))
                     names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#10151D" : "#FFFFFF"))
@@ -966,6 +988,9 @@ struct NativeBusMap: UIViewRepresentable {
             style.setImage(stationIcon(size: 26), forName: "selected-station-marker")
             style.setImage(stationIcon(size: 22, symbol: "flag.fill"), forName: "destination-marker")
             style.setImage(journeyStopIcon(), forName: "journey-waypoint")
+            style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: .systemBlue), forName: "journey-boarding")
+            style.setImage(journeyEndpointIcon(symbol: "arrow.down", color: .systemBlue), forName: "journey-alighting")
+            style.setImage(journeyEndpointIcon(symbol: "flag.fill", color: .systemGreen), forName: "journey-destination")
         }
 
         private func applyLabelLanguage(_ style: MLNStyle) {
