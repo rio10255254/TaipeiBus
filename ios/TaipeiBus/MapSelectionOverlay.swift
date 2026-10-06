@@ -67,10 +67,8 @@ struct MapContextLabels: View {
                 let available = CGRect(x: 16, y: freeTop, width: geometry.size.width - 32,
                     height: max(1, geometry.size.height - bottomClearance - 12 - freeTop))
                 // The right-hand glass control stack and the compass beneath it.
-                var obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
-                if let user = overlay.userPoint {
-                    obstacles.append(CGRect(x: user.x - frame.minX - 28, y: user.y - frame.minY - 28, width: 56, height: 56))
-                }
+                let obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
+                    + (overlay.userPoint.map { [CGRect(x: $0.x - frame.minX - 28, y: $0.y - frame.minY - 28, width: 56, height: 56)] } ?? [])
                 let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
                     inside: available, avoiding: obstacles)
                 let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
