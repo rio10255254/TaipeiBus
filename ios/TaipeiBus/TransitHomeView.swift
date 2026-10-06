@@ -440,9 +440,11 @@ extension View {
 struct PhoneGlassGroup<Content: View>: View {
     @Environment(\.liveSettings) private var live
     private let content: Content
-    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    private let spacing: CGFloat
+    /// Glass shapes closer than `spacing` blend into one Liquid Glass surface.
+    init(spacing: CGFloat = 3, @ViewBuilder content: () -> Content) { self.spacing = spacing; self.content = content() }
     @ViewBuilder var body: some View {
-        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: 3) { content } }
+        if #available(iOS 26.0, *) { GlassEffectContainer(spacing: spacing) { content } }
         else { content }
     }
 }
@@ -510,7 +512,7 @@ private struct HomeSearchRow: View {
     let browse: (BrowseMode) -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     private func circle(_ symbol: String) -> some View {
-        Image(systemName: symbol).liveFont(.title3).frame(width: 52, height: 56).contentShape(Rectangle())
+        Image(systemName: symbol).liveFont(.title3).frame(width: 56, height: 56).contentShape(Circle())
     }
     var body: some View {
         HStack(spacing: 10) {
@@ -530,10 +532,11 @@ private struct HomeSearchRow: View {
             .phoneGlass(in: Capsule())
             .accessibilityLabel(live.text("搜尋目的地"))
             if hasSelection { Spacer(minLength: 0) }
+            // Touching circles blend into one capsule inside the bottom glass container.
             HStack(spacing: 0) {
                 if live.display.stationShortcut || hasSelection {
                     Button { browse(.stops) } label: { circle("mappin.and.ellipse") }
-                        .foregroundStyle(.primary).accessibilityLabel(live.text("站牌"))
+                        .foregroundStyle(.primary).phoneGlass(in: Circle()).accessibilityLabel(live.text("站牌"))
                 }
                 if let bus = model.selectedVehicle {
                     Button {
@@ -545,10 +548,11 @@ private struct HomeSearchRow: View {
                             .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     }
                     .foregroundStyle(model.following ? accent : Color.primary)
+                    .phoneGlass(in: Circle())
                     .accessibilityLabel(model.following ? AppText.text("停止跟車") : AppText.text("跟車"))
                 } else if live.display.routeShortcut || hasSelection {
                     Button { browse(.routes) } label: { circle("point.topleft.down.to.point.bottomright.curvepath") }
-                        .foregroundStyle(.primary).accessibilityLabel(live.text("路線"))
+                        .foregroundStyle(.primary).phoneGlass(in: Circle()).accessibilityLabel(live.text("路線"))
                 }
                 if model.selectedRouteID != nil || model.selectedStationID != nil {
                     Button {
@@ -556,16 +560,14 @@ private struct HomeSearchRow: View {
                         else if model.canReturnToRouteStation { model.returnToRouteStation() }
                         else { model.clearSelection() }
                     } label: {
-                        Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 52, height: 56).contentShape(Rectangle())
+                        Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 56, height: 56).contentShape(Circle())
                     }
                     .foregroundStyle(.secondary)
+                    .phoneGlass(in: Circle())
                     .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("關閉選取"))
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
-            .buttonStyle(PhonePressStyle())
-            .padding(.horizontal, 2)
-            .phoneGlass(in: Capsule(), interactive: false)
         }
         .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
         .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
@@ -584,31 +586,30 @@ private struct MapControlStack: View {
     let showsCityFleet: Bool
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
-    private var separator: some View {
-        Rectangle().fill(Color.primary.opacity(0.14)).frame(width: 28, height: 0.6)
-    }
     var body: some View {
-        PhoneGlassGroup {
-            VStack(spacing: 0) {
+        // Each control keeps its own interactive glass, as in 1.1.9; the
+        // container blends the touching circles into one Apple Maps column.
+        PhoneGlassGroup(spacing: 12) {
+            VStack(spacing: 4) {
                 Button(action: showInformation) {
                     Image(systemName: "map").liveFont(.title3).frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                 }
                 .foregroundStyle(.primary)
+                .phoneGlass(in: Circle())
                 .accessibilityLabel(live.text("資料來源與地圖設定"))
                 if showsCityFleet {
-                    separator
                     Button { model.toggleCityFleet() } label: {
                         Image(systemName: model.cityFleetMode ? "globe.asia.australia.fill" : "globe.asia.australia")
                             .liveFont(.title3).frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                             .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
                     }
                     .foregroundStyle(model.cityFleetMode ? accent : Color.primary)
+                    .phoneGlass(in: Circle())
                     .accessibilityIdentifier("city-fleet-toggle")
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
                     .transition(.opacity)
                 }
-                separator
                 Button {
                     model.cycleUserTracking()
                 } label: {
@@ -622,13 +623,12 @@ private struct MapControlStack: View {
                     }.frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                 }
                 .foregroundStyle(model.userMapMode == .free ? Color.primary : accent)
+                .phoneGlass(in: Circle())
                 .accessibilityIdentifier("map-location")
                 .accessibilityLabel(live.text("定位與地圖方向"))
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
             }
-            .buttonStyle(PhonePressStyle())
-            .phoneGlass(in: RoundedRectangle(cornerRadius: MapChrome.controlSize / 2, style: .continuous), interactive: false)
             .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: showsCityFleet)
         }
