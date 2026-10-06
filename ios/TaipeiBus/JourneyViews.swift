@@ -1012,12 +1012,19 @@ struct JourneyArrivalView: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
     var walk: WalkingLeg?
+    private var requiresVariantConfirmation: Bool {
+        let allowed = model.metadata.routeIDs(serving: ride)
+        return model.metadata.variants(routeID: ride.route.id).contains { variant in
+            !allowed.contains(variant.id) && model.metadata.orderedStops(routeID: variant.id, direction: ride.direction)
+                .contains { $0.id == ride.boarding.id || $0.stationID == ride.boarding.stationID }
+        }
+    }
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { timeline in
             let eta = model.snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: timeline.date)
             VStack(alignment: .leading, spacing: 4) {
                 Text(AppText.text("路線到站：%@", EstimateFeed.label(eta))).liveFont(.subheadline, weight: .medium).monospacedDigit()
-                if model.metadata.variants(routeID: ride.route.id).count > 1 {
+                if requiresVariantConfirmation {
                     Text(AppText.text("上車前請確認「%@」走法。", ride.route.localizedDisplayName)).liveFont(.caption).foregroundStyle(.secondary)
                 }
                 if let eta, eta >= 0, let duration = walk?.duration, duration > Double(eta) + 45 {
