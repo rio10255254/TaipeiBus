@@ -2,9 +2,9 @@ const fs=require('fs'),path=require('path');
 const {chromium}=require('playwright');
 const shots=[
  ['store-07-live-bus-in-3d.png','01-live-bus.png','公車現在到哪了','點車牌，跟著這一輛看。'],
- ['store-08-bus-first-navigation.png','02-waiting.png','下一班還要等多久','先看官方時間，再看往站牌開來的車。'],
+ ['store-08-bus-first-navigation.png','02-waiting.png','上車前，先看下一步','上車站、官方時間，留在地圖上。'],
  ['store-12-in-app-walking.png','03-walking.png','走到站牌，不用換 App','路線、指引和剩餘時間，都在這裡。'],
- ['store-09-onboard-live-guidance.png','04-onboard.png','下一站在哪，還有多久','上車後，沿途站牌與行程接著看。'],
+ ['store-09-onboard-live-guidance.png','04-onboard.png','哪站下車，沿途接著看','確認車牌，查看下一站與下車時間。'],
  ['store-02-trip-choices.png','05-plan.png','要去哪裡，先看怎麼搭','比較走路、候車和搭車的時間。'],
  ['store-03-route-keypad.png','06-search.png','常用路線，幾下就找到','用公車專用鍵盤找路線，也能搜站名。']
 ];
@@ -17,7 +17,7 @@ const escape=s=>s.replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>',
   const source=path.join(input,raw);if(!fs.existsSync(source))throw Error('Missing actual native capture '+raw);
   const png=fs.readFileSync(source);if(png.readUInt32BE(16)!==1320||png.readUInt32BE(20)!==2868)throw Error('Unexpected capture dimensions '+raw);
   const html=`<!DOCTYPE html><html lang="zh-Hant"><meta charset="utf-8"><style>
-  *{box-sizing:border-box}html,body{margin:0;width:1320px;height:2868px;overflow:hidden;background:#f4f7fa}
+  *{box-sizing:border-box}html,body{margin:0;width:1320px;height:2868px;overflow:hidden;background:#f5f5f2}
   body{font-family:"Microsoft JhengHei UI","Microsoft JhengHei",sans-serif;color:#152334}
   .brand{position:absolute;left:96px;top:65px;font-size:30px;letter-spacing:1px;color:#627082;font-weight:500}
   h1{position:absolute;left:92px;top:121px;width:1140px;margin:0;font-size:80px;line-height:1.28;letter-spacing:-2px;font-weight:700}
