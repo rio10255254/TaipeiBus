@@ -1,0 +1,31 @@
+{
+  "version": "1.1.9",
+  "tested_app_source": "1c08aa6",
+  "final_copy_source": "6011c9f",
+  "full_ui_run": "https://github.com/rio10255254/TaipeiBus/actions/runs/37423836053",
+  "copy_ui_run": "https://github.com/rio10255254/TaipeiBus/actions/runs/37426119865",
+  "full_data_run": "https://github.com/rio10255254/TaipeiBus/actions/runs/37423383939",
+  "full_ui_cases": {
+    "light": 5,
+    "dark": 2,
+    "same_process_appearance": "passed"
+  },
+  "copy_ui_cases": 1,
+  "core_cases": 150,
+  "explicit_live_cases_skipped_in_offline_phase": 7,
+  "native_device": "iPhone 17 simulator",
+  "visuals_reviewed": [
+    "compact map and route list",
+    "whole trip steps",
+    "alternate route swipe without navigation start",
+    "official time source popup",
+    "English and Chinese sign names",
+    "system dark appearance",
+    "short complete time explanation"
+  ],
+  "limitations": [
+    "Simulator walkthroughs do not establish physical-device FPS or real arrival error.",
+    "57 source route families missing; some current patterns or hours still need estimates.",
+    "Apple proprietary route weighting and selected vehicle identity are not available from the aggregate ETA response."
+  ]
+}
