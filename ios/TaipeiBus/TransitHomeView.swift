@@ -541,7 +541,7 @@ private struct HomeSearchRow: View {
                     .foregroundStyle(model.following ? accent : Color.primary)
                     .accessibilityLabel(model.following ? AppText.text("停止跟車") : AppText.text("跟車"))
                 } else if live.display.routeShortcut || hasSelection {
-                    Button { browse(.routes) } label: { circle("number") }
+                    Button { browse(.routes) } label: { circle("point.topleft.down.to.point.bottomright.curvepath") }
                         .foregroundStyle(.primary).accessibilityLabel(live.text("路線"))
                 }
                 if model.selectedRouteID != nil || model.selectedStationID != nil {

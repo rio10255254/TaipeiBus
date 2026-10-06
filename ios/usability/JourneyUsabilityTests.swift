@@ -282,7 +282,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-walk-to-stop").tap()
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertTrue(button("journey-board").isHittable); capture("walking-on-the-same-map")
-        button("journey-options").tap(); button("更多行程選項").tap(); button("查看行程").tap()
+        // Once navigation has started, the trip button opens the itinerary directly.
+        button("journey-options").tap()
         capture("full-itinerary")
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
         let internalWalk = button("journey-in-app-walk-0")
