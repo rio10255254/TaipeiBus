@@ -414,12 +414,15 @@ private struct MapBottomControlsHeightKey: PreferenceKey {
 private struct PhoneGlassBackground<S: Shape>: ViewModifier {
     @Environment(\.liveSettings) private var live
     let shape: S
+    /// Interactive glass reacts to touches itself, so it is only used on a single
+    /// control. Groups of buttons keep plain glass and let each button take its tap.
+    var interactive = true
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ViewBuilder func body(content: Content) -> some View {
         if reduceTransparency || live.appearance.solidSurfaces {
             content.background(Color(uiColor: .systemBackground), in: shape)
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(.regular.interactive(), in: shape)
+            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
         } else {
             content.background(.regularMaterial, in: shape)
         }
@@ -428,7 +431,7 @@ private struct PhoneGlassBackground<S: Shape>: ViewModifier {
 }
 
 extension View {
-    func phoneGlass<S: Shape>(in shape: S) -> some View { modifier(PhoneGlassBackground(shape: shape)) }
+    func phoneGlass<S: Shape>(in shape: S, interactive: Bool = true) -> some View { modifier(PhoneGlassBackground(shape: shape, interactive: interactive)) }
 }
 
 struct PhoneGlassGroup<Content: View>: View {
@@ -559,7 +562,7 @@ private struct HomeSearchRow: View {
             }
             .buttonStyle(PhonePressStyle())
             .padding(.horizontal, 2)
-            .phoneGlass(in: Capsule())
+            .phoneGlass(in: Capsule(), interactive: false)
         }
         .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
         .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
@@ -622,7 +625,7 @@ private struct MapControlStack: View {
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
             }
             .buttonStyle(PhonePressStyle())
-            .phoneGlass(in: RoundedRectangle(cornerRadius: MapChrome.controlSize / 2, style: .continuous))
+            .phoneGlass(in: RoundedRectangle(cornerRadius: MapChrome.controlSize / 2, style: .continuous), interactive: false)
             .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: showsCityFleet)
         }
