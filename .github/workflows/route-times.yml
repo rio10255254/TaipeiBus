@@ -1,0 +1,45 @@
+name: Official route travel times
+on:
+  workflow_dispatch:
+    inputs:
+      routes:
+        description: 'Comma-separated published route IDs; empty covers the full Taipei catalog'
+        type: string
+        default: ''
+      publish:
+        description: 'Publish validated public data for the beta app'
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: official-route-times
+  cancel-in-progress: false
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+      TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect bounded shared public time profiles
+        env:
+          REQUESTED_ROUTES: ${{ inputs.routes }}
+        run: python3 ios/release/collect-route-times.py --routes "$REQUESTED_ROUTES" --out "$RUNNER_TEMP/route-times/official-times.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: official-route-times-${{ github.run_id }}
+          path: ${{ runner.temp }}/route-times/
+          retention-days: 30
+      - name: Publish only validated source data
+        if: inputs.publish
+        env:
+          RELEASE_TITLE: Shared official station travel times
+        run: |
+          if ! gh release view travel-time-data --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create travel-time-data --repo "$GITHUB_REPOSITORY" --title "$RELEASE_TITLE" --notes "Public station-to-station time profiles from TDX. Credentials and passenger information are excluded. See coverage.json for source gaps." --target "$GITHUB_SHA"
+          fi
+          gh release upload travel-time-data "$RUNNER_TEMP/route-times/official-times.json" "$RUNNER_TEMP/route-times/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
