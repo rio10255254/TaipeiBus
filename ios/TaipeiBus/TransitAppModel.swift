@@ -523,7 +523,7 @@ final class TransitAppModel: ObservableObject {
     private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
     private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
         guard let onboardArrival, onboardArrival.rideID == ride.id,
-              (0...180).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
+              (0...300).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
         return max(60, onboardArrival.arrival.timeIntervalSince(date))
     }
 
@@ -564,7 +564,8 @@ final class TransitAppModel: ObservableObject {
                 } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
                           let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
                     let total = abs(alight.match.along - board.match.along)
-                    if total > 1 { riding[0] *= min(1.5, max(0, progress.distance / total)) }
+                    // A delayed report can still sit before the boarding stop; never stretch the ride beyond its plan.
+                    if total > 1 { riding[0] *= min(1, max(0, progress.distance / total)) }
                 }
             } else if let held = heldOnboardSeconds(first, at: date) {
                 riding[0] = held
