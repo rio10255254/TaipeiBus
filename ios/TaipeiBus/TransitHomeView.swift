@@ -1141,6 +1141,8 @@ private struct AppInformationView: View {
                     Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
                     Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
                     Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
+                    Text(AppText.text("站間車程使用交通部 TDX 公布的分時段資料；來源不足時仍標示估計。"))
+                    Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
@@ -1180,7 +1182,7 @@ private struct PrivacyExplanationView: View {
                 Text(AppText.text("地圖供應者會收到目前畫面需要的圖磚請求及網路連線資訊，因此可能得知你正在查看的大致區域。"))
             }
             Section(AppText.text("內容更新")) {
-                Text(AppText.text("搜尋別名、文字、外觀及既有搭車設定會從 GitHub 下載。這個請求不包含定位或搜尋文字；GitHub 會收到一般網路連線資訊。"))
+                Text(AppText.text("搜尋別名、文字、外觀、既有搭車設定與共用車程資料會從 GitHub 下載。這個請求不包含定位或搜尋文字；GitHub 會收到一般網路連線資訊。"))
             }
             Section(AppText.text("保存在手機")) {
                 Text(AppText.text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。"))

@@ -72,4 +72,36 @@ final class OfficialTravelTimeTests: XCTestCase {
         XCTAssertEqual(forecast.ridingEstimate(ride, metadata: metadata, at: now,
             travellingAt: date("2026-10-06T11:15:00+08:00")).seconds, 1200)
     }
+
+    func testCandidateSearchUsesOfficialTimesBeforeDiscardingRoutes() throws {
+        let source = RidingTrafficTests().source()
+        var metadata = source.0
+        let first = source.1.stops.first!, last = source.1.stops.last!
+        for stop in source.1.stops {
+            metadata.stations[stop.stationID] = Station(id: stop.stationID, name: stop.name,
+                coordinate: stop.coordinate, address: "", bearing: "E", stopIDs: [stop.id])
+        }
+        let competitor = BusRoute(id: "shorter-road", parentID: "other-family", name: "另一條路線",
+                                  variantName: "", departure: "起點", destination: "終點")
+        metadata.routes[competitor.id] = competitor
+        let a = BusStop(id: "a", routeID: competitor.parentID, stationID: first.stationID, name: first.name,
+                        direction: "0", sequence: 0, coordinate: first.coordinate)
+        let b = BusStop(id: "b", routeID: competitor.parentID, stationID: last.stationID, name: last.name,
+                        direction: "0", sequence: 1, coordinate: last.coordinate)
+        metadata.stops[a.id] = a; metadata.stops[b.id] = b
+        metadata.paths[competitor.id] = [StopReference(stopID: a.id, sequence: 0), StopReference(stopID: b.id, sequence: 1)]
+        metadata.lines["sub:" + competitor.id] = RouteLine(coordinates: [a.coordinate, b.coordinate])
+        metadata.rebuildJourneys()
+        let routes: [[String: Any]] = [
+            ["route": "family", "subroute": "observed", "direction": "0", "updated": "2026-10-05T05:26:38+08:00",
+             "edges": (0..<4).map { ["s\($0)", "s\($0 + 1)"] },
+             "periods": [["weekday": 2, "startHour": 10, "endHour": 11, "seconds": [50, 50, 50, 50]]]],
+            ["route": "other-family", "subroute": "shorter-road", "direction": "0", "updated": "2026-10-05T05:26:38+08:00",
+             "edges": [["a", "b"]], "periods": [["weekday": 2, "startHour": 10, "endHour": 11, "seconds": [900]]]]]
+        metadata.officialTravelTimes = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: ["schema": 1, "routes": routes]))
+        let result = TripPlanner(metadata: metadata).plan(from: first.coordinate, to: last.coordinate,
+            maximumWalk: 30, limit: 1, at: date("2026-10-06T10:15:00+08:00"))
+        XCTAssertEqual(result.first?.rides.first?.route.id, "observed")
+        XCTAssertEqual(result.first?.rideSeconds.first, 200)
+    }
 }
