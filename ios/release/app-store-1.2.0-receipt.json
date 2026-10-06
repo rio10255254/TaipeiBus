@@ -1,0 +1,62 @@
+{
+  "app_id": "6818475740",
+  "version": "1.2.0",
+  "version_id": "70145934-18ab-4b39-845c-663fc8cfd20d",
+  "state": "PREPARE_FOR_SUBMISSION",
+  "enabled_territories": [
+    "TWN"
+  ],
+  "price": 0,
+  "currency": "TWD",
+  "automatic_release": true,
+  "screenshot_set_id": "5ff30e65-8c0e-4bd0-add3-32f804d56788",
+  "screenshots": [
+    {
+      "id": "85000019-669a-8edc-8030-6fb258cae777",
+      "file_name": "01-live-bus.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "6ede320dda2fe5642e9f914830aa9a1b"
+    },
+    {
+      "id": "8fc00019-669a-8edc-8030-01cb6d6e3440",
+      "file_name": "03-walking.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "904d9c6586c2079d1b021861bbc8734c"
+    },
+    {
+      "id": "9b000019-669a-8edc-8013-e501e5897316",
+      "file_name": "04-onboard.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "3c705c8bf2e363d276cc4497864f2288"
+    },
+    {
+      "id": "b6800019-669a-8edc-802b-01ba17aecc74",
+      "file_name": "05-plan.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "df15ee1be5daac32582c24db9acc93da"
+    },
+    {
+      "id": "9a400019-669a-8edc-8000-44689bc79094",
+      "file_name": "06-search.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "967b1232c5ff81787e75ad1eb2ff928a"
+    }
+  ],
+  "metadata_verified": true,
+  "checked_at": "2026-10-06T13:54:47Z",
+  "status": "submitted_for_app_review",
+  "submission_id": "03fff487-e97b-43cf-91ff-01a1c02b4f71",
+  "submission_state": "WAITING_FOR_REVIEW",
+  "build_id": "e2596246-9ca5-4410-bd87-fc404d191fba",
+  "submitted_at": "2026-10-06T13:54:55Z"
+}
