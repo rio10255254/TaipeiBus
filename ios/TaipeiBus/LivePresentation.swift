@@ -135,3 +135,45 @@ struct BilingualName: View {
         }.accessibilityElement(children: .combine).smoothChanges(live.language)
     }
 }
+
+/// Taipei route families keep their published sign colours so a badge, its map
+/// line and the navigation banner read as the same route at a glance. Every
+/// tint keeps white text at 4.5:1 or better.
+enum RouteTint {
+    static let general = "#1F6FD1"
+    static func hex(for name: String) -> String {
+        let value = name.trimmingCharacters(in: .whitespaces)
+        let lower = value.lowercased()
+        func starts(_ chinese: String, _ english: String) -> Bool { value.hasPrefix(chinese) || lower.hasPrefix(english) }
+        if starts("紅", "red") { return "#C62828" }
+        if starts("藍", "blue") { return "#1A4E9C" }
+        if starts("棕", "brown") { return "#8A5A2B" }
+        if starts("綠", "green") { return "#1B7F38" }
+        if starts("橘", "orange") { return "#C25E00" }
+        if starts("黃", "yellow") { return "#8F6C00" }
+        if starts("小", "minibus") || (lower.hasPrefix("s") && value.dropFirst().first?.isNumber == true) { return "#0F7C80" }
+        if value.contains("幹線") || lower.contains("metro bus") { return "#6E3FA3" }
+        return general
+    }
+    static func color(for name: String) -> Color { Color(liveHex: hex(for: name)) }
+    /// Map lines draw on a dark basemap in dark mode, so lift them toward white.
+    static func mapHex(for name: String, dark: Bool) -> String {
+        guard dark else { return hex(for: name) }
+        let base = UIColor(liveHex: hex(for: name))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        base.getRed(&r, green: &g, blue: &b, alpha: &a)
+        func channel(_ value: CGFloat) -> Int { Int(((value + (1 - value) * 0.32) * 255).rounded()) }
+        return String(format: "#%02X%02X%02X", channel(r), channel(g), channel(b))
+    }
+}
+
+/// Shared measurements for the Apple Maps style cards, banners and controls.
+enum MapChrome {
+    static let cardRadius: CGFloat = 26
+    static let controlSize: CGFloat = 48
+    static let walkingLight = "#1F6FD1"
+    static let walkingDark = "#5AA2FF"
+    static let destructive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FF6961") : UIColor(liveHex: "#C4151C") })
+    static let positive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#5EDB86") : UIColor(liveHex: "#1A7F37") })
+    static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
+}

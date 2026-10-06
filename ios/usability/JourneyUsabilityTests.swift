@@ -546,7 +546,7 @@ final class WalkingAndReadabilityUsabilityTests: JourneyUsabilityTestBase {
         }
         XCTAssertLessThan(camera()["pitch"] as? Double ?? 90, 1)
         if ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true" {
-            XCTAssertEqual(camera()["walkingLineColor"] as? String, "#FFB340")
+            XCTAssertEqual(camera()["walkingLineColor"] as? String, "#5AA2FF")
         }
         XCTAssertTrue(app.staticTexts["walking-live-status"].waitForExistence(timeout: 10))
         capture("walking-orange-casing-real-road-and-readable-controls")
