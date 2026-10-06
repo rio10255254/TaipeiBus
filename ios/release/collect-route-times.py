@@ -94,7 +94,8 @@ def main():
             missing.append(route)
         print(f'Official profiles {index + 1}/{len(requested)}; route {route}; patterns {len(decoded)}', flush=True)
     result = {'schema': 1, 'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-              'source': BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/{RouteID}', 'routes': profiles}
+              'source': BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/{RouteID}',
+              'attribution': '交通部運輸資料流通服務平臺（TDX）／臺北市公車資料', 'license': BASE + '/term', 'routes': profiles}
     blob = json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()
     if not profiles or len(blob) > 32 * 1024 * 1024:
         raise ValueError('Empty or oversized catalog; existing public data must remain unchanged')

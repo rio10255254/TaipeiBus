@@ -18,6 +18,10 @@ on:
         description: 'Recheck the live official fleet (disable for UI-only reruns after a passed data audit)'
         type: boolean
         default: true
+      official_times_audit:
+        description: 'Also require the published shared official time catalog and verify every route'
+        type: boolean
+        default: false
       preview_scope:
         description: 'Choose which iPhone screens to capture'
         type: choice
@@ -106,6 +110,20 @@ jobs:
           with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
               list(executor.map(fetch, ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape', 'GetBusData', 'GetEstimateTime']))
           PY
+          if [ '${{ inputs.official_times_audit }}' = 'true' ]; then
+            export BUS_OFFICIAL_TRAVEL_TIMES="$BUS_LIVE_FEEDS_DIRECTORY/OfficialTravelTimes.json"
+            python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from urllib.request import urlopen
+          with urlopen('https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json', timeout=45) as response:
+              data = response.read(32 * 1024 * 1024 + 1)
+          if len(data) > 32 * 1024 * 1024:
+              raise SystemExit('Official catalog exceeds the verified size limit')
+          Path(os.environ['BUS_OFFICIAL_TRAVEL_TIMES']).write_bytes(data)
+          PY
+            swift test --package-path ios/TransitCore --filter OfficialTravelTimeTests.testLiveFullCatalogReportsCoverageAcrossEveryPublishedRoute | tee "$RUNNER_TEMP/official-time-audit.log"
+          fi
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"

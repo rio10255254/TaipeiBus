@@ -2,6 +2,7 @@ import XCTest
 @testable import TransitCore
 
 final class OfficialTravelTimeTests: XCTestCase {
+    private struct Document: Decodable { let routes: [OfficialTravelTimes.Route] }
     func date(_ text: String) -> Date { ISO8601DateFormatter().date(from: text)! }
     func catalog(route: String = "family", subroute: String = "arbitrary-subroute", updated: String = "2026-10-05T05:26:38+08:00", seconds: [Int] = [30]) throws -> OfficialTravelTimes {
         let object: [String: Any] = ["schema": 1, "routes": [["route": route, "subroute": subroute, "direction": "1", "updated": updated, "edges": [["from", "to"]], "periods": [["weekday": 2, "startHour": 10, "endHour": 11, "seconds": seconds]]]]]
@@ -103,5 +104,54 @@ final class OfficialTravelTimeTests: XCTestCase {
             maximumWalk: 30, limit: 1, at: date("2026-10-06T10:15:00+08:00"))
         XCTAssertEqual(result.first?.rides.first?.route.id, "observed")
         XCTAssertEqual(result.first?.rideSeconds.first, 200)
+    }
+
+    func testLiveFullCatalogReportsCoverageAcrossEveryPublishedRoute() throws {
+        guard let directory = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"],
+              let catalogPath = ProcessInfo.processInfo.environment["BUS_OFFICIAL_TRAVEL_TIMES"] else {
+            throw XCTSkip("Explicit full official-data coverage audit only")
+        }
+        let root = URL(fileURLWithPath: directory), data = try Data(contentsOf: URL(fileURLWithPath: catalogPath))
+        var feeds: [String: Data] = [:]
+        for name in ["GetRoute", "GetStop", "GetPathDetail", "GetBusShape"] {
+            feeds[name] = try Data(contentsOf: root.appendingPathComponent(name + ".json"))
+        }
+        var metadata = try FeedDecoder.metadata(feeds: feeds)
+        metadata.officialTravelTimes = try OfficialTravelTimes(data: data)
+        let document = try JSONDecoder().decode(Document.self, from: data), at = Date()
+        XCTAssertGreaterThan(metadata.officialTravelTimes.patternCount, 100)
+        XCTAssertGreaterThan(document.routes.count, 100)
+        var complete = 0, partial = 0, absent = 0, edges = 0, available = 0
+        var records: [[String: Any]] = []
+        for group in metadata.routeCatalog.groups {
+            var groupAvailable = 0, groupEdges = 0
+            for route in group.variants {
+                for direction in ["0", "1", "2"] {
+                    let stops = metadata.orderedStops(routeID: route.id, direction: direction)
+                    guard stops.count >= 2 else { continue }
+                    var matches = 0
+                    for index in stops.indices.dropFirst() {
+                        if let value = metadata.officialTravelTimes.seconds(route: route.parentID, subroute: route.id,
+                            direction: direction, from: stops[index - 1].id, to: stops[index].id, travellingAt: at, observedAt: at) {
+                            XCTAssertTrue((1...1800).contains(value)); matches += 1
+                        }
+                    }
+                    groupAvailable += matches; groupEdges += stops.count - 1
+                    if matches == stops.count - 1 { complete += 1 }
+                    else if matches > 0 { partial += 1 }
+                    else { absent += 1 }
+                }
+            }
+            edges += groupEdges; available += groupAvailable
+            records.append(["route": group.id, "name": group.route.name, "official_edges": groupAvailable,
+                            "published_edges": groupEdges])
+        }
+        XCTAssertGreaterThan(available, 100)
+        let result: [String: Any] = ["source_patterns": document.routes.count, "loaded_patterns": metadata.officialTravelTimes.patternCount,
+            "published_route_families": records.count, "complete_patterns_now": complete, "partial_patterns_now": partial,
+            "missing_patterns_now": absent, "official_edges_now": available, "published_edges": edges, "routes": records]
+        try JSONSerialization.data(withJSONObject: result, options: [.prettyPrinted, .sortedKeys])
+            .write(to: root.appendingPathComponent("official-travel-time-coverage.json"))
+        print("Official data coverage: \(records.count) route families, \(complete) complete / \(partial) partial / \(absent) missing patterns at the audit hour; \(available) / \(edges) matching stop pairs.")
     }
 }

@@ -1141,7 +1141,7 @@ private struct AppInformationView: View {
                     Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
                     Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
                     Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
-                    Text(AppText.text("站間車程使用交通部 TDX 公布的分時段資料；來源不足時仍標示估計。"))
+                    Text(AppText.text("站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。"))
                     Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
                 }
                 Section(AppText.text("地圖")) {
