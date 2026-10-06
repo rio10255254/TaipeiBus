@@ -25,6 +25,7 @@ struct JourneyPlanningView: View {
     @State private var stationResults: [Station] = []
     @State private var stationResultQuery = ""
     @State private var showingRankingInfo = false
+    @State private var searchReturnToItinerary = false
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
     private var searchContext: Coordinate? {
@@ -77,7 +78,8 @@ struct JourneyPlanningView: View {
                         } else if searchingPlaces, planner.destination != nil {
                             focused = false; resolveTask?.cancel(); search.cancel()
                             resolving = false; editingOrigin = false; editingDestination = false
-                            if !planner.started { collapse() }
+                            showingItinerary = searchReturnToItinerary; searchReturnToItinerary = false
+                            if !planner.started { if showingItinerary { expand() } else { collapse() } }
                         } else { dismiss() }
                     }.accessibilityIdentifier("journey-back")
                 }
@@ -286,6 +288,7 @@ struct JourneyPlanningView: View {
         }.buttonStyle(.plain).disabled(resolving)
     }
     private func edit(origin: Bool) {
+        searchReturnToItinerary = showingItinerary || planner.started
         expand()
         resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
         editingOrigin = origin; editingDestination = !origin; showingItinerary = false; query = ""; searchError = nil; focused = true
@@ -310,6 +313,7 @@ struct JourneyPlanningView: View {
         }
     }
     private func choose(_ place: TravelPlace) {
+        searchReturnToItinerary = false
         focused = false
         if editingOrigin { planner.setOrigin(place, metadata: model.metadata) }
         else { planner.setDestination(place, metadata: model.metadata, currentLocation: location.usableCoordinate) }
@@ -881,7 +885,7 @@ struct JourneyItineraryView: View {
                                         VStack(alignment: .leading, spacing: 10) {
                                             Text(duration.breakdownLabel).liveFont(.headline)
                                             Text(duration.waitingLabel)
-                                            Text(duration.ridingSourceLabel)
+                                            if duration.ridingSeconds > 0 { Text(duration.ridingSourceLabel) }
                                             Text(AppText.text("總時間包含步行、可搭班次的候車及車程。官方下一班若早於你走到站牌，會改估後續班次；車程與表定時間都可能隨路況改變。"))
                                         }.liveFont(.subheadline).padding(20).frame(maxWidth: 320).presentationCompactAdaptation(.popover)
                                     }
