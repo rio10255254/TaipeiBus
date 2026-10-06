@@ -482,8 +482,8 @@ private struct SourceStatusView: View {
             if waiting || !healthy {
                 Button(action: refresh) {
                     HStack(spacing: 7) {
-                        if waiting { ProgressView().controlSize(.mini) }
-                        else { Circle().fill(Color.orange).frame(width: 7, height: 7) }
+                        // A static dot: a spinner would animate for as long as data is unavailable.
+                        Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
                         Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
                         if !waiting, let age, age >= 120 {
                             Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -587,10 +587,9 @@ private struct MapControlStack: View {
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     var body: some View {
-        // Each control keeps its own interactive glass, as in 1.1.9; the
-        // container blends the touching circles into one Apple Maps column.
-        PhoneGlassGroup(spacing: 12) {
-            VStack(spacing: 4) {
+        // Each control keeps its own interactive glass, exactly as the 1.1.9
+        // top bar did, without a shared glass container.
+        VStack(spacing: 8) {
                 Button(action: showInformation) {
                     Image(systemName: "map").liveFont(.title3).frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                 }
@@ -629,9 +628,8 @@ private struct MapControlStack: View {
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
             }
-            .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
-            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: showsCityFleet)
-        }
+        .shadow(color: .black.opacity(0.08), radius: 12, y: 4)
+        .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: showsCityFleet)
     }
 }
 

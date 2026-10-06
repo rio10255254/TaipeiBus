@@ -32,7 +32,7 @@ struct NativeBusMap: UIViewRepresentable {
         map.attributionButton.tintColor = .tertiaryLabel
         // The compass appears under the right-hand control stack, as in Apple Maps.
         map.compassViewPosition = .topRight
-        map.compassViewMargins = CGPoint(x: 20, y: 104)
+        map.compassViewMargins = CGPoint(x: 20, y: 116)
         map.compassView.accessibilityIdentifier = "map-compass"
         // An altitude camera needs a laid-out viewport; zoom is safe before SwiftUI sizes the view.
         map.setCenter(Coordinate.taipei.locationCoordinate, zoomLevel: 17.2, animated: false)
