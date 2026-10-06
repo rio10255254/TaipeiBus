@@ -1229,13 +1229,16 @@ private struct RidingBannerContent: View {
                 }
                 Spacer(minLength: 4)
                 if let bus {
+                    let timed = model.arrivalDisplay(bus, stopID: ride.alighting.id, at: date, onboard: true).prediction?.hasUsableTime == true
+                    let remaining = stops.firstIndex(where: { $0.id == ride.alighting.id }).map { AppText.remainingStops($0 + 1) }
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date))
+                        // A far stop has no dependable time yet; lead with the stop count rather than a large "pending".
+                        Text(timed ? model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date) : remaining ?? model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date))
                             .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.7)
                             .multilineTextAlignment(.trailing)
                             .contentTransition(.numericText())
-                        if let count = stops.firstIndex(where: { $0.id == ride.alighting.id }) {
-                            Text(AppText.remainingStops(count + 1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
+                        if let remaining {
+                            Text(timed ? remaining : AppText.text("時間待確認")).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                                 .contentTransition(.numericText())
                         }
                     }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)

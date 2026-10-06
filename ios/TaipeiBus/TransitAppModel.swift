@@ -518,6 +518,15 @@ final class TransitAppModel: ObservableObject {
         return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
     }
 
+    /// The last movement-based arrival while on board. A momentarily stale feed report must not
+    /// swap the remaining time for the much more conservative planned ride time and back again.
+    private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
+    private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
+        guard let onboardArrival, onboardArrival.rideID == ride.id,
+              (0...180).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
+        return max(60, onboardArrival.arrival.timeIntervalSince(date))
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
@@ -549,11 +558,16 @@ final class TransitAppModel: ObservableObject {
                 if progress.distance < -20 { riding[0] = 0 }
                 else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
                     riding[0] = prediction.seconds
+                    onboardArrival = (first.id, date.addingTimeInterval(prediction.seconds), date)
+                } else if let held = heldOnboardSeconds(first, at: date) {
+                    riding[0] = held
                 } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
                           let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
                     let total = abs(alight.match.along - board.match.along)
                     if total > 1 { riding[0] *= min(1.5, max(0, progress.distance / total)) }
                 }
+            } else if let held = heldOnboardSeconds(first, at: date) {
+                riding[0] = held
             } else if let boardedAt {
                 riding[0] = max(60, riding[0] - max(0, date.timeIntervalSince(boardedAt)))
                 positionUncertain = true
