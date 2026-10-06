@@ -27,5 +27,8 @@
     "Simulator walkthroughs do not establish physical-device FPS or real arrival error.",
     "57 source route families missing; some current patterns or hours still need estimates.",
     "Apple proprietary route weighting and selected vehicle identity are not available from the aggregate ETA response."
-  ]
+  ],
+  "release_receipt": "testflight-1.1.9-receipt.json",
+  "published_build": "51.1.0",
+  "publish_status": "internal_group_assigned"
 }
