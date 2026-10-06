@@ -275,13 +275,7 @@ struct TransitHomeView: View {
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
-        // Light, Maps-like confirmation for state the rider caused. Haptics never move a view under a finger.
-        .sensoryFeedback(.selection, trigger: model.selectedStationID) { _, new in new != nil }
-        .sensoryFeedback(.selection, trigger: model.selectedVehicleID) { old, new in new != nil && !planner.started && old != new }
-        .sensoryFeedback(.selection, trigger: model.userMapMode)
-        .sensoryFeedback(.selection, trigger: model.cityFleetMode)
-        .sensoryFeedback(.impact(weight: .medium), trigger: planner.currentStep) { old, new in planner.started && old != nil && new != nil }
-        .sensoryFeedback(.success, trigger: planner.arrived) { _, new in new }
+        .modifier(MapHaptics(model: model, planner: planner))
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
@@ -1371,4 +1365,20 @@ private struct LicenseView: View {
 
 func distanceLabel(_ meters: Double) -> String {
     meters >= 1_000 ? String(format: "%.1f km", meters / 1_000) : "\(Int(meters.rounded())) m"
+}
+
+/// Light, Maps-like confirmation for state the rider caused. Haptics never move a view under a finger.
+private struct MapHaptics: ViewModifier {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    func body(content: Content) -> some View {
+        let started = planner.started
+        return content
+            .sensoryFeedback(.selection, trigger: model.selectedStationID) { (_: String?, new: String?) in new != nil }
+            .sensoryFeedback(.selection, trigger: model.selectedVehicleID) { (old: String?, new: String?) in new != nil && !started && old != new }
+            .sensoryFeedback(.selection, trigger: model.userMapMode)
+            .sensoryFeedback(.selection, trigger: model.cityFleetMode)
+            .sensoryFeedback(.impact(weight: .medium), trigger: planner.currentStep) { (old: JourneyStep?, new: JourneyStep?) in started && old != nil && new != nil }
+            .sensoryFeedback(.success, trigger: planner.arrived) { (_: Bool, new: Bool) in new }
+    }
 }
