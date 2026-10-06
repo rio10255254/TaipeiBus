@@ -299,8 +299,8 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         app.textFields["journey-search-field"].tap(); app.textFields["journey-search-field"].typeText("xyzqzz")
         capture("edit-destination")
         button("取消").tap()
-        XCTAssertTrue(app.navigationBars["路線"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.navigationBars["路線"].exists)
+        // Cancelling an edit during a started trip returns to the same itinerary.
+        XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 5))
         button("更改").tap()
         let field = app.textFields["journey-search-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("西門町")
