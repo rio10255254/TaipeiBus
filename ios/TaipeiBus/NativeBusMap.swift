@@ -1437,7 +1437,7 @@ struct NativeBusMap: UIViewRepresentable {
                 style.addSource(source)
                 let layer = MLNSymbolStyleLayer(identifier: "tapped-place-pin", source: source)
                 layer.iconImageName = NSExpression(forKeyPath: "icon")
-                layer.iconAnchor = NSExpression(forConstantValue: "bottom")
+                // pinIcon draws the tip at the image center, so the default center anchor lands it on the place.
                 layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
                 layer.iconIgnoresPlacement = NSExpression(forConstantValue: true)
                 style.addLayer(layer)

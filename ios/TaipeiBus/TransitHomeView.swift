@@ -517,8 +517,6 @@ private struct SourceStatusView: View {
     }
 }
 
-/// Apple Maps keeps one search field at the bottom of the map. Stops and the
-/// route keypad sit beside it; a selection adds follow and close controls.
 /// Apple Maps-style place card: what was tapped, how far it is, and one tap to get there.
 private struct MapPlaceCard: View {
     @Environment(\.liveSettings) private var live
@@ -565,6 +563,8 @@ private struct MapPlaceCard: View {
     ]
 }
 
+/// Apple Maps keeps one search field at the bottom of the map. Stops and the
+/// route keypad sit beside it; a selection adds follow and close controls.
 private struct HomeSearchRow: View {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
