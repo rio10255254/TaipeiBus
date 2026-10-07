@@ -4657,7 +4657,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -4722,15 +4722,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#E8730C",
@@ -4744,7 +4743,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -4804,15 +4803,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#E8730C",
@@ -4826,7 +4824,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -4893,15 +4891,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#C99700",
@@ -4915,7 +4912,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -4975,15 +4972,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#C99700",
@@ -4997,7 +4993,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5060,15 +5056,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#E0405E",
@@ -5082,7 +5077,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5143,15 +5138,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#9A6B3F",
@@ -5165,7 +5159,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5226,15 +5220,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#3E9B4F",
@@ -5248,7 +5241,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5310,15 +5303,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#C2479C",
@@ -5332,7 +5324,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5392,15 +5384,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#7B61D9",
@@ -5414,7 +5405,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5477,15 +5468,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#6E7C91",
@@ -5499,7 +5489,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15.6,
+      "minzoom": 16,
       "filter": [
         "all",
         [
@@ -5559,15 +5549,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#8A8A8E",
@@ -5649,15 +5638,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#E0405E",
@@ -5740,15 +5728,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#9A6B3F",
@@ -5831,15 +5818,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#3E9B4F",
@@ -5924,15 +5910,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#C2479C",
@@ -6014,15 +5999,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#6E7C91",
@@ -6104,15 +6088,14 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-variable-anchor": [
-          "left",
-          "right",
-          "top"
-        ],
-        "text-radial-offset": 0.95,
-        "text-justify": "auto",
         "text-optional": true,
-        "text-padding": 2
+        "text-padding": 2,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left"
       },
       "paint": {
         "text-color": "#2F7BE5",
