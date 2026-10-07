@@ -26,7 +26,7 @@ final class MapSelectionOverlay: ObservableObject {
             else if zoom > 13.8, compactStation { compactStation = false }
         }
         let time = CACurrentMediaTime()
-        guard point == nil || time - lastUpdate > 1.0 / 30 else { return }
+        guard point == nil || time - lastUpdate > 1.0 / 60 else { return }
         if let old = windowPoint, let point, hypot(old.x - point.x, old.y - point.y) < 0.25 { return }
         if windowPoint != point { windowPoint = point }
         lastUpdate = time

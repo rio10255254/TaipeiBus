@@ -135,12 +135,14 @@ struct NativeBusMap: UIViewRepresentable {
             self.map = map
             map.addSubview(locationMarker)
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
-            let rate: Float = 60
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: rate, preferred: rate)
+            let rate = Float(fullFrameRate)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
             link.add(to: .main, forMode: .common)
             displayLink = link
         }
+        /// ProMotion screens run the map, the 3D buses and the camera at up to 120 Hz.
+        private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
         func stop() {
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
             displayLink?.invalidate(); displayLink = nil
@@ -910,8 +912,9 @@ struct NativeBusMap: UIViewRepresentable {
             guard let buses else { return }
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-                let rate = lowPower || reduceMotion ? 30 : 60
-                link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: Float(rate), preferred: Float(rate))
+                // Low Power Mode and a hot device fall back to 60 Hz; motion stays smooth either way.
+                let rate = lowPower ? 60 : fullFrameRate
+                link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
                 map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
                 lastPowerCheck = now
             }
@@ -1015,7 +1018,13 @@ struct NativeBusMap: UIViewRepresentable {
                 polygon.getCoordinates(&points, range: NSRange(location: 0, length: points.count))
                 return points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
             }
-            let features = map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: Set(["building-3d"]))
+            // Only buildings between the camera and the bus can hide it: on screen that is the
+            // band below and beside the bus. Querying just that band keeps the check off the frame budget.
+            let busPoint = map.convert(point.locationCoordinate, toPointTo: map)
+            let band = CGRect(x: busPoint.x - 170, y: busPoint.y - 40, width: 340, height: map.bounds.maxY - busPoint.y + 40)
+                .intersection(map.bounds)
+            guard !band.isNull, !band.isEmpty else { return }
+            let features = map.visibleFeatures(in: band, styleLayerIdentifiers: Set(["building-3d"]))
             var footprints = features.flatMap { feature -> [MapBuilding] in
                 let value = feature.attribute(forKey: "render_height")
                 let height = (value as? NSNumber)?.doubleValue ?? Double(value as? String ?? "") ?? 0
