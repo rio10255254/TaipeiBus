@@ -425,7 +425,9 @@ jobs:
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
           selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
           if [ '${{ inputs.usability_scope }}' = 'metro' ]; then
-            selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests')
+            selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
