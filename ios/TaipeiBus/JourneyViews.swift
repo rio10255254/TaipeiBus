@@ -597,7 +597,7 @@ private struct OnboardStopsView: View {
                             }.frame(minHeight: 40).accessibilityIdentifier("onboard-stop-" + stop.id)
                         }
                     } header: { Text(AppText.text("這輛車的沿途預估")) } footer: {
-                        Text(bus.map { model.arrivalDisplay($0, stopID: ride.alighting.id, at: timeline.date, onboard: true).explanation }
+                        Text(ride.route.mode != .bus ? AppText.text("依官方捷運站間車程") : bus.map { model.arrivalDisplay($0, stopID: ride.alighting.id, at: timeline.date, onboard: true).explanation }
                              ?? AppText.text("時間依行駛情況更新，塞車與停靠可能影響預估。"))
                     }
                 }.listStyle(.insetGrouped)

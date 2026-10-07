@@ -143,9 +143,14 @@ final class TransitAppModel: ObservableObject {
             vehicle: selectedVehicleID, boarding: routeBoardingStopID, direction: direction,
             variants: allRouteVariants, following: following, focus: focus,
             originStation: routeOriginStationID, walkingIndex: walkingMapIndex, detent: sheetDetent)
-        following = false; stopUserTracking()
+        following = false; followingTrain = false; stopUserTracking()
         location.setWalkingNavigation(true); location.request()
-        stationWalk.begin(station, location: location)
+        var target = station
+        if station.mode != .bus, let exit = metadata.metro.nearestExit(stationID:station.id,to:location.displayCoordinate ?? station.coordinate) {
+            target = Station(id:station.id,name:station.name + " · " + exit.name,coordinate:exit.coordinate,
+                address:station.address,bearing:station.bearing,stopIDs:station.stopIDs,englishName:station.englishName + " · " + exit.englishName,mode:station.mode)
+        }
+        stationWalk.begin(target, location: location)
     }
     func showStationWalkOverview() {
         guard !stationWalk.coordinates.isEmpty else { return }
