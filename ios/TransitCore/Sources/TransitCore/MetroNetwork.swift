@@ -186,10 +186,13 @@ public struct MetroNetwork: Codable, Sendable {
             }
             metadata.paths[route.id] = references
             if pattern.coordinates.count >= 2 {
-                metadata.directionalLines["sub:\(route.id):\(pattern.direction)"] = RouteLine(coordinates: pattern.coordinates)
+                let shape = RouteLine(coordinates: pattern.coordinates)
+                metadata.directionalLines["sub:\(route.id):\(pattern.direction)"] = shape
+                if let journey = RouteJourney.build(stops: metadata.orderedStops(routeID:route.id,direction:pattern.direction), line:shape, stations:metadata.stations) {
+                    metadata.journeys["\(route.id):\(pattern.direction)"] = journey
+                }
             }
         }
-        metadata.rebuildJourneys()
         metadata.rebuildRouteCatalog()
         metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
     }
