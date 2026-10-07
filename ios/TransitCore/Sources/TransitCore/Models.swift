@@ -58,6 +58,11 @@ public struct Station: Identifiable, Sendable {
     public var searchNames: [String] = []
     public var englishName: String = ""
     public var mode: TransportMode = .bus
+    public init(id: String, name: String, coordinate: Coordinate, address: String, bearing: String,
+                stopIDs: [String], searchNames: [String] = [], englishName: String = "", mode: TransportMode = .bus) {
+        self.id = id; self.name = name; self.coordinate = coordinate; self.address = address; self.bearing = bearing
+        self.stopIDs = stopIDs; self.searchNames = searchNames; self.englishName = englishName; self.mode = mode
+    }
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
     public var localizedBearing: String { AppText.text(bearingLabel) }
