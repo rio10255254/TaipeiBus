@@ -70,7 +70,8 @@ struct MapContextLabels: View {
                 let obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
                     + (overlay.userPoint.map { [CGRect(x: $0.x - frame.minX - 28, y: $0.y - frame.minY - 28, width: 56, height: 56)] } ?? [])
                 let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
-                    inside: available, avoiding: obstacles)
+                    inside: available, avoiding: obstacles,
+                    anchorArea:model.selectedTrainID == nil ? nil : CGRect(x:anchor.x-20,y:anchor.y-(overlay.compactStation ? 20 : 64),width:40,height:overlay.compactStation ? 40 : 128))
                 let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
