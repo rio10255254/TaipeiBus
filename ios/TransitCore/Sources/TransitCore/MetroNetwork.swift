@@ -31,6 +31,7 @@ public struct MetroPattern: Codable, Identifiable, Sendable {
     public let lineID: String
     public let direction: String
     public let stationIDs: [String]
+    public let stationCoordinates: [Coordinate]
     public let coordinates: [Coordinate]
     public let seconds: [Double]
     public let dwellSeconds: [Double]
@@ -78,6 +79,7 @@ public struct MetroNetwork: Codable, Sendable {
         guard stations.allSatisfy({ $0.coordinate.latitude.isFinite && $0.coordinate.longitude.isFinite && !$0.name.isEmpty }),
               patterns.allSatisfy({ lineIDs.contains($0.lineID) && ["0", "1"].contains($0.direction) &&
                   $0.stationIDs.count >= 2 && $0.stationIDs.allSatisfy(ids.contains) &&
+                  $0.stationCoordinates.count == $0.stationIDs.count &&
                   $0.seconds.count == $0.stationIDs.count - 1 && $0.seconds.allSatisfy({ $0.isFinite && $0 > 0 && $0 < 1800 }) }) else {
             throw FeedError.invalid("Metro network topology")
         }
@@ -175,7 +177,7 @@ public struct MetroNetwork: Codable, Sendable {
                 guard let station = lookup[id] else { continue }
                 let stopID = "\(pattern.id):\(pattern.direction):\(id)"
                 var stop = BusStop(id: stopID, routeID: line.id, stationID: id, name: station.name,
-                    direction: pattern.direction, sequence: index, coordinate: station.coordinate)
+                    direction: pattern.direction, sequence: index, coordinate: pattern.stationCoordinates[index])
                 stop.englishName = station.englishName; stop.mode = line.mode
                 stop.serviceID = pattern.id
                 metadata.stops[stop.id] = stop

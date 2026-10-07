@@ -23,6 +23,7 @@ final class MetroIntegrationTests: XCTestCase {
         for pattern in metro.patterns {
             XCTAssertGreaterThan(pattern.coordinates.count, pattern.stationIDs.count)
             XCTAssertEqual(metadata.orderedStops(routeID: pattern.id, direction: pattern.direction).count, pattern.stationIDs.count)
+            XCTAssertEqual(metadata.journey(routeID:pattern.id,direction:pattern.direction)?.anchors.count,pattern.stationIDs.count)
         }
     }
     func testNeihuToZhongxiaoFuxingUsesDirectWenhuTrainAndOfficialSeconds() throws {
@@ -79,7 +80,7 @@ final class MetroIntegrationTests: XCTestCase {
         XCTAssertGreaterThan(start.coordinate.distance(to: moving.coordinate), 10)
         XCTAssertLessThan(moving.coordinate.distance(to: station.coordinate), start.coordinate.distance(to: station.coordinate))
         let stopped = try XCTUnwrap(prepared.pose(at: date.addingTimeInterval(45)))
-        XCTAssertLessThan(stopped.coordinate.distance(to: station.coordinate), 80)
+        XCTAssertLessThan(stopped.coordinate.distance(to: pattern.stationCoordinates[5]), 1)
         XCTAssertEqual(stopped.seconds, 0); XCTAssertTrue(stopped.estimatedPosition)
         XCTAssertNil(prepared.pose(at: date.addingTimeInterval(76)))
         let track = RouteLine(coordinates: pattern.coordinates)
@@ -155,6 +156,18 @@ final class MetroIntegrationTests: XCTestCase {
             let elapsed = Date().timeIntervalSince(start)
             XCTAssertLessThan(elapsed,10)
             print("METRO_LIVE_AUDIT",from,to,"seconds",elapsed,"choices",trips.count,"rides",trips.first?.rides.map { $0.route.name } ?? [])
+        }
+    }
+    func testEveryOfficialStationHasAUsableTrainTrackIncludingOffsetStationCentres() throws {
+        let metro = try network(), date = noon()
+        for pattern in metro.patterns {
+            for index in pattern.stationIDs.indices {
+                let report = MetroTrainReport(id:"TRACK-TEST",operatorID:"TRTC",patternID:pattern.id,direction:pattern.direction,
+                    nextStationID:pattern.stationIDs[index],destinationStationID:pattern.stationIDs.last!,remainingSeconds:0,observedAt:date,atPlatform:true)
+                let prepared = try XCTUnwrap(PreparedMetroTrain(report:report,network:metro),pattern.id+" "+pattern.stationIDs[index])
+                let pose = try XCTUnwrap(prepared.pose(at:date))
+                XCTAssertLessThan(pose.coordinate.distance(to:pattern.stationCoordinates[index]),1)
+            }
         }
     }
 }

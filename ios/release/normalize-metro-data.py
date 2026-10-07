@@ -98,7 +98,10 @@ for op,rows in raw['operators'].items():
    if values:
     windows.append({'stationID':prefix+sid,'first':values[0]['FirstTrainTime'],'last':values[0]['LastTrainTime']})
   stationStops=[0]+[stationDwell.get(sid,30) for sid in ids[1:]]
-  patterns.append({'id':prefix+route,'lineID':prefix+lid,'direction':direction,'stationIDs':[prefix+x for x in ids],'coordinates':[c(x) for x in path],'seconds':sec,'dwellSeconds':stationStops,'firstDeparture':opening,'lastDeparture':closing,'headwaySeconds':headway,'periods':periods,'stationWindows':windows})
+  patterns.append({'id':prefix+route,'lineID':prefix+lid,'direction':direction,'stationIDs':[prefix+x for x in ids],
+                   'stationCoordinates':[c(anchors[lid][x]) for x in ids],'coordinates':[c(x) for x in path],
+                   'seconds':sec,'dwellSeconds':stationStops,'firstDeparture':opening,'lastDeparture':closing,
+                   'headwaySeconds':headway,'periods':periods,'stationWindows':windows})
  # Use only the full operating pattern for the base-map line, with shorter/branch paths in the route overlay.
  for l in lines:
   if l['operatorID']==op:

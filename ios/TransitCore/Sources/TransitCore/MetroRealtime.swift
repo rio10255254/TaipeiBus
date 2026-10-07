@@ -35,7 +35,14 @@ public struct MetroRealtime: Codable, Equatable, Sendable {
     public let arrivals: [MetroArrival]
     public init(data: Data, network: MetroNetwork, at date: Date) throws {
         guard data.count <= 2 * 1024 * 1024 else { throw FeedError.invalid("Metro feed size") }
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let decoder = JSONDecoder()
+        let plain = ISO8601DateFormatter(), fractional = ISO8601DateFormatter()
+        fractional.formatOptions.insert(.withFractionalSeconds)
+        decoder.dateDecodingStrategy = .custom { decoder in
+            let text = try decoder.singleValueContainer().decode(String.self)
+            guard let date = plain.date(from:text) ?? fractional.date(from:text) else { throw FeedError.invalid("Metro report timestamp") }
+            return date
+        }
         self = try decoder.decode(Self.self, from: data)
         guard schema == 1, source == "Taipei Metro authorized API", trains.count <= 300, arrivals.count <= 3000,
               Set(trains.map(\.id)).count == trains.count else { throw FeedError.invalid("Metro feed source") }
@@ -43,7 +50,8 @@ public struct MetroRealtime: Codable, Equatable, Sendable {
             guard !report.id.isEmpty, report.operatorID == "TRTC", report.remainingSeconds.isFinite,
                   (0...1800).contains(report.remainingSeconds),
                   let pattern = network.pattern(report.patternID, direction: report.direction),
-                  pattern.stationIDs.contains(report.nextStationID), pattern.stationIDs.contains(report.destinationStationID) else {
+                  let next = pattern.stationIDs.firstIndex(of:report.nextStationID),
+                  let destination = pattern.stationIDs.firstIndex(of:report.destinationStationID), next <= destination else {
                 throw FeedError.invalid("Metro train report")
             }
         }
@@ -104,25 +112,30 @@ public struct PreparedMetroTrain: Sendable {
     public let report: MetroTrainReport
     private let segment: RouteLine
     private let duration: Double
+    private let atStart: Bool
     public init?(report: MetroTrainReport, network: MetroNetwork) {
         guard let pattern = network.pattern(report.patternID, direction: report.direction),
               let index = pattern.stationIDs.firstIndex(of: report.nextStationID),
               let next = network.station(report.nextStationID) else { return nil }
         self.report = report
-        if report.atPlatform || index == 0 {
-            segment = RouteLine(coordinates: [next.coordinate, next.coordinate]); duration = 0; return
-        }
+        atStart = index == 0
         let line = RouteLine(coordinates: pattern.coordinates)
-        guard let previous = network.station(pattern.stationIDs[index - 1]),
-              let from = line.match(previous.coordinate, heading: nil), let to = line.match(next.coordinate, heading: nil) else { return nil }
-        segment = RouteLine(coordinates: line.slice(from: from, to: to)); duration = pattern.seconds[index - 1]
+        let first = atStart ? 0 : index - 1, last = atStart ? 1 : index
+        guard let from = line.match(pattern.stationCoordinates[first], heading: nil),
+              let to = line.match(pattern.stationCoordinates[last], heading: nil) else { return nil }
+        segment = RouteLine(coordinates: line.slice(from: from, to: to))
+        duration = report.atPlatform || atStart ? 0 : pattern.seconds[index - 1]
+        _ = next
     }
     public func pose(at date: Date) -> MetroTrainPose? {
         let age = date.timeIntervalSince(report.observedAt)
         guard (-15...60).contains(age) else { return nil }
         let remaining = max(0, report.remainingSeconds - max(0, age))
-        if duration == 0 { return MetroTrainPose(report: report, coordinate: segment.coordinates[0], heading: 0,
-            path: segment.coordinates, seconds: remaining, estimatedPosition: true) }
+        if duration == 0 {
+            let sample = segment.sample(fraction: atStart ? 0 : 1)
+            return MetroTrainPose(report: report, coordinate: sample.0, heading: sample.1,
+                path: segment.coordinates, seconds: remaining, estimatedPosition: true)
+        }
         let fraction = max(0, min(1, 1 - remaining / duration))
         let sample = segment.sample(fraction: fraction)
         return MetroTrainPose(report: report, coordinate: sample.0, heading: sample.1, path: segment.coordinates,
