@@ -20,6 +20,9 @@ final class MetroIntegrationTests: XCTestCase {
         XCTAssertEqual(metro.stations.flatMap(\.exits).count, 486)
         XCTAssertTrue(metadata.stationSearch.search("BR19", near: .taipei).contains { $0.mode == .metro && $0.name == "內湖" })
         XCTAssertTrue(metadata.stationSearch.search("Neihu", near: .taipei).contains { $0.mode == .metro && $0.name == "內湖" })
+        XCTAssertEqual(metadata.routeCatalog.search("mrt").count,7)
+        XCTAssertEqual(metadata.routeCatalog.search("Brown Line").first?.route.lineCode,"BR")
+        XCTAssertEqual(metadata.routeCatalog.search("紅線").first?.route.lineCode,"R")
         for pattern in metro.patterns {
             XCTAssertGreaterThan(pattern.coordinates.count, pattern.stationIDs.count)
             XCTAssertEqual(metadata.orderedStops(routeID: pattern.id, direction: pattern.direction).count, pattern.stationIDs.count)

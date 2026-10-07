@@ -792,7 +792,7 @@ private struct TransitPanel: View {
     private var browseTitle: String {
         switch model.mode {
         case .stops: return location.usableCoordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌"
-        case .routes: return "公車路線"
+        case .routes: return "公車／捷運路線"
         }
     }
 
@@ -906,7 +906,7 @@ private struct TransitPanel: View {
             if routes.isEmpty { emptyResult }
             ForEach(routes) { result in
                 if model.query.isEmpty, routes.first?.id == result.id {
-                    Text(model.recentRouteIDs.isEmpty ? AppText.text("公車路線") : AppText.text("最近查看")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 8)
+                    Text(model.recentRouteIDs.isEmpty ? AppText.text("公車／捷運路線") : AppText.text("最近查看")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 8)
                 } else if model.query.isEmpty, let first = routes.first(where: { !model.recentRouteIDs.contains($0.id) }), first.id == result.id {
                     Text(AppText.text("其他路線")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 12)
                 }

@@ -64,6 +64,9 @@ public struct RouteCatalog: Sendable {
     public func search(_ query: String) -> [RouteSearchResult] {
         let text = Self.normalize(query)
         guard !text.isEmpty else { return groups.map { RouteSearchResult(group: $0, matchedVariant: nil) } }
+        if ["捷運","mrt","metro"].contains(text), groups.contains(where:{ $0.route.mode != .bus }) {
+            return groups.filter { $0.route.mode != .bus }.map { RouteSearchResult(group:$0,matchedVariant:nil) }
+        }
         // Exact names precede partial names and endpoints. Catalog order breaks all ties.
         return entries.enumerated().compactMap { index, entry -> (Int, Int, RouteSearchResult)? in
             let exactName = entry.names.contains(text)

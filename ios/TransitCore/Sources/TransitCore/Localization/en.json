@@ -494,5 +494,6 @@
   "跟隨列車": "Follow train",
   "%@ 秒": "%@ sec",
   "%@ 分 %@ 秒": "%@ min %@ sec",
-  "站內轉乘 · %@": "Station transfer · %@"
+  "站內轉乘 · %@": "Station transfer · %@",
+  "公車／捷運路線": "Bus / metro lines"
 }
