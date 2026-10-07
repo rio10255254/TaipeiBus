@@ -33,13 +33,19 @@ def main():
             try:
                 raw = read(url, headers); report['decodedBytes'] += len(raw)
                 rows = json.loads(raw)
-                if not isinstance(rows,list): raise ValueError('Expected an official metadata array')
-                result[name] = rows
-                print(operator,name,len(rows),flush=True)
+                if not isinstance(rows,list):
+                    report['missing'].append({'operator':operator,'name':name,'shape':list(rows)[:10] if isinstance(rows,dict) else type(rows).__name__,
+                                              'message':str(rows.get('Message',rows.get('message','')))[:240] if isinstance(rows,dict) else ''})
+                    print(operator,name,'non-array response',flush=True)
+                else:
+                    result[name] = rows
+                    print(operator,name,len(rows),flush=True)
             except urllib.error.HTTPError as error:
                 report['missing'].append({'operator':operator,'name':name,'http':error.code})
                 print(operator,name,'unavailable',error.code,flush=True)
             if report['decodedBytes'] > 24 * 1024 * 1024: raise ValueError('Metro collection budget exceeded')
+            report['operators'][operator] = result
+            (args.out/'metro-raw.json').write_text(json.dumps(report,ensure_ascii=False,separators=(',',':'))+'\n',encoding='utf-8')
         report['operators'][operator] = result
     for operator, rows in report['operators'].items():
         if not rows.get('Line') or not rows.get('Station') or not rows.get('StationOfRoute'):
