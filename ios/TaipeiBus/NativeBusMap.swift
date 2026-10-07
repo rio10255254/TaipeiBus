@@ -1677,6 +1677,16 @@ private actor PlaceTileProvider {
             for point in points where point.coordinate.latitude >= bounds.south && point.coordinate.latitude <= bounds.north &&
                 point.coordinate.longitude >= bounds.west && point.coordinate.longitude <= bounds.east { result[point.id] = point }
         } }
-        return Array(result.values)
+        let center = Coordinate(latitude: (bounds.south + bounds.north) / 2, longitude: (bounds.west + bounds.east) / 2)
+        let landmarks: Set<String> = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
+        let ordered = result.values.sorted { a, b in
+            let al = landmarks.contains(a.kind), bl = landmarks.contains(b.kind)
+            if al != bl { return al }
+            let ad = a.coordinate.distance(to: center), bd = b.coordinate.distance(to: center)
+            if abs(ad - bd) > 20 { return ad < bd }
+            return a.rank == b.rank ? a.id < b.id : a.rank < b.rank
+        }
+        // A pathological dense tile never delivers thousands of UIKit objects.
+        return Array(ordered.prefix(512))
     }
 }
