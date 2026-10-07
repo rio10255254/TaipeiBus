@@ -680,7 +680,14 @@ private struct TransitPanel: View {
     }
 
     var body: some View {
-        panelContent
+        // Search and details swap as whole pages. Letting the header, list and keypad each
+        // transition on their own made the old results slide over the search field mid-way.
+        ZStack(alignment: .top) {
+            panelContent
+                .id(isBrowsing)
+                .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.05)),
+                                        removal: .opacity.animation(.easeIn(duration: 0.1))))
+        }
         .smoothChanges(model.mode)
         .smoothChanges(systemRouteKeyboard)
         .smoothChanges(isBrowsing)

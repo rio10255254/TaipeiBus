@@ -1282,7 +1282,8 @@ private struct RidingBannerContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
-                    Text((progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : AppText.text("在「%@」下車", ride.alighting.localizedName))
+                    // Same "action · stop" form as the boarding banner, so the stop name keeps one line.
+                    Text((progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : live.text("下車 · ") + ride.alighting.localizedName)
                         .liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
                     if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                 }

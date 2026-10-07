@@ -72,9 +72,11 @@ fragment float4 busFragment(BusFragment in [[stage_in]], constant BusUniforms &u
     }
     if (in.material > 2.5) { color = in.color.rgb; }
     // Far-away buses retain their body geometry, but lose harsh window/roof
-    // contrast smoothly so many vehicles read as a quiet neutral-gray flow.
+    // contrast smoothly. A muted transit blue keeps the flow quiet while making
+    // it read as vehicles rather than as gray road texture on the city map.
     if (uniforms.mode.x == 0 && uniforms.mode.y > 0) {
-        color = mix(color, float3(0.73) * diffuse, uniforms.mode.y * 0.55);
+        const float3 flow = uniforms.viewDirection.w > 0 ? float3(0.56, 0.69, 0.86) : float3(0.38, 0.53, 0.73);
+        color = mix(color, flow * diffuse, uniforms.mode.y * 0.6);
     }
     if (uniforms.mode.x == 0 && in.material < 0.5) {
         color = mix(color, uniforms.viewDirection.w > 0 ? float3(0.24,0.64,0.96) : float3(0.31,0.59,0.85), in.selection * 0.55);

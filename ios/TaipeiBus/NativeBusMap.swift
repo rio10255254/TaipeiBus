@@ -1224,11 +1224,15 @@ struct NativeBusMap: UIViewRepresentable {
         private weak var reliefLayer: MLNRasterStyleLayer?
         private func applyReliefAppearance() {
             guard let layer = reliefLayer else { return }
-            let peak = darkMode ? 0.55 : 0.9
+            // Relief reads as a backdrop, like the mainstream maps: strongest when the whole region
+            // is in view, eased off at city scale where buses and labels need the contrast.
+            let peak = darkMode ? 0.5 : 0.78
             layer.rasterOpacity = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
-                6, 0, 7, peak, 12, peak * 0.85, 13.5, peak * 0.4, 14.5, 0])
-            // Dark mode keeps the shadows but dims the highlights so slopes do not glow.
+                6, 0, 7, peak, 10, peak * 0.85, 12, peak * 0.7, 13.5, peak * 0.35, 14.5, 0])
+            // Dark mode keeps the shadows but dims the highlights so slopes do not glow; light mode
+            // lifts the deepest shadows a little so valleys stay green rather than turning muddy.
             layer.maximumRasterBrightness = NSExpression(forConstantValue: darkMode ? 0.35 : 1)
+            layer.minimumRasterBrightness = NSExpression(forConstantValue: darkMode ? 0 : 0.1)
         }
 
         private func applyBasePalette(_ style: MLNStyle) {

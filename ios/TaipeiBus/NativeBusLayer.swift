@@ -270,7 +270,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let definition = distanceBlend * distanceBlend * (3 - 2 * distanceBlend)
             var compactUniforms = uniforms
             compactUniforms.mode.y = 1 - definition
-            compactUniforms.mode.w = 0.52 + definition * 0.48
+            compactUniforms.mode.w = 0.68 + definition * 0.32
             encoder.setRenderPipelineState(pipeline)
             encoder.setDepthStencilState(normalDepth)
             encoder.setVertexBuffer(compactVertexBuffer, offset: 0, index: 0)

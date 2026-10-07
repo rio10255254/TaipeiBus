@@ -2909,7 +2909,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 17.5,
+      "minzoom": 18,
       "filter": [
         "==",
         [
@@ -2933,7 +2933,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 17.5,
+      "minzoom": 18,
       "filter": [
         "==",
         [
