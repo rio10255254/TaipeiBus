@@ -17,7 +17,7 @@
       "type": "raster-dem",
       "encoding": "terrarium",
       "tileSize": 256,
-      "maxzoom": 12,
+      "maxzoom": 11,
       "tiles": [
         "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
       ],
@@ -373,7 +373,7 @@
       "id": "hillshade",
       "type": "hillshade",
       "source": "terrain",
-      "maxzoom": 16,
+      "maxzoom": 15.5,
       "paint": {
         "hillshade-exaggeration": [
           "interpolate",
