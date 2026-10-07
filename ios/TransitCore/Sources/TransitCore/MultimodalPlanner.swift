@@ -8,6 +8,8 @@ public struct MultimodalPlanner: Sendable {
         let direction: String
         let stops: [BusStop]
         let cumulative: [Double]
+        let dwell: [Double]
+        let windows: [BusServiceWindow?]
     }
     private struct Segment: Sendable { let pattern: Int; let first: Int; let last: Int }
     private struct Link: Sendable { let id: String; let distance: Double; let seconds: Double; let internalWalk: Bool }
@@ -38,6 +40,7 @@ public struct MultimodalPlanner: Sendable {
                 let stops = metadata.orderedStops(routeID: route.id, direction: direction)
                 guard stops.count > 1 else { continue }
                 var cumulative = [0.0]
+                let railPattern = route.mode != .bus ? metadata.metro.pattern(route.id, direction: direction) : nil
                 let anchors = Dictionary((metadata.journey(routeID: route.id, direction: direction)?.anchors ?? [])
                     .map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for index in 1..<stops.count {
@@ -46,9 +49,12 @@ public struct MultimodalPlanner: Sendable {
                     let published = metadata.officialTravelTimes.seconds(route: route.parentID, subroute: route.id,
                         direction: direction, from: a.id, to: b.id, travellingAt: Date(), observedAt: Date())
                     let distance = anchors[a.id].flatMap { first in anchors[b.id].map { abs($0 - first) } } ?? a.coordinate.distance(to: b.coordinate) * 1.25
-                    cumulative.append(cumulative.last! + (rail ?? published ?? (distance / 4.5 + 20)))
+                    let dwell = index > 1 && railPattern?.dwellSeconds.indices.contains(index - 1) == true ? railPattern!.dwellSeconds[index - 1] : 0
+                    cumulative.append(cumulative.last! + (rail ?? published ?? (distance / 4.5 + 20)) + dwell)
                 }
-                patterns.append(Pattern(route: route, direction: direction, stops: stops, cumulative: cumulative))
+                let windows = route.mode != .bus ? stops.map { metadata.metro.boardingWindow(routeID: route.id, direction: direction, stationID: $0.stationID) } : []
+                patterns.append(Pattern(route: route, direction: direction, stops: stops, cumulative: cumulative,
+                    dwell: railPattern?.dwellSeconds ?? [], windows: windows))
                 for stop in stops { stationStops[stop.stationID] = stop }
             }
         }
@@ -103,6 +109,17 @@ public struct MultimodalPlanner: Sendable {
             }
         }
         var results: [TransitTrip] = []
+        let secondsOfDay = BusServiceWindow.secondsOfDay(at: date)
+        let minimumWaits = patterns.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.cumulative.last ?? 0) }
+        var serviceCache: [String: BusDayService] = [:]
+        func service(_ index: Int, ready: Double) -> BusDayService {
+            let key = "\(index):\(Int(ready / 60))"
+            if let value = serviceCache[key] { return value }
+            let pattern = patterns[index], value: BusDayService
+            if pattern.route.mode == .bus { value = pattern.route.servicePlans[pattern.direction]?.service(at: date.addingTimeInterval(ready)) ?? .init() }
+            else { value = metadata.metro.service(routeID: pattern.route.id, direction: pattern.direction, at: date.addingTimeInterval(ready)) ?? .init() }
+            serviceCache[key] = value; return value
+        }
         // Three transfers cover bus–metro–metro–bus and cross-branch rail journeys.
         for round in 0..<4 {
             if Task.isCancelled { return [] }
@@ -122,10 +139,8 @@ public struct MultimodalPlanner: Sendable {
                     // Ride only after boarding; this prevents zero-station transfer legs.
                     for boarded in boarding {
                         let source = boarded.label, seconds: Double
-                        if pattern.route.mode != .bus {
-                            seconds = metadata.metro.ridingSeconds(routeID: pattern.route.id, direction: pattern.direction,
-                                from: pattern.stops[boarded.index].stationID, to: stop.stationID) ?? .infinity
-                        } else { seconds = pattern.cumulative[index] - pattern.cumulative[boarded.index] }
+                        let boardingDwell = boarded.index > 0 && pattern.dwell.indices.contains(boarded.index) ? pattern.dwell[boarded.index] : 0
+                        seconds = pattern.cumulative[index] - pattern.cumulative[boarded.index] - boardingDwell
                         let elapsed = source.elapsed + boarded.wait + seconds
                         guard elapsed.isFinite, elapsed < 4 * 3600 else { continue }
                         let label = Label(segments: source.segments + [Segment(pattern: pIndex, first: boarded.index, last: index)],
@@ -148,15 +163,17 @@ public struct MultimodalPlanner: Sendable {
                             if previousRoute.mode == .bus && pattern.route.mode == .bus && previousRoute.parentID == pattern.route.parentID { continue }
                             if patterns[last.pattern].stops[last.first].stationID == stop.stationID { continue }
                         }
-                        let service = pattern.route.mode == .bus ? pattern.route.servicePlans[pattern.direction]?.service(at: date.addingTimeInterval(source.elapsed)) :
-                            metadata.metro.service(routeID: pattern.route.id, direction: pattern.direction, at: date.addingTimeInterval(source.elapsed))
+                        let currentService = service(pIndex, ready: source.elapsed)
                         let official = estimates.value(routeID: pattern.route.parentID, stopID: stop.id, at: date)
                         if let official, [-2,-3,-4].contains(official) { continue }
                         let wait = BoardingTime.wait(official: official, readyAt: source.elapsed, buffer: pattern.route.mode == .bus ? (round > 0 ? 90 : 60) : 30,
-                            service: service, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), boardingOffset: pattern.cumulative[index],
-                            minimumServiceWait: pattern.route.minimumServiceWait(direction: pattern.direction, at: date, fullRouteSeconds: pattern.cumulative.last ?? 0))
-                        if pattern.route.mode != .bus && wait.evidence != .official && !metadata.metro.isOperating(routeID: pattern.route.id, direction: pattern.direction,
-                            stationID: stop.stationID, at: date.addingTimeInterval(source.elapsed + wait.seconds)) { continue }
+                            service: currentService, secondsOfDay: secondsOfDay, boardingOffset: pattern.cumulative[index], minimumServiceWait: minimumWaits[pIndex])
+                        if pattern.route.mode != .bus && wait.evidence != .official {
+                            guard pattern.windows.indices.contains(index), let window = pattern.windows[index] else { continue }
+                            let t = (secondsOfDay + source.elapsed + wait.seconds).truncatingRemainder(dividingBy: 86400)
+                            let first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
+                            if first <= last ? t < first || t > last : t < first && t > last { continue }
+                        }
                         boarding.append((source, index, wait.seconds))
                     }
                     // Keep independent arrival/walking tradeoffs without a combinatorial explosion.
