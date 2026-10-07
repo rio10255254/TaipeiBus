@@ -112,6 +112,11 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastVisibilityAdjustmentAt: CFTimeInterval = 0
 #if DEBUG
         private var lastTestCameraAt: CFTimeInterval = 0
+        private let zoomProbe = ZoomPerformanceProbe()
+        private var zoomProbeObserver: NSObjectProtocol?
+        private var zoomProbeVisibility: [String: Bool] = [:]
+        private var zoomProbeCamera: MLNMapCamera?
+        private var zoomProbeMode = "baseline"
         private struct CameraTransitionTrace {
             let started: CFTimeInterval
             let revision: Int
@@ -140,12 +145,25 @@ struct NativeBusMap: UIViewRepresentable {
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
             link.add(to: .main, forMode: .common)
             displayLink = link
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                zoomProbeObserver = NotificationCenter.default.addObserver(forName: Notification.Name("zoom-performance-control"),
+                    object: nil, queue: .main) { [weak self] note in
+                    guard let mode = note.object as? String else { return }
+                    self?.setZoomProbeMode(mode)
+                }
+            }
+#endif
         }
         /// ProMotion screens run the map, the 3D buses and the camera at up to 120 Hz.
         private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
         func stop() {
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
             displayLink?.invalidate(); displayLink = nil
+#if DEBUG
+            if let zoomProbeObserver { NotificationCenter.default.removeObserver(zoomProbeObserver) }
+            zoomProbeObserver = nil
+#endif
         }
         deinit { displayLink?.invalidate() }
 
@@ -645,6 +663,9 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+#if DEBUG
+            zoomProbe.frame(zoom: mapView.zoomLevel, busEncode: buses?.lastEncodeMilliseconds ?? 0)
+#endif
             if !positionedInitialCamera, mapView.bounds.width > 0 {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -660,6 +681,34 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
 #if DEBUG
+        func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool,
+            frameEncodingTime: Double, frameRenderingTime: Double) {
+            zoomProbe.renderer(encoding: frameEncodingTime, rendering: frameRenderingTime)
+        }
+
+        private func setZoomProbeMode(_ mode: String) {
+            guard let map, let style = map.style else { return }
+            if mode == "begin" { zoomProbe.begin(mode: zoomProbeMode); return }
+            if mode == "end" { zoomProbe.end(); return }
+            zoomProbe.end()
+            if zoomProbeCamera == nil { zoomProbeCamera = savedCamera(map.camera) }
+            if zoomProbeVisibility.isEmpty {
+                zoomProbeVisibility = Dictionary(uniqueKeysWithValues: style.layers.map { ($0.identifier, $0.isVisible) })
+            }
+            zoomProbeMode = mode
+            for layer in style.layers {
+                var visible = zoomProbeVisibility[layer.identifier] ?? layer.isVisible
+                if mode == "no-poi", layer.identifier.hasPrefix("poi") { visible = false }
+                if mode == "no-text", layer is MLNSymbolStyleLayer { visible = false }
+                if mode == "no-3d", layer is MLNFillExtrusionStyleLayer { visible = false }
+                if mode == "no-bus", layer === buses { visible = false }
+                if mode == "old-labels", layer.identifier == "poi_dense_street" { visible = false }
+                layer.isVisible = visible
+            }
+            if let camera = zoomProbeCamera { map.setCamera(savedCamera(camera), animated: false) }
+            lastTestCameraAt = 0
+        }
+
         private func recordTestCamera(_ mapView: MLNMapView) {
             if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), mapView.style != nil,
                CACurrentMediaTime() - lastTestCameraAt >= 0.5 {
@@ -739,6 +788,10 @@ struct NativeBusMap: UIViewRepresentable {
                         let pixel = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)
                         state["markerX"] = pixel.x; state["markerY"] = pixel.y; state["markerID"] = id
                     }
+                }
+                if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                    state["zoomPerformance"] = zoomProbe.summary
+                    state["zoomMode"] = zoomProbeMode
                 }
                 DispatchQueue.main.async { [weak self] in self?.overlay.recordCamera(state) }
                 if let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
@@ -910,6 +963,13 @@ struct NativeBusMap: UIViewRepresentable {
         @objc private func tick(_ link: CADisplayLink) {
             guard model.isActive, let map else { return }
 #if DEBUG
+            let tickStarted = CACurrentMediaTime()
+            defer { zoomProbe.tick(milliseconds: (CACurrentMediaTime() - tickStarted) * 1000) }
+            if zoomProbeMode == "light-tick" {
+                recordTestCamera(map)
+                buses?.setNeedsDisplay()
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(map) }
             recordTestCamera(map)
 #endif
@@ -921,7 +981,10 @@ struct NativeBusMap: UIViewRepresentable {
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
                 // Low Power Mode and a hot device fall back to 60 Hz; motion stays smooth either way.
-                let rate = lowPower ? 60 : fullFrameRate
+                var rate = lowPower ? 60 : fullFrameRate
+#if DEBUG
+                if zoomProbeMode == "60hz" { rate = 60 }
+#endif
                 link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
                 map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
                 lastPowerCheck = now
@@ -1269,3 +1332,62 @@ private final class DeviceLocationMarker: UIView {
         CATransaction.commit()
     }
 }
+
+#if DEBUG
+/// Callback cadence is a simulator rendering measurement, not a physical-display FPS claim.
+private final class ZoomPerformanceProbe {
+    private var active = false
+    private var mode = "baseline"
+    private var began = 0.0
+    private var lastFrame = 0.0
+    private var frames = 0
+    private var gaps: [Double] = []
+    private var busTimes: [Double] = []
+    private var tickTimes: [Double] = []
+    private var encodingTimes: [Double] = []
+    private var renderingTimes: [Double] = []
+    private var minZoom = 99.0
+    private var maxZoom = 0.0
+    private(set) var summary: [String: Any] = ["complete": false]
+    func begin(mode: String) {
+        self.mode = mode; began = CACurrentMediaTime(); lastFrame = 0; frames = 0
+        gaps.removeAll(keepingCapacity: true); busTimes.removeAll(keepingCapacity: true)
+        tickTimes.removeAll(keepingCapacity: true); encodingTimes.removeAll(keepingCapacity: true)
+        renderingTimes.removeAll(keepingCapacity: true); minZoom = 99; maxZoom = 0
+        summary = ["mode": mode, "complete": false]; active = true
+    }
+    func frame(zoom: Double, busEncode: Double) {
+        guard active else { return }
+        let now = CACurrentMediaTime()
+        if lastFrame > 0, gaps.count < 6000 { gaps.append((now - lastFrame) * 1000) }
+        lastFrame = now; frames += 1; minZoom = min(minZoom, zoom); maxZoom = max(maxZoom, zoom)
+        if busTimes.count < 6000 { busTimes.append(busEncode) }
+    }
+    func tick(milliseconds: Double) {
+        if active, tickTimes.count < 6000 { tickTimes.append(milliseconds) }
+    }
+    func renderer(encoding: Double, rendering: Double) {
+        guard active else { return }
+        if encoding.isFinite, encoding >= 0, encodingTimes.count < 6000 { encodingTimes.append(encoding) }
+        if rendering.isFinite, rendering >= 0, renderingTimes.count < 6000 { renderingTimes.append(rendering) }
+    }
+    func end() {
+        guard active else { return }
+        active = false
+        let elapsed = CACurrentMediaTime() - began
+        func stats(_ values: [Double]) -> [String: Any] {
+            let ordered = values.sorted()
+            func percentile(_ p: Double) -> Double {
+                ordered.isEmpty ? 0 : ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * p))]
+            }
+            return ["samples": ordered.count, "median_ms": percentile(0.5), "p95_ms": percentile(0.95),
+                "p99_ms": percentile(0.99), "max_ms": ordered.last ?? 0,
+                "over_33ms": ordered.filter { $0 > 33.34 }.count, "over_100ms": ordered.filter { $0 > 100 }.count]
+        }
+        summary = ["mode": mode, "complete": true, "elapsed_seconds": elapsed, "render_callbacks": frames,
+            "render_callbacks_per_second": Double(frames) / max(0.001, elapsed), "min_zoom": minZoom, "max_zoom": maxZoom,
+            "callback_gap": stats(gaps), "bus_encode": stats(busTimes), "tick": stats(tickTimes),
+            "map_encoding": stats(encodingTimes), "map_rendering": stats(renderingTimes)]
+    }
+}
+#endif

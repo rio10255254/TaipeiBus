@@ -1227,3 +1227,67 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(firstOption.waitForExistence(timeout: 10))
     }
 }
+
+final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
+    var map: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func state() -> [String: Any] {
+        let value = app.staticTexts["map-camera-state"].label
+        guard let bytes = value.data(using: .utf8),
+              let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return result
+    }
+    func wait(_ condition: @escaping ([String: Any]) -> Bool) {
+        let test = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.state()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 90), .completed)
+    }
+    func profile(_ mode: String, cycles: Int = 2) -> [String: Any] {
+        button("zoom-probe-" + mode).press(forDuration: 0.15)
+        wait { $0["zoomMode"] as? String == mode }
+        Thread.sleep(forTimeInterval: 2)
+        button("zoom-probe-begin").press(forDuration: 0.15)
+        for _ in 0..<cycles {
+            map.pinch(withScale: 1.85, velocity: 0.8)
+            map.pinch(withScale: 1 / 1.85, velocity: -0.8)
+        }
+        let a = map.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.55))
+        let b = map.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.6))
+        a.press(forDuration: 0.1, thenDragTo: b, withVelocity: .slow, thenHoldForDuration: 0.1)
+        b.press(forDuration: 0.1, thenDragTo: a, withVelocity: .slow, thenHoldForDuration: 0.1)
+        map.rotate(.pi / 6, withVelocity: 0.6)
+        map.rotate(-.pi / 6, withVelocity: -0.6)
+        button("zoom-probe-end").press(forDuration: 0.15)
+        wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == true }
+        let result = state()["zoomPerformance"] as? [String: Any] ?? [:]
+        XCTAssertGreaterThan(result["render_callbacks"] as? Int ?? 0, 10)
+        XCTAssertGreaterThan((result["max_zoom"] as? Double ?? 0) - (result["min_zoom"] as? Double ?? 0), 0.6)
+        let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys, .prettyPrinted])
+        let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        attachment.name = "zoom-performance-" + mode; attachment.lifetime = .keepAlways; add(attachment)
+        capture("zoom-street-" + mode)
+        return result
+    }
+    func testStreetZoomLayerCosts() {
+        launch(["--test-map-controls", "--test-zoom-performance"])
+        wait { ($0["zoom"] as? Double ?? 0) > 17 && ($0["fleetInput"] as? Int ?? 0) > 0 }
+        // Warm the same vector tiles first; every mode reuses this installed app and cache.
+        map.pinch(withScale: 1.85, velocity: 0.8)
+        map.pinch(withScale: 1 / 1.85, velocity: -0.8)
+        var reports: [[String: Any]] = []
+        for mode in ["baseline", "no-poi", "old-labels", "no-text", "no-3d", "no-bus", "light-tick", "baseline"] {
+            reports.append(profile(mode))
+        }
+        let data = try! JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys, .prettyPrinted])
+        let all = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        all.name = "zoom-performance-comparison"; all.lifetime = .keepAlways; add(all)
+    }
+    func testLiveBusZoomAndReturn() {
+        launch(["--test-map-controls", "--test-zoom-performance", "--preview-vehicle-route", "__live__"])
+        wait { !($0["vehicle"] as? String ?? "").isEmpty && ($0["zoom"] as? Double ?? 0) > 17 }
+        capture("zoom-following-before")
+        _ = profile("baseline", cycles: 3)
+        button("關閉選取").press(forDuration: 0.15)
+        wait { ($0["vehicle"] as? String ?? "") == "" }
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("zoom-following-returned")
+    }
+}

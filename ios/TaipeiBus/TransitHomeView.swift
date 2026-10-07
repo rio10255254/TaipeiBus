@@ -99,6 +99,9 @@ struct TransitHomeView: View {
                 if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
                     DebugMapCameraText(overlay: selectionOverlay)
                 }
+                if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                    DebugZoomPerformanceControls().padding(.top, 146)
+                }
                 if let notice = model.previewNotice {
                     Text(live.text(notice)).liveFont(.caption, weight: .semibold).padding(8)
                         .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80 * CGFloat(live.appearance.spacingScale))
@@ -1366,3 +1369,19 @@ func distanceLabel(_ meters: Double) -> String {
     meters >= 1_000 ? String(format: "%.1f km", meters / 1_000) : "\(Int(meters.rounded())) m"
 }
 
+
+#if DEBUG
+private struct DebugZoomPerformanceControls: View {
+    private let modes = ["baseline", "no-poi", "no-text", "no-3d", "no-bus", "light-tick", "old-labels", "60hz", "begin", "end"]
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(58), spacing: 4), count: 5), spacing: 4) {
+            ForEach(modes, id: \.self) { mode in
+                Button(mode) { NotificationCenter.default.post(name: Notification.Name("zoom-performance-control"), object: mode) }
+                    .font(.system(size: 9)).frame(width: 58, height: 30)
+                    .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 5))
+                    .accessibilityIdentifier("zoom-probe-" + mode).buttonStyle(.plain)
+            }
+        }.frame(width: 306)
+    }
+}
+#endif
