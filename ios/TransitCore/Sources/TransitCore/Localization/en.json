@@ -495,5 +495,7 @@
   "%@ 秒": "%@ sec",
   "%@ 分 %@ 秒": "%@ min %@ sec",
   "站內轉乘 · %@": "Station transfer · %@",
-  "公車／捷運路線": "Bus / metro lines"
+  "公車／捷運路線": "Bus / metro lines",
+  "捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。": "Metro lines, exits and travel times use official data. Without live train data, waiting times are marked as frequency estimates.",
+  "捷運資料說明": "Metro data information"
 }

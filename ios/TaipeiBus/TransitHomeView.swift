@@ -1386,6 +1386,8 @@ private struct AppInformationView: View {
                     Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
                     Text(AppText.text("站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。"))
                     Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
+                    Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
+                    Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
