@@ -4,6 +4,8 @@ import json
 import plistlib
 import re
 import struct
+import gzip
+import hashlib
 import subprocess
 from pathlib import Path
 
@@ -29,6 +31,16 @@ def source_checks(root):
     require(f'MARKETING_VERSION = {config["version"]};' in project, "Project and release-config versions differ.")
     require("TARGETED_DEVICE_FAMILY = 1;" in project, "Review the supported device family.")
     require("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;" in project, "App icon is not configured.")
+    if tuple(map(int, config["version"].split("."))) >= (1,3,0):
+        provenance = json.loads((root / "release/bus-static-provenance.json").read_text(encoding="utf-8"))
+        for feed in provenance["feeds"]:
+            raw = (root / "TaipeiBus/BusMetadata" / (feed["name"] + ".gz")).read_bytes()
+            require(hashlib.sha256(raw).hexdigest() == feed["sha256"], "Bundled bus metadata provenance mismatch")
+            decoded = gzip.decompress(raw)
+            require(len(decoded) <= 32 * 1024 * 1024, "Bundled metadata exceeds its size limit")
+            rows = json.loads(decoded)
+            rows = rows if isinstance(rows,list) else rows.get("BusInfo",[])
+            require(len(rows) == feed["rows"], "Bundled static metadata row count changed")
     icon_set = root / "TaipeiBus/Assets.xcassets/AppIcon.appiconset"
     icon_metadata = json.loads((icon_set / "Contents.json").read_text(encoding="utf-8"))
     icon = icon_set / icon_metadata["images"][0]["filename"]
@@ -60,6 +72,10 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
     require(int(info["DTPlatformVersion"].split(".")[0]) >= minimum_sdk, "Upload SDK is too old.")
     require((app / "PrivacyInfo.xcprivacy").is_file(), "Privacy manifest missing from the actual archive.")
     require(info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {}).get("CFBundleIconName") == "AppIcon", "Compiled app icon missing.")
+    if tuple(map(int, version.split("."))) >= (1,3,0):
+        require((app / "MetroNetwork.json").is_file(), "Metro metadata missing from signed archive")
+        for name in ["GetRoute","GetStop","GetPathDetail","GetProvider","GetBusShape"]:
+            require((app / "BusMetadata" / (name + ".gz")).is_file(), "Static bus fallback missing from signed archive: " + name)
     if tuple(map(int, version.split("."))) >= (1, 1, 9):
         catalog_file = app / "OfficialTravelTimes.json"
         require(catalog_file.is_file(), "The actual archive is missing shared official travel times.")
