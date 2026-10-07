@@ -33,8 +33,8 @@
     ],
     "coreAndLiveCatalogRun": 37682062667,
     "nativeLightEnglishDarkFlowRun": 37681375226,
-    "latestNativeAndBusRegressionRun": 37684476951,
-    "signedUploadRun": 37684289667,
+    "latestNativeAndBusRegressionRun": 37687210966,
+    "signedUploadRun": 37687242339,
     "releaseSearchSeconds": {
       "NeihuToZhongxiaoFuxing": 1.737367033958435,
       "XinbeitouToXiaobitan": 1.0322920083999634,
@@ -63,6 +63,7 @@
   },
   "physicalDeviceFrameRateVerified": false,
   "formalAppStoreChanged": false,
-  "binarySource": "aaba630a5940ac3084c8a4bfaa20a037082a5ea8",
-  "build": "73.1.0"
+  "binarySource": "6654cee2d0d95c43497e25ca15b1950c8bf66fcb",
+  "build": "74.1.0",
+  "startupResilience": "Bundled official static bus and metro metadata remains usable when a metadata download fails; no live GPS or countdown records are bundled."
 }
