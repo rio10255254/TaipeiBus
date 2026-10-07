@@ -10,6 +10,9 @@ struct WalkingLeg: Sendable {
     var duration: TimeInterval?
     var instructions: [String] = []
     var road: RouteLine?
+    var stationSeconds: Double = 0
+    var stationInstruction: String? = nil
+    var internalTransfer = false
     var verified: Bool { duration != nil }
     var timeLabel: String {
         duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
@@ -346,11 +349,30 @@ final class JourneyPlannerModel: ObservableObject {
             let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, limit: 36, ridingDurations: initialRiding, diverse: false)
             func option(_ trip: TransitTrip) -> JourneyOption {
-                var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
-                for index in trip.rides.indices.dropFirst() {
-                    walks.append(WalkingLeg(from: trip.rides[index - 1].alighting.coordinate, to: trip.rides[index].boarding.coordinate))
+                func entrance(_ stop: BusStop, toward point: Coordinate) -> Coordinate {
+                    metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
                 }
-                walks.append(WalkingLeg(from: trip.rides.last!.alighting.coordinate, to: destination.coordinate))
+                let first = trip.rides[0], last = trip.rides.last!
+                let firstExit = metadata.metro.nearestExit(stationID: first.boarding.stationID, to: origin.coordinate)
+                var walks = [WalkingLeg(from: origin.coordinate, to: entrance(first.boarding, toward: origin.coordinate),
+                    stationSeconds: first.boardingAccessSeconds, stationInstruction: firstExit.map { AppText.text("從 %@ 進站", AppLanguage.current == .english ? $0.englishName : $0.name) })]
+                for index in trip.rides.indices.dropFirst() {
+                    let a = trip.rides[index - 1].alighting, b = trip.rides[index].boarding
+                    let transfer = metadata.metro.transfers.first { $0.from == a.stationID && $0.to == b.stationID }
+                    let internalTransfer = a.mode != .bus && b.mode != .bus && (a.stationID == b.stationID || transfer?.external == false)
+                    let officialSeconds = trip.transferSeconds.indices.contains(index - 1) ? trip.transferSeconds[index - 1] : 0
+                    if internalTransfer {
+                        walks.append(WalkingLeg(from: a.coordinate, to: b.coordinate, distance: 0, duration: officialSeconds,
+                            instructions: [AppText.text("站內轉乘")], internalTransfer: true))
+                    } else {
+                        walks.append(WalkingLeg(from: entrance(a, toward: b.coordinate), to: entrance(b, toward: a.coordinate),
+                            stationSeconds: trip.rides[index - 1].alightingAccessSeconds + trip.rides[index].boardingAccessSeconds,
+                            stationInstruction: b.mode != .bus ? AppText.text("進站至月台") : nil))
+                    }
+                }
+                let lastExit = metadata.metro.nearestExit(stationID: last.alighting.stationID, to: destination.coordinate)
+                walks.append(WalkingLeg(from: entrance(last.alighting, toward: destination.coordinate), to: destination.coordinate,
+                    stationSeconds: last.alightingAccessSeconds, stationInstruction: lastExit.map { AppText.text("從 %@ 出站", AppLanguage.current == .english ? $0.englishName : $0.name) }))
                 return JourneyOption(id: trip.id, trip: trip, walks: walks)
             }
             // Verify several families plus their alternative platforms, not just the three eventual rows.
@@ -417,7 +439,11 @@ final class JourneyPlannerModel: ObservableObject {
         var result = option
         for index in option.walks.indices {
             try Task.checkCancellation()
+            if option.walks[index].internalTransfer { continue }
             result.walks[index] = try await walk(option.walks[index])
+            result.walks[index].stationSeconds = option.walks[index].stationSeconds
+            result.walks[index].stationInstruction = option.walks[index].stationInstruction
+            if let seconds = result.walks[index].duration { result.walks[index].duration = seconds + option.walks[index].stationSeconds }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
             let transfer = index > 0 && index < result.walks.count - 1

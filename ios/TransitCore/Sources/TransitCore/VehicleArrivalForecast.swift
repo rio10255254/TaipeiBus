@@ -279,9 +279,8 @@ public struct VehicleArrivalForecast: Sendable {
     public func plannedRidingEstimates(_ trip: TransitTrip, metadata: TransitMetadata, estimates: EstimateFeed,
                                       walkingDurations: [Double?], preferences: LiveSettings.Planning = .init(),
                                       at date: Date) -> [RidingTimeEstimate] {
-        let distances = trip.walkingDistances
-        let walks = distances.enumerated().map { index, distance in
-            walkingDurations.indices.contains(index) ? walkingDurations[index] ?? distance * 1.25 / 1.2 : distance * 1.25 / 1.2
+        let walks = trip.planningWalkSeconds.enumerated().map { index, seconds in
+            walkingDurations.indices.contains(index) ? walkingDurations[index] ?? seconds : seconds
         }
         var durations = trip.rideSeconds, result: [RidingTimeEstimate] = [], elapsed = 0.0
         for (index, ride) in trip.rides.enumerated() {

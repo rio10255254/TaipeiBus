@@ -18,7 +18,7 @@ final class MetroIntegrationTests: XCTestCase {
         let metro = try network(); var metadata = TransitMetadata(); metro.attach(to: &metadata)
         XCTAssertEqual(metro.lines.count, 7); XCTAssertEqual(metro.stations.count, 148)
         XCTAssertEqual(metro.stations.flatMap(\.exits).count, 486)
-        XCTAssertTrue(metadata.stationSearch.search("BR18", near: .taipei).contains { $0.mode == .metro && $0.name == "內湖" })
+        XCTAssertTrue(metadata.stationSearch.search("BR19", near: .taipei).contains { $0.mode == .metro && $0.name == "內湖" })
         XCTAssertTrue(metadata.stationSearch.search("Neihu", near: .taipei).contains { $0.mode == .metro && $0.name == "內湖" })
         for pattern in metro.patterns {
             XCTAssertGreaterThan(pattern.coordinates.count, pattern.stationIDs.count)
@@ -26,7 +26,7 @@ final class MetroIntegrationTests: XCTestCase {
         }
     }
     func testNeihuToZhongxiaoFuxingUsesDirectWenhuTrainAndOfficialSeconds() throws {
-        let result = try trips("BR18", "BR10"), first = try XCTUnwrap(result.first)
+        let result = try trips("BR19", "BR10"), first = try XCTUnwrap(result.first)
         XCTAssertEqual(first.rides.count, 1); XCTAssertEqual(first.rides[0].route.lineCode, "BR")
         XCTAssertEqual(first.rides[0].boarding.name, "內湖"); XCTAssertEqual(first.rides[0].alighting.name, "忠孝復興")
         XCTAssertGreaterThan(first.rideSeconds[0], 600); XCTAssertLessThan(first.rideSeconds[0], 1800)
@@ -57,7 +57,7 @@ final class MetroIntegrationTests: XCTestCase {
     }
     func testNightDoesNotRecommendWaitingHoursForClosedMetro() throws {
         let night = ISO8601DateFormatter().date(from: "2026-10-07T19:00:00Z")!
-        XCTAssertTrue(try trips("BR18", "BR10", at: night).isEmpty)
+        XCTAssertTrue(try trips("BR19", "BR10", at: night).isEmpty)
     }
     func testSeveralTransfersKeepAllWalksInDuration() throws {
         let result = try trips("R22A", "G03A")

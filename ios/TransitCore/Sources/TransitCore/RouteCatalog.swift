@@ -47,7 +47,7 @@ public struct RouteCatalog: Sendable {
         groupsByID = Dictionary(uniqueKeysWithValues: orderedGroups.map { ($0.id, $0) })
         entries = orderedGroups.map { group in
             Entry(group: group,
-                  names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName] }
+                  names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName, $0.lineCode] }
                     .flatMap(Self.searchNames).filter { !$0.isEmpty })),
                   destinations: Array(Set(group.variants.flatMap { [$0.departure, $0.destination, $0.englishDeparture, $0.englishDestination] }
                     .map(Self.normalize).filter { !$0.isEmpty })),

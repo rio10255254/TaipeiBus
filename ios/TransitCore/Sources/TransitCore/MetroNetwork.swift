@@ -92,9 +92,11 @@ public struct MetroNetwork: Codable, Sendable {
     public func ridingSeconds(routeID: String, direction: String, from: String, to: String) -> Double? {
         guard let pattern = pattern(routeID, direction: direction),
               let first = pattern.stationIDs.firstIndex(of: from), let last = pattern.stationIDs.firstIndex(of: to), last > first else { return nil }
-        return pattern.seconds[first..<last].reduce(0,+) + (first + 1..<last).reduce(0) { total, index in
-            total + (pattern.dwellSeconds.indices.contains(index) ? pattern.dwellSeconds[index] : 20)
+        var total: Double = pattern.seconds[first..<last].reduce(0.0, +)
+        for index in (first + 1)..<last {
+            total += pattern.dwellSeconds.indices.contains(index) ? pattern.dwellSeconds[index] : 20.0
         }
+        return total
     }
     public func nearestExit(stationID: String, to point: Coordinate) -> MetroExit? {
         station(stationID)?.exits.min { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) }
