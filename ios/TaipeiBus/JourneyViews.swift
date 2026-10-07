@@ -774,7 +774,7 @@ private struct JourneyRouteChain: View {
                     if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
                         Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     }
-                    RouteBadge(name: option.rides[index].route.localizedName, tintName: option.rides[index].route.name, compact: true)
+                    RouteBadge(name: option.rides[index].route.mode == .bus ? option.rides[index].route.localizedName : option.rides[index].route.lineCode, tintName: option.rides[index].route.name, compact: true)
                 }
             }
         }.lineLimit(1).minimumScaleFactor(0.8)
@@ -1277,7 +1277,7 @@ private struct WaitingBannerContent: View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                RouteBadge(name: ride.route.localizedName, tintName: ride.route.name)
+                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
                     .accessibilityIdentifier("boarding-route")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
@@ -1365,7 +1365,7 @@ private struct RidingBannerContent: View {
         let alightNext = next?.id == ride.alighting.id
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                RouteBadge(name: ride.route.localizedName, tintName: ride.route.name)
+                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)

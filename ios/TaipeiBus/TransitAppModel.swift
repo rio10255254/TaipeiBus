@@ -847,7 +847,9 @@ final class TransitAppModel: ObservableObject {
             return arguments[index + 1]
         }
         if arguments.contains("--preview-metro-fixture") {
-            previewSelectionApplied = prepareMetroFixture(); return
+            previewSelectionApplied = true
+            Task { [weak self] in _ = await self?.prepareMetroFixture() }
+            return
         }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
@@ -1036,12 +1038,16 @@ final class TransitAppModel: ObservableObject {
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
     }
 
-    private func prepareMetroFixture() -> Bool {
+    private func prepareMetroFixture() async -> Bool {
         guard let from = metadata.metro.stations.first(where: { $0.code == "BR19" }),
               let to = metadata.metro.stations.first(where: { $0.code == "BR10" }) else { return false }
         let noon = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
-        guard let trip = MultimodalPlanner(metadata: metadata).plan(from: from.coordinate, to: to.coordinate,
-            maximumWalk: 200, limit: 3, at: noon).first, let ride = trip.rides.first else { return false }
+        let source = metadata
+        let planned = await Task.detached(priority: .userInitiated) {
+            MultimodalPlanner(metadata: source).plan(from: from.coordinate, to: to.coordinate,
+                maximumWalk: 200, limit: 3, at: noon).first
+        }.value
+        guard let trip = planned, let ride = trip.rides.first else { return false }
         let now = Date(), stamp = ISO8601DateFormatter().string(from: now)
         let pattern = metadata.metro.pattern(ride.route.id, direction: ride.direction)!
         let nextIndex = pattern.stationIDs.firstIndex(of: from.id)!
