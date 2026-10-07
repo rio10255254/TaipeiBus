@@ -1,7 +1,7 @@
 {
   "version": "1.2.5",
   "source": "6fc348a343a982472bfca9c324afdf4fc547c837",
-  "status": "verified_ready_for_testflight",
+  "status": "published_to_internal_testflight",
   "performance_run": 37608015257,
   "performance_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/37608015257",
   "implementation": [
@@ -288,5 +288,9 @@
   "receipt": "testflight-1.2.5-receipt.json",
   "native_regression_run": 37608018962,
   "native_regression_review": "Original run had one missed city short press and one missed dark expansion; remaining light/dark and same-process appearance checks passed. The specific failed cases then passed in 37610909178; app source is identical to performance source 6fc348a.",
-  "release_source_before_receipt": "a73d121"
+  "release_source_before_receipt": "a73d121",
+  "release_source": "7c09223e3611da04de8eee0d13fd29b46df72b16",
+  "build_number": "64.1.0",
+  "build_id": "d29c83d6-348b-42bc-b83e-29c5d93b9034",
+  "testflight_run": 37613212051
 }
