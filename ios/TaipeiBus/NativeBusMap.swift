@@ -1490,6 +1490,7 @@ private final class ViewportPlaceRenderer {
     private var lastQueryMs = 0.0
     private var maxQueryMs = 0.0
     private var deferred = 0
+    private var sourceCount = 0
     private let landmarks = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
     private var ordinary: [String] {
         NativeBusMap.Coordinator.poiCategories.flatMap(\.classes).filter { !landmarks.contains($0) }
@@ -1498,7 +1499,7 @@ private final class ViewportPlaceRenderer {
         ["bounded": source != nil, "count": count, "candidateCount": candidates, "queries": queries,
          "cacheReuses": reuses, "queryMs": lastQueryMs, "maxQueryMs": maxQueryMs,
          "deferred": deferred, "interacting": interacting, "flying": flying, "ready": dataReady,
-         "band": cacheBand, "budget": PlaceLabelBudget.maximum]
+         "band": cacheBand, "sourceCount": sourceCount, "budget": PlaceLabelBudget.maximum]
     }
     func install(map: MLNMapView, style: MLNStyle) {
         stop(); self.map = map; source = style.source(withIdentifier: "viewport-places") as? MLNShapeSource
@@ -1563,23 +1564,21 @@ private final class ViewportPlaceRenderer {
         let reuse = cacheBounds.map { covers($0, needed) } == true && currentBand == cacheBand && now - cacheAt < 30 && !records.isEmpty
         if !reuse {
             if cacheBounds.map({ covers($0, needed) }) != true || currentBand != cacheBand { emptyAttempts = 0 }
-            var ring = [CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.west),
-                        CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.east),
-                        CLLocationCoordinate2D(latitude: buffered.north, longitude: buffered.east),
-                        CLLocationCoordinate2D(latitude: buffered.north, longitude: buffered.west),
-                        CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.west)]
-            let polygon = MLNPolygon(coordinates: &ring, count: UInt(ring.count))
             let land = NSPredicate(format: "class IN %@ AND rank <= 3 AND name != NIL", landmarks)
             let rank = currentBand == 2 ? 25 : currentBand == 3 ? 120 : 1_000_000
             let local = NSPredicate(format: "class IN %@ AND rank <= %d AND name != NIL", ordinary, rank)
             let eligible = currentBand == 1 ? land : NSCompoundPredicate(orPredicateWithSubpredicates: [land, local])
-            let query = NSCompoundPredicate(andPredicateWithSubpredicates: [eligible, NSPredicate(format: "SELF IN %@", polygon)])
             let start = CACurrentMediaTime()
-            let features = vector.features(sourceLayerIdentifiers: Set(["poi"]), predicate: query)
+            // Source-query geometry expressions lack the canonical tile context in
+            // this SDK. Clip real coordinates explicitly before copying attributes.
+            let features = vector.features(sourceLayerIdentifiers: Set(["poi"]), predicate: eligible)
+            sourceCount = features.count
             queries += 1; lastQueryMs = (CACurrentMediaTime() - start) * 1000; maxQueryMs = max(maxQueryMs, lastQueryMs)
             var fresh: [String: MLNPointFeature] = [:]
             for feature in features {
                 guard let point = feature as? MLNPointFeature, point.coordinate.latitude.isFinite, point.coordinate.longitude.isFinite,
+                      point.coordinate.latitude >= buffered.south, point.coordinate.latitude <= buffered.north,
+                      point.coordinate.longitude >= buffered.west, point.coordinate.longitude <= buffered.east,
                       let name = point.attribute(forKey: "name") as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                       let kind = point.attribute(forKey: "class") as? String else { continue }
                 let rank = (point.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
