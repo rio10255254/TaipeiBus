@@ -3,7 +3,7 @@ import argparse, datetime, gzip, json, os, time, urllib.error, urllib.parse, url
 from pathlib import Path
 
 BASE = 'https://tdx.transportdata.tw'
-NAMES = ['Line', 'Route', 'Station', 'StationOfRoute', 'StationExit', 'StationTransfer',
+NAMES = ['Line', 'Route', 'Station', 'StationOfRoute', 'StationExit', 'StationTransfer', 'LineTransfer',
          'Shape', 'S2STravelTime', 'Frequency', 'FirstLastTimetable']
 
 def read(url, headers=None, data=None):
