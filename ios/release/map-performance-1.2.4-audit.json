@@ -1,0 +1,926 @@
+{
+  "version": "1.2.4",
+  "build": "62.1.0",
+  "binary_source": "e1dff15bf187d9c95943fc62f7e4da3499d5521c",
+  "build_id": "6edd6ae7-8338-425f-86a0-d02c70cc62d7",
+  "test_run": 37593368003,
+  "test_source": "e7008eb",
+  "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/37593368003",
+  "status": "diagnosis_verified",
+  "method": "Native iPhone 17 simulator pinch, pan, rotate and live-bus return gestures. Each comparison resets the same warmed map camera in the same process. No fake bus GPS or arrivals.",
+  "primary_finding": "Street-scale POI symbol placement is the dominant measured map-encoding cost. Disabling POI labels reduces median encoding from 43.16 ms to 8.71 ms. Removing the high-rank unbounded band alone reduces it to 28.67 ms, so the remaining mid-rank band is also expensive. Disabling buses or the per-frame app tick barely changes total encoding cost.",
+  "tile_density": {
+    "source": "https://tiles.openfreemap.org/planet/20261004_113936_pt/14/13724/7014.pbf",
+    "z": 14,
+    "x": 13724,
+    "y": 7014,
+    "bytes": 780512,
+    "layers": {
+      "aeroway": 5,
+      "boundary": 2,
+      "building": 259,
+      "housenumber": 2521,
+      "landcover": 827,
+      "landuse": 131,
+      "mountain_peak": 6,
+      "park": 1,
+      "place": 126,
+      "poi": 5636,
+      "transportation": 822,
+      "transportation_name": 735,
+      "water": 50,
+      "water_name": 27,
+      "waterway": 6
+    },
+    "named_ordinary_pois": 3331,
+    "bands": {
+      "rank_le25": 337,
+      "rank_26_to120": 2082,
+      "rank_gt120_unbounded": 912
+    },
+    "max_rank": 258,
+    "rank_caps": {
+      "5": 7,
+      "10": 27,
+      "15": 90,
+      "20": 202,
+      "25": 337,
+      "40": 750,
+      "80": 1712,
+      "120": 2419
+    }
+  },
+  "comparison_normalized_ms": [
+    {
+      "bus_encode": {
+        "max_ms": 5.863041666657409,
+        "median_ms": 1.0946249999506108,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6924166667186,
+        "p99_ms": 3.5527916667206227,
+        "samples": 366
+      },
+      "callback_gap": {
+        "max_ms": 289.7843750000675,
+        "median_ms": 52.13991666664697,
+        "over_33ms": 362,
+        "over_100ms": 18,
+        "p95_ms": 95.68966666665801,
+        "p99_ms": 124.12258333324644,
+        "samples": 365
+      },
+      "complete": true,
+      "elapsed_seconds": 21.05180595833326,
+      "map_encoding": {
+        "max_ms": 136.44762499984608,
+        "median_ms": 43.16462499991758,
+        "p95_ms": 54.09704199996668,
+        "p99_ms": 58.90175000001818,
+        "samples": 366
+      },
+      "map_rendering": {
+        "max_ms": 2.3911660000521806,
+        "median_ms": 0.039292000110435765,
+        "p95_ms": 0.08945900003709539,
+        "p99_ms": 0.19816599990463146,
+        "samples": 366
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "baseline",
+      "render_callbacks": 366,
+      "render_callbacks_per_second": 17.385681813921554,
+      "tick": {
+        "max_ms": 4.91958333338971,
+        "median_ms": 0.10524999993322126,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3174166666894962,
+        "p99_ms": 2.6601666667147583,
+        "samples": 366
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.8651666666282836,
+        "median_ms": 1.9277500000498549,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 3.113083333346367,
+        "p99_ms": 3.4309166667298996,
+        "samples": 798
+      },
+      "callback_gap": {
+        "max_ms": 151.6114999999445,
+        "median_ms": 18.042041666603836,
+        "over_33ms": 103,
+        "over_100ms": 8,
+        "p95_ms": 65.3479166667239,
+        "p99_ms": 99.65933333342036,
+        "samples": 797
+      },
+      "complete": true,
+      "elapsed_seconds": 19.000427583333362,
+      "map_encoding": {
+        "max_ms": 147.9386670000622,
+        "median_ms": 8.709000000067135,
+        "p95_ms": 18.323667000004207,
+        "p99_ms": 65.89762600003723,
+        "samples": 798
+      },
+      "map_rendering": {
+        "max_ms": 0.3868750000037835,
+        "median_ms": 0.04558399996312801,
+        "p95_ms": 0.11825000001408625,
+        "p99_ms": 0.17212500006280607,
+        "samples": 798
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-poi",
+      "render_callbacks": 798,
+      "render_callbacks_per_second": 41.999054837059724,
+      "tick": {
+        "max_ms": 4.034583333350383,
+        "median_ms": 0.15045833333715564,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.36716666670599807,
+        "p99_ms": 2.8872500000716173,
+        "samples": 798
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 5.393916666662335,
+        "median_ms": 1.12899999999172,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.795083333353432,
+        "p99_ms": 3.1870416665924495,
+        "samples": 449
+      },
+      "callback_gap": {
+        "max_ms": 130.3976666666813,
+        "median_ms": 35.40766666662876,
+        "over_33ms": 278,
+        "over_100ms": 7,
+        "p95_ms": 74.06416666663063,
+        "p99_ms": 103.42133333335823,
+        "samples": 448
+      },
+      "complete": true,
+      "elapsed_seconds": 18.16425229166657,
+      "map_encoding": {
+        "max_ms": 88.39279200003602,
+        "median_ms": 28.66545800009135,
+        "p95_ms": 37.427541999932146,
+        "p99_ms": 44.3597089999912,
+        "samples": 449
+      },
+      "map_rendering": {
+        "max_ms": 0.15662500004509639,
+        "median_ms": 0.03916699995443196,
+        "p95_ms": 0.09049999994203972,
+        "p99_ms": 0.12074999995093094,
+        "samples": 449
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "old-labels",
+      "render_callbacks": 449,
+      "render_callbacks_per_second": 24.718881503644003,
+      "tick": {
+        "max_ms": 5.608374999951593,
+        "median_ms": 0.09812500002226443,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.26712499993664096,
+        "p99_ms": 2.297208333288836,
+        "samples": 449
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 4.517250000048989,
+        "median_ms": 1.8808333333026894,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 3.010750000044027,
+        "p99_ms": 3.5479166666618767,
+        "samples": 965
+      },
+      "callback_gap": {
+        "max_ms": 421.9309999999723,
+        "median_ms": 17.295541666612735,
+        "over_33ms": 121,
+        "over_100ms": 25,
+        "p95_ms": 61.62174999997205,
+        "p99_ms": 136.3008749999608,
+        "samples": 964
+      },
+      "complete": true,
+      "elapsed_seconds": 23.533112291666725,
+      "map_encoding": {
+        "max_ms": 119.01387500006422,
+        "median_ms": 3.9327499999899374,
+        "p95_ms": 19.475417000080597,
+        "p99_ms": 57.496999999898435,
+        "samples": 965
+      },
+      "map_rendering": {
+        "max_ms": 0.5686669999249716,
+        "median_ms": 0.04562499998428393,
+        "p95_ms": 0.12820799997825816,
+        "p99_ms": 0.22437500001615263,
+        "samples": 965
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-text",
+      "render_callbacks": 965,
+      "render_callbacks_per_second": 41.00605088013432,
+      "tick": {
+        "max_ms": 5.213833333300499,
+        "median_ms": 0.15295833338768716,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3632499999639549,
+        "p99_ms": 2.987250000046515,
+        "samples": 965
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.757416666644531,
+        "median_ms": 1.1613750000378786,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6930833333835835,
+        "p99_ms": 2.9657083333631817,
+        "samples": 371
+      },
+      "callback_gap": {
+        "max_ms": 194.33683333329554,
+        "median_ms": 53.24462500004756,
+        "over_33ms": 368,
+        "over_100ms": 27,
+        "p95_ms": 110.9809583333572,
+        "p99_ms": 149.67649999994137,
+        "samples": 370
+      },
+      "complete": true,
+      "elapsed_seconds": 22.130860291666636,
+      "map_encoding": {
+        "max_ms": 183.95145899989984,
+        "median_ms": 43.78370900008122,
+        "p95_ms": 54.80866600009904,
+        "p99_ms": 62.935958000025494,
+        "samples": 371
+      },
+      "map_rendering": {
+        "max_ms": 0.5098330000237183,
+        "median_ms": 0.04029100000479957,
+        "p95_ms": 0.09212500003741297,
+        "p99_ms": 0.13087500008168718,
+        "samples": 371
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-3d",
+      "render_callbacks": 371,
+      "render_callbacks_per_second": 16.76392128957137,
+      "tick": {
+        "max_ms": 3.1201666666902383,
+        "median_ms": 0.11054166668600374,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.30879166661179624,
+        "p99_ms": 2.14891666666972,
+        "samples": 371
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 1.021833333311406,
+        "median_ms": 1.021833333311406,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 1.021833333311406,
+        "p99_ms": 1.021833333311406,
+        "samples": 363
+      },
+      "callback_gap": {
+        "max_ms": 184.73504166672683,
+        "median_ms": 51.12712499999361,
+        "over_33ms": 358,
+        "over_100ms": 18,
+        "p95_ms": 97.72162500007653,
+        "p99_ms": 144.86474999989696,
+        "samples": 362
+      },
+      "complete": true,
+      "elapsed_seconds": 20.235772916666747,
+      "map_encoding": {
+        "max_ms": 151.19637600014357,
+        "median_ms": 41.04824999990342,
+        "p95_ms": 53.180500000053144,
+        "p99_ms": 59.35762599983718,
+        "samples": 363
+      },
+      "map_rendering": {
+        "max_ms": 1.0089170000355807,
+        "median_ms": 0.040207999973063124,
+        "p95_ms": 0.0902919998679863,
+        "p99_ms": 0.25145800009340746,
+        "samples": 363
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-bus",
+      "render_callbacks": 363,
+      "render_callbacks_per_second": 17.938529034441924,
+      "tick": {
+        "max_ms": 2.667374999873573,
+        "median_ms": 0.10370833319939265,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.31241666670212,
+        "p99_ms": 1.4890416666730744,
+        "samples": 363
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.101916666537363,
+        "median_ms": 1.1475833332497132,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.635374999954365,
+        "p99_ms": 2.906749999965541,
+        "samples": 339
+      },
+      "callback_gap": {
+        "max_ms": 172.3890416667473,
+        "median_ms": 51.09716666675013,
+        "over_33ms": 338,
+        "over_100ms": 13,
+        "p95_ms": 90.1629166667135,
+        "p99_ms": 143.81766666656404,
+        "samples": 338
+      },
+      "complete": true,
+      "elapsed_seconds": 18.881202249999887,
+      "map_encoding": {
+        "max_ms": 129.5356250000168,
+        "median_ms": 41.59395900001073,
+        "p95_ms": 52.57241700019222,
+        "p99_ms": 55.99654200000259,
+        "samples": 339
+      },
+      "map_rendering": {
+        "max_ms": 0.69862500004092,
+        "median_ms": 0.0391249998301646,
+        "p95_ms": 0.08650000017951243,
+        "p99_ms": 0.16174999996110273,
+        "samples": 339
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "light-tick",
+      "render_callbacks": 339,
+      "render_callbacks_per_second": 17.95436516761013,
+      "tick": {
+        "max_ms": 4.464625000082378,
+        "median_ms": 0.023416666635966976,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.07354166655204608,
+        "p99_ms": 1.787000000149419,
+        "samples": 339
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 6.549374999849533,
+        "median_ms": 1.1672916666611854,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6868749998811836,
+        "p99_ms": 3.056999999898835,
+        "samples": 358
+      },
+      "callback_gap": {
+        "max_ms": 568.4585416665868,
+        "median_ms": 54.34516666673517,
+        "over_33ms": 357,
+        "over_100ms": 31,
+        "p95_ms": 120.20462499981477,
+        "p99_ms": 175.18770833339659,
+        "samples": 357
+      },
+      "complete": true,
+      "elapsed_seconds": 22.728207833333272,
+      "map_encoding": {
+        "max_ms": 134.48233300005086,
+        "median_ms": 44.72320800005036,
+        "p95_ms": 58.86254100005317,
+        "p99_ms": 69.22429099995497,
+        "samples": 358
+      },
+      "map_rendering": {
+        "max_ms": 0.5077079999864509,
+        "median_ms": 0.04033299978800642,
+        "p95_ms": 0.0882499998624553,
+        "p99_ms": 0.12349999997240957,
+        "samples": 358
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "baseline",
+      "render_callbacks": 358,
+      "render_callbacks_per_second": 15.751351915875915,
+      "tick": {
+        "max_ms": 3.8605833333349437,
+        "median_ms": 0.10945833332698385,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3542916667811369,
+        "p99_ms": 2.5842083334737254,
+        "samples": 358
+      }
+    }
+  ],
+  "original_reporter_values": [
+    {
+      "bus_encode": {
+        "max_ms": 5.863041666657409,
+        "median_ms": 1.0946249999506108,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6924166667186,
+        "p99_ms": 3.5527916667206227,
+        "samples": 366
+      },
+      "callback_gap": {
+        "max_ms": 289.7843750000675,
+        "median_ms": 52.13991666664697,
+        "over_33ms": 362,
+        "over_100ms": 18,
+        "p95_ms": 95.68966666665801,
+        "p99_ms": 124.12258333324644,
+        "samples": 365
+      },
+      "complete": true,
+      "elapsed_seconds": 21.05180595833326,
+      "map_encoding": {
+        "max_ms": 0.13644762499984608,
+        "median_ms": 0.04316462499991758,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.05409704199996668,
+        "p99_ms": 0.05890175000001818,
+        "samples": 366
+      },
+      "map_rendering": {
+        "max_ms": 0.0023911660000521806,
+        "median_ms": 3.9292000110435765e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 8.945900003709539e-05,
+        "p99_ms": 0.00019816599990463146,
+        "samples": 366
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "baseline",
+      "render_callbacks": 366,
+      "render_callbacks_per_second": 17.385681813921554,
+      "tick": {
+        "max_ms": 4.91958333338971,
+        "median_ms": 0.10524999993322126,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3174166666894962,
+        "p99_ms": 2.6601666667147583,
+        "samples": 366
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.8651666666282836,
+        "median_ms": 1.9277500000498549,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 3.113083333346367,
+        "p99_ms": 3.4309166667298996,
+        "samples": 798
+      },
+      "callback_gap": {
+        "max_ms": 151.6114999999445,
+        "median_ms": 18.042041666603836,
+        "over_33ms": 103,
+        "over_100ms": 8,
+        "p95_ms": 65.3479166667239,
+        "p99_ms": 99.65933333342036,
+        "samples": 797
+      },
+      "complete": true,
+      "elapsed_seconds": 19.000427583333362,
+      "map_encoding": {
+        "max_ms": 0.1479386670000622,
+        "median_ms": 0.008709000000067135,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.018323667000004207,
+        "p99_ms": 0.06589762600003723,
+        "samples": 798
+      },
+      "map_rendering": {
+        "max_ms": 0.0003868750000037835,
+        "median_ms": 4.558399996312801e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.00011825000001408625,
+        "p99_ms": 0.00017212500006280607,
+        "samples": 798
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-poi",
+      "render_callbacks": 798,
+      "render_callbacks_per_second": 41.999054837059724,
+      "tick": {
+        "max_ms": 4.034583333350383,
+        "median_ms": 0.15045833333715564,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.36716666670599807,
+        "p99_ms": 2.8872500000716173,
+        "samples": 798
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 5.393916666662335,
+        "median_ms": 1.12899999999172,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.795083333353432,
+        "p99_ms": 3.1870416665924495,
+        "samples": 449
+      },
+      "callback_gap": {
+        "max_ms": 130.3976666666813,
+        "median_ms": 35.40766666662876,
+        "over_33ms": 278,
+        "over_100ms": 7,
+        "p95_ms": 74.06416666663063,
+        "p99_ms": 103.42133333335823,
+        "samples": 448
+      },
+      "complete": true,
+      "elapsed_seconds": 18.16425229166657,
+      "map_encoding": {
+        "max_ms": 0.08839279200003602,
+        "median_ms": 0.02866545800009135,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.037427541999932146,
+        "p99_ms": 0.0443597089999912,
+        "samples": 449
+      },
+      "map_rendering": {
+        "max_ms": 0.00015662500004509639,
+        "median_ms": 3.916699995443196e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 9.049999994203972e-05,
+        "p99_ms": 0.00012074999995093094,
+        "samples": 449
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "old-labels",
+      "render_callbacks": 449,
+      "render_callbacks_per_second": 24.718881503644003,
+      "tick": {
+        "max_ms": 5.608374999951593,
+        "median_ms": 0.09812500002226443,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.26712499993664096,
+        "p99_ms": 2.297208333288836,
+        "samples": 449
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 4.517250000048989,
+        "median_ms": 1.8808333333026894,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 3.010750000044027,
+        "p99_ms": 3.5479166666618767,
+        "samples": 965
+      },
+      "callback_gap": {
+        "max_ms": 421.9309999999723,
+        "median_ms": 17.295541666612735,
+        "over_33ms": 121,
+        "over_100ms": 25,
+        "p95_ms": 61.62174999997205,
+        "p99_ms": 136.3008749999608,
+        "samples": 964
+      },
+      "complete": true,
+      "elapsed_seconds": 23.533112291666725,
+      "map_encoding": {
+        "max_ms": 0.11901387500006422,
+        "median_ms": 0.003932749999989937,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.019475417000080597,
+        "p99_ms": 0.057496999999898435,
+        "samples": 965
+      },
+      "map_rendering": {
+        "max_ms": 0.0005686669999249716,
+        "median_ms": 4.562499998428393e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.00012820799997825816,
+        "p99_ms": 0.00022437500001615263,
+        "samples": 965
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-text",
+      "render_callbacks": 965,
+      "render_callbacks_per_second": 41.00605088013432,
+      "tick": {
+        "max_ms": 5.213833333300499,
+        "median_ms": 0.15295833338768716,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3632499999639549,
+        "p99_ms": 2.987250000046515,
+        "samples": 965
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.757416666644531,
+        "median_ms": 1.1613750000378786,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6930833333835835,
+        "p99_ms": 2.9657083333631817,
+        "samples": 371
+      },
+      "callback_gap": {
+        "max_ms": 194.33683333329554,
+        "median_ms": 53.24462500004756,
+        "over_33ms": 368,
+        "over_100ms": 27,
+        "p95_ms": 110.9809583333572,
+        "p99_ms": 149.67649999994137,
+        "samples": 370
+      },
+      "complete": true,
+      "elapsed_seconds": 22.130860291666636,
+      "map_encoding": {
+        "max_ms": 0.18395145899989984,
+        "median_ms": 0.04378370900008122,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.05480866600009904,
+        "p99_ms": 0.0629359580000255,
+        "samples": 371
+      },
+      "map_rendering": {
+        "max_ms": 0.0005098330000237183,
+        "median_ms": 4.029100000479957e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 9.212500003741297e-05,
+        "p99_ms": 0.00013087500008168718,
+        "samples": 371
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-3d",
+      "render_callbacks": 371,
+      "render_callbacks_per_second": 16.76392128957137,
+      "tick": {
+        "max_ms": 3.1201666666902383,
+        "median_ms": 0.11054166668600374,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.30879166661179624,
+        "p99_ms": 2.14891666666972,
+        "samples": 371
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 1.021833333311406,
+        "median_ms": 1.021833333311406,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 1.021833333311406,
+        "p99_ms": 1.021833333311406,
+        "samples": 363
+      },
+      "callback_gap": {
+        "max_ms": 184.73504166672683,
+        "median_ms": 51.12712499999361,
+        "over_33ms": 358,
+        "over_100ms": 18,
+        "p95_ms": 97.72162500007653,
+        "p99_ms": 144.86474999989696,
+        "samples": 362
+      },
+      "complete": true,
+      "elapsed_seconds": 20.235772916666747,
+      "map_encoding": {
+        "max_ms": 0.15119637600014357,
+        "median_ms": 0.04104824999990342,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.053180500000053144,
+        "p99_ms": 0.05935762599983718,
+        "samples": 363
+      },
+      "map_rendering": {
+        "max_ms": 0.0010089170000355807,
+        "median_ms": 4.0207999973063124e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 9.02919998679863e-05,
+        "p99_ms": 0.00025145800009340746,
+        "samples": 363
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "no-bus",
+      "render_callbacks": 363,
+      "render_callbacks_per_second": 17.938529034441924,
+      "tick": {
+        "max_ms": 2.667374999873573,
+        "median_ms": 0.10370833319939265,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.31241666670212,
+        "p99_ms": 1.4890416666730744,
+        "samples": 363
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 3.101916666537363,
+        "median_ms": 1.1475833332497132,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.635374999954365,
+        "p99_ms": 2.906749999965541,
+        "samples": 339
+      },
+      "callback_gap": {
+        "max_ms": 172.3890416667473,
+        "median_ms": 51.09716666675013,
+        "over_33ms": 338,
+        "over_100ms": 13,
+        "p95_ms": 90.1629166667135,
+        "p99_ms": 143.81766666656404,
+        "samples": 338
+      },
+      "complete": true,
+      "elapsed_seconds": 18.881202249999887,
+      "map_encoding": {
+        "max_ms": 0.1295356250000168,
+        "median_ms": 0.04159395900001073,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.05257241700019222,
+        "p99_ms": 0.05599654200000259,
+        "samples": 339
+      },
+      "map_rendering": {
+        "max_ms": 0.00069862500004092,
+        "median_ms": 3.91249998301646e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 8.650000017951243e-05,
+        "p99_ms": 0.00016174999996110273,
+        "samples": 339
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "light-tick",
+      "render_callbacks": 339,
+      "render_callbacks_per_second": 17.95436516761013,
+      "tick": {
+        "max_ms": 4.464625000082378,
+        "median_ms": 0.023416666635966976,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.07354166655204608,
+        "p99_ms": 1.787000000149419,
+        "samples": 339
+      }
+    },
+    {
+      "bus_encode": {
+        "max_ms": 6.549374999849533,
+        "median_ms": 1.1672916666611854,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 2.6868749998811836,
+        "p99_ms": 3.056999999898835,
+        "samples": 358
+      },
+      "callback_gap": {
+        "max_ms": 568.4585416665868,
+        "median_ms": 54.34516666673517,
+        "over_33ms": 357,
+        "over_100ms": 31,
+        "p95_ms": 120.20462499981477,
+        "p99_ms": 175.18770833339659,
+        "samples": 357
+      },
+      "complete": true,
+      "elapsed_seconds": 22.728207833333272,
+      "map_encoding": {
+        "max_ms": 0.13448233300005086,
+        "median_ms": 0.04472320800005036,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.05886254100005317,
+        "p99_ms": 0.06922429099995497,
+        "samples": 358
+      },
+      "map_rendering": {
+        "max_ms": 0.0005077079999864509,
+        "median_ms": 4.033299978800642e-05,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 8.82499998624553e-05,
+        "p99_ms": 0.00012349999997240957,
+        "samples": 358
+      },
+      "max_zoom": 19.407797830400433,
+      "min_zoom": 18.02531713137582,
+      "mode": "baseline",
+      "render_callbacks": 358,
+      "render_callbacks_per_second": 15.751351915875915,
+      "tick": {
+        "max_ms": 3.8605833333349437,
+        "median_ms": 0.10945833332698385,
+        "over_33ms": 0,
+        "over_100ms": 0,
+        "p95_ms": 0.3542916667811369,
+        "p99_ms": 2.5842083334737254,
+        "samples": 358
+      }
+    }
+  ],
+  "units": "Callback gaps, bus encode and tick are already milliseconds. MapLibre 6.31 renderer delegate encoding/rendering values are seconds despite the public header wording. Original map_* median_ms/p95_ms keys from this run contain seconds; normalized values above multiply by 1000. Original map_* threshold counters are discarded. Diagnostic collection is now corrected for future runs.",
+  "unit_source": [
+    "https://github.com/maplibre/maplibre-native/blob/ios-v6.31.0/include/mln/util/monotonic_timer.hpp",
+    "https://github.com/maplibre/maplibre-native/blob/ios-v6.31.0/src/mln/renderer/render_tree.hpp",
+    "https://github.com/maplibre/maplibre-native/blob/ios-v6.31.0/src/mln/renderer/renderer_impl.cpp"
+  ],
+  "native_checks": {
+    "core_tests": 154,
+    "core_skipped_live_cases": 7,
+    "core_failures": 0,
+    "debug_build": "passed",
+    "release_build": "passed",
+    "zoom_and_live_return_tests": 2,
+    "failures": 0
+  },
+  "visual_review": "Original live-following, street baseline and POI-disabled screenshots inspected. A baseline can show few actual labels while still spending time on thousands of loaded-tile candidates.",
+  "limits": [
+    "Render callbacks are not physical-display presentation FPS. Video encoding FPS is not app FPS.",
+    "The street comparison uses a flat camera. It does not exonerate every 3D building scene; the separate live-following test starts at pitch 57 and reproduces slow updates.",
+    "City-scale thousands-of-bus scenes and iOS 27 on the physical phone were not profiled.",
+    "The source remains the original public app behavior outside DEBUG. No new TestFlight/App Store build was published or existing review changed."
+  ],
+  "recommended_fix": "Keep bus tracking, route geometry, stops and important landmarks. Bound ordinary POI candidates by the visible area and a genuine display budget, and defer extra label work while gestures are moving. Verify a bounded implementation with the same comparison before publication.",
+  "invalid_trials": [
+    {
+      "run": 37590942826,
+      "reason": "Cancelled after detecting that the richer MapLibre delegate overload suppresses the normal overload; restored callback forwarding."
+    },
+    {
+      "run": 37591435578,
+      "reason": "The diagnostic result dictionary boxed an Optional maximum as SwiftValue and raised a JSON exception. Corrected to an explicit Double; no numbers from this run are used."
+    }
+  ],
+  "artifact_ids": {
+    "full_native_results": 11470027733,
+    "recording_and_preview": 11470885364
+  }
+}

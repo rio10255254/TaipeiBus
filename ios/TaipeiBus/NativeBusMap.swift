@@ -1370,8 +1370,9 @@ private final class ZoomPerformanceProbe {
     }
     func renderer(encoding: Double, rendering: Double) {
         guard active else { return }
-        if encoding.isFinite, encoding >= 0, encodingTimes.count < 6000 { encodingTimes.append(encoding) }
-        if rendering.isFinite, rendering >= 0, renderingTimes.count < 6000 { renderingTimes.append(rendering) }
+        // MapLibre 6.31's MonotonicTimer duration<double> reports seconds.
+        if encoding.isFinite, encoding >= 0, encodingTimes.count < 6000 { encodingTimes.append(encoding * 1000) }
+        if rendering.isFinite, rendering >= 0, renderingTimes.count < 6000 { renderingTimes.append(rendering * 1000) }
     }
     func end() {
         guard active else { return }
