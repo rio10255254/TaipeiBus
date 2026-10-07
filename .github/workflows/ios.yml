@@ -404,6 +404,13 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
         run: |
           set -euo pipefail
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
+            curl --fail --silent --show-error --location --max-time 45 \
+              https://tiles.openfreemap.org/planet/20261004_113936_pt/14/13724/7014.pbf \
+              --output "$RUNNER_TEMP/place-fixture.pbf"
+            BUS_PLACE_TILE_FIXTURE="$RUNNER_TEMP/place-fixture.pbf" swift test --package-path ios/TransitCore \
+              --filter MapPlaceTileTests.testActualPublishedPoiTileMatchesIndependentCount
+          fi
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
