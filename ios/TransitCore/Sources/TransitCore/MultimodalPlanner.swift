@@ -42,7 +42,7 @@ public struct MultimodalPlanner: Sendable {
                     .map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for index in 1..<stops.count {
                     let a = stops[index - 1], b = stops[index]
-                    let rail = metadata.metro.ridingSeconds(routeID: route.id, direction: direction, from: a.stationID, to: b.stationID)
+                    let rail = route.mode != .bus ? metadata.metro.ridingSeconds(routeID: route.id, direction: direction, from: a.stationID, to: b.stationID) : nil
                     let published = metadata.officialTravelTimes.seconds(route: route.parentID, subroute: route.id,
                         direction: direction, from: a.id, to: b.id, travellingAt: Date(), observedAt: Date())
                     let distance = anchors[a.id].flatMap { first in anchors[b.id].map { abs($0 - first) } } ?? a.coordinate.distance(to: b.coordinate) * 1.25
@@ -63,8 +63,8 @@ public struct MultimodalPlanner: Sendable {
             for dx in -2...2 { for dy in -2...2 {
                 for other in grid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id {
                     if stop.mode != .bus && other.mode != .bus { continue }
-                    let from = metadata.metro.nearestExit(stationID: id, to: other.coordinate)?.coordinate ?? stop.coordinate
-                    let to = metadata.metro.nearestExit(stationID: other.stationID, to: from)?.coordinate ?? other.coordinate
+                    let from = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: other.coordinate)?.coordinate ?? stop.coordinate
+                    let to = other.mode == .bus ? other.coordinate : metadata.metro.nearestExit(stationID: other.stationID, to: from)?.coordinate ?? other.coordinate
                     let distance = from.distance(to: to)
                     let maximum = stop.mode == .bus && other.mode == .bus ? 220.0 : 450.0
                     if distance <= maximum {
@@ -90,7 +90,8 @@ public struct MultimodalPlanner: Sendable {
             preferences: preferences, estimates: estimates, at: date, preservePlatforms: true)
         guard !metadata.metro.patterns.isEmpty else { return bus }
         func streetDistance(_ stop: BusStop, to c: Coordinate) -> Double {
-            (metadata.metro.nearestExit(stationID: stop.stationID, to: c)?.coordinate ?? stop.coordinate).distance(to: c)
+            if stop.mode == .bus { return stop.coordinate.distance(to: c) }
+            return (metadata.metro.nearestExit(stationID: stop.stationID, to: c)?.coordinate ?? stop.coordinate).distance(to: c)
         }
         var previous: [String: [Label]] = [:]
         for (id, stop) in stationStops {
