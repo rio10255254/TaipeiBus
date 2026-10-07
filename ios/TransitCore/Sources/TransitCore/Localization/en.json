@@ -493,5 +493,6 @@
   "首班 %@ · 末班 %@": "First %@ · Last %@",
   "跟隨列車": "Follow train",
   "%@ 秒": "%@ sec",
-  "%@ 分 %@ 秒": "%@ min %@ sec"
+  "%@ 分 %@ 秒": "%@ min %@ sec",
+  "站內轉乘 · %@": "Station transfer · %@"
 }

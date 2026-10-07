@@ -1012,7 +1012,7 @@ private struct JourneyWalkingStep: View {
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: "figure.walk").liveFont(.title2).foregroundStyle(.primary).frame(width: 34)
             VStack(alignment: .leading, spacing: 5) {
-                Text(leg.internalTransfer ? AppText.text("站內轉乘") : (walked ? AppText.text("已走到 ") : AppText.text("步行至 ")) + target)
+                Text(leg.internalTransfer ? AppText.text("站內轉乘 · %@",target) : (walked ? AppText.text("已走到 ") : AppText.text("步行至 ")) + target)
                     .liveFont(.headline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("journey-walk-status-\(index)")
                 if live.language == .english, option.rides.indices.contains(index) {
                     Text(option.rides[index].boarding.name).liveFont(.caption).foregroundStyle(.secondary)

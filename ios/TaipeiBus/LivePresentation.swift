@@ -142,8 +142,8 @@ struct BilingualName: View {
 enum RouteTint {
     static let general = "#1F6FD1"
     static func hex(for name: String) -> String {
-        let metro = ["文湖線":"#9e652e", "板南線":"#0a59ae", "淡水信義線":"#e3002c", "松山新店線":"#008659", "中和新蘆線":"#f8b61c", "環狀線":"#ffdb00", "三鶯線":"#88b15a",
-            "Wenhu Line":"#9e652e", "Bannan Line":"#0a59ae", "Tamsui-Xinyi Line":"#e3002c", "Songshan-Xindian Line":"#008659", "Zhonghe-Xinlu Line":"#f8b61c", "Circular Line":"#ffdb00", "Sanying Line":"#88b15a"]
+        let metro = ["文湖線":"#b57a25", "板南線":"#0a59ae", "淡水信義線":"#d90023", "松山新店線":"#107547", "中和新蘆線":"#f5a818", "環狀線":"#fedb00", "三鶯線":"#47C1E1",
+            "Wenhu Line":"#b57a25", "Bannan Line":"#0a59ae", "Tamsui-Xinyi Line":"#d90023", "Songshan-Xindian Line":"#107547", "Zhonghe-Xinlu Line":"#f5a818", "Circular Line":"#fedb00", "Sanying Line":"#47C1E1"]
         if let color = metro[name] { return color }
         let value = name.trimmingCharacters(in: .whitespaces)
         let lower = value.lowercased()

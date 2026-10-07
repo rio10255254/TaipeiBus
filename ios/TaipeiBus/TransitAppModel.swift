@@ -342,7 +342,10 @@ final class TransitAppModel: ObservableObject {
     var activeWalkingIndex: Int? {
         if stationWalk.isActive { return nil }
         if let walkingMapIndex { return walkingMapIndex }
-        if planner.started, case .walk(let index) = planner.currentStep { return index }
+        if planner.started, case .walk(let index) = planner.currentStep {
+            if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer == true { return nil }
+            return index
+        }
         return nil
     }
     func updateWalkingLocation() {
@@ -371,6 +374,7 @@ final class TransitAppModel: ObservableObject {
     }
     func stopUserTracking() { userMapMode = .free }
     func cycleUserTracking() {
+        followingTrain = false
         cityFleetMode = false
         let next: UserMapMode = userMapMode == .north ? .heading : .north
         if planner.selected == nil { clearSelection() }
@@ -571,7 +575,9 @@ final class TransitAppModel: ObservableObject {
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
            let progress = planner.walkingProgress, progress.locationConfirmed,
            let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
-            walking[0] = progress.remainingSeconds
+            let leg = option.walks[index]
+            let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
+            walking[0] = progress.remainingSeconds + stationAllowance
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
@@ -708,7 +714,7 @@ final class TransitAppModel: ObservableObject {
         followingTrain = true
         guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
               let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
-        focus = .metroTrain(id); focusRevision += 1
+        focusMap(.metroTrain(id))
     }
     func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
         if let value = metroArrival(ride, at: date) { return MetroCountdown.label(value) }

@@ -14,6 +14,7 @@ struct WalkingLeg: Sendable {
     var stationInstruction: String? = nil
     var internalTransfer = false
     var minimumDuration: Double = 0
+    var streetDuration: Double? = nil
     var verified: Bool { duration != nil }
     var timeLabel: String {
         duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
@@ -112,10 +113,11 @@ final class JourneyPlannerModel: ObservableObject {
     func updateWalking(index: Int, coordinate: Coordinate, accuracy: Double, timestamp: Date, now: Date) {
         guard let option = selected, option.walks.indices.contains(index) else { return }
         let leg = option.walks[index]
+        guard !leg.internalTransfer else { return }
         let first = walkingLegIndex != index
         if first {
             endWalkingGuidance(); walkingLegIndex = index
-            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.duration ?? 0)
+            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.streetDuration ?? leg.duration ?? 0)
         }
         guard var progress = walkingProgress else { return }
         let firstReliable = progress.lastFix == nil
@@ -131,13 +133,17 @@ final class JourneyPlannerModel: ObservableObject {
         walkingTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let refreshed = try await walk(WalkingLeg(from: coordinate, to: leg.to), guidance: true)
+                var refreshed = try await walk(WalkingLeg(from: coordinate, to: leg.to), guidance: true)
                 guard !Task.isCancelled, walkingGeneration == token, selectedID == optionID,
                       walkingLegIndex == index, let slot = options.firstIndex(where: { $0.id == optionID }) else { return }
                 walkingRecalculating = false
                 guard refreshed.verified else { walkingRouteUnavailable = true; return }
+                refreshed.streetDuration = refreshed.duration
+                refreshed.stationSeconds = leg.stationSeconds; refreshed.stationInstruction = leg.stationInstruction
+                let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
+                refreshed.duration = (refreshed.duration ?? 0) + stationAllowance
                 options[slot].walks[index] = refreshed
-                walkingProgress = WalkingProgress(coordinates: refreshed.coordinates, distance: refreshed.distance ?? 0, seconds: refreshed.duration ?? 0)
+                walkingProgress = WalkingProgress(coordinates: refreshed.coordinates, distance: refreshed.distance ?? 0, seconds: refreshed.streetDuration ?? refreshed.duration ?? 0)
                 walkingRevision += 1; walkingRouteRevision += 1
             } catch {
                 if walkingGeneration == token, !Task.isCancelled { walkingRecalculating = false; walkingRouteUnavailable = true }
@@ -443,6 +449,7 @@ final class JourneyPlannerModel: ObservableObject {
             try Task.checkCancellation()
             if option.walks[index].internalTransfer { continue }
             result.walks[index] = try await walk(option.walks[index])
+            result.walks[index].streetDuration = result.walks[index].duration
             result.walks[index].stationSeconds = option.walks[index].stationSeconds
             result.walks[index].stationInstruction = option.walks[index].stationInstruction
             if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
