@@ -1093,7 +1093,7 @@ struct NativeBusMap: UIViewRepresentable {
             layer.rasterOpacity = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
                 6, 0, 7, peak, 12, peak * 0.85, 13.5, peak * 0.4, 14.5, 0])
             // Dark mode keeps the shadows but dims the highlights so slopes do not glow.
-            layer.rasterBrightnessMax = NSExpression(forConstantValue: darkMode ? 0.35 : 1)
+            layer.maximumRasterBrightness = NSExpression(forConstantValue: darkMode ? 0.35 : 1)
         }
 
         private func applyBasePalette(_ style: MLNStyle) {
