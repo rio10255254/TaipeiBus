@@ -500,5 +500,6 @@
   "捷運資料說明": "Metro data information",
   "下班列車": "Next train",
   "官方下班列車": "Official next train",
-  "公車資料暫缺，捷運路線仍可使用": "Bus data is temporarily unavailable. Metro routes remain available."
+  "公車資料暫缺，捷運路線仍可使用": "Bus data is temporarily unavailable. Metro routes remain available.",
+  "路線與站牌使用內建官方資料，等待更新": "Using bundled official routes and stops while waiting for an update."
 }

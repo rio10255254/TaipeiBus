@@ -1,0 +1,46 @@
+{
+  "collectedAt": "2026-10-07T21:07:26.698986+00:00",
+  "source": "https://tcgbusfs.blob.core.windows.net/blobbus/",
+  "feeds": [
+    {
+      "name": "GetRoute",
+      "bytes": 76901,
+      "decodedBytes": 953835,
+      "rows": 791,
+      "sha256": "972171c4f65bb03ca68bed16edf763a6581c2b1577dbd0b01402015cffef7755",
+      "sourceTime": "2026/10/08 05:03:04"
+    },
+    {
+      "name": "GetStop",
+      "bytes": 1419960,
+      "decodedBytes": 9398394,
+      "rows": 28814,
+      "sha256": "fecc3169ff6099cff5cd5ba7283c0b66c6953a8aa238a6d38d06634356e16179",
+      "sourceTime": "2026/10/08 04:42:55"
+    },
+    {
+      "name": "GetPathDetail",
+      "bytes": 341562,
+      "decodedBytes": 4313525,
+      "rows": 42981,
+      "sha256": "6a3b0cfb86b99556fca1244de0a0bdff2f7afe945a5dde8475eb301969fc0949",
+      "sourceTime": "2026/10/08 04:42:19"
+    },
+    {
+      "name": "GetProvider",
+      "bytes": 2097,
+      "decodedBytes": 27600,
+      "rows": 141,
+      "sha256": "755c8cf41bce37b2541cb947e121fc222fc1b5a16fff6867033805c3db5a02e3",
+      "sourceTime": "2026/10/08 04:03:04"
+    },
+    {
+      "name": "GetBusShape",
+      "bytes": 2909251,
+      "decodedBytes": 9326688,
+      "rows": 1010,
+      "sha256": "579168ed214aa8d6fd7341be5f4dd498597512ef8f956cb7de3256755f3b0467",
+      "sourceTime": null
+    }
+  ]
+}

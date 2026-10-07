@@ -5,6 +5,7 @@ import TransitCore
 actor TransitService {
     private var metroRealtimeAt = Date.distantPast
     private var metroPacket: MetroRealtime?
+    private var bundledMetadata: TransitMetadata?
     /// The URL belongs to an authorized server relay; credentials stay on that server.
     func metroRealtime(network: MetroNetwork, force: Bool = false) async -> MetroRealtime? {
         if !force, Date().timeIntervalSince(metroRealtimeAt) < 15 { return metroPacket }
@@ -43,7 +44,18 @@ actor TransitService {
     }
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }
     func offlineMetroMetadata() -> TransitMetadata? {
-        var result = TransitMetadata(); installMetro(in:&result)
+        if let bundledMetadata { return bundledMetadata }
+        var feeds: [String:Data] = [:]
+        for name in Self.metadataNames {
+            guard let url = Bundle.main.url(forResource:name,withExtension:"gz",subdirectory:"BusMetadata"),
+                  let compressed = try? Data(contentsOf:url), let bytes = try? inflate(compressed) else { continue }
+            feeds[name] = bytes
+        }
+        var result = (try? FeedDecoder.metadata(feeds:feeds)) ?? TransitMetadata()
+        result.officialTravelTimes = (bundledOfficialTravelTimes() ?? .init()).matching(result)
+        installMetro(in:&result)
+        bundledMetadata = result
+        metadata = result
         return result.metro.stations.isEmpty ? nil : result
     }
     func cachedMetadata() -> TransitMetadata? {
@@ -96,7 +108,7 @@ actor TransitService {
             if metadata.routes.isEmpty, let offline = offlineMetroMetadata() { metadata = offline }
             guard !metadata.routes.isEmpty else { throw error }
             metadataLoadedAt = Date()
-            metadataNotice = AppText.text("公車資料暫缺，捷運路線仍可使用")
+            metadataNotice = AppText.text("路線與站牌使用內建官方資料，等待更新")
             return metadata
         }
         var decoded = decodedBus
@@ -223,6 +235,9 @@ actor TransitService {
 
     private func fetch(_ name: String) async throws -> Data {
         let data = try await transport.data(name)
+        return try inflate(data)
+    }
+    private func inflate(_ data: Data) throws -> Data {
         guard data.starts(with: [0x1f, 0x8b]) else { return data }
         var output: UnsafeMutablePointer<UInt8>?
         var length = 0
