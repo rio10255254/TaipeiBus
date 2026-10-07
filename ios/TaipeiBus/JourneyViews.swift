@@ -1458,7 +1458,7 @@ struct MetroBoardingRows: View {
                         if let id = arrival.trainID, model.metroRealtime?.trains.contains(where: { $0.id == id }) == true {
                             Button { model.selectedTrainID = id; model.metroRevisionForSelection(); } label: {
                                 Label(AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold).padding(8)
-                            }.buttonStyle(MapActionStyle())
+                            }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-arrival-" + id)
                         }
                     }
                 }

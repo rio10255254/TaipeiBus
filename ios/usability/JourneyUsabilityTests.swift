@@ -32,6 +32,11 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
     func testMetroTrainIsThreeDimensionalAndMapZoomRemainsResponsive() {
         launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
         waitCamera("Metro train geometry is rendered") { ($0["trainModels"] as? Int ?? 0) >= 1 }
+        let follow = app.buttons["metro-track-arrival-QA-TRAIN-01"]
+        XCTAssertTrue(follow.waitForExistence(timeout:10)); follow.tap()
+        waitCamera("Following the train reaches street scale") { ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 0) > 45 }
+        capture("metro-07-train-closeup")
+        XCTAssertGreaterThanOrEqual(camera()["trainModels"] as? Int ?? 0,1)
         let beforeZoom = camera()["zoom"] as? Double ?? 0
         nativeMap.pinch(withScale: 3, velocity: 1)
         waitCamera("Train zoom must respond to the pinch") { ($0["zoom"] as? Double ?? 0) > beforeZoom + 0.8 }
