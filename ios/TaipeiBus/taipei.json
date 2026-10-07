@@ -16,7 +16,7 @@
     "terrain": {
       "type": "raster-dem",
       "encoding": "terrarium",
-      "tileSize": 256,
+      "tileSize": 512,
       "maxzoom": 11,
       "tiles": [
         "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
@@ -373,7 +373,7 @@
       "id": "hillshade",
       "type": "hillshade",
       "source": "terrain",
-      "maxzoom": 15.5,
+      "maxzoom": 14,
       "paint": {
         "hillshade-exaggeration": [
           "interpolate",
@@ -387,8 +387,8 @@
           0.5,
           12,
           0.4,
-          15,
-          0.12
+          14,
+          0.15
         ],
         "hillshade-shadow-color": "#4E5F4A",
         "hillshade-highlight-color": "#FFFFFF",
