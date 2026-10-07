@@ -21,6 +21,7 @@ public struct MultimodalPlanner: Sendable {
         let cost: Double
         let lastStation: String
         let hasRail: Bool
+        let family: String
     }
     private let metadata: TransitMetadata
     private let patterns: [Pattern]
@@ -97,7 +98,7 @@ public struct MultimodalPlanner: Sendable {
             if distance <= maximumWalk {
                 let walking = distance * 1.25 / 1.2 + (stop.mode != .bus ? 120 : 0)
                 previous[id] = [Label(segments: [], access: distance, distances: [], transferSeconds: [], elapsed: walking,
-                    walking: walking, cost: walking * preferences.walkingWeight, lastStation: id, hasRail: false)]
+                    walking: walking, cost: walking * preferences.walkingWeight, lastStation: id, hasRail: false, family: "")]
             }
         }
         var results: [TransitTrip] = []
@@ -107,8 +108,7 @@ public struct MultimodalPlanner: Sendable {
             var arrived: [String: [Label]] = [:]
             func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
                 var pool = values[id] ?? []
-                let family = label.segments.map { patterns[$0.pattern].route.parentID }.joined(separator: "|")
-                if let same = pool.firstIndex(where: { $0.segments.map { patterns[$0.pattern].route.parentID }.joined(separator: "|") == family }) {
+                if let same = pool.firstIndex(where: { $0.family == label.family }) {
                     guard pool[same].cost > label.cost else { return }; pool.remove(at: same)
                 }
                 if pool.contains(where: { $0.cost <= label.cost && $0.walking <= label.walking && $0.hasRail == label.hasRail }) { return }
@@ -131,7 +131,8 @@ public struct MultimodalPlanner: Sendable {
                             access: source.access, distances: source.distances, transferSeconds: source.transferSeconds,
                             elapsed: elapsed, walking: source.walking,
                             cost: source.cost + boarded.wait * preferences.waitingWeight + seconds + (round > 0 ? min(300, preferences.transferPenaltySeconds) : 0),
-                            lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus)
+                            lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus,
+                            family: source.family + "|" + pattern.route.parentID)
                         insert(label, in: &arrived, at: stop.stationID)
                     }
                     guard index < pattern.stops.count - 1 else { continue }
@@ -139,6 +140,10 @@ public struct MultimodalPlanner: Sendable {
                         if source.segments.contains(where: { $0.pattern == pIndex }) { continue }
                         if let last = source.segments.last {
                             let previousRoute = patterns[last.pattern].route
+                            // Bus-only chains are already handled by the indexed bus planner.
+                            // A mixed search must not expand the entire city's bus–bus graph
+                            // before it has entered rail; one feeder on each side is retained.
+                            if previousRoute.mode == .bus && pattern.route.mode == .bus { continue }
                             if previousRoute.mode == .bus && pattern.route.mode == .bus && previousRoute.parentID == pattern.route.parentID { continue }
                             if patterns[last.pattern].stops[last.first].stationID == stop.stationID { continue }
                         }
@@ -188,16 +193,19 @@ public struct MultimodalPlanner: Sendable {
                     }
                 }
             }
+            if round == 3 { break }
             var next: [String: [Label]] = [:]
             for (id, labels) in arrived {
                 for link in links[id] ?? [] {
                     for label in labels {
+                        if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
+                           stationStops[link.id]?.mode == .bus { continue }
                         // Same platform changing trains still includes a short platform allowance.
                         let duration = link.id == id && link.internalWalk ? 60.0 : link.seconds
                         let value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
                             transferSeconds: label.transferSeconds + [duration], elapsed: label.elapsed + duration,
                             walking: label.walking + duration, cost: label.cost + duration * preferences.walkingWeight,
-                            lastStation: link.id, hasRail: label.hasRail)
+                            lastStation: link.id, hasRail: label.hasRail, family: label.family)
                         insert(value, in: &next, at: link.id)
                     }
                 }

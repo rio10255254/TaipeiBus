@@ -115,8 +115,9 @@ public struct MetroNetwork: Codable, Sendable {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
         let weekday = calendar.component(.weekday, from: date) - 1
         let time = BusServiceWindow.secondsOfDay(at: date), holiday = TransitServiceCalendar.isHoliday(date)
+        let holidayProfile = holiday && pattern.periods.contains { $0.holiday }
         let period = pattern.periods.first {
-            guard $0.weekdays.contains(weekday) || holiday && $0.holiday,
+            guard (holidayProfile ? $0.holiday : $0.weekdays.contains(weekday)),
                   let window = BusServiceWindow(first: $0.start, last: $0.end) else { return false }
             let first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
             return first < last ? time >= first && time < last : time >= first || time < last
