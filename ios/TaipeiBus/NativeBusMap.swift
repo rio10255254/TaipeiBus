@@ -684,6 +684,8 @@ struct NativeBusMap: UIViewRepresentable {
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool,
             frameEncodingTime: Double, frameRenderingTime: Double) {
             zoomProbe.renderer(encoding: frameEncodingTime, rendering: frameRenderingTime)
+            // MapLibre selects one delegate overload; preserve the normal frame callback.
+            mapViewDidFinishRenderingFrame(mapView, fullyRendered: fullyRendered)
         }
 
         private func setZoomProbeMode(_ mode: String) {
