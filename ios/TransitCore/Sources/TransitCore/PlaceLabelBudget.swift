@@ -38,12 +38,21 @@ public enum PlaceLabelBudget {
             let bd = hypot(b.x - width / 2, b.y - height / 2)
             return ad == bd ? a.id < b.id : ad < bd
         }
-        var usedIDs = Set<String>(), cells = Set<String>(), result: [String] = []
+        var usedIDs = Set<String>(), cells: [String: PlaceLabelCandidate] = [:], result: [String] = []
         let spacing = zoom < 16.5 ? 72.0 : 52.0
         for point in ordered {
             guard !usedIDs.contains(point.id) else { continue }
-            let cell = "\(Int(floor(point.x / spacing))):\(Int(floor(point.y / spacing)))"
-            guard cells.insert(cell).inserted else { continue }
+            let cx = Int(floor(point.x / spacing)), cy = Int(floor(point.y / spacing))
+            let cell = "\(cx):\(cy)"
+            guard cells[cell] == nil else { continue }
+            let crowded = (-1...1).contains { dx in
+                (-1...1).contains { dy in
+                    guard let neighbor = cells["\(cx + dx):\(cy + dy)"] else { return false }
+                    return hypot(point.x - neighbor.x, point.y - neighbor.y) < spacing * 0.75
+                }
+            }
+            guard !crowded else { continue }
+            cells[cell] = point
             usedIDs.insert(point.id); result.append(point.id)
             if result.count == budget { break }
         }
