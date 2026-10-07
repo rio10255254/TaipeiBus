@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -70,7 +70,7 @@ jobs:
           python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
-        if: inputs.usability_scope != 'routing-only'
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -79,13 +79,13 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
       - name: Package simulator app for requested preview
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
-        if: inputs.usability_scope != 'routing-only'
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -127,14 +127,18 @@ jobs:
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
+          if [ '${{ inputs.usability_scope }}' != 'metro-routing' ]; then
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter CooperatedRouteTests.testLiveAllPublishedRoutesAndCooperatedVehicleCoverage | tee -a "$RUNNER_TEMP/routing-audit.log"
-          if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'routing-only' ] || [ '${{ inputs.usability_scope }}' = 'metro-routing' ]; then
             swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+            if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
             swift test --package-path ios/TransitCore --filter RouteRecommendationAuditTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+            fi
           fi
       - name: iPhone 17 launch and screenshots
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         timeout-minutes: 12
         run: |
           set -euo pipefail
@@ -402,7 +406,7 @@ jobs:
           fi
       - name: Tap through native user journeys
         id: native_journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then

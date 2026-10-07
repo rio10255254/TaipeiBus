@@ -147,7 +147,9 @@ public struct MetroNetwork: Codable, Sendable {
         metadata.metro = self
         let lookup = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
         for station in stations {
-            var value = Station(id: station.id, name: station.name, coordinate: station.coordinate, address: "", bearing: "", stopIDs: [])
+            let lineName = lines.first { station.code.hasPrefix($0.code) }?.name ?? ""
+            var value = Station(id: station.id, name: station.name, coordinate: station.coordinate,
+                address: station.code + " · " + lineName, bearing: station.code, stopIDs: [])
             value.englishName = station.englishName; value.mode = .metro
             value.searchNames = [station.code, "捷運" + station.name, station.englishName]
             metadata.stations[value.id] = value
@@ -159,8 +161,9 @@ public struct MetroNetwork: Codable, Sendable {
                 variantName: line.name, departure: first.name, destination: last.name)
             route.mode = line.mode; route.lineCode = line.code; route.lineColor = line.color; route.englishName = line.englishName
             if pattern.direction == "0" {
-                route = BusRoute(id: pattern.id, parentID: line.id, name: line.name, variantName: line.name,
+                route = BusRoute(id: pattern.id, parentID: line.id, name: line.name, variantName: first.name + "–" + last.name,
                     departure: first.name, destination: last.name, englishName: line.englishName,
+                    englishVariantName: first.englishName + "–" + last.englishName,
                     englishDeparture: first.englishName, englishDestination: last.englishName,
                     mode: line.mode, lineCode: line.code, lineColor: line.color)
             }

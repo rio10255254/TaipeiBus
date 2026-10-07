@@ -31,6 +31,9 @@ public struct RouteCatalog: Sendable {
     public init(routes: [BusRoute] = []) {
         let orderedGroups = Dictionary(grouping: routes, by: \.parentID).values.map { rows in
             let variants = rows.sorted { a, b in
+                if a.mode != .bus && b.mode != .bus {
+                    return a.id.localizedStandardCompare(b.id) == .orderedAscending
+                }
                 let aBase = a.variantName.isEmpty || a.variantName == a.name
                 let bBase = b.variantName.isEmpty || b.variantName == b.name
                 if aBase != bBase { return aBase }

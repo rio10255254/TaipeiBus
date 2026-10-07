@@ -68,6 +68,12 @@ for op,rows in raw['operators'].items():
   sec=[];dwell=[];path=[]
   for a,b in zip(ids,ids[1:]):
    edge=edges.get((a,b)) or edges.get((b,a))
+   # The newer published TRTC CSV carries actual directed pairs, including R01.
+   # Prefer that direction's current profile to reversing an older TDX profile.
+   directed=latest.get((clean(names[a]['Zh_tw']),clean(names[b]['Zh_tw']))) if op=='TRTC' else None
+   if directed:
+    edge={'RunTime':int(directed['traveltime']),'StopTime':int(directed['stoptime'])}
+    stationDwell[a]=edge['StopTime']
    if not edge:
     rowtime=latest.get((clean(names[a]['Zh_tw']),clean(names[b]['Zh_tw']))) or latest.get((clean(names[b]['Zh_tw']),clean(names[a]['Zh_tw'])))
     if not rowtime:raise ValueError('Official time edge missing '+a+' -> '+b)

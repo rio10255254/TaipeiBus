@@ -144,13 +144,13 @@ public struct MultimodalPlanner: Sendable {
                         }
                         let service = pattern.route.mode == .bus ? pattern.route.servicePlans[pattern.direction]?.service(at: date.addingTimeInterval(source.elapsed)) :
                             metadata.metro.service(routeID: pattern.route.id, direction: pattern.direction, at: date.addingTimeInterval(source.elapsed))
-                        if pattern.route.mode != .bus && !metadata.metro.isOperating(routeID: pattern.route.id, direction: pattern.direction,
-                            stationID: stop.stationID, at: date.addingTimeInterval(source.elapsed)) { continue }
                         let official = estimates.value(routeID: pattern.route.parentID, stopID: stop.id, at: date)
                         if let official, [-2,-3,-4].contains(official) { continue }
                         let wait = BoardingTime.wait(official: official, readyAt: source.elapsed, buffer: pattern.route.mode == .bus ? (round > 0 ? 90 : 60) : 30,
                             service: service, secondsOfDay: BusServiceWindow.secondsOfDay(at: date), boardingOffset: pattern.cumulative[index],
                             minimumServiceWait: pattern.route.minimumServiceWait(direction: pattern.direction, at: date, fullRouteSeconds: pattern.cumulative.last ?? 0))
+                        if pattern.route.mode != .bus && wait.evidence != .official && !metadata.metro.isOperating(routeID: pattern.route.id, direction: pattern.direction,
+                            stationID: stop.stationID, at: date.addingTimeInterval(source.elapsed + wait.seconds)) { continue }
                         boarding.append((source, index, wait.seconds))
                     }
                     // Keep independent arrival/walking tradeoffs without a combinatorial explosion.

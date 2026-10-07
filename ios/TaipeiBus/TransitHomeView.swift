@@ -1024,12 +1024,16 @@ private struct StationDetails: View {
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
+                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : !model.metadata.metro.isOperating(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date) ? AppText.text("營運時間外") : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).frame(minHeight: 44).accessibilityIdentifier("station-route-" + row.stop.routeID)
+                        if row.stop.mode != .bus, let window = model.metadata.metro.boardingWindow(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID) {
+                            Text(AppText.text("首班 %@ · 末班 %@", String(format:"%02d:%02d",window.firstMinute / 60,window.firstMinute % 60), String(format:"%02d:%02d",window.lastMinute / 60,window.lastMinute % 60)))
+                                .liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
                         if !row.approaches.isEmpty {
                             Text(live.text("同方向車輛")).liveFont(.caption2).foregroundStyle(.secondary)
                             HStack(spacing: 8) {

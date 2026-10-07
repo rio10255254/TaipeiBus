@@ -122,12 +122,12 @@ private struct MapContextLabelContent: View, Equatable {
                             if compact && !expanded {
                                 Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                                 Text(station.localizedName).font(.caption.weight(.semibold)).lineLimit(1)
-                                if let first { Text(EstimateFeed.label(first.estimateSeconds)).font(.caption).monospacedDigit() }
+                                if let first, first.estimateSeconds != nil || station.mode == .bus { Text(EstimateFeed.label(first.estimateSeconds)).font(.caption).monospacedDigit() }
                             } else {
-                                Image(systemName: "mappin.circle.fill").foregroundStyle(Color.accentColor)
+                                Image(systemName: station.mode == .bus ? "mappin.circle.fill" : "tram.circle.fill").foregroundStyle(Color.accentColor)
                                 VStack(alignment: .leading, spacing: 1) {
                                     BilingualName(station).font(.headline).lineLimit(2)
-                                    Text(station.localizedBearing).font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
+                                    Text(station.mode == .bus ? station.localizedBearing : model.metadata.metro.station(station.id)?.code ?? "").font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                                 }
                             }
                             Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
@@ -139,8 +139,8 @@ private struct MapContextLabelContent: View, Equatable {
                             if let route = first.route { model.selectRoute(route, direction: first.stop.direction, boardingStopID: first.stop.id) }
                         } label: {
                             HStack(spacing: 5) {
-                                RouteBadge(name: first.route?.localizedName ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
-                                Text(EstimateFeed.label(first.estimateSeconds)).fontWeight(.semibold).monospacedDigit()
+                                RouteBadge(name: first.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
+                                Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) : AppText.text("看方向")).fontWeight(.semibold).monospacedDigit()
                                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                             }.font(.caption).padding(.leading, 4).padding(.trailing, 10).frame(minHeight: 32)
                                 .background(.regularMaterial, in: Capsule())

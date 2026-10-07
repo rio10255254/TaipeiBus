@@ -301,7 +301,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.addSource(nearby); nearbySource = nearby
             let dots = MLNSymbolStyleLayer(identifier: "nearby-station-dots", source: nearby)
             dots.minimumZoomLevel = 15.7
-            dots.iconImageName = NSExpression(forConstantValue: "station-marker")
+            dots.iconImageName = NSExpression(mglJSONObject: ["coalesce", ["get", "icon"], "station-marker"])
             dots.iconScale = NSExpression(forConstantValue: 0.85)
             dots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(dots)
@@ -332,7 +332,7 @@ struct NativeBusMap: UIViewRepresentable {
             let source = MLNShapeSource(identifier: id, shape: nil, options: nil)
             style.addSource(source)
             let layer = MLNSymbolStyleLayer(identifier: "\(id)-dot", source: source)
-            layer.iconImageName = NSExpression(forConstantValue: "selected-station-marker")
+            layer.iconImageName = NSExpression(mglJSONObject: ["coalesce", ["get", "icon"], "selected-station-marker"])
             layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(layer)
             return source
@@ -474,7 +474,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard !tintedTripIcons.contains(name), let style = map?.style else { return name }
             let color = UIColor(liveHex: hex)
             let image = kind == "waypoint" ? journeyStopIcon(color: color)
-                : journeyEndpointIcon(symbol: kind == "alighting" ? "arrow.down" : "bus.fill", color: color)
+                : journeyEndpointIcon(symbol: kind == "alighting" ? "arrow.down" : model.metadata.metro.lines.contains(where: { $0.name == route }) ? "tram.fill" : "bus.fill", color: color)
             style.setImage(image, forName: name); tintedTripIcons.insert(name)
             return name
         }
@@ -539,7 +539,9 @@ struct NativeBusMap: UIViewRepresentable {
                 style.setImage(poiIcon(symbol: category.symbol, color: UIColor(liveHex: darkMode ? category.darkHex : category.hex)), forName: category.name)
             }
             style.setImage(stationIcon(size: 22), forName: "station-marker")
+            style.setImage(stationIcon(size: 22, symbol: "tram.fill"), forName: "metro-station-marker")
             style.setImage(pinIcon(symbol: "bus.fill", color: markerBlue), forName: "selected-station-marker")
+            style.setImage(pinIcon(symbol: "tram.fill", color: markerBlue), forName: "selected-metro-station-marker")
             style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "destination-marker")
             style.setImage(journeyStopIcon(), forName: "journey-waypoint")
             style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: markerBlue), forName: "journey-boarding")
@@ -712,7 +714,9 @@ struct NativeBusMap: UIViewRepresentable {
                 buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
             }
             if lastStationID != model.mapLabelStation?.id {
-                stationSource?.shape = point(model.mapLabelStation?.coordinate)
+                let marker = point(model.mapLabelStation?.coordinate)
+                marker?.attributes = ["icon": model.mapLabelStation?.mode == .bus ? "selected-station-marker" : "selected-metro-station-marker"]
+                stationSource?.shape = marker
                 lastStationID = model.mapLabelStation?.id
                 updateNearbyStations(force: true)
             }
@@ -774,7 +778,8 @@ struct NativeBusMap: UIViewRepresentable {
             let features = stations.map { station -> MLNPointFeature in
                 let feature = MLNPointFeature()
                 feature.coordinate = station.coordinate.locationCoordinate
-                feature.attributes = ["stationID": station.id, "name": station.id == model.mapLabelStation?.id ? "" : station.bilingualName + " · " + station.localizedBearing]
+                feature.attributes = ["stationID": station.id, "name": station.id == model.mapLabelStation?.id ? "" : station.bilingualName + (station.mode == .bus ? " · " + station.localizedBearing : ""),
+                    "icon": station.mode == .bus ? "station-marker" : "metro-station-marker"]
                 return feature
             }
             nearbySource?.shape = MLNShapeCollectionFeature(shapes: features)

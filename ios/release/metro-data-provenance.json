@@ -30,7 +30,7 @@
       "sha256": "5f5129274536a55ad8c01ffbe6518f5a1f3a442e5068bf2bfe2f1c31ce4c9351"
     }
   ],
-  "outputSha256": "11d1ed81934e478e12deaefcf580503346fd5c8854a6cb38e144f327e1513c29",
+  "outputSha256": "9e44a417112ca821308d40e5aafaf2cee2bf9bbc63f8ac83d0f2af045678721f",
   "counts": {
     "lines": 7,
     "stations": 148,
@@ -48,5 +48,6 @@
     37665974383,
     37668310116
   ],
-  "dwellSemantics": "TDX StopTime is FromStationID dwell; terminal boarding and final alighting dwell are excluded"
+  "dwellSemantics": "TDX StopTime is FromStationID dwell; terminal boarding and final alighting dwell are excluded",
+  "profilePriority": "TRTC published effective-20260830 directed pair, then official TDX pair/reverse where not published"
 }
