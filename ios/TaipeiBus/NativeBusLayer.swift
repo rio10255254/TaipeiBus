@@ -500,7 +500,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                 vertices.append(Vertex(position: SIMD4(p.x,p.y,p.z,0), normal: SIMD4(n.x,n.y,n.z,material), color: SIMD4(shade.x,shade.y,shade.z,1)))
             }
         }
-        let steel = SIMD3<Float>(0.86, 0.87, 0.88), roofShade = SIMD3<Float>(0.74, 0.75, 0.77)
+        let steel = SIMD3<Float>(0.86, 0.87, 0.88), roofShade = SIMD3<Float>(0.8, 0.81, 0.83)
         let glass = SIMD3<Float>(0.13, 0.16, 0.19), skirt = SIMD3<Float>(0.24, 0.25, 0.27)
         let carLength: Float = 11.9, gap: Float = 0.55, width: Float = 2.7
         let centers: [Float] = [-(carLength + gap), 0, carLength + gap]
@@ -546,14 +546,13 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                 }
             }
             if !compact {
-                // Roof air-conditioning units.
-                for unit: Float in [-3.2, 3.2] {
-                    let c = center + unit
-                    let box = [SIMD3<Float>(-0.62, c - 1.1, 3.42), SIMD3(0.62, c - 1.1, 3.42), SIMD3(0.62, c + 1.1, 3.42), SIMD3(-0.62, c + 1.1, 3.42)]
-                    let lid = box.map { SIMD3($0.x * 0.9, $0.y + ($0.y > c ? -0.08 : 0.08), 3.72) }
-                    for i in 0..<4 { let j = (i + 1) % 4; quad(box[i], box[j], lid[j], lid[i], shade: SIMD3(repeating: 0.66)) }
-                    quad(lid[0], lid[1], lid[2], lid[3], shade: SIMD3(repeating: 0.7), normal: SIMD3(0, 0, 1))
-                }
+                // One low roof equipment fairing per car, close to the roof tone so the roof
+                // reads as a clean surface rather than patches.
+                let box = [SIMD3<Float>(-0.58, center - 3.6, 3.42), SIMD3(0.58, center - 3.6, 3.42),
+                           SIMD3(0.58, center + 3.6, 3.42), SIMD3(-0.58, center + 3.6, 3.42)]
+                let lid = box.map { SIMD3($0.x * 0.88, $0.y + ($0.y > center ? -0.25 : 0.25), 3.58) }
+                for i in 0..<4 { let j = (i + 1) % 4; quad(box[i], box[j], lid[j], lid[i], shade: roofShade * 0.97) }
+                quad(lid[0], lid[1], lid[2], lid[3], shade: roofShade * 1.02, normal: SIMD3(0, 0, 1))
             }
             if lead || tail {
                 // Cab face: windshield, a stripe band and lamps. Forward is +y.

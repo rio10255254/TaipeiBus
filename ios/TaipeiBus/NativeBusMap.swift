@@ -368,11 +368,11 @@ struct NativeBusMap: UIViewRepresentable {
             style.addSource(source); metroSource = source
             let casing = MLNLineStyleLayer(identifier: "metro-network-casing", source: source)
             casing.lineColor = NSExpression(forConstantValue: UIColor.white)
-            casing.lineWidth = zoomed([9: 2.6, 12: 4.8, 14: 7.2, 16: 10.5, 18: 15])
+            casing.lineWidth = zoomed([9: 2.6, 12: 4.8, 14: 6.8, 16: 8.6, 18: 11])
             casing.lineJoin = NSExpression(forConstantValue: "round"); casing.lineCap = NSExpression(forConstantValue: "round")
             let lines = MLNLineStyleLayer(identifier: "metro-network-lines", source: source)
             lines.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
-            lines.lineWidth = zoomed([9: 1.4, 12: 2.8, 14: 4.4, 16: 6.8, 18: 10])
+            lines.lineWidth = zoomed([9: 1.4, 12: 2.8, 14: 4.2, 16: 5.6, 18: 7.5])
             lines.lineJoin = NSExpression(forConstantValue: "round"); lines.lineCap = NSExpression(forConstantValue: "round")
             // Ground level: above streets, under 3D buildings and every label.
             if let below = style.layer(withIdentifier: "building") {
