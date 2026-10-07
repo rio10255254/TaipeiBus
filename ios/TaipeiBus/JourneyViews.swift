@@ -1154,6 +1154,11 @@ struct JourneyGuideCard: View {
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
                         HStack(spacing: 8) {
+                            if ride.route.mode != .bus {
+                                TimelineView(.periodic(from:.now,by:1)) { timeline in
+                                    MetroOnboardSummary(model:model,ride:ride,date:timeline.date,compact:true)
+                                }
+                            } else {
                             Button { chooseVehicle = true } label: {
                                 Label(model.onboardPlate(for: ride) ?? AppText.text("選擇搭乘車牌"), systemImage: "bus")
                                     .liveFont(.subheadline, weight: .semibold).monospaced().lineLimit(1).minimumScaleFactor(0.8)
@@ -1164,9 +1169,10 @@ struct JourneyGuideCard: View {
                                     Image(systemName: "scope").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
                                 }.buttonStyle(MapActionStyle()).accessibilityLabel(AppText.text("追蹤 ") + bus.plate)
                             }
+                            }
                             Spacer(minLength: 0)
                             Button { showRideStops = true } label: {
-                                Label(AppText.text("沿途站牌"), systemImage: "list.bullet").liveFont(.subheadline, weight: .semibold)
+                                Label(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"), systemImage: "list.bullet").liveFont(.subheadline, weight: .semibold)
                                     .lineLimit(1).padding(.horizontal, 14).frame(minHeight: 40)
                             }
                             .buttonStyle(MapActionStyle(tint: Color.primary))
@@ -1467,20 +1473,21 @@ private struct MetroOnboardSummary: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
     let date: Date
+    var compact = false
     var body: some View {
         let remaining = model.metroRemaining(ride, at: date)
         VStack(alignment: .leading, spacing: 6) {
-            HStack {
+            if !compact { HStack {
                 Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).liveFont(.title3, weight: .bold)
                 Spacer()
                 Text(AppText.minutes(max(0,Int(ceil(remaining.seconds / 60))))).liveFont(.title3, weight: .bold).monospacedDigit()
-            }
+            } }
             HStack {
                 Text(remaining.stops.first.map { AppText.text("下一站 · ") + $0.localizedName } ?? AppText.text("準備下車"))
                 Spacer()
-                Text(AppText.remainingStops(remaining.stops.count))
+                if !compact { Text(AppText.remainingStops(remaining.stops.count)) }
             }.liveFont(.subheadline).foregroundStyle(.secondary)
-            Text(remaining.officialPosition ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("依站間車程估計 · 到站請確認站名"))
+            Text(compact ? remaining.officialPosition ? AppText.text("官方列車訊號") : AppText.text("依站間車程估計") : remaining.officialPosition ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("依站間車程估計 · 到站請確認站名"))
                 .liveFont(.caption).foregroundStyle(.secondary)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("metro-onboard-summary")
     }

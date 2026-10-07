@@ -24,12 +24,17 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-onboard-summary").firstMatch.waitForExistence(timeout:10))
         capture("metro-02-onboard")
         XCTAssertFalse(app.staticTexts["選擇車牌即可看沿途時間"].exists)
+        XCTAssertFalse(app.buttons["journey-onboard-vehicle"].exists)
+        app.buttons["journey-alight"].tap()
+        XCTAssertTrue(app.buttons["journey-arrive"].waitForExistence(timeout:10))
+        capture("metro-06-exit")
     }
     func testMetroTrainIsThreeDimensionalAndMapZoomRemainsResponsive() {
         launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
         waitCamera("Metro train geometry is rendered") { ($0["trainModels"] as? Int ?? 0) >= 1 }
+        let beforeZoom = camera()["zoom"] as? Double ?? 0
         nativeMap.pinch(withScale: 3, velocity: 1)
-        waitCamera("Train zoom remains a valid map") { ($0["zoom"] as? Double ?? 0) > 13 }
+        waitCamera("Train zoom must respond to the pinch") { ($0["zoom"] as? Double ?? 0) > beforeZoom + 0.8 }
         capture("metro-03-train-map")
         XCTAssertLessThan(camera()["trainEncodeMs"] as? Double ?? .infinity, 16)
         nativeMap.pinch(withScale: 0.3, velocity: -1)

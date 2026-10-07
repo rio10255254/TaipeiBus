@@ -717,7 +717,9 @@ final class TransitAppModel: ObservableObject {
         return AppText.text("約 %@–%@ 分", 1, max(1, Int(ceil(headway.upperSeconds / 60))))
     }
     func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], officialPosition: Bool) {
-        let report = metroRealtime?.trains.first { $0.id == selectedTrainID && $0.patternID == ride.route.id && $0.direction == ride.direction && (-15...60).contains(date.timeIntervalSince($0.observedAt)) }
+        let report = metroRealtime?.trains.first { $0.id == selectedTrainID &&
+            metadata.metro.canServe(ride,patternID:$0.patternID,direction:$0.direction,destinationStationID:$0.destinationStationID) &&
+            (-15...60).contains(date.timeIntervalSince($0.observedAt)) }
         if let report, let next = ride.stops.firstIndex(where: { $0.stationID == report.nextStationID }) {
             let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
                 from: report.nextStationID, to: ride.alighting.stationID) ?? 0
