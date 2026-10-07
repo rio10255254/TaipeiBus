@@ -73,6 +73,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var metroStationsSource: MLNShapeSource?
         private var metroExitsSource: MLNShapeSource?
         private var lastMetroKey = ""
+        private var lastMetroTrainKey = ""
         private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
@@ -314,7 +315,7 @@ struct NativeBusMap: UIViewRepresentable {
             names.textHaloWidth = NSExpression(forConstantValue: 2)
             names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
             style.addLayer(names)
-            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""
+            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""
             lastStationBrowsing = nil
             lastStationID = nil
             update(location: pendingLocation)
@@ -371,9 +372,10 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(labels)
         }
         private func updateMetro(map: MLNMapView) {
-            let key = "\(model.metadata.metro.stations.count):\(darkMode):\(AppLanguage.current):\(model.selectedRouteID ?? ""):\(model.metroRevision)"
-            guard key != lastMetroKey else { return }; lastMetroKey = key
             let network = model.metadata.metro
+            let key = "\(network.generatedAt):\(network.stations.count):\(darkMode):\(AppLanguage.current)"
+            if key != lastMetroKey {
+            lastMetroKey = key
             var seen = Set<String>()
             let lines = network.patterns.filter { $0.direction == "0" }.compactMap { pattern -> MLNPolylineFeature? in
                 // Operating branches remain visible; exact duplicate shapes are drawn once.
@@ -402,8 +404,11 @@ struct NativeBusMap: UIViewRepresentable {
                     layer.textHaloColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1B242C") : UIColor.white)
                 }
             }
+            }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
             trains?.selectedID = model.selectedTrainID
+            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? "")"
+            guard trainKey != lastMetroTrainKey else { return }; lastMetroTrainKey = trainKey
             var reports = model.metroRealtime?.trains ?? []
             if let route = model.selectedRoute, route.mode != .bus {
                 let ids = Set(model.metadata.variants(routeID: route.id).map(\.id))

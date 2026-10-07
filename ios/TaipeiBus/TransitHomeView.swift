@@ -1351,7 +1351,7 @@ struct RouteBadge: View {
             .monospacedDigit()
             .padding(.horizontal, (compact ? 7 : 10) * CGFloat(live.appearance.spacingScale))
             .padding(.vertical, (compact ? 3 : 6) * CGFloat(live.appearance.spacingScale)).frame(minWidth: compact ? 34 : 52)
-            .foregroundStyle(.white)
+            .foregroundStyle(RouteTint.signInk(for: tintName ?? name))
             .background(RouteTint.color(for: tintName ?? name), in: RoundedRectangle(cornerRadius: (compact ? 7 : 10) * CGFloat(live.appearance.cornerScale), style: .continuous))
     }
 }

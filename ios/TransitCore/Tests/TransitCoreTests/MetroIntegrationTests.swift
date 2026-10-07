@@ -121,14 +121,14 @@ final class MetroIntegrationTests: XCTestCase {
     }
     func testBoardingAnAlternateOperatingPatternRequiresEveryPlannedStationInOrder() throws {
         let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
-        let pattern = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
-        let stops = metadata.orderedStops(routeID:pattern.id,direction:"0")
+        let pattern = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "1" })
+        let stops = metadata.orderedStops(routeID:pattern.id,direction:"1")
         let route = try XCTUnwrap(metadata.routes[pattern.id])
-        let short = TransitRide(route:route,direction:"0",stops:Array(stops[1...3]),coordinates:[])
-        let alternate = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-2") && $0.direction == "0" })
-        XCTAssertTrue(metro.canServe(short,patternID:alternate.id,direction:"0",destinationStationID:alternate.stationIDs.last!))
-        let beyond = TransitRide(route:route,direction:"0",stops:Array(stops[1...]),coordinates:[])
-        XCTAssertFalse(metro.canServe(beyond,patternID:alternate.id,direction:"0",destinationStationID:alternate.stationIDs.last!))
+        let short = TransitRide(route:route,direction:"1",stops:Array(stops[1...3]),coordinates:[])
+        let alternate = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-2") && $0.direction == "1" })
+        XCTAssertTrue(metro.canServe(short,patternID:alternate.id,direction:"1",destinationStationID:alternate.stationIDs.last!))
+        let beyond = TransitRide(route:route,direction:"1",stops:Array(stops[1...]),coordinates:[])
+        XCTAssertFalse(metro.canServe(beyond,patternID:alternate.id,direction:"1",destinationStationID:alternate.stationIDs.last!))
     }
     func testPublishedDwellBelongsToOriginStationInBothDirections() throws {
         let metro = try network()
