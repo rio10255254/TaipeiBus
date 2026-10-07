@@ -39,17 +39,17 @@ enum JourneyStep: Equatable {
 }
 
 private actor TripNetwork {
-    private var planner: TripPlanner?
+    private var planner: MultimodalPlanner?
     private var key = ""
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning,
                  estimates: EstimateFeed) -> [TransitTrip] {
         let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
-            planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
+            planner = MultimodalPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
         return planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 36,
-                             preferences: preferences, estimates: estimates, preservePlatforms: true)
+                             preferences: preferences, estimates: estimates)
 
     }
 }

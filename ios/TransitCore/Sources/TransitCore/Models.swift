@@ -1,5 +1,7 @@
 import Foundation
 
+public enum TransportMode: String, Codable, Sendable { case bus, metro, lightRail }
+
 public struct BusRoute: Identifiable, Sendable {
     public let id: String
     public let parentID: String
@@ -14,6 +16,9 @@ public struct BusRoute: Identifiable, Sendable {
     public var aliasName: String = ""
     public var serviceWindows: [String: [BusServiceWindow]] = [:]
     public var servicePlans: [String: BusServicePlan] = [:]
+    public var mode: TransportMode = .bus
+    public var lineCode: String = ""
+    public var lineColor: String = ""
     public var displayName: String { variantName.isEmpty ? name : variantName }
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var localizedDisplayName: String {
@@ -37,6 +42,7 @@ public struct BusStop: Identifiable, Sendable {
     public var sequence: Int
     public let coordinate: Coordinate
     public var englishName: String = ""
+    public var mode: TransportMode = .bus
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
 }
@@ -50,6 +56,7 @@ public struct Station: Identifiable, Sendable {
     public var stopIDs: [String]
     public var searchNames: [String] = []
     public var englishName: String = ""
+    public var mode: TransportMode = .bus
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
     public var localizedBearing: String { AppText.text(bearingLabel) }
@@ -122,6 +129,7 @@ public struct StopReference: Sendable {
 }
 
 public struct TransitMetadata: Sendable {
+    public var metro = MetroNetwork.empty
     public var officialTravelTimes = OfficialTravelTimes()
     public let revision = UUID()
     public var routes: [String: BusRoute] = [:]

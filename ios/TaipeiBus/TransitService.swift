@@ -48,6 +48,7 @@ actor TransitService {
         let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
             .flatMap { try? OfficialTravelTimes(data: $0) }
         loaded.officialTravelTimes = (preferredOfficial(cached, bundledOfficialTravelTimes()) ?? .init()).matching(loaded)
+        installMetro(in: &loaded)
         metadata = loaded
         return loaded
     }
@@ -72,11 +73,18 @@ actor TransitService {
         try Task.checkCancellation()
         var decoded = try FeedDecoder.metadata(feeds: feeds)
         decoded.officialTravelTimes = await official.matching(decoded)
+        installMetro(in: &decoded)
         if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append(AppText.text("路線軌跡／站序")) }
         metadata = decoded
         metadataLoadedAt = Date()
         metadataNotice = notices.isEmpty ? nil : AppText.text("部分路線資料暫用快取或未取得")
         return metadata
+    }
+
+    private func installMetro(in metadata: inout TransitMetadata) {
+        guard let url = Bundle.main.url(forResource: "MetroNetwork", withExtension: "json"),
+              let data = try? Data(contentsOf: url), let metro = try? MetroNetwork(data: data) else { return }
+        metro.attach(to: &metadata)
     }
 
     private func bundledOfficialTravelTimes() -> OfficialTravelTimes? {

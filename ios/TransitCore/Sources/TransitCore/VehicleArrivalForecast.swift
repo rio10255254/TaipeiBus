@@ -279,7 +279,7 @@ public struct VehicleArrivalForecast: Sendable {
     public func plannedRidingEstimates(_ trip: TransitTrip, metadata: TransitMetadata, estimates: EstimateFeed,
                                       walkingDurations: [Double?], preferences: LiveSettings.Planning = .init(),
                                       at date: Date) -> [RidingTimeEstimate] {
-        let distances = [trip.accessDistance] + (trip.transfers > 0 ? [trip.transferDistance] : []) + [trip.egressDistance]
+        let distances = trip.walkingDistances
         let walks = distances.enumerated().map { index, distance in
             walkingDurations.indices.contains(index) ? walkingDurations[index] ?? distance * 1.25 / 1.2 : distance * 1.25 / 1.2
         }
@@ -296,6 +296,10 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
                               travellingAt: Date? = nil) -> RidingTimeEstimate {
+        if ride.route.mode != .bus, let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+            from: ride.boarding.stationID, to: ride.alighting.stationID) {
+            return RidingTimeEstimate(seconds: seconds, evidence: .officialProfile, observedVehicles: 0)
+        }
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
               let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
