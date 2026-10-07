@@ -1682,8 +1682,8 @@ private actor PlaceTileProvider {
         let ordered = result.values.sorted { a, b in
             let al = landmarks.contains(a.kind), bl = landmarks.contains(b.kind)
             if al != bl { return al }
-            let ad = a.coordinate.distance(to: center), bd = b.coordinate.distance(to: center)
-            if abs(ad - bd) > 20 { return ad < bd }
+            let ad = Int(a.coordinate.distance(to: center) / 20), bd = Int(b.coordinate.distance(to: center) / 20)
+            if ad != bd { return ad < bd }
             return a.rank == b.rank ? a.id < b.id : a.rank < b.rank
         }
         // A pathological dense tile never delivers thousands of UIKit objects.
