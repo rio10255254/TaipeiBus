@@ -1,19 +1,32 @@
 import XCTest
 
 final class MetroUsabilityTests: JourneyUsabilityTestBase {
+    var nativeMap: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func camera() -> [String: Any] {
+        let probe = app.staticTexts["map-camera-state"]
+        guard let bytes = (probe.exists ? probe.label : nativeMap.value as? String ?? "").data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    func waitCamera(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 20), .completed, description + ": " + String(describing: camera()))
+    }
+    func ready() {
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-boarding-arrivals").firstMatch.waitForExistence(timeout:100))
+    }
     func testMetroUsesExistingBoardingOnboardAndExitFlow() {
-        launch(["--preview-metro-fixture", "--usability-fixture"])
-        XCTAssertTrue(app.otherElements["metro-boarding-arrivals"].waitForExistence(timeout: 100) || app.staticTexts["metro-boarding-arrivals"].exists)
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
         waitCamera("Official metro geometry must be installed") { ($0["metroStations"] as? Int ?? 0) == 148 }
         capture("metro-01-waiting")
         let board = app.buttons["journey-board"]
         XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
-        XCTAssertTrue(app.otherElements["metro-onboard-summary"].waitForExistence(timeout: 10) || app.staticTexts["metro-onboard-summary"].exists)
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-onboard-summary").firstMatch.waitForExistence(timeout:10))
         capture("metro-02-onboard")
         XCTAssertFalse(app.staticTexts["選擇車牌即可看沿途時間"].exists)
     }
     func testMetroTrainIsThreeDimensionalAndMapZoomRemainsResponsive() {
-        launch(["--preview-metro-fixture", "--usability-fixture"])
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
         waitCamera("Metro train geometry is rendered") { ($0["trainModels"] as? Int ?? 0) >= 1 }
         nativeMap.pinch(withScale: 3, velocity: 1)
         waitCamera("Train zoom remains a valid map") { ($0["zoom"] as? Double ?? 0) > 13 }
@@ -24,7 +37,7 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         capture("metro-04-overview")
     }
     func testEnglishMetroRetainsChineseStationNames() {
-        launch(["--preview-metro-fixture", "--usability-fixture", "--test-language", "en"])
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls", "--test-language", "en"]); ready()
         waitCamera("Metro appears in English") { ($0["metroStations"] as? Int ?? 0) == 148 }
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "Neihu")).firstMatch.waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "內湖")).firstMatch.exists)
