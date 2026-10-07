@@ -79,6 +79,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var cameraMoving = false
         private var cameraMoveToken = 0
         private var lastPowerCheck: CFTimeInterval = 0
+        private var lastPreferredRate = 0
         private var lastMotionSetting: Bool?
         private var lastNearbyUpdate: CFTimeInterval = 0
         private var lastNearbyCenter: Coordinate?
@@ -147,6 +148,7 @@ struct NativeBusMap: UIViewRepresentable {
             let rate = Float(fullFrameRate)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
+            lastPreferredRate = Int(rate)
             link.add(to: .main, forMode: .common)
             displayLink = link
 #if DEBUG
@@ -677,6 +679,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+            places.dataReady = fullyRendered
             places.request()
 #if DEBUG
             zoomProbe.frame(zoom: mapView.zoomLevel, busEncode: buses?.lastEncodeMilliseconds ?? 0)
@@ -1041,8 +1044,11 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
                 if zoomProbeMode == "60hz" { rate = 60 }
 #endif
-                link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
-                map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
+                if rate != lastPreferredRate {
+                    link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
+                    map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
+                    lastPreferredRate = rate
+                }
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
@@ -1475,6 +1481,8 @@ private final class ViewportPlaceRenderer {
     private var lastInset = UIEdgeInsets.zero
     var interacting = false
     var flying = false
+    var dataReady = false
+    private var emptyAttempts = 0
     private var count = 0
     private var candidates = 0
     private var queries = 0
@@ -1489,12 +1497,14 @@ private final class ViewportPlaceRenderer {
     var diagnostics: [String: Any] {
         ["bounded": source != nil, "count": count, "candidateCount": candidates, "queries": queries,
          "cacheReuses": reuses, "queryMs": lastQueryMs, "maxQueryMs": maxQueryMs,
-         "deferred": deferred, "interacting": interacting, "flying": flying, "budget": PlaceLabelBudget.maximum]
+         "deferred": deferred, "interacting": interacting, "flying": flying, "ready": dataReady,
+         "band": cacheBand, "budget": PlaceLabelBudget.maximum]
     }
     func install(map: MLNMapView, style: MLNStyle) {
         stop(); self.map = map; source = style.source(withIdentifier: "viewport-places") as? MLNShapeSource
         cacheBounds = nil; cacheBand = -1; records.removeAll(); previous.removeAll()
         lastStamp = ""; count = 0; lastCenter = nil; lastEvaluation = 0; lastPlacement = 0
+        dataReady = false; emptyAttempts = 0
         request()
     }
     func stop() { generation += 1; pending?.cancel(); pending = nil; source = nil }
@@ -1505,23 +1515,23 @@ private final class ViewportPlaceRenderer {
         let now = CACurrentMediaTime()
         guard now - lastEvaluation >= 0.25 else { return }
         lastEvaluation = now
-        guard !interacting, !flying else { return }
+        guard !interacting, !flying, dataReady else { return }
         let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
         let footprint = map.bounds.inset(by: map.contentInset)
         guard footprint.width > 40, footprint.height > 40 else { return }
         let scale = 40_075_016.0 * cos(center.latitude * .pi / 180) / (512 * pow(2, map.zoomLevel))
         let distance = max(5, scale * 28)
         let needs = lastCenter.map { $0.distance(to: center) > distance } ?? true
-        let changed = needs || abs(map.zoomLevel - lastZoom) > 0.25 ||
+        let changed = needs || band(map.zoomLevel) != cacheBand || abs(map.zoomLevel - lastZoom) > 0.25 ||
             abs(map.direction - lastHeading) > 12 || abs(map.camera.pitch - lastPitch) > 8 || lastInset != map.contentInset
-        let emptyRetry = records.isEmpty && now - cacheAt > 2
+        let emptyRetry = records.isEmpty && emptyAttempts < 3 && now - cacheAt > 2
         guard changed || emptyRetry else { return }
         guard pending == nil else { return }
         let token = generation
         let job = DispatchWorkItem { [weak self] in
             guard let self, self.generation == token else { return }
             self.pending = nil
-            guard !self.interacting, !self.flying else { self.deferred += 1; return }
+            guard !self.interacting, !self.flying, self.dataReady else { self.deferred += 1; return }
             self.refresh()
         }
         pending = job
@@ -1539,18 +1549,20 @@ private final class ViewportPlaceRenderer {
         outer.south <= inner.south && outer.north >= inner.north && outer.west <= inner.west && outer.east >= inner.east
     }
     private func refresh() {
-        guard !interacting, !flying, let map, let source, let vector = map.style?.source(withIdentifier: "openmaptiles") as? MLNVectorTileSource else { return }
+        guard !interacting, !flying, dataReady, let map, let source, let vector = map.style?.source(withIdentifier: "openmaptiles") as? MLNVectorTileSource else { return }
         let now = CACurrentMediaTime(), zoom = map.zoomLevel, currentBand = band(zoom)
         let viewport = map.bounds.inset(by: map.contentInset)
         guard viewport.width > 40, viewport.height > 40 else { return }
         if currentBand == 0 {
             if count != 0 { source.shape = nil; count = 0; previous.removeAll(); lastStamp = "" }
-            cacheBounds = nil; records.removeAll(); cacheAt = now; remember(map, at: now); return
+            cacheBounds = nil; cacheBand = 0; records.removeAll(); cacheAt = now; emptyAttempts = 3
+            remember(map, at: now); return
         }
         guard let needed = bounds(viewport.insetBy(dx: -16, dy: -16), map: map),
               let buffered = bounds(viewport.insetBy(dx: -80, dy: -80), map: map) else { return }
         let reuse = cacheBounds.map { covers($0, needed) } == true && currentBand == cacheBand && now - cacheAt < 30 && !records.isEmpty
         if !reuse {
+            if cacheBounds.map({ covers($0, needed) }) != true || currentBand != cacheBand { emptyAttempts = 0 }
             var ring = [CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.west),
                         CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.east),
                         CLLocationCoordinate2D(latitude: buffered.north, longitude: buffered.east),
@@ -1582,6 +1594,7 @@ private final class ViewportPlaceRenderer {
                 copy.attributes = attributes; fresh[id] = copy
             }
             records = fresh; cacheBounds = buffered; cacheBand = currentBand; cacheAt = now
+            emptyAttempts = fresh.isEmpty ? emptyAttempts + 1 : 0
         } else { reuses += 1 }
         let projected = records.map { id, feature -> PlaceLabelCandidate in
             let pixel = map.convert(feature.coordinate, toPointTo: map)

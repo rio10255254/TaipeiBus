@@ -1317,4 +1317,13 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         let comparison = XCTAttachment(string: String(decoding: bytes, as: UTF8.self))
         comparison.name = "zoom-fixed-comparison"; comparison.lifetime = .keepAlways; add(comparison)
     }
+    func testBoundedPlacesRetainEnglishNamesAndTheme() {
+        launch(["--test-map-controls", "--test-language", "en"])
+        wait { (($0["placeLabels"] as? [String: Any])?["count"] as? Int ?? 0) > 0 }
+        XCTAssertEqual(state()["language"] as? String, "en")
+        XCTAssertEqual(state()["darkMode"] as? Bool, ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true")
+        let labels = state()["placeLabels"] as? [String: Any] ?? [:]
+        XCTAssertLessThanOrEqual(labels["count"] as? Int ?? 1000, 96)
+        capture("zoom-fixed-english-place-design")
+    }
 }
