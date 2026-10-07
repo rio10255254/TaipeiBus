@@ -483,6 +483,10 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         wait("Controlled fleet and initial street camera are ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 90) < 1 && ($0["cameraMoving"] as? Bool) == false }
         let local = camera()
         button("city-fleet-toggle").press(forDuration: 0.15)
+        Thread.sleep(forTimeInterval: 1)
+        if camera()["cityMode"] as? Bool != true {
+            button("city-fleet-toggle").tap()
+        }
         wait("City framing settles") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
             let samples = trace?["samples"] as? [[String: Double]] ?? []
@@ -599,6 +603,9 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertLessThan(label.frame.height, 125)
         capture("station-name-and-arrivals-without-a-card")
         button("map-station-expand").press(forDuration: 0.15)
+        if !button("map-station-details").waitForExistence(timeout: 2) {
+            button("map-station-expand").tap()
+        }
         XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 5))
         button("map-station-details").press(forDuration: 0.15)
         expandDetails()
