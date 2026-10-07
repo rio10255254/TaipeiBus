@@ -394,6 +394,9 @@
         "hillshade-highlight-color": "#FFFFFF",
         "hillshade-accent-color": "#6E7F62",
         "hillshade-illumination-anchor": "viewport"
+      },
+      "layout": {
+        "visibility": "none"
       }
     },
     {
