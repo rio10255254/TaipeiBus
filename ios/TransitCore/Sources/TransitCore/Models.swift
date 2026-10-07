@@ -43,6 +43,7 @@ public struct BusStop: Identifiable, Sendable {
     public let coordinate: Coordinate
     public var englishName: String = ""
     public var mode: TransportMode = .bus
+    public var serviceID: String = ""
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var bilingualName: String { localizedName == name ? name : localizedName + "\n" + name }
 }
@@ -243,7 +244,7 @@ public struct StationArrival: Identifiable, Sendable {
                             snapshot: TransitSnapshot, now: Date) -> [StationArrival] {
         var seen = Set<String>()
         return station.stopIDs.compactMap { id -> StationArrival? in
-            guard let stop = metadata.stops[id], seen.insert("\(stop.routeID):\(stop.direction)").inserted else { return nil }
+            guard let stop = metadata.stops[id], seen.insert("\(stop.mode == .bus ? stop.routeID : stop.serviceID):\(stop.direction)").inserted else { return nil }
             let buses = snapshot.vehicles.compactMap { bus -> VehicleApproach? in
                 guard bus.parentRouteID == stop.routeID, bus.direction == stop.direction,
                       bus.hasReliablePosition(at: now) else { return nil }
@@ -257,7 +258,7 @@ public struct StationArrival: Identifiable, Sendable {
                 if ($0.alongDistance != nil) != ($1.alongDistance != nil) { return $0.alongDistance != nil }
                 return ($0.alongDistance ?? $0.directDistance) < ($1.alongDistance ?? $1.directDistance)
             }
-            return StationArrival(stop: stop, route: metadata.parents[stop.routeID],
+            return StationArrival(stop: stop, route: stop.mode == .bus ? metadata.parents[stop.routeID] : metadata.routes[stop.serviceID],
                                   estimateSeconds: snapshot.estimates.value(routeID: stop.routeID, stopID: id, at: now),
                                   approaches: Array(buses.prefix(2)))
         }.sorted {

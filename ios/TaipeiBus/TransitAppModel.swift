@@ -26,6 +26,7 @@ enum MapFocus {
     case userLocation
     case route(String)
     case vehicle(String)
+    case metroTrain(String)
     case journey([Coordinate])
     case cityOverview
     case returnToCity
@@ -696,7 +697,7 @@ final class TransitAppModel: ObservableObject {
         metroRevision += 1
         guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
               let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
-        focus = .coordinate(pose.coordinate); focusRevision += 1
+        focus = .metroTrain(id); focusRevision += 1
     }
     func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
         if let value = metroArrival(ride, at: date) { return EstimateFeed.label(value) }
@@ -832,6 +833,9 @@ final class TransitAppModel: ObservableObject {
         func value(after flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
+        }
+        if arguments.contains("--preview-metro-fixture") {
+            previewSelectionApplied = prepareMetroFixture(); return
         }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
@@ -1018,6 +1022,31 @@ final class TransitAppModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("place-search-audit.json"), options: .atomic)
         }
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+    }
+
+    private func prepareMetroFixture() -> Bool {
+        guard let from = metadata.metro.stations.first(where: { $0.code == "BR19" }),
+              let to = metadata.metro.stations.first(where: { $0.code == "BR10" }) else { return false }
+        let noon = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
+        guard let trip = MultimodalPlanner(metadata: metadata).plan(from: from.coordinate, to: to.coordinate,
+            maximumWalk: 200, limit: 3, at: noon).first, let ride = trip.rides.first else { return false }
+        let now = Date(), stamp = ISO8601DateFormatter().string(from: now)
+        let pattern = metadata.metro.pattern(ride.route.id, direction: ride.direction)!
+        let nextIndex = pattern.stationIDs.firstIndex(of: from.id)!
+        let report: [String: Any] = ["id":"QA-TRAIN-01", "operatorID":"TRTC", "patternID":ride.route.id, "direction":ride.direction,
+            "nextStationID":from.id, "destinationStationID":pattern.stationIDs.last!, "remainingSeconds":60,
+            "observedAt":stamp, "atPlatform":false]
+        let arrival: [String: Any] = ["stationID":from.id,"patternID":ride.route.id,"direction":ride.direction,
+            "destinationStationID":pattern.stationIDs.last!,"trainID":"QA-TRAIN-01","seconds":60,"observedAt":stamp]
+        guard nextIndex > 0, let bytes = try? JSONSerialization.data(withJSONObject:["schema":1,"source":"Taipei Metro authorized API","trains":[report],"arrivals":[arrival]]),
+              let packet = try? MetroRealtime(data: bytes, network: metadata.metro, at: now) else { return false }
+        metroRealtime = packet; metroRevision += 1
+        snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast); planner.prepareBoardingPreview(trip)
+        selectedTrainID = "QA-TRAIN-01"
+        previewNotice = "介面驗證用資料 · 非即時列車"
+        focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
+        return true
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {

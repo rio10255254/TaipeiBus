@@ -480,5 +480,9 @@
   "後續班次": "Following trains",
   "官方到站時間": "Official arrival time",
   "官方列車訊號 · 位置為估計": "Official train report · estimated position",
-  "依站間車程估計 · 到站請確認站名": "Estimated from travel times · confirm station names"
+  "依站間車程估計 · 到站請確認站名": "Estimated from travel times · confirm station names",
+  "列車方向": "Train directions",
+  "班距 %@ 分": "Every %@ min",
+  "介面驗證用資料 · 非即時列車": "Interface test data · not live trains",
+  "沿線車站": "Stations on this line"
 }

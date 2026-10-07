@@ -403,7 +403,13 @@ struct NativeBusMap: UIViewRepresentable {
                 }
             }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
-            trains?.ingestTrains(model.metroRealtime?.trains ?? [], network: network)
+            trains?.selectedID = model.selectedTrainID
+            var reports = model.metroRealtime?.trains ?? []
+            if let route = model.selectedRoute, route.mode != .bus {
+                let ids = Set(model.metadata.variants(routeID: route.id).map(\.id))
+                reports = reports.filter { ids.contains($0.patternID) }
+            }
+            trains?.ingestTrains(reports, network: network)
         }
 
         /// Street-level stop: a white disc with a blue rim and bus glyph, like Apple Maps transit stops.
@@ -921,6 +927,11 @@ struct NativeBusMap: UIViewRepresentable {
                 state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
+                state["metroLines"] = model.metadata.metro.lines.count
+                state["metroStations"] = model.metadata.metro.stations.count
+                state["trainModels"] = trains?.modelVehicleCount ?? 0
+                state["selectedTrain"] = model.selectedTrainID ?? ""
+                state["trainEncodeMs"] = trains?.lastEncodeMilliseconds ?? 0
                 state["fleetCompactModels"] = buses?.compactVehicleCount ?? 0
                 state["fleetDetailedModels"] = buses?.detailedVehicleCount ?? 0
                 state["fleetEncodeMs"] = buses?.lastEncodeMilliseconds ?? 0
@@ -990,6 +1001,12 @@ struct NativeBusMap: UIViewRepresentable {
             if case .leaveCity = focus { lastFocusWasLeavingCity = true }
             else { lastFocusWasLeavingCity = false }
             switch focus {
+            case .metroTrain(let id):
+                guard let report = model.metroRealtime?.trains.first(where: { $0.id == id }),
+                      let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
+                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: 250,
+                    pitch: 52, heading: pose.heading)
+                moveCamera(camera, map: map, duration: 0.8)
             case .coordinate(let position):
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
             case .station(let id):
@@ -1452,6 +1469,7 @@ struct NativeBusMap: UIViewRepresentable {
                 let y = map.convert(b.coordinate.locationCoordinate, toPointTo: map)
                 return hypot(x.x - point.x, x.y - point.y) < hypot(y.x - point.x, y.y - point.y)
             }
+            if let id = trains?.hitTest(point) { model.selectedTrainID = id; model.metroRevisionForSelection(); return }
             if model.stationBrowsing, let station { model.selectStation(station); return }
             guard let id = buses.hitTest(point), let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else {
 #if DEBUG

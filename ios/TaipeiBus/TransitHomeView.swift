@@ -1007,7 +1007,7 @@ private struct StationDetails: View {
                     }
                 }.padding(.bottom, 18 * CGFloat(live.appearance.spacingScale))
                 HStack {
-                    Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
+                    Text(station.mode == .bus ? live.text("官方到站預估") : live.text("列車方向")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
                     if let time = model.snapshot.estimates.updatedAt {
                         Text(time.formatted(SourceStatusView.clockStyle)).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -1020,11 +1020,11 @@ private struct StationDetails: View {
                             if let route = row.route { model.selectRoute(route, direction: row.stop.direction, boardingStopID: row.stop.id) }
                         } label: {
                             HStack(spacing: 12) {
-                                RouteBadge(name: row.route?.localizedName ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
+                                RouteBadge(name: row.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(EstimateFeed.label(row.estimateSeconds))
+                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
@@ -1048,7 +1048,15 @@ private struct StationDetails: View {
                     }.padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
                     Divider()
                 }
-                Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                if station.mode == .bus {
+                    Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                } else {
+                    Text(AppText.text("依官方班距估計")).liveFont(.caption).foregroundStyle(.secondary)
+                    ForEach(model.metadata.metro.station(station.id)?.exits ?? []) { exit in
+                        HStack { Label(AppLanguage.current == .english ? exit.englishName : exit.name, systemImage: exit.accessible ? "figure.roll" : "door.left.hand.open"); Spacer() }
+                            .liveFont(.subheadline).padding(.vertical, 6)
+                    }
+                }
             }
         }
     }
@@ -1094,6 +1102,15 @@ private struct RouteDetails: View {
             }
             boardingStopSelector
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                if route.mode != .bus {
+                    if let stop = model.routeBoardingStop {
+                        let stops = model.metadata.orderedStops(routeID: route.id, direction: model.direction)
+                        if let index = stops.firstIndex(where: { $0.id == stop.id }), index < stops.count - 1 {
+                            let ride = TransitRide(route: route, direction: model.direction, stops: Array(stops[index...]), coordinates: [])
+                            MetroBoardingRows(model: model, ride: ride, date: timeline.date)
+                        }
+                    }
+                } else {
                 let buses = model.routeVehicles()
                 if let stop = model.routeBoardingStop {
                     let group = RouteBoardingVehicles(stop: stop, vehicles: buses, metadata: model.metadata, at: timeline.date)
@@ -1139,8 +1156,9 @@ private struct RouteDetails: View {
                         ForEach(buses) { bus in VehicleRow(vehicle: bus) { model.selectVehicle(bus) } }
                     }.liveFont(.subheadline)
                 }
+                }
             }
-            Text(model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
+            Text(route.mode != .bus ? AppText.text("沿線車站") : model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
                 .liveFont(.headline).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
             if model.allRouteVariants && model.routeVariants.count > 1 {
                 Text(live.text("切換上方走法，可看各支線停靠站。")).liveFont(.caption).foregroundStyle(.secondary)
@@ -1154,7 +1172,7 @@ private struct RouteDetails: View {
                             Image(systemName: model.routeBoardingStopID == stop.id ? "checkmark.circle.fill" : "circle").foregroundStyle(model.routeBoardingStopID == stop.id ? Color.accentColor : .secondary).frame(width: 26)
                             BilingualName(stop).liveFont(.subheadline)
                             Spacer(minLength: 8)
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)))
+                            Text(route.mode == .bus ? EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)) : model.metadata.metro.station(stop.stationID)?.code ?? "")
                                 .liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
                         }.frame(minHeight: 50).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("route-boarding-stop-" + stop.id)

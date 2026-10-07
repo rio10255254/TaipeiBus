@@ -164,6 +164,7 @@ public struct MetroNetwork: Codable, Sendable {
                 var stop = BusStop(id: stopID, routeID: line.id, stationID: id, name: station.name,
                     direction: pattern.direction, sequence: index, coordinate: station.coordinate)
                 stop.englishName = station.englishName; stop.mode = line.mode
+                stop.serviceID = pattern.id
                 metadata.stops[stop.id] = stop
                 metadata.stations[id]?.stopIDs.append(stop.id)
                 references.append(StopReference(stopID: stop.id, sequence: index))

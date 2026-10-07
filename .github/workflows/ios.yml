@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -418,6 +418,10 @@ jobs:
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
           selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'metro' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
           fi

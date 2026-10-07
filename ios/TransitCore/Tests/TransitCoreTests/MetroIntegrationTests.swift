@@ -69,4 +69,54 @@ final class MetroIntegrationTests: XCTestCase {
         XCTAssertTrue(value.elapsedSeconds.isFinite)
         XCTAssertGreaterThan(value.walkingSeconds, 210)
     }
+    func testTrainProjectionStaysOnTrackStopsAtReportedStationAndExpires() throws {
+        let metro = try network(), pattern = try XCTUnwrap(metro.patterns.first { $0.lineID.hasSuffix(":BR") && $0.direction == "0" })
+        let station = try XCTUnwrap(metro.station(pattern.stationIDs[5])), date = noon()
+        let report = MetroTrainReport(id: "TEST-TRAIN", operatorID: "TRTC", patternID: pattern.id, direction: pattern.direction,
+            nextStationID: station.id, destinationStationID: pattern.stationIDs.last!, remainingSeconds: 30, observedAt: date, atPlatform: false)
+        let prepared = try XCTUnwrap(PreparedMetroTrain(report: report, network: metro))
+        let start = try XCTUnwrap(prepared.pose(at: date)), moving = try XCTUnwrap(prepared.pose(at: date.addingTimeInterval(15)))
+        XCTAssertGreaterThan(start.coordinate.distance(to: moving.coordinate), 10)
+        XCTAssertLessThan(moving.coordinate.distance(to: station.coordinate), start.coordinate.distance(to: station.coordinate))
+        let stopped = try XCTUnwrap(prepared.pose(at: date.addingTimeInterval(45)))
+        XCTAssertLessThan(stopped.coordinate.distance(to: station.coordinate), 80)
+        XCTAssertEqual(stopped.seconds, 0); XCTAssertTrue(stopped.estimatedPosition)
+        XCTAssertNil(prepared.pose(at: date.addingTimeInterval(76)))
+        let track = RouteLine(coordinates: pattern.coordinates)
+        XCTAssertLessThan(try XCTUnwrap(track.match(moving.coordinate, heading: nil)).distance, 1)
+    }
+    func testOfficialCountdownUsesSourceTimestampAndDoesNotReviveExpiredBusData() throws {
+        let metro = try network(), pattern = try XCTUnwrap(metro.patterns.first { $0.lineID.hasSuffix(":BR") && $0.direction == "0" })
+        let date = noon(), stamp = ISO8601DateFormatter().string(from: date)
+        let arrival: [String:Any] = ["stationID":pattern.stationIDs[1],"patternID":pattern.id,"direction":pattern.direction,
+            "destinationStationID":pattern.stationIDs.last!,"seconds":120,"observedAt":stamp]
+        let bytes = try JSONSerialization.data(withJSONObject:["schema":1,"source":"Taipei Metro authorized API","trains":[],"arrivals":[arrival]])
+        let packet = try MetroRealtime(data: bytes, network: metro, at: date)
+        let mixed = packet.applying(to: EstimateFeed(seconds:["bus:stop":800],updatedAt:date.addingTimeInterval(-300)),network:metro,at:date.addingTimeInterval(30))
+        let id = "\(pattern.lineID):\(pattern.id):\(pattern.direction):\(pattern.stationIDs[1])"
+        XCTAssertNil(mixed.seconds["bus:stop"])
+        XCTAssertEqual(mixed.seconds[id],90)
+        XCTAssertNil(packet.arrivals[0].remaining(at:date.addingTimeInterval(76)))
+        let fake = try JSONSerialization.data(withJSONObject:["schema":1,"source":"schedule simulation","trains":[],"arrivals":[arrival]])
+        XCTAssertThrowsError(try MetroRealtime(data:fake,network:metro,at:date))
+    }
+    func testBusMetroBusJourneyKeepsBothActualTransfers() throws {
+        let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
+        let a = try XCTUnwrap(metro.stations.first { $0.code == "BR19" }), b = try XCTUnwrap(metro.stations.first { $0.code == "BR10" })
+        let origin = Coordinate(latitude:a.coordinate.latitude+0.015,longitude:a.coordinate.longitude)
+        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude)
+        for (name,points) in [("feeder-in",[origin,a.coordinate]),("feeder-out",[b.coordinate,destination])] {
+            metadata.routes[name] = BusRoute(id:name,parentID:name,name:name,variantName:name,departure:"A",destination:"B")
+            for (index,coordinate) in points.enumerated() {
+                let id = "\(name):\(index)", stop = BusStop(id:id,routeID:name,stationID:id,name:id,direction:"0",sequence:index,coordinate:coordinate)
+                metadata.stops[id] = stop;metadata.stations[id] = Station(id:id,name:id,coordinate:coordinate,address:"",bearing:"",stopIDs:[id])
+                metadata.paths[name,default:[]].append(StopReference(stopID:id,sequence:index))
+            }
+        }
+        metadata.rebuildRouteCatalog()
+        let result = MultimodalPlanner(metadata:metadata).plan(from:origin,to:destination,maximumWalk:100,limit:12,at:noon())
+        let trip = try XCTUnwrap(result.first { $0.rides.map(\.route.mode) == [.bus,.metro,.bus] })
+        XCTAssertEqual(trip.walkingDistances.count,4);XCTAssertEqual(trip.transferSeconds.count,2)
+        XCTAssertTrue(TripRanking.assessment(trip,estimates:.init(),at:noon()).elapsedSeconds.isFinite)
+    }
 }

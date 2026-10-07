@@ -1,5 +1,37 @@
 import XCTest
 
+final class MetroUsabilityTests: JourneyUsabilityTestBase {
+    func testMetroUsesExistingBoardingOnboardAndExitFlow() {
+        launch(["--preview-metro-fixture", "--usability-fixture"])
+        XCTAssertTrue(app.otherElements["metro-boarding-arrivals"].waitForExistence(timeout: 100) || app.staticTexts["metro-boarding-arrivals"].exists)
+        waitCamera("Official metro geometry must be installed") { ($0["metroStations"] as? Int ?? 0) == 148 }
+        capture("metro-01-waiting")
+        let board = app.buttons["journey-board"]
+        XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
+        XCTAssertTrue(app.otherElements["metro-onboard-summary"].waitForExistence(timeout: 10) || app.staticTexts["metro-onboard-summary"].exists)
+        capture("metro-02-onboard")
+        XCTAssertFalse(app.staticTexts["選擇車牌即可看沿途時間"].exists)
+    }
+    func testMetroTrainIsThreeDimensionalAndMapZoomRemainsResponsive() {
+        launch(["--preview-metro-fixture", "--usability-fixture"])
+        waitCamera("Metro train geometry is rendered") { ($0["trainModels"] as? Int ?? 0) >= 1 }
+        nativeMap.pinch(withScale: 3, velocity: 1)
+        waitCamera("Train zoom remains a valid map") { ($0["zoom"] as? Double ?? 0) > 13 }
+        capture("metro-03-train-map")
+        XCTAssertLessThan(camera()["trainEncodeMs"] as? Double ?? .infinity, 16)
+        nativeMap.pinch(withScale: 0.3, velocity: -1)
+        waitCamera("Can return from train zoom") { ($0["metroLines"] as? Int ?? 0) == 7 }
+        capture("metro-04-overview")
+    }
+    func testEnglishMetroRetainsChineseStationNames() {
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-language", "en"])
+        waitCamera("Metro appears in English") { ($0["metroStations"] as? Int ?? 0) == 148 }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "Neihu")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "內湖")).firstMatch.exists)
+        capture("metro-05-english")
+    }
+}
+
 class JourneyUsabilityTestBase: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
     override func setUpWithError() throws { continueAfterFailure = false }

@@ -1420,7 +1420,7 @@ private struct RidingBannerContent: View {
     }
 }
 
-private struct MetroBoardingRows: View {
+struct MetroBoardingRows: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
