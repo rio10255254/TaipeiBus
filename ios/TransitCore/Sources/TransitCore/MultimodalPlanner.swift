@@ -25,6 +25,11 @@ public struct MultimodalPlanner: Sendable {
         let hasRail: Bool
         let family: String
     }
+    private struct Candidate {
+        let label: Label
+        let egress: Double
+        let score: Double
+    }
     private let metadata: TransitMetadata
     private let patterns: [Pattern]
     private let links: [String: [Link]]
@@ -109,7 +114,7 @@ public struct MultimodalPlanner: Sendable {
                     walking: walking, cost: walking * preferences.walkingWeight, lastStation: id, hasRail: false, family: "")]
             }
         }
-        var candidates: [(label: Label, egress: Double, score: Double)] = []
+        var candidates: [Candidate] = []
         let secondsOfDay = BusServiceWindow.secondsOfDay(at: date)
         let minimumWaits = patterns.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.cumulative.last ?? 0) }
         var serviceCache: [String: BusDayService] = [:]
@@ -190,7 +195,7 @@ public struct MultimodalPlanner: Sendable {
                 if egress <= maximumWalk {
                     for label in labels where label.hasRail {
                         let finalAccess = stop.mode != .bus ? 90.0 : 0
-                        candidates.append((label,egress,label.cost + (egress * 1.25 / 1.2 + finalAccess) * preferences.walkingWeight))
+                        candidates.append(Candidate(label:label,egress:egress,score:label.cost + (egress * 1.25 / 1.2 + finalAccess) * preferences.walkingWeight))
                     }
                 }
             }
@@ -216,9 +221,10 @@ public struct MultimodalPlanner: Sendable {
         // Construct road slices only for useful candidates, after the complete graph
         // search. Thousands of dominated trips do not need expensive map geometry.
         let grouped = Dictionary(grouping:candidates,by:{ $0.label.family })
-        let retained = grouped.values.flatMap { $0.sorted { $0.score < $1.score }.prefix(3) }
-            .sorted { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
-            .prefix(max(36,limit * 2))
+        var representative: [Candidate] = []
+        for pool in grouped.values { representative.append(contentsOf:pool.sorted { $0.score < $1.score }.prefix(3)) }
+        representative.sort { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
+        let retained = representative.prefix(max(36,limit * 2))
         let results = retained.map { candidate -> TransitTrip in
             let label = candidate.label
             let rides = label.segments.map { segment -> TransitRide in
