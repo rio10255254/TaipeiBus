@@ -42,6 +42,10 @@ actor TransitService {
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }
+    func offlineMetroMetadata() -> TransitMetadata? {
+        var result = TransitMetadata(); installMetro(in:&result)
+        return result.metro.stations.isEmpty ? nil : result
+    }
     func cachedMetadata() -> TransitMetadata? {
         var feeds: [String: Data] = [:]
         let essentials: Set<String> = ["GetRoute", "GetStop", "GetPathDetail"]
@@ -86,7 +90,16 @@ actor TransitService {
             }
         }
         try Task.checkCancellation()
-        var decoded = try FeedDecoder.metadata(feeds: feeds)
+        let decodedBus: TransitMetadata
+        do { decodedBus = try FeedDecoder.metadata(feeds: feeds) }
+        catch {
+            if metadata.routes.isEmpty, let offline = offlineMetroMetadata() { metadata = offline }
+            guard !metadata.routes.isEmpty else { throw error }
+            metadataLoadedAt = Date()
+            metadataNotice = AppText.text("公車資料暫缺，捷運路線仍可使用")
+            return metadata
+        }
+        var decoded = decodedBus
         decoded.officialTravelTimes = await official.matching(decoded)
         installMetro(in: &decoded)
         if decoded.lines.isEmpty || decoded.paths.isEmpty { notices.append(AppText.text("路線軌跡／站序")) }

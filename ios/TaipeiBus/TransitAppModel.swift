@@ -262,6 +262,10 @@ final class TransitAppModel: ObservableObject {
             guard let self else { return }
             do {
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
+                else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--preview-metro-fixture") { applyPreviewSelection() }
+#endif
                 async let prepared = service.prepare()
                 if !metadata.routes.isEmpty {
                     let current = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
