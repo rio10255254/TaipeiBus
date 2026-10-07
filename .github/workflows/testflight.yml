@@ -8,6 +8,10 @@ on:
         type: choice
         options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data']
         default: 'check-only'
+      metro_endpoints:
+        description: 'Optional bounded metro metadata endpoint subset'
+        type: string
+        default: ''
       route_ids:
         description: 'For official travel times: comma-separated published route IDs; empty uses every route'
         type: string
@@ -262,7 +266,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Collect bounded official metro metadata
-        run: python3 ios/release/collect-metro-data.py --out "$RUNNER_TEMP/metro"
+        run: python3 ios/release/collect-metro-data.py --out "$RUNNER_TEMP/metro" --endpoints "${{ inputs.metro_endpoints }}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
