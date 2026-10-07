@@ -104,6 +104,10 @@ for op,rows in raw['operators'].items():
   if l['operatorID']==op:
    ps=[p for p in patterns if p['lineID']==l['id'] and p['direction']=='0'];l['coordinates']=max(ps,key=lambda p:len(p['stationIDs']))['coordinates']
 transferTimes={clean(r['station']):float(r['Time'])*60 for r in csv.DictReader((root/'transfers.csv').read_text(encoding='cp950').splitlines())}
+for station in stations:
+ if clean(station['name']) in ['北投','七張','大橋頭'] and clean(station['name']) in transferTimes:
+  transfers.append({'from':station['id'],'to':station['id'],'seconds':transferTimes[clean(station['name'])],
+                    'instructions':'站內轉乘 · '+station['name'],'external':False})
 for a in stations:
  for b in stations:
   if a['id']==b['id'] or clean(a['name'])!=clean(b['name']):continue

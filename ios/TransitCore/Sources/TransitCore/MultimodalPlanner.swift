@@ -65,7 +65,8 @@ public struct MultimodalPlanner: Sendable {
         var links: [String: [Link]] = [:]
         for (id, stop) in stationStops {
             let x = Int(floor(stop.coordinate.longitude / 0.003)), y = Int(floor(stop.coordinate.latitude / 0.003))
-            var adjacent = [Link(id: id, distance: 0, seconds: 0, internalWalk: stop.mode != .bus)]
+            let platformWalk = metadata.metro.transfers.first { $0.from == id && $0.to == id }?.seconds ?? 60
+            var adjacent = [Link(id: id, distance: 0, seconds: stop.mode == .bus ? 0 : platformWalk, internalWalk: stop.mode != .bus)]
             for dx in -2...2 { for dy in -2...2 {
                 for other in grid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id {
                     if stop.mode != .bus && other.mode != .bus { continue }
@@ -79,7 +80,7 @@ public struct MultimodalPlanner: Sendable {
                     }
                 }
             } }
-            for official in metadata.metro.transfers where official.from == id {
+            for official in metadata.metro.transfers where official.from == id && official.to != id {
                 guard let other = stationStops[official.to] else { continue }
                 adjacent.append(Link(id: official.to, distance: official.external ? stop.coordinate.distance(to: other.coordinate) : 0,
                     seconds: official.seconds, internalWalk: !official.external))
@@ -219,7 +220,7 @@ public struct MultimodalPlanner: Sendable {
                         if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
                            stationStops[link.id]?.mode == .bus { continue }
                         // Same platform changing trains still includes a short platform allowance.
-                        let duration = link.id == id && link.internalWalk ? 60.0 : link.seconds
+                        let duration = link.seconds
                         let value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
                             transferSeconds: label.transferSeconds + [duration], elapsed: label.elapsed + duration,
                             walking: label.walking + duration, cost: label.cost + duration * preferences.walkingWeight,

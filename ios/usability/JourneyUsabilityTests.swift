@@ -13,7 +13,7 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 20), .completed, description + ": " + String(describing: camera()))
     }
     func ready() {
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-boarding-arrivals").firstMatch.waitForExistence(timeout:100))
+        XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout:100))
     }
     func testMetroUsesExistingBoardingOnboardAndExitFlow() {
         launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()

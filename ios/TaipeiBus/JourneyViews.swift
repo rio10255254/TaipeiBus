@@ -1458,7 +1458,7 @@ struct MetroBoardingRows: View {
                 }
                 Text(AppText.text("官方到站時間")).liveFont(.caption).foregroundStyle(.secondary)
             }
-        }.padding(.vertical, 6).accessibilityIdentifier("metro-boarding-arrivals")
+        }.padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("metro-boarding-arrivals")
     }
 }
 
@@ -1482,7 +1482,7 @@ private struct MetroOnboardSummary: View {
             }.liveFont(.subheadline).foregroundStyle(.secondary)
             Text(remaining.officialPosition ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("依站間車程估計 · 到站請確認站名"))
                 .liveFont(.caption).foregroundStyle(.secondary)
-        }.accessibilityIdentifier("metro-onboard-summary")
+        }.accessibilityElement(children: .contain).accessibilityIdentifier("metro-onboard-summary")
     }
 }
 

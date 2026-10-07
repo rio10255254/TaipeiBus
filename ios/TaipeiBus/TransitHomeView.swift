@@ -319,12 +319,15 @@ struct TransitHomeView: View {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
                 } ?? false
+                let sameTrain = model.metroRealtime?.trains.first(where: { $0.id == model.selectedTrainID }).map { report in
+                    planner.activeRide.map { model.metadata.metro.canServe($0, patternID: report.patternID, direction: report.direction, destinationStationID: report.destinationStationID) } == true
+                } ?? false
                 if let index = model.walkingMapIndex, !userChangedJourney,
                    planner.selected?.walks.indices.contains(index) == true {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
                     model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
-                } else if !sameVehicle {
+                } else if !sameVehicle && !sameTrain {
                     model.clearWalkingMap()
                     model.clearSelection()
                     if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }

@@ -416,6 +416,7 @@ final class TransitAppModel: ObservableObject {
         focusMap(.journey(points.isEmpty ? [walk.from, walk.to] : points))
     }
     func selectStation(_ station: Station) {
+        selectedTrainID = nil; followingTrain = false
         routeOverviewReturn = nil; routeOriginStationID = nil
         if selectedStationID == nil { browseQuery = query }
         stationBrowsing = false
@@ -428,6 +429,7 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
+        selectedTrainID = nil; followingTrain = false
         if let station = selectedStationID { routeOriginStationID = station }
         else if selectedRoute?.parentID != route.parentID { routeOriginStationID = nil }
         let context = boardingStopID ?? selectedStation?.stopIDs.first {
@@ -626,7 +628,10 @@ final class TransitAppModel: ObservableObject {
 #endif
         boardedAt = Date()
         if ride.route.mode != .bus {
-            selectedTrainID = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: Date())?.trainID
+            let selected = metroRealtime?.trains.first { $0.id == selectedTrainID }
+            if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
+                selectedTrainID = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: Date())?.trainID
+            }
         }
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
@@ -1042,9 +1047,10 @@ final class TransitAppModel: ObservableObject {
         guard let from = metadata.metro.stations.first(where: { $0.code == "BR19" }),
               let to = metadata.metro.stations.first(where: { $0.code == "BR10" }) else { return false }
         let noon = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
-        let source = metadata
+        let network = metadata.metro
         let planned = await Task.detached(priority: .userInitiated) {
-            MultimodalPlanner(metadata: source).plan(from: from.coordinate, to: to.coordinate,
+            var source = TransitMetadata(); network.attach(to: &source)
+            return MultimodalPlanner(metadata: source).plan(from: from.coordinate, to: to.coordinate,
                 maximumWalk: 200, limit: 3, at: noon).first
         }.value
         guard let trip = planned, let ride = trip.rides.first else { return false }

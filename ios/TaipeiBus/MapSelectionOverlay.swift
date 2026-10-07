@@ -57,10 +57,10 @@ struct MapContextLabels: View {
 
     var body: some View {
         GeometryReader { geometry in
-            if let point = overlay.windowPoint, model.mapLabelStation != nil || model.selectedVehicleID != nil {
+            if let point = overlay.windowPoint, model.mapLabelStation != nil || model.selectedVehicleID != nil || model.selectedTrainID != nil {
                 let frame = geometry.frame(in: .global)
                 let anchor = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
-                let vehicle = model.selectedVehicleID != nil
+                let vehicle = model.selectedVehicleID != nil || model.selectedTrainID != nil
                 let expanded = expandedStationID == model.mapLabelStation?.id && expandedStationID != nil
                 let width = min(!vehicle && overlay.compactStation && !expanded ? 200.0 : 280.0, geometry.size.width - 32)
                 let freeTop: CGFloat = (model.routeBoardingStop != nil && !vehicle ? 170 : vehicle ? 64 : 140) + topClearance
@@ -75,7 +75,7 @@ struct MapContextLabels: View {
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
                     .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
-                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
                     expanded: expanded, compact: overlay.compactStation,
                     toggle: {
 #if DEBUG
@@ -185,6 +185,29 @@ private struct MapContextLabelContent: View, Equatable {
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).readableMapSurface().fixedSize()
+        } else if let id = model.selectedTrainID, let report = model.metroRealtime?.trains.first(where: { $0.id == id }) {
+            TimelineView(.periodic(from: .now, by: 1)) { timeline in
+                if (-15...60).contains(timeline.date.timeIntervalSince(report.observedAt)),
+                   let pattern = model.metadata.metro.pattern(report.patternID, direction: report.direction),
+                   let line = model.metadata.metro.line(pattern.lineID), let station = model.metadata.metro.station(report.nextStationID) {
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 8) {
+                            RouteBadge(name: line.code, tintName: line.name, compact: true)
+                            Text(report.id).font(.caption.weight(.semibold)).lineLimit(1)
+                            Spacer(minLength: 2)
+                            Button { model.metroRevisionForSelection() } label: { Image(systemName:"scope").frame(width:32,height:32) }
+                                .accessibilityLabel(AppText.text("跟隨列車"))
+                        }
+                        HStack {
+                            Text(AppText.text("下一站 · ") + (AppLanguage.current == .english ? station.englishName : station.name)).font(.subheadline.weight(.semibold))
+                            Spacer(minLength:4)
+                            Text(EstimateFeed.label(max(0,Int(report.remainingSeconds - max(0,timeline.date.timeIntervalSince(report.observedAt)))))).font(.subheadline).monospacedDigit()
+                        }
+                        if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
+                        Text(AppText.text("官方列車訊號 · 位置為估計")).font(.caption2).foregroundStyle(.secondary)
+                    }.mapLabelSurface().accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
+                }
+            }
         }
     }
 }

@@ -295,6 +295,11 @@ struct NativeBusMap: UIViewRepresentable {
             }
             style.addLayer(layer); buses = layer
             let rail = NativeBusLayer(identifier: "native-metro-trains"); rail.trainMode = true
+            rail.onSelectedPoint = { [weak self, weak mapView] point in
+                guard let self, let mapView, self.model.selectedTrainID != nil, self.model.mapLabelStation == nil else { return }
+                let global = point.map { mapView.convert($0, to: nil) }
+                DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
+            }
             style.addLayer(rail); trains = rail
             stationSource = addStationLayer(id: "selected-station", style: style)
             let nearby = MLNShapeSource(identifier: "nearby-stations", shape: nil, options: nil)

@@ -490,5 +490,6 @@
   "走到車站": "Walk to station",
   "依官方捷運站間車程": "Official metro station travel times",
   "看方向": "View directions",
-  "首班 %@ · 末班 %@": "First %@ · Last %@"
+  "首班 %@ · 末班 %@": "First %@ · Last %@",
+  "跟隨列車": "Follow train"
 }
