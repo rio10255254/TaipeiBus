@@ -3,10 +3,11 @@ import CoreGraphics
 
 /// Keep a small map label near its pin without covering controls or the pin itself.
 public enum MapLabelPlacement {
-    public static func frame(anchor: CGPoint, size: CGSize, inside bounds: CGRect, avoiding obstacles: [CGRect] = []) -> CGRect {
+    public static func frame(anchor: CGPoint, size: CGSize, inside bounds: CGRect, avoiding obstacles: [CGRect] = [],
+                             clearance: CGFloat = 18) -> CGRect {
         guard !bounds.isEmpty, anchor.x.isFinite, anchor.y.isFinite, size.width.isFinite, size.height.isFinite else { return .zero }
         let width = min(max(1, size.width), bounds.width), height = min(max(1, size.height), bounds.height)
-        let gap: CGFloat = 18
+        let gap = max(18, clearance.isFinite ? clearance : 18)
         let origins = [CGPoint(x: anchor.x - width / 2, y: anchor.y - height - gap),
             CGPoint(x: anchor.x - width / 2, y: anchor.y + gap),
             CGPoint(x: anchor.x + gap, y: anchor.y - height / 2),

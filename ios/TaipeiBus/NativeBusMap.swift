@@ -74,6 +74,12 @@ struct NativeBusMap: UIViewRepresentable {
         private var metroExitsSource: MLNShapeSource?
         private var lastMetroKey = ""
         private var lastMetroTrainKey = ""
+        private var lastMetroFocusKey = ""
+        private var metroFocusKey: String {
+            let busRoute = model.selectedRoute.map { $0.mode == .bus } ?? false
+            let busTrip = model.planner.selected.map { option in option.rides.allSatisfy { $0.route.mode == .bus } } ?? false
+            return busRoute || busTrip || model.selectedVehicleID != nil ? "dim" : "full"
+        }
         private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
@@ -320,7 +326,7 @@ struct NativeBusMap: UIViewRepresentable {
             names.textHaloWidth = NSExpression(forConstantValue: 2)
             names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
             style.addLayer(names)
-            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""
+            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""; lastMetroFocusKey = ""
             lastStationBrowsing = nil
             lastStationID = nil
             update(location: pendingLocation)
@@ -345,37 +351,63 @@ struct NativeBusMap: UIViewRepresentable {
 
         private var markerBlue: UIColor { UIColor(liveHex: darkMode ? MapChrome.walkingDark : RouteTint.general) }
 
+        /// The metro is drawn as part of the map itself, like Apple Maps' transit lines: full
+        /// line colours on the ground beneath buildings and labels, widening with zoom.
         private func installMetro(_ style: MLNStyle) {
+            // The base map's grey OSM metro tracks would double every coloured line.
+            for id in ["tunnel_transit_rail", "tunnel_transit_rail_hatching", "road_transit_rail",
+                       "road_transit_rail_hatching", "bridge_transit_rail", "bridge_transit_rail_hatching"] {
+                style.layer(withIdentifier: id)?.isVisible = false
+            }
+            func zoomed(_ stops: [Double: Double]) -> NSExpression {
+                let head: [Any] = ["interpolate", ["exponential", 1.5], ["zoom"]]
+                let tail: [Any] = stops.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] as [Any] }
+                return NSExpression(mglJSONObject: head + tail)
+            }
             let source = MLNShapeSource(identifier: "metro-network", shape: nil, options: nil)
             style.addSource(source); metroSource = source
             let casing = MLNLineStyleLayer(identifier: "metro-network-casing", source: source)
-            casing.lineColor = NSExpression(forConstantValue: UIColor.white.withAlphaComponent(0.7))
-            casing.lineWidth = NSExpression(forConstantValue: 5); style.addLayer(casing)
+            casing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            casing.lineWidth = zoomed([9: 2.6, 12: 4.8, 14: 7.2, 16: 10.5, 18: 15])
+            casing.lineJoin = NSExpression(forConstantValue: "round"); casing.lineCap = NSExpression(forConstantValue: "round")
             let lines = MLNLineStyleLayer(identifier: "metro-network-lines", source: source)
-            lines.lineOpacity = NSExpression(forConstantValue:0.35)
             lines.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
-            lines.lineWidth = NSExpression(forConstantValue: 2.5); style.addLayer(lines)
+            lines.lineWidth = zoomed([9: 1.4, 12: 2.8, 14: 4.4, 16: 6.8, 18: 10])
+            lines.lineJoin = NSExpression(forConstantValue: "round"); lines.lineCap = NSExpression(forConstantValue: "round")
+            // Ground level: above streets, under 3D buildings and every label.
+            if let below = style.layer(withIdentifier: "building") {
+                style.insertLayer(casing, below: below); style.insertLayer(lines, below: below)
+            } else { style.addLayer(casing); style.addLayer(lines) }
             let stations = MLNShapeSource(identifier: "metro-stations", shape: nil, options: nil)
             style.addSource(stations); metroStationsSource = stations
             let dots = MLNCircleStyleLayer(identifier: "metro-station-dots", source: stations)
-            dots.minimumZoomLevel = 11; dots.circleRadius = NSExpression(forConstantValue: 4)
+            dots.minimumZoomLevel = 11.5
+            // Interchanges read as larger white stops with a dark rim, like the official map.
+            dots.circleRadius = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
+                11.5, ["case", ["get", "transfer"], 3.4, 2.2], 14, ["case", ["get", "transfer"], 5.6, 3.8],
+                17, ["case", ["get", "transfer"], 8, 5.6]])
             dots.circleColor = NSExpression(forConstantValue: UIColor.white)
-            dots.circleStrokeColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
-            dots.circleStrokeWidth = NSExpression(forConstantValue: 2); style.addLayer(dots)
-            dots.circleOpacity = NSExpression(forConstantValue:0.6); dots.circleStrokeOpacity = NSExpression(forConstantValue:0.6)
+            dots.circleStrokeColor = NSExpression(mglJSONObject: ["to-color", ["get", "rim"]])
+            dots.circleStrokeWidth = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 11.5, 1.2, 15, 2.2])
+            dots.circlePitchAlignment = NSExpression(forConstantValue: "map")
+            style.addLayer(dots)
             let names = MLNSymbolStyleLayer(identifier: "metro-station-names", source: stations)
-            names.minimumZoomLevel = 13; names.text = NSExpression(forKeyPath: "name")
-            names.textFontSize = NSExpression(forConstantValue: 12)
-            names.textColor = NSExpression(forConstantValue: UIColor.darkGray)
-            names.textHaloColor = NSExpression(forConstantValue: UIColor.white); names.textHaloWidth = NSExpression(forConstantValue: 2)
-            names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
+            names.minimumZoomLevel = 12.5
+            names.text = NSExpression(forKeyPath: "name")
+            names.textFontNames = NSExpression(forConstantValue: ["Noto Sans Bold", "Noto Sans Regular"])
+            names.textFontSize = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 12.5, 10.5, 16, 13])
+            names.textHaloWidth = NSExpression(forConstantValue: 1.6)
+            names.textVariableAnchor = NSExpression(forConstantValue: ["top", "bottom", "left", "right"])
+            names.textRadialOffset = NSExpression(forConstantValue: 0.95)
+            names.symbolSortKey = NSExpression(mglJSONObject: ["case", ["get", "transfer"], 0, 1])
+            // Interchanges stay labelled first; ordinary stations appear as room allows.
             style.addLayer(names)
             let exits = MLNShapeSource(identifier: "metro-exits", shape: nil, options: nil)
             style.addSource(exits); metroExitsSource = exits
             let labels = MLNSymbolStyleLayer(identifier: "metro-exit-labels", source: exits)
             labels.minimumZoomLevel = 17; labels.text = NSExpression(forKeyPath: "name")
-            labels.textFontSize = NSExpression(forConstantValue: 10); labels.textColor = NSExpression(forConstantValue: UIColor.darkGray)
-            labels.textHaloColor = NSExpression(forConstantValue: UIColor.white); labels.textHaloWidth = NSExpression(forConstantValue: 2)
+            labels.textFontSize = NSExpression(forConstantValue: 10)
+            labels.textHaloWidth = NSExpression(forConstantValue: 1.6)
             style.addLayer(labels)
         }
         private func updateMetro(map: MLNMapView) {
@@ -393,13 +425,32 @@ struct NativeBusMap: UIViewRepresentable {
                 feature.attributes = ["color": RouteTint.mapHex(for: line.name, dark: darkMode)]; return feature
             }
             metroSource?.shape = MLNShapeCollectionFeature(shapes: lines)
-            let stations = network.stations.map { station -> MLNPointFeature in
-                let feature = MLNPointFeature(); feature.coordinate = station.coordinate.locationCoordinate
-                let line = network.lines.first { station.code.hasPrefix($0.code) }
-                feature.attributes = ["stationID": station.id, "name": station.code + " " + (AppLanguage.current == .english ? station.englishName : station.name),
-                    "color": line.map { RouteTint.mapHex(for: $0.name, dark: darkMode) } ?? RouteTint.general]; return feature
+            // One stop per physical station: platforms of different lines sharing a name and
+            // standing within a short walk are drawn as a single interchange.
+            var groups: [(stations: [MetroStation], center: Coordinate)] = []
+            for station in network.stations {
+                if let index = groups.firstIndex(where: { $0.stations[0].name == station.name && $0.center.distance(to: station.coordinate) < 400 }) {
+                    groups[index].stations.append(station)
+                } else { groups.append(([station], station.coordinate)) }
+            }
+            let stations = groups.map { group -> MLNPointFeature in
+                let lead = group.stations[0]
+                let lineColors = group.stations.compactMap { station in network.lines.first { station.code.hasPrefix($0.code) } }
+                    .map { RouteTint.mapHex(for: $0.name, dark: darkMode) }
+                let transfer = Set(lineColors).count > 1
+                let feature = MLNPointFeature(); feature.coordinate = lead.coordinate.locationCoordinate
+                feature.attributes = ["stationID": lead.id, "transfer": transfer,
+                    "name": AppLanguage.current == .english ? lead.englishName : lead.name,
+                    "rim": transfer ? (darkMode ? "#E6E8EB" : "#3A3D42") : lineColors.first ?? RouteTint.general]
+                return feature
             }
             metroStationsSource?.shape = MLNShapeCollectionFeature(shapes: stations)
+            if let casing = map.style?.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer {
+                casing.lineColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1C1D20") : UIColor.white)
+            }
+            if let dots = map.style?.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer {
+                dots.circleColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#2A2C30") : UIColor.white)
+            }
             let exits = network.stations.flatMap { station in station.exits.map { exit -> MLNPointFeature in
                 let feature = MLNPointFeature(); feature.coordinate = exit.coordinate.locationCoordinate
                 feature.attributes = ["stationID": station.id, "name": AppLanguage.current == .english ? exit.englishName : exit.name]; return feature
@@ -407,10 +458,26 @@ struct NativeBusMap: UIViewRepresentable {
             metroExitsSource?.shape = MLNShapeCollectionFeature(shapes: exits)
             for id in ["metro-station-names", "metro-exit-labels"] {
                 if let layer = map.style?.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
-                    layer.textColor = NSExpression(forConstantValue: darkMode ? UIColor.white : UIColor.darkGray)
-                    layer.textHaloColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1B242C") : UIColor.white)
+                    layer.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#E6E8EB" : "#33363B"))
+                    layer.textHaloColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1C1D20") : UIColor.white)
                 }
             }
+            }
+            // A bus route or trip in focus pushes the metro back, the way Apple Maps dims other
+            // transit; a selected metro line stays fully drawn.
+            let focusKey = metroFocusKey
+            if focusKey != lastMetroFocusKey, let style = map.style {
+                lastMetroFocusKey = focusKey
+                let dimmed = focusKey == "dim"
+                (style.layer(withIdentifier: "metro-network-lines") as? MLNLineStyleLayer)?.lineOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.32 : 1)
+                (style.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer)?.lineOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.4 : 1)
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleStrokeOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
+                (style.layer(withIdentifier: "metro-station-names") as? MLNSymbolStyleLayer)?.isVisible = !dimmed
             }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
             trains?.selectedID = model.selectedTrainID
@@ -1287,7 +1354,8 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func captureDayPalette(_ style: MLNStyle) {
             dayPaints = [:]
-            for layer in style.layers {
+            // Metro layers carry their own line colours in both appearances.
+            for layer in style.layers where !layer.identifier.hasPrefix("metro-") {
                 var paints: [String: NSExpression] = [:]
                 if let layer = layer as? MLNBackgroundStyleLayer { paints["background"] = layer.backgroundColor }
                 if let layer = layer as? MLNFillStyleLayer {

@@ -20,8 +20,11 @@ final class MapSelectionOverlay: ObservableObject {
         if cameraState != text { cameraState = text }
     }
 #endif
+    /// Map zoom at the last update, so a label can keep clear of a long vehicle's body.
+    private(set) var zoom: Double = 16
     func update(_ point: CGPoint?, zoom: Double? = nil) {
         if let zoom {
+            self.zoom = zoom
             if zoom < 13.2, !compactStation { compactStation = true }
             else if zoom > 13.8, compactStation { compactStation = false }
         }
@@ -69,8 +72,11 @@ struct MapContextLabels: View {
                 // The right-hand glass control stack and the compass beneath it.
                 let obstacles = [CGRect(x: geometry.size.width - 76, y: topClearance, width: 76, height: 224)]
                     + (overlay.userPoint.map { [CGRect(x: $0.x - frame.minX - 28, y: $0.y - frame.minY - 28, width: 56, height: 56)] } ?? [])
+                // A three-car train is ~37 m long; keep the card off its whole body, not just its centre.
+                let metresPerPoint = 70_400 / pow(2, overlay.zoom)
+                let clearance = model.selectedTrainID != nil ? min(110, max(18, 18.4 / metresPerPoint + 12)) : 18
                 let placement = MapLabelPlacement.frame(anchor: anchor, size: CGSize(width: width, height: labelSize.height),
-                    inside: available, avoiding: obstacles)
+                    inside: available, avoiding: obstacles, clearance: clearance)
                 let tip = CGPoint(x: anchor.y < placement.minY || anchor.y > placement.maxY ? placement.midX : min(placement.maxX, max(placement.minX, anchor.x)),
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
