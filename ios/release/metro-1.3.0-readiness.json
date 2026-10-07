@@ -1,0 +1,63 @@
+{
+  "version": "1.3.0",
+  "distribution": "testflight-only",
+  "baseVersion": "1.2.8",
+  "baseCommit": "97572b2aa0b2348ded8618302e7c4bda6124e7a4",
+  "status": "awaiting_final_beta_processing_and_regression_checks",
+  "coverage": {
+    "operators": [
+      "TRTC",
+      "NTMC"
+    ],
+    "metroLines": 7,
+    "stationCodes": 148,
+    "operatingPatterns": 26,
+    "exits": 486
+  },
+  "implemented": [
+    "Typed metro search and familiar line colour aliases",
+    "Bus and metro planning with up to three real transfers",
+    "Official directed running times and origin-station dwell",
+    "Official internal and external interchange walking times",
+    "Entrance-aware walking and native boarding, riding and exit flow",
+    "English with Chinese station names and system dark appearance",
+    "Native instanced 3D train model, bounded track projection and report correction smoothing",
+    "Authoritative next-train countdowns anchored to provider timestamps and displayed in seconds",
+    "No synthetic train identities or test fixtures in distributed builds"
+  ],
+  "validation": {
+    "officialNetworkCollectionRuns": [
+      37665089435,
+      37665974383,
+      37668310116
+    ],
+    "coreAndLiveCatalogRun": 37682062667,
+    "nativeLightEnglishDarkFlowRun": 37681375226,
+    "latestNativeAndBusRegressionRun": 37684476951,
+    "signedUploadRun": 37684289667,
+    "releaseSearchSeconds": {
+      "NeihuToZhongxiaoFuxing": 1.737367033958435,
+      "XinbeitouToXiaobitan": 1.0322920083999634,
+      "SanyingToNeihu": 0.4194279909133911,
+      "LuzhouToHuilong": 0.9054570198059082
+    }
+  },
+  "liveData": {
+    "enabled": false,
+    "operatorMembership": "Taipei Metro authorization not yet held by developer",
+    "liveCountdownPolicy": "Use authorized provider countdown directly; otherwise explicitly label official-frequency estimates",
+    "trainPositionPolicy": "Projected from authorized train identity, next station and countdown on official track; explicitly estimated, never GPS",
+    "TDXLiveBoardCheck": {
+      "run": 37680086275,
+      "TRTC": "One expired row with zero estimate and no train identity at collection time; not enabled as live tracking",
+      "NTMC": "Endpoint returned HTTP 400"
+    },
+    "remaining": [
+      "Applicant address, terms confirmation and signature on official membership forms",
+      "Operator approval and actual API contract",
+      "Authorized server relay deployment and live-device verification"
+    ]
+  },
+  "physicalDeviceFrameRateVerified": false,
+  "formalAppStoreChanged": false
+}
