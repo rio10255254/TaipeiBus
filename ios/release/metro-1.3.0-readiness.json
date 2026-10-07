@@ -3,7 +3,7 @@
   "distribution": "testflight-only",
   "baseVersion": "1.2.8",
   "baseCommit": "97572b2aa0b2348ded8618302e7c4bda6124e7a4",
-  "status": "published_to_internal_testflight_final_regression_pending",
+  "status": "published_to_internal_testflight_verified",
   "coverage": {
     "operators": [
       "TRTC",
@@ -41,9 +41,12 @@
       "SanyingToNeihu": 0.4194279909133911,
       "LuzhouToHuilong": 0.9054570198059082
     },
-    "compiledNativeDeviceAndSimulatorRun": 37684150036,
-    "finalEnglishCountdownNativeRun": 37684252556,
-    "nativeTrainCloseupRun": 37684364713
+    "compiledNativeDeviceAndSimulatorRun": 37687210966,
+    "finalEnglishCountdownNativeRun": 37687210966,
+    "nativeTrainCloseupRun": 37687210966,
+    "nativeLightTests": 5,
+    "nativeDarkTests": 2,
+    "actualSystemAppearanceSwitchRetainsBus": true
   },
   "liveData": {
     "enabled": false,
