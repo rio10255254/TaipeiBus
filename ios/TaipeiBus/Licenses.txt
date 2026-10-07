@@ -1,4 +1,6 @@
 TaipeiBus uses MapLibre Native (BSD-2-Clause), OpenFreeMap, OpenMapTiles and OpenStreetMap.
+Terrain shading uses Terrain Tiles from the AWS Open Data Registry (Mapzen terrarium; sources include SRTM, public domain, and other open elevation datasets).
+https://registry.opendata.aws/terrain-tiles/
 Map style adapted from Liberty and OpenFreeMap.
 https://maplibre.org
 https://openfreemap.org

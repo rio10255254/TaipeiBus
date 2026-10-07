@@ -12,6 +12,16 @@
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
+    },
+    "terrain": {
+      "type": "raster-dem",
+      "encoding": "terrarium",
+      "tileSize": 256,
+      "maxzoom": 12,
+      "tiles": [
+        "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+      ],
+      "attribution": "Terrain © Mapzen, AWS Open Data"
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
@@ -33,16 +43,17 @@
         "raster-opacity": [
           "interpolate",
           [
-            "exponential",
-            1.5
+            "linear"
           ],
           [
             "zoom"
           ],
           0,
-          0.6,
+          0.7,
           6,
-          0.1
+          0.35,
+          7,
+          0
         ]
       }
     },
@@ -52,8 +63,20 @@
       "source": "openmaptiles",
       "source-layer": "park",
       "paint": {
-        "fill-color": "#D3EBC2",
-        "fill-opacity": 1,
+        "fill-color": "#C6E5AE",
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          0.75,
+          12,
+          1
+        ],
         "fill-outline-color": "#D3EBC2"
       }
     },
@@ -92,6 +115,67 @@
       }
     },
     {
+      "id": "landuse_commercial",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "minzoom": 12,
+      "filter": [
+        "match",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "commercial",
+          "retail"
+        ],
+        true,
+        false
+      ],
+      "paint": {
+        "fill-color": "#F6E4C8",
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          12,
+          0.5,
+          15,
+          0.95
+        ]
+      }
+    },
+    {
+      "id": "landuse_industrial",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landuse",
+      "minzoom": 12,
+      "filter": [
+        "match",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "industrial",
+          "garages",
+          "railway"
+        ],
+        true,
+        false
+      ],
+      "paint": {
+        "fill-color": "#ECE8F0",
+        "fill-opacity": 0.8
+      }
+    },
+    {
       "id": "landcover_wood",
       "type": "fill",
       "source": "openmaptiles",
@@ -106,8 +190,20 @@
       ],
       "paint": {
         "fill-antialias": false,
-        "fill-color": "#CBE5B6",
-        "fill-opacity": 0.65
+        "fill-color": "#BFDEA6",
+        "fill-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          0.9,
+          14,
+          0.75
+        ]
       }
     },
     {
@@ -125,8 +221,27 @@
       ],
       "paint": {
         "fill-antialias": false,
-        "fill-color": "#D3EBC2",
-        "fill-opacity": 0.65
+        "fill-color": "#D2EABF",
+        "fill-opacity": 0.8
+      }
+    },
+    {
+      "id": "landcover_farmland",
+      "type": "fill",
+      "source": "openmaptiles",
+      "source-layer": "landcover",
+      "filter": [
+        "==",
+        [
+          "get",
+          "class"
+        ],
+        "farmland"
+      ],
+      "paint": {
+        "fill-color": "#E6EFCF",
+        "fill-opacity": 0.8,
+        "fill-antialias": false
       }
     },
     {
@@ -234,7 +349,7 @@
         "hospital"
       ],
       "paint": {
-        "fill-color": "#F7E3E1"
+        "fill-color": "#F8DFE0"
       }
     },
     {
@@ -251,7 +366,34 @@
         "school"
       ],
       "paint": {
-        "fill-color": "#F3ECDC"
+        "fill-color": "#F1E6D6"
+      }
+    },
+    {
+      "id": "hillshade",
+      "type": "hillshade",
+      "source": "terrain",
+      "maxzoom": 16,
+      "paint": {
+        "hillshade-exaggeration": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          6,
+          0.5,
+          12,
+          0.4,
+          15,
+          0.12
+        ],
+        "hillshade-shadow-color": "#4E5F4A",
+        "hillshade-highlight-color": "#FFFFFF",
+        "hillshade-accent-color": "#6E7F62",
+        "hillshade-illumination-anchor": "viewport"
       }
     },
     {
@@ -331,20 +473,22 @@
         "line-cap": "round"
       },
       "paint": {
-        "line-color": "#A8D3F2",
+        "line-color": "#9ACDF2",
         "line-width": [
           "interpolate",
           [
             "exponential",
-            1.2
+            1.3
           ],
           [
             "zoom"
           ],
-          11,
-          0.5,
+          8,
+          0.8,
+          12,
+          1.6,
           20,
-          6
+          8
         ]
       }
     },
@@ -376,7 +520,7 @@
         "line-cap": "round"
       },
       "paint": {
-        "line-color": "#A8D3F2",
+        "line-color": "#9ACDF2",
         "line-width": [
           "interpolate",
           [
@@ -407,7 +551,7 @@
         "tunnel"
       ],
       "paint": {
-        "fill-color": "#A8D3F2"
+        "fill-color": "#9ACDF2"
       }
     },
     {
@@ -2614,7 +2758,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#C6C2BA",
+        "line-color": "#ACA79E",
         "line-width": [
           "interpolate",
           [
@@ -2716,7 +2860,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#C6C2BA",
+        "line-color": "#ACA79E",
         "line-width": [
           "interpolate",
           [
@@ -3762,7 +3906,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#C6C2BA",
+        "line-color": "#ACA79E",
         "line-width": [
           "interpolate",
           [
@@ -3854,7 +3998,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#C6C2BA",
+        "line-color": "#ACA79E",
         "line-width": [
           "interpolate",
           [
@@ -3927,9 +4071,9 @@
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 13,
-      "maxzoom": 14,
+      "maxzoom": 15.5,
       "paint": {
-        "fill-color": "#E8E5DE",
+        "fill-color": "#E4E1DA",
         "fill-outline-color": [
           "interpolate",
           [
@@ -4506,6 +4650,711 @@
         "text-halo-blur": 0.5,
         "text-halo-width": 1,
         "text-halo-color": "#FFFFFF"
+      }
+    },
+    {
+      "id": "poi",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "poi",
+      "minzoom": 15.6,
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream",
+            "cafe",
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music",
+            "grocery",
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary",
+            "school",
+            "college",
+            "library",
+            "kindergarten",
+            "park",
+            "garden",
+            "playground",
+            "zoo",
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema",
+            "lodging",
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station",
+            "place_of_worship",
+            "railway"
+          ],
+          true,
+          false
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "!",
+          [
+            "match",
+            [
+              "get",
+              "class"
+            ],
+            [
+              "railway",
+              "museum",
+              "attraction",
+              "castle",
+              "monument",
+              "hospital",
+              "college",
+              "park",
+              "zoo",
+              "town_hall",
+              "library"
+            ],
+            true,
+            false
+          ]
+        ]
+      ],
+      "layout": {
+        "icon-image": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "poi-food",
+          [
+            "cafe"
+          ],
+          "poi-cafe",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "poi-shop",
+          [
+            "grocery"
+          ],
+          "poi-grocery",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "poi-health",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "poi-education",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "poi-park",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "poi-culture",
+          [
+            "lodging"
+          ],
+          "poi-lodging",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "poi-service",
+          [
+            "place_of_worship"
+          ],
+          "poi-worship",
+          [
+            "railway"
+          ],
+          "poi-rail",
+          ""
+        ],
+        "icon-size": 0.92,
+        "icon-padding": 2,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:zh"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          15,
+          11,
+          18,
+          12.5
+        ],
+        "text-max-width": 8,
+        "text-variable-anchor": [
+          "left",
+          "right",
+          "top"
+        ],
+        "text-radial-offset": 0.95,
+        "text-justify": "auto",
+        "text-optional": true,
+        "text-padding": 2
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "#E8730C",
+          [
+            "cafe"
+          ],
+          "#E8730C",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "#C99700",
+          [
+            "grocery"
+          ],
+          "#C99700",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "#E0405E",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "#9A6B3F",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "#3E9B4F",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "#C2479C",
+          [
+            "lodging"
+          ],
+          "#7B61D9",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "#6E7C91",
+          [
+            "place_of_worship"
+          ],
+          "#8A8A8E",
+          [
+            "railway"
+          ],
+          "#2F7BE5",
+          "#6E6C66"
+        ],
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.3,
+        "icon-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          15.6,
+          0,
+          16.0,
+          1
+        ],
+        "text-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          15.6,
+          0,
+          16.0,
+          1
+        ]
+      }
+    },
+    {
+      "id": "poi_major",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "poi",
+      "minzoom": 14,
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream",
+            "cafe",
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music",
+            "grocery",
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary",
+            "school",
+            "college",
+            "library",
+            "kindergarten",
+            "park",
+            "garden",
+            "playground",
+            "zoo",
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema",
+            "lodging",
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station",
+            "place_of_worship",
+            "railway"
+          ],
+          true,
+          false
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "railway",
+            "museum",
+            "attraction",
+            "castle",
+            "monument",
+            "hospital",
+            "college",
+            "park",
+            "zoo",
+            "town_hall",
+            "library"
+          ],
+          true,
+          false
+        ],
+        [
+          "<=",
+          [
+            "get",
+            "rank"
+          ],
+          30
+        ]
+      ],
+      "layout": {
+        "icon-image": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "poi-food",
+          [
+            "cafe"
+          ],
+          "poi-cafe",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "poi-shop",
+          [
+            "grocery"
+          ],
+          "poi-grocery",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "poi-health",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "poi-education",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "poi-park",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "poi-culture",
+          [
+            "lodging"
+          ],
+          "poi-lodging",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "poi-service",
+          [
+            "place_of_worship"
+          ],
+          "poi-worship",
+          [
+            "railway"
+          ],
+          "poi-rail",
+          ""
+        ],
+        "icon-size": 1,
+        "icon-padding": 2,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:zh"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          15,
+          11,
+          18,
+          12.5
+        ],
+        "text-max-width": 8,
+        "text-variable-anchor": [
+          "left",
+          "right",
+          "top"
+        ],
+        "text-radial-offset": 0.95,
+        "text-justify": "auto",
+        "text-optional": true,
+        "text-padding": 2
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "#E8730C",
+          [
+            "cafe"
+          ],
+          "#E8730C",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "#C99700",
+          [
+            "grocery"
+          ],
+          "#C99700",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "#E0405E",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "#9A6B3F",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "#3E9B4F",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "#C2479C",
+          [
+            "lodging"
+          ],
+          "#7B61D9",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "#6E7C91",
+          [
+            "place_of_worship"
+          ],
+          "#8A8A8E",
+          [
+            "railway"
+          ],
+          "#2F7BE5",
+          "#6E6C66"
+        ],
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.3,
+        "icon-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0,
+          14.4,
+          1
+        ],
+        "text-opacity": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          14,
+          0,
+          14.4,
+          1
+        ]
       }
     },
     {

@@ -377,8 +377,43 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        /// Point-of-interest categories, coloured like Apple Maps. Keep in sync with taipei.json.
+        static let poiCategories: [(name: String, symbol: String, hex: String, darkHex: String, classes: [String])] = [
+            ("poi-food", "fork.knife", "#E8730C", "#FF9F45", ["restaurant", "fast_food", "bar", "beer", "bakery", "ice_cream"]),
+            ("poi-cafe", "cup.and.saucer.fill", "#E8730C", "#FF9F45", ["cafe"]),
+            ("poi-shop", "bag.fill", "#C99700", "#F2C94C", ["shop", "clothing_store", "alcohol_shop", "butcher", "jewelry", "books", "mobile_phone", "music"]),
+            ("poi-grocery", "cart.fill", "#C99700", "#F2C94C", ["grocery"]),
+            ("poi-health", "cross.fill", "#E0405E", "#FF7A93", ["hospital", "pharmacy", "dentist", "doctors", "veterinary"]),
+            ("poi-education", "graduationcap.fill", "#9A6B3F", "#D4A373", ["school", "college", "library", "kindergarten"]),
+            ("poi-park", "leaf.fill", "#3E9B4F", "#6FCF7F", ["park", "garden", "playground", "zoo"]),
+            ("poi-culture", "star.fill", "#C2479C", "#E889CB", ["museum", "art_gallery", "attraction", "monument", "castle", "theatre", "cinema"]),
+            ("poi-lodging", "bed.double.fill", "#7B61D9", "#A99BFF", ["lodging"]),
+            ("poi-service", "building.columns.fill", "#6E7C91", "#A7B3C6", ["bank", "post", "town_hall", "police", "fire_station"]),
+            ("poi-worship", "building.fill", "#8A8A8E", "#B8B8BD", ["place_of_worship"]),
+            ("poi-rail", "tram.fill", "#2F7BE5", "#6EA8FF", ["railway"]),
+        ]
+        static func poiTextColor(dark: Bool) -> NSExpression {
+            var match: [Any] = ["match", ["get", "class"]]
+            for category in poiCategories { match.append(category.classes); match.append(dark ? category.darkHex : category.hex) }
+            match.append(dark ? "#C7C9CF" : "#6E6C66")
+            return NSExpression(mglJSONObject: ["to-color", match])
+        }
+        private func poiIcon(symbol: String, color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+                let disc = UIBezierPath(ovalIn: CGRect(x: 1.5, y: 1.5, width: 21, height: 21))
+                color.setFill(); disc.fill()
+                UIColor.white.setStroke(); disc.lineWidth = 1.5; disc.stroke()
+                let configuration = UIImage.SymbolConfiguration(pointSize: 10.5, weight: .bold)
+                if let glyph = UIImage(systemName: symbol, withConfiguration: configuration)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                    glyph.draw(in: CGRect(x: 12 - glyph.size.width / 2, y: 12 - glyph.size.height / 2, width: glyph.size.width, height: glyph.size.height))
+                }
+            }
+        }
         private func installMarkerImages(_ style: MLNStyle) {
             tintedTripIcons = []
+            for category in Self.poiCategories {
+                style.setImage(poiIcon(symbol: category.symbol, color: UIColor(liveHex: darkMode ? category.darkHex : category.hex)), forName: category.name)
+            }
             style.setImage(stationIcon(size: 22), forName: "station-marker")
             style.setImage(pinIcon(symbol: "bus.fill", color: markerBlue), forName: "selected-station-marker")
             style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "destination-marker")
@@ -1036,14 +1071,18 @@ struct NativeBusMap: UIViewRepresentable {
                 if let layer = layer as? MLNFillStyleLayer {
                     let shade: String
                     if id.contains("water") { shade = "#1D3A52" }
-                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch"].contains(where: id.contains) { shade = "#21352A" }
+                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch", "farmland"].contains(where: id.contains) { shade = "#21352A" }
+                    else if id.contains("commercial") { shade = "#2B2826" }
+                    else if id.contains("industrial") { shade = "#26252B" }
                     else if id.contains("building") { shade = "#2E3035" }
                     else if id.contains("hospital") { shade = "#33282B" }
                     else if id.contains("sand") { shade = "#2F2D25" }
                     else { shade = "#222327" }
                     layer.fillColor = darkMode ? color(shade) : day["fill"]
                     layer.fillOutlineColor = darkMode ? color(shade) : day["outline"]
-                    layer.fillPattern = darkMode ? nil : day["pattern"]
+                    // Only the road-area layer has a pattern. Writing a captured empty pattern
+                    // back to ordinary fills stops them drawing, so water and parks vanished.
+                    if id == "road_area_pattern" { layer.fillPattern = darkMode ? nil : day["pattern"] }
                 }
                 if let layer = layer as? MLNLineStyleLayer {
                     let shade: String
@@ -1057,8 +1096,18 @@ struct NativeBusMap: UIViewRepresentable {
                     layer.lineColor = darkMode ? color(shade) : day["line"]
                 }
                 if let layer = layer as? MLNSymbolStyleLayer {
-                    layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
+                    if id.hasPrefix("poi") {
+                        // Places keep their category colour, lifted for the dark map.
+                        layer.textColor = darkMode ? Self.poiTextColor(dark: true) : day["text"]
+                    } else {
+                        layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
+                    }
                     layer.textHaloColor = darkMode ? color("#1C1D20") : day["halo"]
+                }
+                if let layer = layer as? MLNHillshadeStyleLayer {
+                    layer.hillshadeShadowColor = color(darkMode ? "#000000" : "#4E5F4A")
+                    layer.hillshadeHighlightColor = darkMode ? NSExpression(forConstantValue: UIColor(white: 1, alpha: 0.06)) : color("#FFFFFF")
+                    layer.hillshadeAccentColor = color(darkMode ? "#101114" : "#6E7F62")
                 }
             }
         }
