@@ -8,6 +8,18 @@ enum BrowseMode: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+/// A shop, landmark or other place tapped on the map; it can become a trip destination.
+struct MapPlaceSelection: Equatable {
+    let name: String
+    let englishName: String?
+    let kind: String
+    let coordinate: Coordinate
+    var localizedName: String { AppLanguage.current == .english ? englishName ?? name : name }
+    static func == (a: MapPlaceSelection, b: MapPlaceSelection) -> Bool {
+        a.name == b.name && a.kind == b.kind && a.coordinate.latitude == b.coordinate.latitude && a.coordinate.longitude == b.coordinate.longitude
+    }
+}
+
 enum MapFocus {
     case coordinate(Coordinate)
     case station(String)
@@ -81,6 +93,7 @@ final class TransitAppModel: ObservableObject {
     /// waiting card while it settles cannot drop the request.
     @Published var showingArrivingVehicles = false
     @Published var focus: MapFocus?
+    @Published var tappedPlace: MapPlaceSelection?
     @Published var focusRevision = 0
     @Published var selectionRevision = 0
     @Published var mapError: String?

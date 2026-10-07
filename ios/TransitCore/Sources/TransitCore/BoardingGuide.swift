@@ -17,10 +17,18 @@ public struct BoardingGuide: Sendable {
             Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: true)
         if [-2, -3, -4].contains(estimateSeconds ?? 0) { emptyPositionLabel = EstimateFeed.label(estimateSeconds) }
         else if !Self.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: false).isEmpty,
-                approaches.isEmpty { emptyPositionLabel = "前車已過站 · 等待後續車輛" }
+                approaches.isEmpty {
+            // The official feed can already time the next bus while it has not yet appeared on
+            // the route (still at the terminal or not reporting). Say that, instead of implying
+            // there is nothing coming.
+            emptyPositionLabel = (estimateSeconds ?? -1) >= 0 ? "前車已過站 · 下一班尚未回報位置" : "前車已過站 · 等待後續車輛"
+        }
         else if estimateSeconds != nil { emptyPositionLabel = "到站預估可用 · GPS 暫缺" }
         else { emptyPositionLabel = snapshot.vehicleError == nil ? "此方向暫無車輛回報" : "車輛定位更新中" }
     }
+
+    /// The official feed times a next bus that has no live position to list yet.
+    public var nextBusWithoutPosition: Bool { approaches.isEmpty && (estimateSeconds ?? -1) >= 0 }
 
     public var arrivalLabel: String {
         guard let seconds = estimateSeconds else { return AppText.text("目前沒有到站預估") }

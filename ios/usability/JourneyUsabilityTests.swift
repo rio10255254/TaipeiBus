@@ -1324,6 +1324,19 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         let comparison = XCTAttachment(string: String(decoding: bytes, as: UTF8.self))
         comparison.name = "zoom-fixed-comparison"; comparison.lifetime = .keepAlways; add(comparison)
     }
+    func testTappedPlaceOpensACardAndStartsATrip() {
+        launch(["--test-map-controls"])
+        wait { $0["placeX"] is Double && $0["placeY"] is Double }
+        let target = state()
+        let x = target["placeX"] as? Double ?? 0, y = target["placeY"] as? Double ?? 0
+        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+        XCTAssertTrue(button("place-card-route").waitForExistence(timeout: 15))
+        XCTAssertFalse((state()["tappedPlace"] as? String ?? "").isEmpty)
+        capture("place-card")
+        button("place-card-route").tap()
+        XCTAssertTrue(app.navigationBars["路線"].waitForExistence(timeout: 20))
+        capture("place-card-route")
+    }
     func testBoundedPlacesRetainEnglishNamesAndTheme() {
         launch(["--test-map-controls", "--test-language", "en"])
         wait { (($0["placeLabels"] as? [String: Any])?["count"] as? Int ?? 0) > 0 }

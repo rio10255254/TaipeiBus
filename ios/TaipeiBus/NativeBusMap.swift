@@ -1,5 +1,6 @@
 import SwiftUI
 import MapLibre
+import CoreLocation
 import MetalKit
 import TransitCore
 
@@ -106,6 +107,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastFocusWasLeavingCity = false
         private var insetWork: DispatchWorkItem?
         private var pendingInset: UIEdgeInsets?
+        private var refitEasesOut = false
         private var lastVisibilityCheck: CFTimeInterval = 0
         private var lastVisibilityTarget: Coordinate?
         private var visibilityVehicleID: String?
@@ -463,8 +465,8 @@ struct NativeBusMap: UIViewRepresentable {
             if pendingInset == inset, !reduceMotion { return false }
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
             guard map.contentInset != inset else { return false }
-            if map.contentInset == .zero || reduceMotion {
-                map.setContentInset(inset, animated: false)
+            if !positionedInitialCamera || reduceMotion {
+                setInset(inset, keepingViewOf: map)
                 return true
             }
             // Geometry reports every frame while a panel animates. Apply the final
@@ -480,13 +482,42 @@ struct NativeBusMap: UIViewRepresentable {
             return false
         }
 
-        private func applyPendingInset(_ map: MLNMapView) {
-            guard !cameraMoving, insetWork == nil, let inset = pendingInset else { return }
-            pendingInset = nil
-            // Padding and a camera flight must not run competing native animations.
-            // Refit once after the explicit movement and panel layout have settled.
+        /// Changes the map padding without moving anything on screen. MapLibre keeps the
+        /// center coordinate when padding changes, which shifts the whole map in one frame;
+        /// re-centering on what is already shown at the new padded center cancels that out.
+        /// Any intended reframing then animates from exactly what the rider sees.
+        private func setInset(_ inset: UIEdgeInsets, keepingViewOf map: MLNMapView) {
+            let bounds = map.bounds
+            guard positionedInitialCamera, bounds.width > 0, bounds.height > 0 else {
+                map.setContentInset(inset, animated: false); return
+            }
+            let anchor = CGPoint(x: bounds.minX + inset.left + (bounds.width - inset.left - inset.right) / 2,
+                                 y: bounds.minY + inset.top + (bounds.height - inset.top - inset.bottom) / 2)
+            let coordinate = map.convert(anchor, toCoordinateFrom: map)
+            let zoom = map.zoomLevel, direction = map.direction
             map.setContentInset(inset, animated: false)
-            update(location: pendingLocation, viewportChanged: true)
+            guard CLLocationCoordinate2DIsValid(coordinate) else { return }
+            map.setCenter(coordinate, zoomLevel: zoom, direction: direction, animated: false)
+        }
+
+        private func applyPendingInset(_ map: MLNMapView) {
+            guard insetWork == nil, let inset = pendingInset else { return }
+            pendingInset = nil
+            // Padding and a camera flight must not run competing native animations. The
+            // padding changes invisibly, then one movement (or a flight already under way,
+            // retargeted from where it is now) frames the content for the new viewport.
+            let flying = cameraMoving
+            setInset(inset, keepingViewOf: map)
+            guard flying else { update(location: pendingLocation, viewportChanged: true); return }
+            // Re-centering stopped the flight where it was; continue it to the target as
+            // framed for the new viewport, decelerating only, so it reads as one motion.
+            let token = cameraMoveToken
+            refitEasesOut = true
+            if let focus = model.focus, !model.mapWasMoved { self.focus(focus, map: map, duration: 0.4) }
+            else if let target = lastCameraTarget { moveCamera(savedCamera(target), map: map, duration: 0.4) }
+            refitEasesOut = false
+            if cameraMoveToken == token { cameraMoving = false; places.flying = false; places.request() }
+            lastFocusRevision = model.focusRevision
         }
 
         func update(location: Coordinate?, viewportChanged: Bool = false) {
@@ -500,10 +531,12 @@ struct NativeBusMap: UIViewRepresentable {
                                           altitude: 650, pitch: 54, heading: 0), animated: false)
             }
             // Finish an explicit focus even when panels resize during the animation or tiles are still loading.
-            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil &&
+            // A sheet covering most of the map leaves nothing worth reframing; the map stays still.
+            let visibleHeight = map.bounds.height - map.contentInset.top - map.contentInset.bottom
+            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil && visibleHeight > 220 &&
                 (model.selectedVehicleID == nil || model.following)
             if (lastFocusRevision != model.focusRevision || refit), map.bounds.width > 0, map.bounds.height > 0 {
-                focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.28)
+                focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.38)
                 lastFocusRevision = model.focusRevision
             }
             guard buses != nil else { return }
@@ -515,6 +548,7 @@ struct NativeBusMap: UIViewRepresentable {
                 updateNearbyStations(force: true); updateTripStops()
                 lastLanguage = model.language
             }
+            if let style = map.style { updateTappedPlace(style) }
             guard let buses else { return }
             buses.darkAppearance = darkMode
             if lastMetadataCount != model.metadata.stations.count {
@@ -833,6 +867,16 @@ struct NativeBusMap: UIViewRepresentable {
                 if let point = buses?.testVisiblePoint(in: mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 32, dy: 32)) {
                     state["busHitID"] = point.id; state["busHitX"] = point.point.x; state["busHitY"] = point.point.y
                 }
+                if model.tappedPlace == nil, model.selectedStationID == nil, model.planner.selected == nil {
+                    // A rendered place well inside the open map, for the tap-to-route check.
+                    let open = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 60, dy: 60)
+                    if let place = mapView.visibleFeatures(in: open, styleLayerIdentifiers: Self.placeLayerIDs)
+                        .compactMap({ $0 as? MLNPointFeature }).first {
+                        let pixel = mapView.convert(place.coordinate, toPointTo: mapView)
+                        state["placeX"] = pixel.x; state["placeY"] = pixel.y
+                    }
+                }
+                state["tappedPlace"] = model.tappedPlace?.name ?? ""
                 if model.stationBrowsing {
                     let visible = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 24, dy: 24)
                     let markers = mapView.visibleFeatures(in: visible, styleLayerIdentifiers: Set(["nearby-station-dots"]))
@@ -956,8 +1000,9 @@ struct NativeBusMap: UIViewRepresentable {
                 recordCameraSample(map)
             }
 #endif
+            // A flight retargeted mid-way is already moving; easing in again would visibly stall it.
             map.setCamera(camera, withDuration: seconds,
-                animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut)) { [weak self, weak map] in
+                animationTimingFunction: CAMediaTimingFunction(name: refitEasesOut ? .easeOut : .easeInEaseOut)) { [weak self, weak map] in
                 guard let self, let map, self.cameraMoveToken == token else { return }
                 self.cameraMoving = false
                 self.places.flying = false
@@ -1335,7 +1380,8 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
                 model.recordMapTap("map-tap:no-bus")
 #endif
-                if let station { model.selectStation(station) }
+                if let station { model.tappedPlace = nil; model.selectStation(station) }
+                else { selectPlace(at: point, map: map) }
                 return
             }
             // Only rendered 3D buildings can occlude a bus. Cached building
@@ -1351,6 +1397,62 @@ struct NativeBusMap: UIViewRepresentable {
 #endif
             if occluded { return }
             model.selectVehicle(bus)
+        }
+        /// Places are only offered while the map is free to browse, never over a trip or a
+        /// selected stop, route or bus. A tap on empty map clears the current place.
+        private func selectPlace(at point: CGPoint, map: MLNMapView) {
+            let browsing = model.selectedStationID == nil && model.selectedRouteID == nil &&
+                model.selectedVehicleID == nil && model.planner.selected == nil && !model.cityFleetMode
+            guard browsing else { return }
+            let rect = CGRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48)
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Self.placeLayerIDs)
+            let nearest = features.compactMap { $0 as? MLNPointFeature }.min { a, b in
+                let x = map.convert(a.coordinate, toPointTo: map), y = map.convert(b.coordinate, toPointTo: map)
+                return hypot(x.x - point.x, x.y - point.y) < hypot(y.x - point.x, y.y - point.y)
+            }
+            guard let feature = nearest, let kind = feature.attribute(forKey: "class") as? String,
+                  let name = (feature.attribute(forKey: "name:zh") ?? feature.attribute(forKey: "name")) as? String else {
+                if model.tappedPlace != nil { model.tappedPlace = nil }
+                return
+            }
+            let english = (feature.attribute(forKey: "name:en") ?? feature.attribute(forKey: "name_en")) as? String
+            let place = MapPlaceSelection(name: name, englishName: english, kind: kind,
+                coordinate: Coordinate(latitude: feature.coordinate.latitude, longitude: feature.coordinate.longitude))
+            model.tappedPlace = model.tappedPlace == place ? nil : place
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+        static let placeLayerIDs: Set<String> = ["poi", "poi_dense", "poi_dense_street", "poi_landmark"]
+        static func placeCategory(_ kind: String) -> (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {
+            poiCategories.first { $0.classes.contains(kind) }
+        }
+
+        private var lastTappedPlace: MapPlaceSelection?
+        private var lastTappedDark = false
+        private func updateTappedPlace(_ style: MLNStyle) {
+            guard lastTappedPlace != model.tappedPlace || lastTappedDark != darkMode ||
+                  style.source(withIdentifier: "tapped-place") == nil else { return }
+            lastTappedPlace = model.tappedPlace; lastTappedDark = darkMode
+            let source = (style.source(withIdentifier: "tapped-place") as? MLNShapeSource) ?? {
+                let source = MLNShapeSource(identifier: "tapped-place", shape: nil, options: nil)
+                style.addSource(source)
+                let layer = MLNSymbolStyleLayer(identifier: "tapped-place-pin", source: source)
+                layer.iconImageName = NSExpression(forKeyPath: "icon")
+                layer.iconAnchor = NSExpression(forConstantValue: "bottom")
+                layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
+                layer.iconIgnoresPlacement = NSExpression(forConstantValue: true)
+                style.addLayer(layer)
+                return source
+            }()
+            guard let place = model.tappedPlace else { source.shape = nil; return }
+            let category = Self.placeCategory(place.kind)
+            let icon = "tapped-place-" + (category?.name ?? "poi") + (darkMode ? "-dark" : "")
+            if style.image(forName: icon) == nil {
+                style.setImage(pinIcon(symbol: category?.symbol ?? "mappin",
+                                       color: UIColor(liveHex: darkMode ? category?.darkHex ?? "#A7B3C6" : category?.hex ?? "#6E7C91")), forName: icon)
+            }
+            let feature = MLNPointFeature(); feature.coordinate = place.coordinate.locationCoordinate
+            feature.attributes = ["icon": icon]
+            source.shape = feature
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
     }

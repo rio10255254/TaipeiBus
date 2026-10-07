@@ -433,6 +433,7 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesImproveFlatAndThreeDimensionalZoom'
               '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testLiveBusZoomAndReturn'
+              '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testTappedPlaceOpensACardAndStartsATrip'
               '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesRetainEnglishNamesAndTheme')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi

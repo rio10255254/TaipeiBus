@@ -206,7 +206,11 @@ struct TransitHomeView: View {
         .smoothChanges(planner.started)
         .smoothChanges(planner.selectedID)
         .smoothChanges(model.language)
-        if !nearbyStations.isEmpty, let position = location.usableCoordinate {
+        if let place = model.tappedPlace, !hasSelection {
+            MapPlaceCard(place: place, distance: location.usableCoordinate.map { $0.distance(to: place.coordinate) },
+                         route: { routeToPlace(place) }, close: { model.tappedPlace = nil })
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else if !nearbyStations.isEmpty, let position = location.usableCoordinate {
             HStack(spacing: 10) {
                 ForEach(nearbyStations) { station in
                     Button { model.selectStation(station) } label: {
@@ -243,6 +247,17 @@ struct TransitHomeView: View {
     }
     .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
+    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.tappedPlace)
+    }
+
+    /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
+    private func routeToPlace(_ place: MapPlaceSelection) {
+        model.tappedPlace = nil
+        planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
+                               metadata: model.metadata, currentLocation: location.usableCoordinate)
+        showJourneyItinerary = false
+        journeyDetent = planner.origin == nil ? .large : .height(420)
+        showJourney = true
     }
 
 
@@ -340,6 +355,7 @@ struct TransitHomeView: View {
             if !model.mapWasMoved { model.showStationWalkOverview() }
         }
         .onChange(of: planner.currentStep) { _, _ in model.updateWalkingLocation() }
+        .onChange(of: hasSelection) { _, selected in if selected { model.tappedPlace = nil } }
         .onChange(of: planner.walkingRouteRevision) { _, _ in
             if let index = model.activeWalkingIndex, !model.mapWasMoved {
                 model.focusMap(.journey(planner.walkingCoordinates(at: index)))
@@ -503,6 +519,52 @@ private struct SourceStatusView: View {
 
 /// Apple Maps keeps one search field at the bottom of the map. Stops and the
 /// route keypad sit beside it; a selection adds follow and close controls.
+/// Apple Maps-style place card: what was tapped, how far it is, and one tap to get there.
+private struct MapPlaceCard: View {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.colorScheme) private var colorScheme
+    let place: MapPlaceSelection
+    let distance: Double?
+    let route: () -> Void
+    let close: () -> Void
+    private var category: (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {
+        NativeBusMap.Coordinator.placeCategory(place.kind)
+    }
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: category?.symbol ?? "mappin").liveFont(.subheadline, weight: .semibold).foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color(liveHex: colorScheme == .dark ? category?.darkHex ?? "#A7B3C6" : category?.hex ?? "#6E7C91")))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place.localizedName).liveFont(.headline, weight: .semibold).lineLimit(1)
+                Text([category.map { live.text(Self.categoryNames[$0.name] ?? "地點") } ?? live.text("地點"),
+                      distance.map { distanceLabel($0) }].compactMap { $0 }.joined(separator: " · "))
+                    .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button(action: route) {
+                Label(live.text("路線"), systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    .liveFont(.subheadline, weight: .semibold).labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 14).frame(minHeight: 40)
+            }
+            .buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
+            .accessibilityIdentifier("place-card-route")
+            Button(action: close) {
+                Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
+            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+        }
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
+        .phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
+    }
+    static let categoryNames: [String: String] = [
+        "poi-food": "餐廳", "poi-cafe": "咖啡廳", "poi-shop": "商店", "poi-grocery": "超市", "poi-health": "醫療",
+        "poi-education": "學校", "poi-park": "公園", "poi-culture": "文化景點", "poi-lodging": "住宿",
+        "poi-service": "公共服務", "poi-worship": "宗教場所", "poi-rail": "車站"
+    ]
+}
+
 private struct HomeSearchRow: View {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion

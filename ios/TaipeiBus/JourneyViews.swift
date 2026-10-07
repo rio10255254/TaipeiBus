@@ -382,7 +382,10 @@ private struct JourneyBoardingContent: View {
                             .liveFont(.subheadline).padding(20).frame(maxWidth: 300).presentationCompactAdaptation(.popover)
                     }
             }
-            if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
+            if guide.nextBusWithoutPosition {
+                NextBusRow(guide: guide)
+                    .background(Color(uiColor: .systemBackground).opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            } else if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
             else {
                 VStack(spacing: 0) {
                     ForEach(Array(guide.approaches.prefix(3))) { approach in
@@ -403,6 +406,27 @@ private struct JourneyBoardingContent: View {
     }
 }
 
+/// The officially timed next bus, listed even before its GPS appears on the route.
+private struct NextBusRow: View {
+    @Environment(\.liveSettings) private var live
+    let guide: BoardingGuide
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "bus.fill").liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(live.text("下一班")).liveFont(.body, weight: .semibold)
+                Text(live.text(guide.emptyPositionLabel)).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
+            Spacer(minLength: 8)
+            Text(guide.arrivalShortLabel).liveFont(.body, weight: .bold).monospacedDigit()
+                .contentTransition(.numericText())
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .accessibilityElement(children: .combine).accessibilityIdentifier("boarding-next-bus-without-position")
+    }
+}
+
 struct VehicleArrivalsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.liveSettings) private var live
@@ -418,7 +442,8 @@ struct VehicleArrivalsView: View {
                         Text(AppText.text("往 ") + ride.route.localizedDestination(direction: ride.direction)).foregroundStyle(.secondary)
                     } header: { Text(AppText.text("官方下一班")) }
                     Section {
-                        if guide.approaches.isEmpty { Text(guide.emptyPositionLabel).foregroundStyle(.secondary) }
+                        if guide.nextBusWithoutPosition { NextBusRow(guide: guide) }
+                        else if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).foregroundStyle(.secondary) }
                         ForEach(guide.approaches) { approach in
                             VStack(alignment: .leading, spacing: 3) {
                                 BoardingVehicleRow(model: model, ride: ride, approach: approach, date: timeline.date)
