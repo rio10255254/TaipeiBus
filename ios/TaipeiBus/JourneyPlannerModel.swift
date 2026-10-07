@@ -185,7 +185,7 @@ final class JourneyPlannerModel: ObservableObject {
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
+                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : estimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
             return duration
         }
         return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)

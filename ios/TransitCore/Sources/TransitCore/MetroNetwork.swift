@@ -89,6 +89,15 @@ public struct MetroNetwork: Codable, Sendable {
     public func line(_ id: String) -> MetroLine? { lines.first { $0.id == id } }
     public func station(_ id: String) -> MetroStation? { stations.first { $0.id == id } }
     public func pattern(_ id: String, direction: String) -> MetroPattern? { patterns.first { $0.id == id && $0.direction == direction } }
+    public func canServe(_ ride: TransitRide, patternID: String, direction: String, destinationStationID: String) -> Bool {
+        guard direction == ride.direction, let pattern = pattern(patternID, direction: direction),
+              let planned = self.pattern(ride.route.id, direction: direction), pattern.lineID == planned.lineID,
+              let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
+              let destination = pattern.stationIDs.firstIndex(of: destinationStationID),
+              destination >= board + ride.stopCount,
+              board + ride.stops.count <= pattern.stationIDs.count else { return false }
+        return Array(pattern.stationIDs[board..<(board + ride.stops.count)]) == ride.stops.map(\.stationID)
+    }
     public func ridingSeconds(routeID: String, direction: String, from: String, to: String) -> Double? {
         guard let pattern = pattern(routeID, direction: direction),
               let first = pattern.stationIDs.firstIndex(of: from), let last = pattern.stationIDs.firstIndex(of: to), last > first else { return nil }

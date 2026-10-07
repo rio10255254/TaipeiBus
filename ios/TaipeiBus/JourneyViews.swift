@@ -1430,7 +1430,7 @@ struct MetroBoardingRows: View {
     let ride: TransitRide
     let date: Date
     private var arrivals: [MetroArrival] {
-        (model.metroRealtime?.arrivals ?? []).filter { $0.patternID == ride.route.id && $0.direction == ride.direction && $0.stationID == ride.boarding.stationID && $0.remaining(at: date) != nil }
+        (model.metroRealtime?.arrivals ?? []).filter { $0.stationID == ride.boarding.stationID && $0.remaining(at: date) != nil && model.metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }
             .sorted { ($0.remaining(at: date) ?? .max) < ($1.remaining(at: date) ?? .max) }
     }
     var body: some View {

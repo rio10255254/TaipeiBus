@@ -614,7 +614,7 @@ final class TransitAppModel: ObservableObject {
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
+            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : rideEstimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
         return duration
     }
 

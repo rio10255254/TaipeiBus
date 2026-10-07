@@ -54,7 +54,7 @@ public struct VehicleArrivalDisplay: Equatable, Sendable {
 
 /// A whole-ride planning estimate, never the official arrival time of a named bus.
 public struct RidingTimeEstimate: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case stationHistory, officialProfile, recentTraffic, typical }
+    public enum Evidence: String, Sendable { case stationHistory, officialProfile, railProfile, recentTraffic, typical }
     public let seconds: Double
     public let evidence: Evidence
     public let observedVehicles: Int
@@ -65,6 +65,7 @@ public struct RidingTimeEstimate: Equatable, Sendable {
         switch evidence {
         case .stationHistory: return AppText.text("依近期站間紀錄")
         case .officialProfile: return AppText.text("依官方分時段車程")
+        case .railProfile: return AppText.text("依官方捷運站間車程")
         case .recentTraffic: return AppText.text("依目前路線車流")
         case .typical: return AppText.text("一般車程估計")
         }
@@ -297,7 +298,7 @@ public struct VehicleArrivalForecast: Sendable {
                               travellingAt: Date? = nil) -> RidingTimeEstimate {
         if ride.route.mode != .bus, let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) {
-            return RidingTimeEstimate(seconds: seconds, evidence: .officialProfile, observedVehicles: 0)
+            return RidingTimeEstimate(seconds: seconds, evidence: .railProfile, observedVehicles: 0)
         }
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),

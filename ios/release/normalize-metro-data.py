@@ -62,6 +62,9 @@ for op,rows in raw['operators'].items():
   travel=next((r for r in rows['S2STravelTime'] if r['RouteID']==route),None)
   if travel is None:raise ValueError('Official travel-time profile missing '+route)
   edges={(e['FromStationID'],e['ToStationID']):e for e in travel['TravelTimes']}
+  # TDX StopTime belongs to FromStationID, not ToStationID. Map by station
+  # identity so reversing a pattern cannot shift each station's dwell by one.
+  stationDwell={e['FromStationID']:e.get('StopTime',0) for e in travel['TravelTimes']}
   sec=[];dwell=[];path=[]
   for a,b in zip(ids,ids[1:]):
    edge=edges.get((a,b)) or edges.get((b,a))
@@ -88,7 +91,8 @@ for op,rows in raw['operators'].items():
    values=[r for r in ext.get('FirstLastTimetable',[]) if r['StationID']==sid and r.get('DestinationStaionID')==ids[-1]]
    if values:
     windows.append({'stationID':prefix+sid,'first':values[0]['FirstTrainTime'],'last':values[0]['LastTrainTime']})
-  patterns.append({'id':prefix+route,'lineID':prefix+lid,'direction':direction,'stationIDs':[prefix+x for x in ids],'coordinates':[c(x) for x in path],'seconds':sec,'dwellSeconds':[0]+dwell,'firstDeparture':opening,'lastDeparture':closing,'headwaySeconds':headway,'periods':periods,'stationWindows':windows})
+  stationStops=[0]+[stationDwell.get(sid,30) for sid in ids[1:]]
+  patterns.append({'id':prefix+route,'lineID':prefix+lid,'direction':direction,'stationIDs':[prefix+x for x in ids],'coordinates':[c(x) for x in path],'seconds':sec,'dwellSeconds':stationStops,'firstDeparture':opening,'lastDeparture':closing,'headwaySeconds':headway,'periods':periods,'stationWindows':windows})
  # Use only the full operating pattern for the base-map line, with shorter/branch paths in the route overlay.
  for l in lines:
   if l['operatorID']==op:

@@ -119,4 +119,42 @@ final class MetroIntegrationTests: XCTestCase {
         XCTAssertEqual(trip.walkingDistances.count,4);XCTAssertEqual(trip.transferSeconds.count,2)
         XCTAssertTrue(TripRanking.assessment(trip,estimates:.init(),at:noon()).elapsedSeconds.isFinite)
     }
+    func testBoardingAnAlternateOperatingPatternRequiresEveryPlannedStationInOrder() throws {
+        let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
+        let pattern = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
+        let stops = metadata.orderedStops(routeID:pattern.id,direction:"0")
+        let route = try XCTUnwrap(metadata.routes[pattern.id])
+        let short = TransitRide(route:route,direction:"0",stops:Array(stops[1...3]),coordinates:[])
+        let alternate = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-2") && $0.direction == "0" })
+        XCTAssertTrue(metro.canServe(short,patternID:alternate.id,direction:"0",destinationStationID:alternate.stationIDs.last!))
+        let beyond = TransitRide(route:route,direction:"0",stops:Array(stops[1...]),coordinates:[])
+        XCTAssertFalse(metro.canServe(beyond,patternID:alternate.id,direction:"0",destinationStationID:alternate.stationIDs.last!))
+    }
+    func testPublishedDwellBelongsToOriginStationInBothDirections() throws {
+        let metro = try network()
+        let a = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
+        let b = try XCTUnwrap(metro.patterns.first { $0.id == a.id && $0.direction == "1" })
+        let stop = try XCTUnwrap(a.stationIDs.firstIndex { $0.hasSuffix(":BL22") })
+        let back = try XCTUnwrap(b.stationIDs.firstIndex { $0.hasSuffix(":BL22") })
+        XCTAssertEqual(a.dwellSeconds[stop],24);XCTAssertEqual(b.dwellSeconds[back],24)
+        XCTAssertEqual(metro.ridingSeconds(routeID:a.id,direction:a.direction,from:a.stationIDs[0],to:a.stationIDs[1]),a.seconds[0])
+    }
+    func testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime() throws {
+        guard let folder = ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Live city metadata not requested") }
+        var feeds: [String:Data] = [:]
+        for name in ["GetRoute","GetStop","GetPathDetail","GetBusShape"] {
+            feeds[name] = try Data(contentsOf:URL(fileURLWithPath:folder).appendingPathComponent(name+".json"))
+        }
+        var metadata = try FeedDecoder.metadata(feeds:feeds); let metro = try network();metro.attach(to:&metadata)
+        let began = Date(), planner = MultimodalPlanner(metadata:metadata)
+        XCTAssertLessThan(Date().timeIntervalSince(began),10)
+        for (from,to) in [("BR19","BR10"),("R22A","G03A"),("LB12","BR19"),("O54","O21")] {
+            let a = try XCTUnwrap(metro.stations.first { $0.code == from }), b = try XCTUnwrap(metro.stations.first { $0.code == to })
+            let start = Date(), trips = planner.plan(from:a.coordinate,to:b.coordinate,maximumWalk:800,limit:12,at:noon())
+            XCTAssertFalse(trips.isEmpty);XCTAssertTrue(trips.contains { $0.rides.contains { $0.route.mode != .bus } })
+            let elapsed = Date().timeIntervalSince(start)
+            XCTAssertLessThan(elapsed,10)
+            print("METRO_LIVE_AUDIT",from,to,"seconds",elapsed,"choices",trips.count,"rides",trips.first?.rides.map { $0.route.name } ?? [])
+        }
+    }
 }

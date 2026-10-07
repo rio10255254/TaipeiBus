@@ -30,7 +30,7 @@
       "sha256": "5f5129274536a55ad8c01ffbe6518f5a1f3a442e5068bf2bfe2f1c31ce4c9351"
     }
   ],
-  "outputSha256": "90b595b73fb6f4e2e9702e73f53c11823e006b5115bf29ff48f35c6170fff1ee",
+  "outputSha256": "11d1ed81934e478e12deaefcf580503346fd5c8854a6cb38e144f327e1513c29",
   "counts": {
     "lines": 7,
     "stations": 148,
@@ -40,11 +40,13 @@
   "officialSources": [
     "https://tdx.transportdata.tw/api-service/swagger",
     "https://data.taipei/dataset/detail?id=513e97fe-6a98-4a0d-b7dc-11122c8638d4",
-    "https://data.taipei/dataset/detail?id=782c2b71-8f5a-4575-9bf2-e86999be2863"
+    "https://data.taipei/dataset/detail?id=782c2b71-8f5a-4575-9bf2-e86999be2863",
+    "https://www.hackrail.tw/info/dataguide"
   ],
   "collectionRuns": [
     37665089435,
     37665974383,
     37668310116
-  ]
+  ],
+  "dwellSemantics": "TDX StopTime is FromStationID dwell; terminal boarding and final alighting dwell are excluded"
 }

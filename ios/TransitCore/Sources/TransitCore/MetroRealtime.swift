@@ -55,15 +55,11 @@ public struct MetroRealtime: Codable, Equatable, Sendable {
         }
     }
     public func nextArrival(ride: TransitRide, network: MetroNetwork, at date: Date) -> MetroArrival? {
-        guard let last = ride.stops.last else { return nil }
+        guard !ride.stops.isEmpty else { return nil }
         return arrivals.filter { a in
-            guard a.patternID == ride.route.id, a.direction == ride.direction, a.stationID == ride.boarding.stationID,
-                  a.remaining(at: date) != nil else { return false }
+            guard a.stationID == ride.boarding.stationID, a.remaining(at: date) != nil else { return false }
             // A short-turn train must actually reach the requested alighting station.
-            guard let pattern = network.pattern(a.patternID, direction: a.direction),
-                  let alighting = pattern.stationIDs.firstIndex(of: last.stationID),
-                  let destination = pattern.stationIDs.firstIndex(of: a.destinationStationID) else { return false }
-            return destination >= alighting
+            return network.canServe(ride, patternID: a.patternID, direction: a.direction, destinationStationID: a.destinationStationID)
         }.min { ($0.remaining(at: date) ?? .max) < ($1.remaining(at: date) ?? .max) }
     }
     public func applying(to estimates: EstimateFeed, network: MetroNetwork, at date: Date) -> EstimateFeed {
