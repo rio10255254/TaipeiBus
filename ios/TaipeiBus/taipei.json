@@ -4616,7 +4616,310 @@
       }
     },
     {
-      "id": "poi_food",
+      "id": "poi_dense",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "poi",
+      "minzoom": 17.5,
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream",
+            "cafe",
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music",
+            "grocery",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary",
+            "school",
+            "kindergarten",
+            "garden",
+            "playground",
+            "art_gallery",
+            "theatre",
+            "cinema",
+            "lodging",
+            "bank",
+            "post",
+            "police",
+            "fire_station",
+            "place_of_worship"
+          ],
+          true,
+          false
+        ],
+        [
+          "has",
+          "name"
+        ],
+        [
+          ">",
+          [
+            "get",
+            "rank"
+          ],
+          4
+        ],
+        [
+          "<=",
+          [
+            "get",
+            "rank"
+          ],
+          16
+        ]
+      ],
+      "layout": {
+        "icon-image": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "poi-food",
+          [
+            "cafe"
+          ],
+          "poi-cafe",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "poi-shop",
+          [
+            "grocery"
+          ],
+          "poi-grocery",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "poi-health",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "poi-education",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "poi-park",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "poi-culture",
+          [
+            "lodging"
+          ],
+          "poi-lodging",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "poi-service",
+          [
+            "place_of_worship"
+          ],
+          "poi-worship",
+          [
+            "railway"
+          ],
+          "poi-rail",
+          ""
+        ],
+        "icon-size": 0.9,
+        "icon-padding": 3,
+        "symbol-sort-key": [
+          "get",
+          "rank"
+        ],
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:zh"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          15,
+          11,
+          18,
+          12.5
+        ],
+        "text-max-width": 8,
+        "text-anchor": "left",
+        "text-offset": [
+          0.95,
+          0
+        ],
+        "text-justify": "left",
+        "text-optional": true,
+        "text-padding": 3
+      },
+      "paint": {
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "#E8730C",
+          [
+            "cafe"
+          ],
+          "#E8730C",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "#C99700",
+          [
+            "grocery"
+          ],
+          "#C99700",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "#E0405E",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "#9A6B3F",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "#3E9B4F",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "#C2479C",
+          [
+            "lodging"
+          ],
+          "#7B61D9",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "#6E7C91",
+          [
+            "place_of_worship"
+          ],
+          "#8A8A8E",
+          [
+            "railway"
+          ],
+          "#2F7BE5",
+          "#6E6C66"
+        ],
+        "text-halo-color": "#FFFFFF",
+        "text-halo-width": 1.4,
+        "text-halo-blur": 0.3
+      }
+    },
+    {
+      "id": "poi",
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
@@ -4635,7 +4938,34 @@
             "bar",
             "beer",
             "bakery",
-            "ice_cream"
+            "ice_cream",
+            "cafe",
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music",
+            "grocery",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary",
+            "school",
+            "kindergarten",
+            "garden",
+            "playground",
+            "art_gallery",
+            "theatre",
+            "cinema",
+            "lodging",
+            "bank",
+            "post",
+            "police",
+            "fire_station",
+            "place_of_worship"
           ],
           true,
           false
@@ -4643,159 +4973,36 @@
         [
           "has",
           "name"
+        ],
+        [
+          "<=",
+          [
+            "get",
+            "rank"
+          ],
+          4
         ]
       ],
       "layout": {
-        "icon-image": "poi-food",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#E8730C",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_cafe",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
+        "icon-image": [
           "match",
           [
             "get",
             "class"
           ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "poi-food",
           [
             "cafe"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-cafe",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#E8730C",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_shop",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-cafe",
           [
             "shop",
             "clothing_store",
@@ -4806,676 +5013,67 @@
             "mobile_phone",
             "music"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-shop",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#C99700",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_grocery",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-shop",
           [
             "grocery"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-grocery",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
+          "poi-grocery",
           [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#C99700",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_health",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
+            "hospital",
             "pharmacy",
             "dentist",
             "doctors",
             "veterinary"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-health",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#E0405E",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_education",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-health",
           [
             "school",
+            "college",
+            "library",
             "kindergarten"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-education",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
+          "poi-education",
           [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#9A6B3F",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_park",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
+            "park",
             "garden",
-            "playground"
+            "playground",
+            "zoo"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-park",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
+          "poi-park",
           [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#3E9B4F",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_culture",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
+            "museum",
             "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
             "theatre",
             "cinema"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-culture",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#C2479C",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_lodging",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-culture",
           [
             "lodging"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-lodging",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#7B61D9",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_service",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-lodging",
           [
             "bank",
             "post",
+            "town_hall",
             "police",
             "fire_station"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-service",
-        "icon-size": 0.92,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#6E7C91",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_worship",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 16,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "poi-service",
           [
             "place_of_worship"
           ],
-          true,
-          false
+          "poi-worship",
+          [
+            "railway"
+          ],
+          "poi-rail",
+          ""
         ],
-        [
-          "has",
-          "name"
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-worship",
         "icon-size": 0.92,
-        "icon-padding": 2,
+        "icon-padding": 3,
         "symbol-sort-key": [
           "get",
           "rank"
@@ -5512,293 +5110,111 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
         "text-anchor": "left",
         "text-offset": [
           0.95,
           0
         ],
-        "text-justify": "left"
+        "text-justify": "left",
+        "text-optional": true,
+        "text-padding": 3
       },
       "paint": {
-        "text-color": "#8A8A8E",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_major_health",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 14,
-      "filter": [
-        "all",
-        [
+        "text-color": [
           "match",
           [
             "get",
             "class"
           ],
           [
-            "hospital"
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ],
-        [
-          "<=",
+          "#E8730C",
           [
-            "get",
-            "rank"
+            "cafe"
           ],
-          30
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-health",
-        "icon-size": 1,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
+          "#E8730C",
           [
-            "get",
-            "name:zh"
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
           ],
+          "#C99700",
           [
-            "get",
-            "name"
+            "grocery"
           ],
+          "#C99700",
           [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
           ],
+          "#E0405E",
           [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#E0405E",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_major_education",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 14,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
+            "school",
             "college",
-            "library"
+            "library",
+            "kindergarten"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ],
-        [
-          "<=",
-          [
-            "get",
-            "rank"
-          ],
-          30
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-education",
-        "icon-size": 1,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#9A6B3F",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_major_park",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 14,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
+          "#9A6B3F",
           [
             "park",
+            "garden",
+            "playground",
             "zoo"
           ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ],
-        [
-          "<=",
+          "#3E9B4F",
           [
-            "get",
-            "rank"
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
           ],
-          30
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-park",
-        "icon-size": 1,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
+          "#C2479C",
           [
-            "get",
-            "name:zh"
+            "lodging"
           ],
+          "#7B61D9",
           [
-            "get",
-            "name"
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
           ],
+          "#6E7C91",
           [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
+            "place_of_worship"
           ],
+          "#8A8A8E",
           [
-            "zoom"
+            "railway"
           ],
-          15,
-          11,
-          18,
-          12.5
+          "#2F7BE5",
+          "#6E6C66"
         ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#3E9B4F",
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
         "text-halo-blur": 0.3
       }
     },
     {
-      "id": "poi_major_culture",
+      "id": "poi_landmark",
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
@@ -5812,187 +5228,16 @@
             "class"
           ],
           [
+            "hospital",
+            "college",
+            "library",
+            "park",
+            "zoo",
             "museum",
             "attraction",
             "monument",
-            "castle"
-          ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ],
-        [
-          "<=",
-          [
-            "get",
-            "rank"
-          ],
-          30
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-culture",
-        "icon-size": 1,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#C2479C",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_major_service",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 14,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
-            "town_hall"
-          ],
-          true,
-          false
-        ],
-        [
-          "has",
-          "name"
-        ],
-        [
-          "<=",
-          [
-            "get",
-            "rank"
-          ],
-          30
-        ]
-      ],
-      "layout": {
-        "icon-image": "poi-service",
-        "icon-size": 1,
-        "icon-padding": 2,
-        "symbol-sort-key": [
-          "get",
-          "rank"
-        ],
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          15,
-          11,
-          18,
-          12.5
-        ],
-        "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
-        "text-anchor": "left",
-        "text-offset": [
-          0.95,
-          0
-        ],
-        "text-justify": "left"
-      },
-      "paint": {
-        "text-color": "#6E7C91",
-        "text-halo-color": "#FFFFFF",
-        "text-halo-width": 1.4,
-        "text-halo-blur": 0.3
-      }
-    },
-    {
-      "id": "poi_major_rail",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
-      "minzoom": 14,
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
+            "castle",
+            "town_hall",
             "railway"
           ],
           true,
@@ -6008,13 +5253,100 @@
             "get",
             "rank"
           ],
-          30
+          3
         ]
       ],
       "layout": {
-        "icon-image": "poi-rail",
+        "icon-image": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "poi-food",
+          [
+            "cafe"
+          ],
+          "poi-cafe",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "poi-shop",
+          [
+            "grocery"
+          ],
+          "poi-grocery",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "poi-health",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "poi-education",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "poi-park",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "poi-culture",
+          [
+            "lodging"
+          ],
+          "poi-lodging",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "poi-service",
+          [
+            "place_of_worship"
+          ],
+          "poi-worship",
+          [
+            "railway"
+          ],
+          "poi-rail",
+          ""
+        ],
         "icon-size": 1,
-        "icon-padding": 2,
+        "icon-padding": 3,
         "symbol-sort-key": [
           "get",
           "rank"
@@ -6051,17 +5383,104 @@
           12.5
         ],
         "text-max-width": 8,
-        "text-optional": true,
-        "text-padding": 2,
         "text-anchor": "left",
         "text-offset": [
           0.95,
           0
         ],
-        "text-justify": "left"
+        "text-justify": "left",
+        "text-optional": true,
+        "text-padding": 3
       },
       "paint": {
-        "text-color": "#2F7BE5",
+        "text-color": [
+          "match",
+          [
+            "get",
+            "class"
+          ],
+          [
+            "restaurant",
+            "fast_food",
+            "bar",
+            "beer",
+            "bakery",
+            "ice_cream"
+          ],
+          "#E8730C",
+          [
+            "cafe"
+          ],
+          "#E8730C",
+          [
+            "shop",
+            "clothing_store",
+            "alcohol_shop",
+            "butcher",
+            "jewelry",
+            "books",
+            "mobile_phone",
+            "music"
+          ],
+          "#C99700",
+          [
+            "grocery"
+          ],
+          "#C99700",
+          [
+            "hospital",
+            "pharmacy",
+            "dentist",
+            "doctors",
+            "veterinary"
+          ],
+          "#E0405E",
+          [
+            "school",
+            "college",
+            "library",
+            "kindergarten"
+          ],
+          "#9A6B3F",
+          [
+            "park",
+            "garden",
+            "playground",
+            "zoo"
+          ],
+          "#3E9B4F",
+          [
+            "museum",
+            "art_gallery",
+            "attraction",
+            "monument",
+            "castle",
+            "theatre",
+            "cinema"
+          ],
+          "#C2479C",
+          [
+            "lodging"
+          ],
+          "#7B61D9",
+          [
+            "bank",
+            "post",
+            "town_hall",
+            "police",
+            "fire_station"
+          ],
+          "#6E7C91",
+          [
+            "place_of_worship"
+          ],
+          "#8A8A8E",
+          [
+            "railway"
+          ],
+          "#2F7BE5",
+          "#6E6C66"
+        ],
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
         "text-halo-blur": 0.3

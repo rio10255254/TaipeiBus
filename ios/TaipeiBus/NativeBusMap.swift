@@ -395,6 +395,13 @@ struct NativeBusMap: UIViewRepresentable {
             ("poi-worship", "building.fill", "#8A8A8E", "#B8B8BD", ["place_of_worship"]),
             ("poi-rail", "tram.fill", "#2F7BE5", "#6EA8FF", ["railway"]),
         ]
+        /// Category colours lifted for the dark map, matched on the place class.
+        static let poiDarkTextColor: NSExpression = {
+            var match: [Any] = ["match", ["get", "class"]]
+            for category in poiCategories { match.append(category.classes); match.append(category.darkHex) }
+            match.append("#C7C9CF")
+            return NSExpression(mglJSONObject: ["to-color", match])
+        }()
         private func poiIcon(symbol: String, color: UIColor) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
                 let disc = UIBezierPath(ovalIn: CGRect(x: 1.5, y: 1.5, width: 21, height: 21))
@@ -1133,9 +1140,7 @@ struct NativeBusMap: UIViewRepresentable {
                 if let layer = layer as? MLNSymbolStyleLayer {
                     if id.hasPrefix("poi") {
                         // Places keep their category colour, lifted for the dark map.
-                        let key = "poi-" + id.replacingOccurrences(of: "poi_major_", with: "").replacingOccurrences(of: "poi_", with: "")
-                        let category = Self.poiCategories.first { $0.name == key }
-                        layer.textColor = darkMode ? color(category?.darkHex ?? "#C7C9CF") : day["text"]
+                        layer.textColor = darkMode ? Self.poiDarkTextColor : day["text"]
                     } else {
                         layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
                     }
