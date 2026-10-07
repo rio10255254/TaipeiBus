@@ -1221,6 +1221,13 @@ struct NativeBusMap: UIViewRepresentable {
                 }
                 lastFollowTime = now
             }
+            if model.followingTrain, now >= followSuspendedUntil, let id = model.selectedTrainID,
+               let pose = trains?.pose(id: id, time: now, now: date), !pose.stale {
+                let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+                let camera = map.camera
+                camera.centerCoordinate = center.interpolate(to: pose.coordinate, fraction: reduceMotion ? 1 : 1 - exp(-dt / 0.12)).locationCoordinate
+                map.setCamera(camera, animated: false)
+            }
         }
 
         private func updateLocationMarker(_ map: MLNMapView, elapsed: Double) {
@@ -1254,6 +1261,7 @@ struct NativeBusMap: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false
+                    self?.model.followingTrain = false
                     self?.model.stopUserTracking()
                     if let self, let map = self.map { self.applyPendingInset(map) }
                 }

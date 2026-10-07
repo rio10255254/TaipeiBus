@@ -132,9 +132,17 @@ public struct PreparedMetroTrain: Sendable {
         return MetroTrainPose(report: report, coordinate: sample.0, heading: sample.1, path: segment.coordinates,
             seconds: remaining, estimatedPosition: true)
     }
-    public func renderPose(at date: Date) -> VehiclePose? {
+    public func renderPose(at date: Date, blendingFrom origin: Coordinate? = nil, fraction: Double = 1) -> VehiclePose? {
         guard let value = pose(at: date) else { return nil }
-        return VehiclePose(id: report.id, coordinate: value.coordinate, heading: value.heading,
+        var coordinate = value.coordinate, heading = value.heading
+        if let origin, fraction < 1, segment.length > 0,
+           let first = segment.match(origin, heading: nil), first.distance < 60,
+           let target = segment.match(coordinate, heading: nil) {
+            let t = min(1,max(0,fraction)), smooth = t*t*(3-2*t)
+            let sample = segment.sample(fraction: (first.along + (target.along - first.along)*smooth) / segment.length)
+            coordinate = sample.0; heading = sample.1
+        }
+        return VehiclePose(id: report.id, coordinate: coordinate, heading: heading,
             stale: false, traveledDistance: 0, observedAt: report.observedAt)
     }
 }

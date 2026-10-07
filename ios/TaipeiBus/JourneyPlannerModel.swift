@@ -13,6 +13,7 @@ struct WalkingLeg: Sendable {
     var stationSeconds: Double = 0
     var stationInstruction: String? = nil
     var internalTransfer = false
+    var minimumDuration: Double = 0
     var verified: Bool { duration != nil }
     var timeLabel: String {
         duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
@@ -367,7 +368,8 @@ final class JourneyPlannerModel: ObservableObject {
                     } else {
                         walks.append(WalkingLeg(from: entrance(a, toward: b.coordinate), to: entrance(b, toward: a.coordinate),
                             stationSeconds: trip.rides[index - 1].alightingAccessSeconds + trip.rides[index].boardingAccessSeconds,
-                            stationInstruction: b.mode != .bus ? AppText.text("進站至月台") : nil))
+                            stationInstruction: b.mode != .bus ? AppText.text("進站至月台") : nil,
+                            minimumDuration: transfer?.seconds ?? 0))
                     }
                 }
                 let lastExit = metadata.metro.nearestExit(stationID: last.alighting.stationID, to: destination.coordinate)
@@ -443,7 +445,7 @@ final class JourneyPlannerModel: ObservableObject {
             result.walks[index] = try await walk(option.walks[index])
             result.walks[index].stationSeconds = option.walks[index].stationSeconds
             result.walks[index].stationInstruction = option.walks[index].stationInstruction
-            if let seconds = result.walks[index].duration { result.walks[index].duration = seconds + option.walks[index].stationSeconds }
+            if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
             let transfer = index > 0 && index < result.walks.count - 1

@@ -568,10 +568,12 @@ private struct OnboardStopsView: View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let bus = model.onboardVehicle(for: ride)
-                let stops = model.onboardStops(for: ride, at: timeline.date)
+                let stops = ride.route.mode == .bus ? model.onboardStops(for: ride, at: timeline.date) : model.metroRemaining(ride, at: timeline.date).stops
                 List {
                     Section {
-                        if let plate = model.onboardPlate(for: ride) {
+                        if ride.route.mode != .bus {
+                            Text(AppText.text("依站間車程估計 · 到站請確認站名")).foregroundStyle(.secondary)
+                        } else if let plate = model.onboardPlate(for: ride) {
                             Text(plate).monospaced().bold().accessibilityIdentifier("onboard-confirmed-plate")
                             if bus?.hasReliablePosition(at: timeline.date) != true { Text(AppText.text("車輛位置更新中")).foregroundStyle(.secondary) }
                         } else { Text(AppText.text("請先在搭車畫面選擇車牌")).foregroundStyle(.secondary) }
@@ -588,7 +590,7 @@ private struct OnboardStopsView: View {
                                 }
                                 Spacer(minLength: 4)
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text(bus.map { model.onboardEstimateLabel($0, stopID: stop.id, at: timeline.date) } ?? live.text("時間待確認"))
+                                    Text(ride.route.mode != .bus ? model.metroStopLabel(ride, stop: stop, at: timeline.date) : bus.map { model.onboardEstimateLabel($0, stopID: stop.id, at: timeline.date) } ?? live.text("時間待確認"))
                                         .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(2)
                                     Text(AppText.remainingStops(index + 1)).liveFont(.caption).foregroundStyle(.secondary)
                                 }.frame(maxWidth: live.language == .english ? 115 : 110, alignment: .trailing)
@@ -600,7 +602,7 @@ private struct OnboardStopsView: View {
                     }
                 }.listStyle(.insetGrouped)
             }
-            .navigationTitle(AppText.text("沿途站牌")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(AppText.text("完成")) { dismiss() }.accessibilityIdentifier("journey-stops-done") } }
         }.presentationDetents([.large])
     }

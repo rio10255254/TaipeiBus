@@ -8,8 +8,19 @@ import TransitCore
 final class NativeBusLayer: MLNCustomStyleLayer {
     var trainMode = false
     private var trains: [PreparedMetroTrain] = []
+    private var trainOrigins: [String: Coordinate] = [:]
+    private var trainBlendStarted = Date.distantPast
+    private var trainVisible = false
     func ingestTrains(_ reports: [MetroTrainReport], network: MetroNetwork) {
+        let now = Date()
+        trainOrigins = Dictionary(trains.compactMap { track in trainPose(track, at: now).map { (track.report.id,$0.coordinate) } }, uniquingKeysWith: { a,_ in a })
+        trainBlendStarted = now
         trains = reports.compactMap { PreparedMetroTrain(report: $0, network: network) }; setNeedsDisplay()
+    }
+    private func trainPose(_ track: PreparedMetroTrain, at now: Date) -> VehiclePose? {
+        guard (-15...60).contains(now.timeIntervalSince(track.report.observedAt)) else { return nil }
+        return track.renderPose(at: reduceMotion ? track.report.observedAt : now,
+            blendingFrom: reduceMotion ? nil : trainOrigins[track.report.id], fraction: now.timeIntervalSince(trainBlendStarted))
     }
     var onError: ((String) -> Void)?
     var onSelectedPoint: ((CGPoint?) -> Void)?
@@ -93,9 +104,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
 #endif
         setNeedsDisplay()
     }
-    func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
+    func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? {
+        if trainMode { return trains.first { $0.report.id == id }.flatMap { trainPose($0, at: now) } }
+        return motion.pose(id: id, time: time, now: now)
+    }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
-        if trainMode { return !reduceMotion && trains.contains { $0.pose(at: now) != nil } }
+        if trainMode {
+            let visible = trains.contains { (-15...60).contains(now.timeIntervalSince($0.report.observedAt)) }
+            if visible != trainVisible { trainVisible = visible; setNeedsDisplay() }
+            return !reduceMotion && visible
+        }
         return motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
     }
 
@@ -211,7 +229,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let longitudeMargin = latitudeMargin / cos(Self.origin.latitude * .pi / 180)
         let bounds = GeoBounds(south: viewport.sw.latitude - latitudeMargin, west: viewport.sw.longitude - longitudeMargin,
                                north: viewport.ne.latitude + latitudeMargin, east: viewport.ne.longitude + longitudeMargin)
-        let poses = trainMode ? trains.compactMap { $0.renderPose(at: reduceMotion ? $0.report.observedAt : Date()) }
+        let poses = trainMode ? trains.compactMap { trainPose($0, at: Date()) }
             .filter { bounds.contains($0.coordinate) || $0.id == selectedID } : motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
         sampledVehicleCount = poses.count
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)

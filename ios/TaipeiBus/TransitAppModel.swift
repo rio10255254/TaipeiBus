@@ -56,6 +56,7 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var metroRealtime: MetroRealtime?
     @Published private(set) var metroRevision = 0
     @Published var selectedTrainID: String?
+    @Published var followingTrain = false
     @Published private(set) var loading = true
     @Published private(set) var loadError: String?
     @Published private(set) var metadataNotice: String?
@@ -483,6 +484,7 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
+        selectedTrainID = nil; followingTrain = false
         routeOverviewReturn = nil; routeOriginStationID = nil
 #if DEBUG
         debugActions.append("clear-selection")
@@ -572,7 +574,10 @@ final class TransitAppModel: ObservableObject {
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
         if onboard, let first = remainingRides.first, !riding.isEmpty {
-            if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
+            if first.route.mode != .bus {
+                let remaining = metroRemaining(first, at: date)
+                riding[0] = remaining.seconds; positionUncertain = !remaining.officialPosition
+            } else if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
                let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
                let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
                 if progress.distance < -20 { riding[0] = 0 }
@@ -695,6 +700,7 @@ final class TransitAppModel: ObservableObject {
     }
     func metroRevisionForSelection() {
         metroRevision += 1
+        followingTrain = true
         guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
               let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
         focus = .metroTrain(id); focusRevision += 1
@@ -724,6 +730,12 @@ final class TransitAppModel: ObservableObject {
         let total = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) ?? 0
         return (max(0,total - elapsed), remaining, false)
+    }
+    func metroStopLabel(_ ride: TransitRide, stop: BusStop, at date: Date) -> String {
+        let remaining = metroRemaining(ride, at: date)
+        let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+            from: stop.stationID, to: ride.alighting.stationID) ?? 0
+        return AppText.text("約 %@ 分", max(0, Int(ceil(max(0, remaining.seconds - after) / 60))))
     }
 
     /// Boarding is confirmed by the rider. A delayed GPS fix must not put the
@@ -756,7 +768,7 @@ final class TransitAppModel: ObservableObject {
         boardedAt = nil; anchorBoardedVehicle()
     }
     func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection(); anchorBoardedVehicle() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); clearSelection(); anchorBoardedVehicle() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
