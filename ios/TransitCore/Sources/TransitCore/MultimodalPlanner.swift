@@ -109,7 +109,7 @@ public struct MultimodalPlanner: Sendable {
                     walking: walking, cost: walking * preferences.walkingWeight, lastStation: id, hasRail: false, family: "")]
             }
         }
-        var results: [TransitTrip] = []
+        var candidates: [(label: Label, egress: Double, score: Double)] = []
         let secondsOfDay = BusServiceWindow.secondsOfDay(at: date)
         let minimumWaits = patterns.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.cumulative.last ?? 0) }
         var serviceCache: [String: BusDayService] = [:]
@@ -189,26 +189,8 @@ public struct MultimodalPlanner: Sendable {
                 let egress = streetDistance(stop, to: destination)
                 if egress <= maximumWalk {
                     for label in labels where label.hasRail {
-                        let rides = label.segments.map { segment -> TransitRide in
-                            let p = patterns[segment.pattern], stops = Array(p.stops[segment.first...segment.last])
-                            var coordinates: [Coordinate] = []
-                            if let line = metadata.line(p.route.id, direction: p.direction),
-                               let from = line.match(stops[0].coordinate, heading: nil), let to = line.match(stops.last!.coordinate, heading: nil) {
-                                coordinates = line.slice(from: from, to: to)
-                            }
-                            return TransitRide(route: p.route, direction: p.direction, stops: stops, coordinates: coordinates,
-                                fullRouteSeconds: p.cumulative.last ?? 0, boardingOffsetSeconds: p.cumulative[segment.first],
-                                railService: p.route.mode != .bus ? metadata.metro.service(routeID: p.route.id, direction: p.direction, at: date) : nil,
-                                boardingAccessSeconds: p.route.mode != .bus ? 120 : 0, alightingAccessSeconds: p.route.mode != .bus ? 90 : 0)
-                        }
-                        let times = label.segments.map { s in
-                            let p = patterns[s.pattern]
-                            return metadata.metro.ridingSeconds(routeID: p.route.id, direction: p.direction,
-                                from: p.stops[s.first].stationID, to: p.stops[s.last].stationID) ?? (p.cumulative[s.last] - p.cumulative[s.first])
-                        }
-                        results.append(TransitTrip(rides: rides, accessDistance: label.access, egressDistance: egress,
-                            transferDistance: label.distances.reduce(0,+), score: label.cost + egress * 1.25 / 1.2 * preferences.walkingWeight,
-                            rideSeconds: times, transferDistances: label.distances, transferSeconds: label.transferSeconds))
+                        let finalAccess = stop.mode != .bus ? 90.0 : 0
+                        candidates.append((label,egress,label.cost + (egress * 1.25 / 1.2 + finalAccess) * preferences.walkingWeight))
                     }
                 }
             }
@@ -230,6 +212,36 @@ public struct MultimodalPlanner: Sendable {
                 }
             }
             previous = next
+        }
+        // Construct road slices only for useful candidates, after the complete graph
+        // search. Thousands of dominated trips do not need expensive map geometry.
+        let grouped = Dictionary(grouping:candidates,by:{ $0.label.family })
+        let retained = grouped.values.flatMap { $0.sorted { $0.score < $1.score }.prefix(3) }
+            .sorted { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
+            .prefix(max(36,limit * 2))
+        let results = retained.map { candidate -> TransitTrip in
+            let label = candidate.label
+            let rides = label.segments.map { segment -> TransitRide in
+                let p = patterns[segment.pattern], stops = Array(p.stops[segment.first...segment.last])
+                var coordinates: [Coordinate] = []
+                if let line = metadata.line(p.route.id,direction:p.direction),
+                   let journey = metadata.journey(routeID:p.route.id,direction:p.direction),
+                   let from = journey.anchors.first(where:{ $0.stop.id == stops[0].id }),
+                   let to = journey.anchors.first(where:{ $0.stop.id == stops.last!.id }) {
+                    coordinates = line.slice(from:from.match,to:to.match)
+                }
+                return TransitRide(route:p.route,direction:p.direction,stops:stops,coordinates:coordinates,
+                    fullRouteSeconds:p.cumulative.last ?? 0,boardingOffsetSeconds:p.cumulative[segment.first],
+                    railService:p.route.mode != .bus ? metadata.metro.service(routeID:p.route.id,direction:p.direction,at:date) : nil,
+                    boardingAccessSeconds:p.route.mode != .bus ? 120 : 0,alightingAccessSeconds:p.route.mode != .bus ? 90 : 0)
+            }
+            let times = label.segments.map { s -> Double in
+                let p = patterns[s.pattern], dwell = s.first > 0 && p.dwell.indices.contains(s.first) ? p.dwell[s.first] : 0
+                return p.cumulative[s.last] - p.cumulative[s.first] - dwell
+            }
+            return TransitTrip(rides:rides,accessDistance:label.access,egressDistance:candidate.egress,
+                transferDistance:label.distances.reduce(0,+),score:candidate.score,rideSeconds:times,
+                transferDistances:label.distances,transferSeconds:label.transferSeconds)
         }
         let unique = Dictionary((bus + results).map { ($0.id, $0) }, uniquingKeysWith: { a, b in a.score < b.score ? a : b })
         return TripRanking.recommended(Array(unique.values), estimates: estimates, at: date, preferences: preferences, limit: limit, diverse: false)
