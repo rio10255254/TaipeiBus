@@ -4620,7 +4620,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 18,
+      "minzoom": 17.5,
       "filter": [
         "all",
         [
@@ -4677,15 +4677,7 @@
             "get",
             "rank"
           ],
-          24
-        ],
-        [
-          "<=",
-          [
-            "get",
-            "rank"
-          ],
-          80
+          120
         ]
       ],
       "layout": {
@@ -4923,7 +4915,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 17,
+      "minzoom": 16.5,
       "filter": [
         "all",
         [
@@ -4980,7 +4972,7 @@
             "get",
             "rank"
           ],
-          6
+          25
         ],
         [
           "<=",
@@ -4988,7 +4980,7 @@
             "get",
             "rank"
           ],
-          24
+          120
         ]
       ],
       "layout": {
@@ -5226,7 +5218,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 16,
+      "minzoom": 15.5,
       "filter": [
         "all",
         [
@@ -5283,7 +5275,7 @@
             "get",
             "rank"
           ],
-          6
+          25
         ]
       ],
       "layout": {
