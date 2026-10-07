@@ -3,6 +3,21 @@ import TransitCore
 
 /// Networking, gzip, parsing and road matching all run outside the UI actor.
 actor TransitService {
+    private var metroRealtimeAt = Date.distantPast
+    private var metroPacket: MetroRealtime?
+    /// The URL belongs to an authorized server relay; credentials stay on that server.
+    func metroRealtime(network: MetroNetwork, force: Bool = false) async -> MetroRealtime? {
+        if !force, Date().timeIntervalSince(metroRealtimeAt) < 15 { return metroPacket }
+        metroRealtimeAt = Date()
+        guard let text = Bundle.main.object(forInfoDictionaryKey: "MetroRealtimeURL") as? String,
+              let url = URL(string: text), url.scheme == "https", url.host != nil, url.user == nil, url.password == nil else { return nil }
+        var request = URLRequest(url: url); request.timeoutInterval = 8; request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return metroPacket }
+            let packet = try MetroRealtime(data: bytes, network: network, at: Date()); metroPacket = packet; return packet
+        } catch { return metroPacket }
+    }
     private let transport: ConditionalFeedTransport
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()

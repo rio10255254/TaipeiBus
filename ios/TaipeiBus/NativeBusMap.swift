@@ -68,6 +68,11 @@ struct NativeBusMap: UIViewRepresentable {
         var darkMode = false
         private weak var map: MLNMapView?
         private var buses: NativeBusLayer?
+        private var trains: NativeBusLayer?
+        private var metroSource: MLNShapeSource?
+        private var metroStationsSource: MLNShapeSource?
+        private var metroExitsSource: MLNShapeSource?
+        private var lastMetroKey = ""
         private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
@@ -177,6 +182,7 @@ struct NativeBusMap: UIViewRepresentable {
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            installMetro(style)
             places.install(map: mapView, style: style)
             lastAppearance = nil; lastDarkMode = nil
             installRelief(style)
@@ -287,6 +293,8 @@ struct NativeBusMap: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
             }
             style.addLayer(layer); buses = layer
+            let rail = NativeBusLayer(identifier: "native-metro-trains"); rail.trainMode = true
+            style.addLayer(rail); trains = rail
             stationSource = addStationLayer(id: "selected-station", style: style)
             let nearby = MLNShapeSource(identifier: "nearby-stations", shape: nil, options: nil)
             style.addSource(nearby); nearbySource = nearby
@@ -306,7 +314,7 @@ struct NativeBusMap: UIViewRepresentable {
             names.textHaloWidth = NSExpression(forConstantValue: 2)
             names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
             style.addLayer(names)
-            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1
+            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""
             lastStationBrowsing = nil
             lastStationID = nil
             update(location: pendingLocation)
@@ -330,6 +338,73 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private var markerBlue: UIColor { UIColor(liveHex: darkMode ? MapChrome.walkingDark : RouteTint.general) }
+
+        private func installMetro(_ style: MLNStyle) {
+            let source = MLNShapeSource(identifier: "metro-network", shape: nil, options: nil)
+            style.addSource(source); metroSource = source
+            let casing = MLNLineStyleLayer(identifier: "metro-network-casing", source: source)
+            casing.lineColor = NSExpression(forConstantValue: UIColor.white.withAlphaComponent(0.7))
+            casing.lineWidth = NSExpression(forConstantValue: 5); style.addLayer(casing)
+            let lines = MLNLineStyleLayer(identifier: "metro-network-lines", source: source)
+            lines.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
+            lines.lineWidth = NSExpression(forConstantValue: 2.5); style.addLayer(lines)
+            let stations = MLNShapeSource(identifier: "metro-stations", shape: nil, options: nil)
+            style.addSource(stations); metroStationsSource = stations
+            let dots = MLNCircleStyleLayer(identifier: "metro-station-dots", source: stations)
+            dots.minimumZoomLevel = 11; dots.circleRadius = NSExpression(forConstantValue: 4)
+            dots.circleColor = NSExpression(forConstantValue: UIColor.white)
+            dots.circleStrokeColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
+            dots.circleStrokeWidth = NSExpression(forConstantValue: 2); style.addLayer(dots)
+            let names = MLNSymbolStyleLayer(identifier: "metro-station-names", source: stations)
+            names.minimumZoomLevel = 13; names.text = NSExpression(forKeyPath: "name")
+            names.textFontSize = NSExpression(forConstantValue: 12)
+            names.textColor = NSExpression(forConstantValue: UIColor.darkGray)
+            names.textHaloColor = NSExpression(forConstantValue: UIColor.white); names.textHaloWidth = NSExpression(forConstantValue: 2)
+            names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
+            style.addLayer(names)
+            let exits = MLNShapeSource(identifier: "metro-exits", shape: nil, options: nil)
+            style.addSource(exits); metroExitsSource = exits
+            let labels = MLNSymbolStyleLayer(identifier: "metro-exit-labels", source: exits)
+            labels.minimumZoomLevel = 17; labels.text = NSExpression(forKeyPath: "name")
+            labels.textFontSize = NSExpression(forConstantValue: 10); labels.textColor = NSExpression(forConstantValue: UIColor.darkGray)
+            labels.textHaloColor = NSExpression(forConstantValue: UIColor.white); labels.textHaloWidth = NSExpression(forConstantValue: 2)
+            style.addLayer(labels)
+        }
+        private func updateMetro(map: MLNMapView) {
+            let key = "\(model.metadata.metro.stations.count):\(darkMode):\(AppLanguage.current):\(model.selectedRouteID ?? ""):\(model.metroRevision)"
+            guard key != lastMetroKey else { return }; lastMetroKey = key
+            let network = model.metadata.metro
+            var seen = Set<String>()
+            let lines = network.patterns.filter { $0.direction == "0" }.compactMap { pattern -> MLNPolylineFeature? in
+                // Operating branches remain visible; exact duplicate shapes are drawn once.
+                let signature = pattern.stationIDs.joined(separator: "|")
+                guard seen.insert(signature).inserted, let line = network.line(pattern.lineID) else { return nil }
+                var points = pattern.coordinates.map(\.locationCoordinate)
+                let feature = MLNPolylineFeature(coordinates: &points, count: UInt(points.count))
+                feature.attributes = ["color": RouteTint.mapHex(for: line.name, dark: darkMode)]; return feature
+            }
+            metroSource?.shape = MLNShapeCollectionFeature(shapes: lines)
+            let stations = network.stations.map { station -> MLNPointFeature in
+                let feature = MLNPointFeature(); feature.coordinate = station.coordinate.locationCoordinate
+                let line = network.lines.first { station.code.hasPrefix($0.code) }
+                feature.attributes = ["stationID": station.id, "name": station.code + " " + (AppLanguage.current == .english ? station.englishName : station.name),
+                    "color": line.map { RouteTint.mapHex(for: $0.name, dark: darkMode) } ?? RouteTint.general]; return feature
+            }
+            metroStationsSource?.shape = MLNShapeCollectionFeature(shapes: stations)
+            let exits = network.stations.flatMap { station in station.exits.map { exit -> MLNPointFeature in
+                let feature = MLNPointFeature(); feature.coordinate = exit.coordinate.locationCoordinate
+                feature.attributes = ["stationID": station.id, "name": AppLanguage.current == .english ? exit.englishName : exit.name]; return feature
+            } }
+            metroExitsSource?.shape = MLNShapeCollectionFeature(shapes: exits)
+            for id in ["metro-station-names", "metro-exit-labels"] {
+                if let layer = map.style?.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
+                    layer.textColor = NSExpression(forConstantValue: darkMode ? UIColor.white : UIColor.darkGray)
+                    layer.textHaloColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1B242C") : UIColor.white)
+                }
+            }
+            trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
+            trains?.ingestTrains(model.metroRealtime?.trains ?? [], network: network)
+        }
 
         /// Street-level stop: a white disc with a blue rim and bus glyph, like Apple Maps transit stops.
         private func stationIcon(size: CGFloat, symbol: String = "bus.fill") -> UIImage {
@@ -558,6 +633,7 @@ struct NativeBusMap: UIViewRepresentable {
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
             let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
             let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil):anchor\(model.anchorRevision)"
+            updateMetro(map: map)
             if lastSnapshotRevision != model.snapshot.revision || vehicleKey != lastVehicleKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.cityFleetMode { vehicles = model.cityVehicles }
@@ -1097,6 +1173,7 @@ struct NativeBusMap: UIViewRepresentable {
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
+            if trains?.isAnimating(time: now, now: date) == true { trains?.setNeedsDisplay() }
             // Tile loading can delay a flight beyond its requested duration. Wait
             // for MapLibre's completion before following or avoiding buildings.
             guard !cameraMoving else { return }
@@ -1366,7 +1443,7 @@ struct NativeBusMap: UIViewRepresentable {
             model.recordMapTap("map-tap:\(Int(point.x)),\(Int(point.y))")
 #endif
             let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
-            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-waypoint-dots", "journey-stop-names"]))
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-waypoint-dots", "journey-stop-names", "metro-station-dots", "metro-station-names", "metro-exit-labels"]))
             let station = features.compactMap { feature -> Station? in
                 guard let id = feature.attribute(forKey: "stationID") as? String else { return nil }
                 return model.metadata.stations[id]

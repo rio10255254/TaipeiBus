@@ -6,6 +6,11 @@ import TransitCore
 
 /// Bus geometry participates in MLNMapView's Metal render pass and native 3D depth buffer.
 final class NativeBusLayer: MLNCustomStyleLayer {
+    var trainMode = false
+    private var trains: [PreparedMetroTrain] = []
+    func ingestTrains(_ reports: [MetroTrainReport], network: MetroNetwork) {
+        trains = reports.compactMap { PreparedMetroTrain(report: $0, network: network) }; setNeedsDisplay()
+    }
     var onError: ((String) -> Void)?
     var onSelectedPoint: ((CGPoint?) -> Void)?
     var selectedID: String? {
@@ -90,7 +95,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
     func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
-        motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
+        if trainMode { return !reduceMotion && trains.contains { $0.pose(at: now) != nil } }
+        return motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
     }
 
     override func didMove(to mapView: MLNMapView) {
@@ -205,7 +211,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let longitudeMargin = latitudeMargin / cos(Self.origin.latitude * .pi / 180)
         let bounds = GeoBounds(south: viewport.sw.latitude - latitudeMargin, west: viewport.sw.longitude - longitudeMargin,
                                north: viewport.ne.latitude + latitudeMargin, east: viewport.ne.longitude + longitudeMargin)
-        let poses = motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
+        let poses = trainMode ? trains.compactMap { $0.renderPose(at: reduceMotion ? $0.report.observedAt : Date()) }
+            .filter { bounds.contains($0.coordinate) || $0.id == selectedID } : motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
         sampledVehicleCount = poses.count
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
@@ -357,6 +364,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     private func mesh(compact: Bool = false) -> [Vertex] {
+        if trainMode { return trainMesh(compact: compact) }
         var vertices: [Vertex] = []
         func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, color: SIMD3<Float>,
                       normal: SIMD3<Float>? = nil, material: Float = 0, wheelY: Float = 0) {
@@ -445,6 +453,38 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         return vertices
     }
 
+    private func trainMesh(compact: Bool) -> [Vertex] {
+        var vertices: [Vertex] = []
+        func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>, shade: SIMD3<Float>, normal: SIMD3<Float>, material: Float = 0) {
+            for p in [a,b,c,a,c,d] { vertices.append(Vertex(position: SIMD4(p.x,p.y,p.z,0), normal: SIMD4(normal.x,normal.y,normal.z,material), color: SIMD4(shade.x,shade.y,shade.z,1))) }
+        }
+        for center: Float in [-12.1,0,12.1] {
+            let lower = bodyRing(width:2.65,length:11.6,z:0.4,y:center)
+            let upper = bodyRing(width:2.65,length:11.6,z:2.95,y:center)
+            let roof = bodyRing(width:2.26,length:11.24,z:3.3,y:center)
+            for i in 0..<8 {
+                let j = (i+1)%8
+                let normal = simd_normalize(simd_cross(lower[j]-lower[i],upper[j]-lower[i]))
+                quad(lower[i],lower[j],upper[j],upper[i],shade:SIMD3(repeating:0.79),normal:normal)
+                quad(upper[i],upper[j],roof[j],roof[i],shade:SIMD3(repeating:0.82),normal:normal)
+            }
+            for i in 1..<7 { quad(roof[0],roof[i],roof[i+1],roof[0],shade:SIMD3(repeating:0.85),normal:SIMD3(0,0,1)) }
+            for side: Float in [-1,1] {
+                let x = side * 1.332
+                for start: Float in [-4.8,-2.4,0,2.4] {
+                    quad(SIMD3(x,center+start,1.55),SIMD3(x,center+start+1.9,1.55),SIMD3(x,center+start+1.9,2.72),SIMD3(x,center+start,2.72),
+                        shade:SIMD3(0.29,0.33,0.35),normal:SIMD3(side,0,0),material:1)
+                    if !compact {
+                        let y = center+start+2.08
+                        quad(SIMD3(x,y,0.65),SIMD3(x,y+0.18,0.65),SIMD3(x,y+0.18,2.82),SIMD3(x,y,2.82),shade:SIMD3(repeating:0.52),normal:SIMD3(side,0,0))
+                    }
+                }
+            }
+        }
+        quad(SIMD3(-0.96,17.91,1.75),SIMD3(0.96,17.91,1.75),SIMD3(0.96,17.91,2.7),SIMD3(-0.96,17.91,2.7),shade:SIMD3(0.29,0.33,0.35),normal:SIMD3(0,1,0),material:1)
+        return vertices
+    }
+
     private func bodyRing(width: Float, length: Float, z: Float, y: Float = 0) -> [SIMD3<Float>] {
         let x = width/2, l = length/2, bevel: Float = min(0.22,width/5)
         return [SIMD3(-x+bevel,y-l,z),SIMD3(x-bevel,y-l,z),SIMD3(x,y-l+bevel,z),SIMD3(x,y+l-bevel,z),
@@ -452,7 +492,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     private func outline() -> [Vertex] {
-        let lower = bodyRing(width:2.56,length:11.81,z:0.43), upper = bodyRing(width:2.32,length:11.56,z:3.42)
+        let lower = bodyRing(width:trainMode ? 2.7 : 2.56,length:trainMode ? 36 : 11.81,z:0.43), upper = bodyRing(width:trainMode ? 2.32 : 2.32,length:trainMode ? 35.8 : 11.56,z:3.42)
         var edges: [(SIMD3<Float>,SIMD3<Float>)] = []
         for i in 0..<8 {
             edges.append((lower[i],lower[(i+1)%8])); edges.append((upper[i],upper[(i+1)%8]))

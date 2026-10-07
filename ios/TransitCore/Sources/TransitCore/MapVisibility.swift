@@ -16,6 +16,9 @@ public struct GeoBounds: Sendable {
     public func intersects(_ other: GeoBounds) -> Bool {
         north >= other.south && south <= other.north && east >= other.west && west <= other.east
     }
+    public func contains(_ coordinate: Coordinate) -> Bool {
+        (south...north).contains(coordinate.latitude) && (west...east).contains(coordinate.longitude)
+    }
     public func union(_ other: GeoBounds) -> GeoBounds {
         GeoBounds(south: min(south, other.south), west: min(west, other.west),
                   north: max(north, other.north), east: max(east, other.east))
