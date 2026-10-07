@@ -83,6 +83,7 @@ public struct RouteCatalog: Sendable {
                       locale: Locale(identifier: "zh_TW"))
             .replacingOccurrences(of: "臺", with: "台")
             .filter { !$0.isWhitespace }
+        if let alias = ["brownline":"棕線","redline":"紅線","greenline":"綠線","orangeline":"橘線","blueline":"藍線","yellowline":"黃線"][name] { return alias }
         // Localized keypad tokens still address the same canonical route names.
         for (english, chinese) in [("neihutech", "內科"), ("nangangsw", "南軟"), ("civic", "市民"),
             ("huai-en", "懷恩"), ("maokong", "貓空"), ("minibus", "小"), ("metrobus", "幹線"),

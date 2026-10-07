@@ -170,6 +170,7 @@ public struct MetroNetwork: Codable, Sendable {
                     englishDeparture: first.englishName, englishDestination: last.englishName,
                     mode: line.mode, lineCode: line.code, lineColor: line.color)
             }
+            route.aliasName = ["BR":"棕線","R":"紅線","G":"綠線","O":"橘線","BL":"藍線","Y":"黃線"][line.code] ?? ""
             metadata.routes[route.id] = route
             if metadata.parents[route.parentID] == nil { metadata.parents[route.parentID] = route }
             var references = metadata.paths[route.id] ?? []
