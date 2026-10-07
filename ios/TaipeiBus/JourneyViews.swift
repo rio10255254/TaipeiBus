@@ -1301,7 +1301,7 @@ private struct WaitingBannerContent: View {
                         .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("boarding-official-arrival")
-                    Text(ride.route.mode != .bus ? (model.metroArrival(ride, at: date) == nil ? AppText.text("依官方班距估計") : AppText.text("官方下一班")) : guide.estimateSeconds == nil ? AppText.text("暫無預估") : AppText.text("官方下一班"))
+                    Text(ride.route.mode != .bus ? (model.metroArrival(ride, at: date) == nil ? AppText.text("依官方班距估計") : AppText.text("官方下班列車")) : guide.estimateSeconds == nil ? AppText.text("暫無預估") : AppText.text("官方下一班"))
                         .liveFont(.caption, weight: .semibold)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
                 }.layoutPriority(1)
@@ -1444,7 +1444,7 @@ struct MetroBoardingRows: View {
             if arrivals.isEmpty {
                 HStack {
                     Image(systemName: "tram.fill").foregroundStyle(.secondary)
-                    Text(AppText.text("下一班")).liveFont(.subheadline, weight: .semibold)
+                    Text(AppText.text("下班列車")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
                     Text(model.metroWaitLabel(ride, at: date)).liveFont(.subheadline, weight: .bold).monospacedDigit()
                 }
@@ -1452,7 +1452,7 @@ struct MetroBoardingRows: View {
             } else {
                 ForEach(Array(arrivals.prefix(3).enumerated()), id: \.offset) { index, arrival in
                     HStack {
-                        Text(index == 0 ? AppText.text("下一班") : AppText.text("後續班次")).liveFont(.subheadline)
+                        Text(index == 0 ? AppText.text("下班列車") : AppText.text("後續班次")).liveFont(.subheadline)
                         Spacer()
                         Text(MetroCountdown.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
                         if let id = arrival.trainID, model.metroRealtime?.trains.contains(where: { $0.id == id }) == true {
