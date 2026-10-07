@@ -1,0 +1,292 @@
+{
+  "version": "1.2.5",
+  "source": "6fc348a343a982472bfca9c324afdf4fc547c837",
+  "status": "verified_ready_for_testflight",
+  "performance_run": 37608015257,
+  "performance_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/37608015257",
+  "implementation": [
+    "Background actor fetches and decodes only the original OpenFreeMap POI layer; network, protobuf and geographic scans do not run on the UI thread.",
+    "Twelve-tile decoded cache, cancellation generations and buffered viewport reuse prevent stale updates and repeated whole-tile queries.",
+    "Background handoff capped at 512 candidates; actual symbol source capped at 96 with spatial spacing, landmark priority and label retention.",
+    "Original four POI layer styles, category icons, colours, font expressions and zoom bands remain unchanged.",
+    "Gesture and camera-flight work defers place publication; no unsupported source-query spatial expression is used."
+  ],
+  "comparison": [
+    {
+      "fixed": {
+        "bus_encode": {
+          "max_ms": 9.177625000120315,
+          "median_ms": 2.0514166667453537,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 3.2782083333131595,
+          "p99_ms": 4.402333333246133,
+          "samples": 733
+        },
+        "callback_gap": {
+          "max_ms": 617.8388749999613,
+          "median_ms": 21.55420833332755,
+          "over_33ms": 176,
+          "over_100ms": 33,
+          "p95_ms": 86.2577916666396,
+          "p99_ms": 216.3988333334146,
+          "samples": 732
+        },
+        "complete": true,
+        "elapsed_seconds": 25.651961708333374,
+        "map_encoding": {
+          "max_ms": 171.0837079999692,
+          "median_ms": 10.791625000138083,
+          "over_33ms": 51,
+          "over_100ms": 3,
+          "p95_ms": 37.76520799988248,
+          "p99_ms": 76.99579199993423,
+          "samples": 733
+        },
+        "map_rendering": {
+          "max_ms": 5.117958000028011,
+          "median_ms": 0.05033399997955712,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.15170799997576978,
+          "p99_ms": 0.35120800021104515,
+          "samples": 733
+        },
+        "max_zoom": 19.382481585749442,
+        "min_zoom": 18,
+        "mode": "baseline",
+        "render_callbacks": 733,
+        "render_callbacks_per_second": 28.574812653095275,
+        "tick": {
+          "max_ms": 13.3944583333232,
+          "median_ms": 0.18083333316099015,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 4.701666666505844,
+          "p99_ms": 5.801249999876745,
+          "samples": 850
+        }
+      },
+      "legacy": {
+        "bus_encode": {
+          "max_ms": 4.753166666660036,
+          "median_ms": 1.3094999999339052,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 2.903583333363713,
+          "p99_ms": 3.3324166665806843,
+          "samples": 306
+        },
+        "callback_gap": {
+          "max_ms": 241.87845833330357,
+          "median_ms": 58.40308333335997,
+          "over_33ms": 305,
+          "over_100ms": 28,
+          "p95_ms": 126.85320833338665,
+          "p99_ms": 161.90612499985946,
+          "samples": 305
+        },
+        "complete": true,
+        "elapsed_seconds": 20.28834866666648,
+        "map_encoding": {
+          "max_ms": 227.5584589999653,
+          "median_ms": 47.12216699999772,
+          "over_33ms": 297,
+          "over_100ms": 2,
+          "p95_ms": 66.48570800007292,
+          "p99_ms": 76.95733400009885,
+          "samples": 306
+        },
+        "map_rendering": {
+          "max_ms": 0.3847079999559355,
+          "median_ms": 0.040207999973063124,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.09245900014320796,
+          "p99_ms": 0.10816700000759738,
+          "samples": 306
+        },
+        "max_zoom": 19.382481585749442,
+        "min_zoom": 18,
+        "mode": "legacy-poi",
+        "render_callbacks": 306,
+        "render_callbacks_per_second": 15.08254836445878,
+        "tick": {
+          "max_ms": 4.027250000035565,
+          "median_ms": 0.12862499988841591,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.32749999991210643,
+          "p99_ms": 1.8156666665163357,
+          "samples": 306
+        }
+      },
+      "places": {
+        "band": 4,
+        "bounded": true,
+        "budget": 96,
+        "cacheReuses": 3,
+        "candidateCount": 0,
+        "count": 0,
+        "deferred": 9,
+        "flying": false,
+        "interacting": false,
+        "maxQueryMs": 1501.8355833333317,
+        "queries": 9,
+        "queryMs": 1.7686250000679138,
+        "ready": false,
+        "sourceCount": 0
+      },
+      "view": "flat-view"
+    },
+    {
+      "fixed": {
+        "bus_encode": {
+          "max_ms": 654.5141249998778,
+          "median_ms": 2.2228750001431763,
+          "over_33ms": 1,
+          "over_100ms": 1,
+          "p95_ms": 3.6483750000115833,
+          "p99_ms": 4.692291666742676,
+          "samples": 1922
+        },
+        "callback_gap": {
+          "max_ms": 8587.685791666672,
+          "median_ms": 18.82129166665436,
+          "over_33ms": 291,
+          "over_100ms": 57,
+          "p95_ms": 68.63379166679806,
+          "p99_ms": 222.0339166665326,
+          "samples": 1921
+        },
+        "complete": true,
+        "elapsed_seconds": 73.9543746249999,
+        "map_encoding": {
+          "max_ms": 884.979999999814,
+          "median_ms": 11.00204199997279,
+          "over_33ms": 87,
+          "over_100ms": 6,
+          "p95_ms": 31.712250000055064,
+          "p99_ms": 64.12424999984978,
+          "samples": 1922
+        },
+        "map_rendering": {
+          "max_ms": 2.842708000116545,
+          "median_ms": 0.051125000027241185,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.13383300006353238,
+          "p99_ms": 0.26541700003690494,
+          "samples": 1922
+        },
+        "max_zoom": 19.382481585749442,
+        "min_zoom": 18,
+        "mode": "baseline",
+        "render_callbacks": 1922,
+        "render_callbacks_per_second": 25.988996725966196,
+        "tick": {
+          "max_ms": 13.335874999938824,
+          "median_ms": 0.15799999982846202,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.4085416667294339,
+          "p99_ms": 3.1510833334778,
+          "samples": 1922
+        }
+      },
+      "legacy": {
+        "bus_encode": {
+          "max_ms": 6.5195833333291375,
+          "median_ms": 1.5406249999614374,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 3.415541666754507,
+          "p99_ms": 4.361333333235962,
+          "samples": 337
+        },
+        "callback_gap": {
+          "max_ms": 493.9762916667405,
+          "median_ms": 67.61387500000637,
+          "over_33ms": 336,
+          "over_100ms": 43,
+          "p95_ms": 136.34595833332241,
+          "p99_ms": 214.91212499995527,
+          "samples": 336
+        },
+        "complete": true,
+        "elapsed_seconds": 26.106416500000023,
+        "map_encoding": {
+          "max_ms": 171.22845799985953,
+          "median_ms": 54.43766700022934,
+          "over_33ms": 337,
+          "over_100ms": 3,
+          "p95_ms": 75.7572910001727,
+          "p99_ms": 88.75237600022956,
+          "samples": 337
+        },
+        "map_rendering": {
+          "max_ms": 1.0611669999889273,
+          "median_ms": 0.04683299994212575,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.1048330000230635,
+          "p99_ms": 0.20354100001895858,
+          "samples": 337
+        },
+        "max_zoom": 19.382481585749442,
+        "min_zoom": 18,
+        "mode": "legacy-poi",
+        "render_callbacks": 337,
+        "render_callbacks_per_second": 12.908703881285266,
+        "tick": {
+          "max_ms": 6.476083333382121,
+          "median_ms": 0.13983333315081836,
+          "over_33ms": 0,
+          "over_100ms": 0,
+          "p95_ms": 0.396624999893902,
+          "p99_ms": 3.1035833333135088,
+          "samples": 337
+        }
+      },
+      "places": {
+        "band": 4,
+        "bounded": true,
+        "budget": 96,
+        "cacheReuses": 11,
+        "candidateCount": 4,
+        "count": 2,
+        "deferred": 33,
+        "flying": false,
+        "interacting": false,
+        "maxQueryMs": 1501.8355833333317,
+        "queries": 16,
+        "queryMs": 2.3051666667015525,
+        "ready": false,
+        "sourceCount": 5
+      },
+      "view": "3d-view"
+    }
+  ],
+  "verification": [
+    "Core tests, parser malformed-data checks and release/debug builds passed.",
+    "Independent count and named-point coordinates verified on the actual published tile.",
+    "Flat and 57-degree 3D comparison, live tracking/return, English light/dark place labels and dark onboard flow passed.",
+    "Native screenshots visually inspected: existing merchant icon/colour, English street and place names and dark theme retained."
+  ],
+  "controls_recheck": {
+    "run": 37610909178,
+    "reason": "One automated short press missed city-fleet activation; one dark station-label short press missed expansion. Event traces showed no action. Native tests now verify activation and retry with a normal tap, retaining all framing and stop-order assertions.",
+    "result": "success",
+    "coverage": "Two light cases and one dark case passed, retaining city framing/continuous transition samples and exact stop/approaching-bus order."
+  },
+  "limits": [
+    "Render encoding cost and callback cadence are simulator measurements, not physical iPhone display FPS.",
+    "Some long-tail frames remain from base-map tile/style loading and the test harness; no universal zero-stall or sustained-120-FPS claim.",
+    "Async place-load wall time in telemetry includes HTTP/cache waiting; it is not UI-thread blocking time."
+  ],
+  "distribution": "testflight-only",
+  "receipt": "testflight-1.2.5-receipt.json",
+  "native_regression_run": 37608018962,
+  "native_regression_review": "Original run had one missed city short press and one missed dark expansion; remaining light/dark and same-process appearance checks passed. The specific failed cases then passed in 37610909178; app source is identical to performance source 6fc348a.",
+  "release_source_before_receipt": "a73d121"
+}
