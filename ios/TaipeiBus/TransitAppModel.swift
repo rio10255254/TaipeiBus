@@ -711,7 +711,7 @@ final class TransitAppModel: ObservableObject {
         focus = .metroTrain(id); focusRevision += 1
     }
     func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
-        if let value = metroArrival(ride, at: date) { return EstimateFeed.label(value) }
+        if let value = metroArrival(ride, at: date) { return MetroCountdown.label(value) }
         guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date),
               let headway = metadata.metro.service(routeID: ride.route.id, direction: ride.direction, at: date)?.headway else { return AppText.text("營運時間外") }
         return AppText.text("約 %@–%@ 分", 1, max(1, Int(ceil(headway.upperSeconds / 60))))

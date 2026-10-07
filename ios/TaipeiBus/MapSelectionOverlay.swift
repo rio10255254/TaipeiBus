@@ -201,7 +201,7 @@ private struct MapContextLabelContent: View, Equatable {
                         HStack {
                             Text(AppText.text("下一站 · ") + (AppLanguage.current == .english ? station.englishName : station.name)).font(.subheadline.weight(.semibold))
                             Spacer(minLength:4)
-                            Text(EstimateFeed.label(max(0,Int(report.remainingSeconds - max(0,timeline.date.timeIntervalSince(report.observedAt)))))).font(.subheadline).monospacedDigit()
+                            Text(MetroCountdown.label(max(0,Int(report.remainingSeconds - max(0,timeline.date.timeIntervalSince(report.observedAt)))))).font(.subheadline).monospacedDigit()
                         }
                         if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
                         Text(AppText.text("官方列車訊號 · 位置為估計")).font(.caption2).foregroundStyle(.secondary)

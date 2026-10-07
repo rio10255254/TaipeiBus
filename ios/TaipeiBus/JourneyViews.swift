@@ -1448,7 +1448,7 @@ struct MetroBoardingRows: View {
                     HStack {
                         Text(index == 0 ? AppText.text("下一班") : AppText.text("後續班次")).liveFont(.subheadline)
                         Spacer()
-                        Text(EstimateFeed.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                        Text(MetroCountdown.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
                         if let id = arrival.trainID, model.metroRealtime?.trains.contains(where: { $0.id == id }) == true {
                             Button { model.selectedTrainID = id; model.metroRevisionForSelection(); } label: {
                                 Label(AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold).padding(8)

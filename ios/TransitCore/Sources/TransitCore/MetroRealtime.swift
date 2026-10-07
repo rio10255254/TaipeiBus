@@ -1,5 +1,14 @@
 import Foundation
 
+public enum MetroCountdown {
+    public static func label(_ seconds: Int?) -> String {
+        guard let seconds else { return "—" }
+        if seconds == 0 { return AppText.text("進站中") }
+        if seconds < 60 { return AppText.text("%@ 秒",seconds) }
+        return AppText.text("%@ 分 %@ 秒",seconds / 60,seconds % 60)
+    }
+}
+
 /// The private operator feed is normalized on the server. No account keys are
 /// distributed to phones, and station arrival events cannot invent train IDs.
 public struct MetroTrainReport: Codable, Identifiable, Equatable, Sendable {

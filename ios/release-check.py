@@ -73,6 +73,8 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
         print(f"Bundled official travel profiles: {len(catalog['routes'])}")
     executable = (app / info["CFBundleExecutable"]).read_bytes()
     require(b"--preview-capture" not in executable, "Debug preview flags leaked into the Release binary.")
+    require(b"--preview-metro-fixture" not in executable and b"QA-TRAIN-01" not in executable,
+            "Metro verification fixtures must never enter the distributed app.")
     subprocess.run(["/usr/bin/codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     require(any((archive / "dSYMs").glob("TaipeiBus.app.dSYM")), "Release debug symbols are missing.")
     print(f"Verified signed iPhone archive: {bundle_id}, {version} ({build_number}), SDK {info['DTPlatformVersion']}")

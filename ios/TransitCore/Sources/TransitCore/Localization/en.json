@@ -491,5 +491,7 @@
   "依官方捷運站間車程": "Official metro station travel times",
   "看方向": "View directions",
   "首班 %@ · 末班 %@": "First %@ · Last %@",
-  "跟隨列車": "Follow train"
+  "跟隨列車": "Follow train",
+  "%@ 秒": "%@ sec",
+  "%@ 分 %@ 秒": "%@ min %@ sec"
 }
