@@ -4,7 +4,7 @@ from pathlib import Path
 
 BASE = 'https://tdx.transportdata.tw'
 NAMES = ['Line', 'Route', 'Station', 'StationOfRoute', 'StationExit', 'StationTransfer', 'LineTransfer',
-         'Shape', 'S2STravelTime', 'Frequency', 'FirstLastTimetable']
+         'Shape', 'S2STravelTime', 'Frequency', 'FirstLastTimetable', 'LiveBoard']
 
 def read(url, headers=None, data=None):
     with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers or {}), timeout=45) as response:
