@@ -1275,8 +1275,8 @@ private struct WaitingBannerContent: View {
     }
 }
 
-/// A stop name in the navigation banner stays on one line when a slightly smaller size fits,
-/// and only wraps for names too long for that; it never breaks a short name in the middle.
+/// A stop name in the navigation banner stays on one line, stepping down in size as needed,
+/// so a name is never broken in the middle across two lines.
 private struct BannerTitle: View {
     let text: String
     var body: some View {
@@ -1284,7 +1284,8 @@ private struct BannerTitle: View {
             Text(text).liveFont(.title3, weight: .bold).lineLimit(1)
             Text(text).liveFont(.headline, weight: .bold).lineLimit(1)
             Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1)
-            Text(text).liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
+            // Beside the badge and the stop count there is only ~155 pt; shrink rather than wrap.
+            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1).minimumScaleFactor(0.7)
         }
     }
 }
