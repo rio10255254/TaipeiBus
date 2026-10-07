@@ -41,4 +41,20 @@ final class PlaceLabelBudgetTests: XCTestCase {
                           PlaceLabelBudget.limit(zoom: 18, width: 400, height: 650))
         XCTAssertEqual(PlaceLabelBudget.limit(zoom: 22, width: 2000, height: 2000), 96)
     }
+    func testOverscanRingIsSeparatelyBudgetedAndNeverDisplacesVisiblePlaces() {
+        let visible = (0..<10000).map { i in
+            PlaceLabelCandidate(id: "v\(i)", x: Double(i % 100) * 4, y: Double(i / 100) * 6.5, rank: 50, landmark: false)
+        }
+        let ring = (0..<400).map { i in
+            PlaceLabelCandidate(id: "r\(i)", x: Double(i % 40) * 14 - 80, y: -60 - Double(i / 40) * 12, rank: 1, landmark: true)
+        }
+        let plain = PlaceLabelBudget.select(visible + ring, zoom: 18, width: 400, height: 650)
+        let wide = PlaceLabelBudget.select(visible + ring, zoom: 18, width: 400, height: 650, overscan: 200)
+        XCTAssertFalse(plain.contains { $0.hasPrefix("r") })
+        XCTAssertEqual(wide.filter { $0.hasPrefix("v") }.count, plain.count, "Ring labels must not take visible slots")
+        let outer = wide.filter { $0.hasPrefix("r") }.count
+        XCTAssertGreaterThan(outer, 0)
+        XCTAssertLessThanOrEqual(outer, PlaceLabelBudget.limit(zoom: 18, width: 400, height: 650) / 2)
+        XCTAssertEqual(Set(wide).count, wide.count)
+    }
 }

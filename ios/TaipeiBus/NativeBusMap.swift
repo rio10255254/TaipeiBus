@@ -1462,10 +1462,16 @@ private final class ZoomPerformanceProbe {
 /// Only nearby, budgeted places enter the symbol layout pipeline. Queries are
 /// coalesced after gestures and reused inside a buffered geographic viewport.
 private final class ViewportPlaceRenderer {
+    static let landmarkClasses: Set<String> = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
+    static let ordinaryClasses: Set<String> = Set(NativeBusMap.Coordinator.poiCategories.flatMap(\.classes)).subtracting(landmarkClasses)
+    /// Labels are pre-placed this far past each screen edge so a short pan shows places at once.
+    private static let overscan: CGFloat = 120
     private weak var map: MLNMapView?
     private var source: MLNShapeSource?
     private var pending: DispatchWorkItem?
+    private var trailing: DispatchWorkItem?
     private var generation = 0
+    private var loadGeneration = 0
     private var lastEvaluation = 0.0
     private var lastPlacement = 0.0
     private var cacheBounds: GeoBounds?
@@ -1479,11 +1485,13 @@ private final class ViewportPlaceRenderer {
     private var lastHeading = -1.0
     private var lastPitch = -1.0
     private var lastInset = UIEdgeInsets.zero
+    private var unpublished = false
     var interacting = false
     var flying = false
     var dataReady = false
     private var emptyAttempts = 0
     private var count = 0
+    private var ringCount = 0
     private var candidates = 0
     private var queries = 0
     private var reuses = 0
@@ -1493,12 +1501,8 @@ private final class ViewportPlaceRenderer {
     private var sourceCount = 0
     private let provider = PlaceTileProvider()
     private var loadTask: Task<Void, Never>?
-    private let landmarks = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
-    private var ordinary: [String] {
-        NativeBusMap.Coordinator.poiCategories.flatMap(\.classes).filter { !landmarks.contains($0) }
-    }
     var diagnostics: [String: Any] {
-        ["bounded": source != nil, "count": count, "candidateCount": candidates, "queries": queries,
+        ["bounded": source != nil, "count": count, "ringCount": ringCount, "candidateCount": candidates, "queries": queries,
          "cacheReuses": reuses, "queryMs": lastQueryMs, "maxQueryMs": maxQueryMs,
          "deferred": deferred, "interacting": interacting, "flying": flying, "ready": dataReady,
          "band": cacheBand, "sourceCount": sourceCount, "budget": PlaceLabelBudget.maximum]
@@ -1506,17 +1510,31 @@ private final class ViewportPlaceRenderer {
     func install(map: MLNMapView, style: MLNStyle) {
         stop(); self.map = map; source = style.source(withIdentifier: "viewport-places") as? MLNShapeSource
         cacheBounds = nil; cacheBand = -1; records.removeAll(); previous.removeAll()
-        lastStamp = ""; count = 0; lastCenter = nil; lastEvaluation = 0; lastPlacement = 0
-        dataReady = false; emptyAttempts = 0
+        lastStamp = ""; count = 0; ringCount = 0; lastCenter = nil; lastEvaluation = 0; lastPlacement = 0
+        dataReady = false; emptyAttempts = 0; unpublished = false
         request()
     }
-    func stop() { generation += 1; pending?.cancel(); pending = nil; loadTask?.cancel(); loadTask = nil; source = nil }
-    func suspend() { generation += 1; pending?.cancel(); pending = nil; loadTask?.cancel(); loadTask = nil; deferred += 1 }
+    func stop() {
+        generation += 1; loadGeneration += 1
+        pending?.cancel(); pending = nil; trailing?.cancel(); trailing = nil
+        loadTask?.cancel(); loadTask = nil; source = nil
+    }
+    /// Gestures only hold back publication. A tile fetch already under way keeps going in
+    /// the background so its places are ready the moment the map settles.
+    func suspend() { generation += 1; pending?.cancel(); pending = nil; deferred += 1 }
     private func band(_ zoom: Double) -> Int { zoom < 14 ? 0 : zoom < 15.5 ? 1 : zoom < 16.5 ? 2 : zoom < 17.5 ? 3 : 4 }
     func request() {
         guard let map, source != nil else { return }
         let now = CACurrentMediaTime()
-        guard now - lastEvaluation >= 0.25 else { return }
+        guard now - lastEvaluation >= 0.25 else {
+            // Never drop the last request of a burst: the map stops rendering once it is idle.
+            if trailing == nil {
+                let job = DispatchWorkItem { [weak self] in self?.trailing = nil; self?.request() }
+                trailing = job
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.26 - (now - lastEvaluation), execute: job)
+            }
+            return
+        }
         lastEvaluation = now
         guard !interacting, !flying else { return }
         let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
@@ -1525,7 +1543,7 @@ private final class ViewportPlaceRenderer {
         let scale = 40_075_016.0 * cos(center.latitude * .pi / 180) / (512 * pow(2, map.zoomLevel))
         let distance = max(5, scale * 28)
         let needs = lastCenter.map { $0.distance(to: center) > distance } ?? true
-        let changed = needs || band(map.zoomLevel) != cacheBand || abs(map.zoomLevel - lastZoom) > 0.25 ||
+        let changed = needs || unpublished || band(map.zoomLevel) != cacheBand || abs(map.zoomLevel - lastZoom) > 0.25 ||
             abs(map.direction - lastHeading) > 12 || abs(map.camera.pitch - lastPitch) > 8 || lastInset != map.contentInset
         let emptyRetry = records.isEmpty && emptyAttempts < 3 && now - cacheAt > 2
         guard changed || emptyRetry else { return }
@@ -1538,7 +1556,10 @@ private final class ViewportPlaceRenderer {
             self.refresh()
         }
         pending = job
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.16, 0.65 - (now - lastPlacement)), execute: job)
+        // Places already loaded for this area appear almost at once; new ones wait a beat so a
+        // quick follow-up gesture does not pay for a layout it will immediately discard.
+        let delay = unpublished ? 0.08 : max(0.16, 0.65 - (now - lastPlacement))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: job)
     }
     private func bounds(_ rect: CGRect, map: MLNMapView) -> GeoBounds? {
         let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
@@ -1557,35 +1578,38 @@ private final class ViewportPlaceRenderer {
         let viewport = map.bounds.inset(by: map.contentInset)
         guard viewport.width > 40, viewport.height > 40 else { return }
         if currentBand == 0 {
-            if count != 0 { source.shape = nil; count = 0; previous.removeAll(); lastStamp = "" }
-            cacheBounds = nil; records.removeAll(); cacheAt = now; cacheBand = 0; emptyAttempts = 3
+            if count + ringCount != 0 { source.shape = nil; count = 0; ringCount = 0; previous.removeAll(); lastStamp = "" }
+            cacheBounds = nil; records.removeAll(); cacheAt = now; cacheBand = 0; emptyAttempts = 3; unpublished = false
             remember(map, at: now); return
         }
-        guard let needed = bounds(viewport.insetBy(dx: -16, dy: -16), map: map),
-              let buffered = bounds(viewport.insetBy(dx: -80, dy: -80), map: map) else { return }
+        // A tilted camera already sees far ahead; a ring past its top edge would reach toward
+        // the horizon and multiply the area to load for little benefit.
+        let outer = ring(for: map)
+        guard let needed = bounds(viewport.insetBy(dx: -outer - 16, dy: -outer - 16), map: map),
+              let buffered = bounds(viewport.insetBy(dx: -outer - 80, dy: -outer - 80), map: map) else { return }
         let reuse = cacheBounds.map { covers($0, needed) } == true && currentBand == cacheBand && !records.isEmpty
         if reuse { reuses += 1; publish(map, source: source, zoom: zoom, viewport: viewport); return }
+        // A fetch for an older area finishes first and then asks again (see below).
         guard loadTask == nil else { return }
-        let token = generation
+        let token = loadGeneration
         let started = CACurrentMediaTime()
         queries += 1
+        let maximumRank = currentBand == 2 ? 25.0 : currentBand == 3 ? 120.0 : 1_000_000.0
+        let ordinary = currentBand > 1 ? Self.ordinaryClasses : []
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { if self.generation == token { self.loadTask = nil } }
+            defer { if self.loadGeneration == token { self.loadTask = nil } }
             do {
-                let values = try await self.provider.places(in: buffered)
+                let values = try await self.provider.places(in: buffered, landmarks: Self.landmarkClasses,
+                                                            ordinary: ordinary, maximumRank: maximumRank)
                 try Task.checkCancellation()
-                guard self.generation == token, !self.interacting, !self.flying,
-                      let currentMap = self.map, let currentSource = self.source else { return }
+                guard self.loadGeneration == token, self.source != nil else { return }
                 self.sourceCount = values.count
                 self.lastQueryMs = (CACurrentMediaTime() - started) * 1000
                 self.maxQueryMs = max(self.maxQueryMs, self.lastQueryMs)
                 var fresh: [String: MLNPointFeature] = [:]
-                let maximumRank = currentBand == 2 ? 25.0 : currentBand == 3 ? 120.0 : 1_000_000.0
+                fresh.reserveCapacity(values.count)
                 for place in values {
-                    let eligible = self.landmarks.contains(place.kind) ? place.rank <= 3 :
-                        currentBand > 1 && self.ordinary.contains(place.kind) && place.rank <= maximumRank
-                    guard eligible else { continue }
                     let feature = MLNPointFeature(); feature.coordinate = place.coordinate.locationCoordinate
                     feature.identifier = place.id
                     var attributes: [String: Any] = ["class": place.kind, "rank": place.rank]
@@ -1594,31 +1618,40 @@ private final class ViewportPlaceRenderer {
                 }
                 self.records = fresh; self.cacheBounds = buffered; self.cacheBand = currentBand; self.cacheAt = CACurrentMediaTime()
                 self.emptyAttempts = fresh.isEmpty ? self.emptyAttempts + 1 : 0
-                self.publish(currentMap, source: currentSource, zoom: currentMap.zoomLevel,
-                             viewport: currentMap.bounds.inset(by: currentMap.contentInset))
+                // Publish now if the map is still, otherwise as soon as it settles. If the camera
+                // moved on meanwhile, the next request reuses or replaces this area.
+                self.unpublished = true
+                self.loadTask = nil
+                self.lastEvaluation = 0
+                self.request()
             } catch {
-                if self.generation == token { self.cacheAt = CACurrentMediaTime(); self.emptyAttempts += 1 }
+                if self.loadGeneration == token { self.cacheAt = CACurrentMediaTime(); self.emptyAttempts += 1 }
             }
         }
     }
+    private func ring(for map: MLNMapView) -> CGFloat { map.camera.pitch > 20 ? 40 : Self.overscan }
     private func publish(_ map: MLNMapView, source: MLNShapeSource, zoom: Double, viewport: CGRect) {
         let projected = records.map { id, feature -> PlaceLabelCandidate in
             let pixel = map.convert(feature.coordinate, toPointTo: map)
             let kind = feature.attribute(forKey: "class") as? String ?? ""
             let rank = (feature.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
             return PlaceLabelCandidate(id: id, x: pixel.x - viewport.minX, y: pixel.y - viewport.minY,
-                                       rank: rank, landmark: landmarks.contains(kind))
+                                       rank: rank, landmark: Self.landmarkClasses.contains(kind))
         }
         candidates = projected.count
-        let ids = PlaceLabelBudget.select(projected, zoom: zoom, width: viewport.width, height: viewport.height, previous: previous).sorted()
-        let stamp = ids.map { id -> String in
-            guard let feature = records[id] else { return id }
-            return "\(id):\(feature.coordinate.latitude):\(feature.coordinate.longitude):\(feature.attributes)"
-        }.joined(separator: "|")
+        let ids = PlaceLabelBudget.select(projected, zoom: zoom, width: viewport.width, height: viewport.height,
+                                          previous: previous, overscan: Double(ring(for: map))).sorted()
+        // Identifiers already carry the class, name and position of each place.
+        let stamp = ids.joined(separator: "|")
         if stamp != lastStamp {
             source.shape = MLNShapeCollectionFeature(shapes: ids.compactMap { records[$0] })
-            lastStamp = stamp; previous = Set(ids); count = ids.count
+            lastStamp = stamp; previous = Set(ids)
+            let onScreen = Set(projected.lazy.filter {
+                $0.x >= -48 && $0.x <= viewport.width + 48 && $0.y >= -48 && $0.y <= viewport.height + 48
+            }.map(\.id))
+            count = ids.filter(onScreen.contains).count; ringCount = ids.count - count
         }
+        unpublished = false
         remember(map, at: CACurrentMediaTime())
     }
     private func remember(_ map: MLNMapView, at time: Double) {
@@ -1634,17 +1667,30 @@ private actor PlaceTileProvider {
     private var configuration: Configuration?
     private var cache: [String: [MapPlace]] = [:]
     private var order: [String] = []
-    private func bytes(_ url: URL) async throws -> Data {
+    /// Tile URLs carry the data version, so a dedicated disk cache can serve them across
+    /// launches without a second download of what the map itself already fetched once.
+    private let session: URLSession = {
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("place-tiles", isDirectory: true)
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = URLCache(memoryCapacity: 4 * 1024 * 1024, diskCapacity: 96 * 1024 * 1024, directory: folder)
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+    private let agent = "TaipeiBus/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1")
+    private func bytes(_ url: URL, policy: URLRequest.CachePolicy) async throws -> Data {
         guard url.scheme == "https", url.host == "tiles.openfreemap.org" else { throw FeedError.invalid("Place tile endpoint") }
-        var request = URLRequest(url: url, cachePolicy: .returnCacheDataElseLoad, timeoutInterval: 20)
-        request.setValue("TaipeiBus/1.2.5", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        var request = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 20)
+        request.setValue(agent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
         guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 8 * 1024 * 1024 else { throw FeedError.invalid("Place tile response") }
         return data
     }
-    func places(in bounds: GeoBounds) async throws -> [MapPlace] {
+    func places(in bounds: GeoBounds, landmarks: Set<String>, ordinary: Set<String>, maximumRank: Double) async throws -> [MapPlace] {
         if configuration == nil {
-            let data = try await bytes(URL(string: "https://tiles.openfreemap.org/planet")!)
+            // The tile list names the current data version; revalidate it so an old cached
+            // version that the server has retired never leaves the map without places.
+            let data = try await bytes(URL(string: "https://tiles.openfreemap.org/planet")!, policy: .useProtocolCachePolicy)
             configuration = try JSONDecoder().decode(Configuration.self, from: data)
         }
         guard let configuration, let template = configuration.tiles.first else { return [] }
@@ -1661,32 +1707,47 @@ private actor PlaceTileProvider {
         }
         guard east >= west, south >= north, (east - west + 1) * (south - north + 1) <= 16 else { return [] }
         var result: [String: MapPlace] = [:]
+        var failures = 0, tiles = 0
         for x in west...east { for y in north...south {
             try Task.checkCancellation()
+            tiles += 1
             let key = "\(zoom)/\(x)/\(y)"
             let points: [MapPlace]
             if let cached = cache[key] { points = cached }
             else {
                 let text = template.replacingOccurrences(of: "{z}", with: String(zoom)).replacingOccurrences(of: "{x}", with: String(x)).replacingOccurrences(of: "{y}", with: String(y))
                 guard let url = URL(string: text) else { continue }
-                let data = try await bytes(url)
-                points = try MapPlaceTile.decode(data, zoom: zoom, x: x, y: y)
+                // One unreachable tile leaves a gap instead of blanking the whole screen.
+                do {
+                    points = try MapPlaceTile.decode(try await bytes(url, policy: .returnCacheDataElseLoad), zoom: zoom, x: x, y: y)
+                } catch {
+                    if Task.isCancelled { throw CancellationError() }
+                    failures += 1; continue
+                }
                 cache[key] = points; order.removeAll { $0 == key }; order.append(key)
-                if order.count > 12 { cache.removeValue(forKey: order.removeFirst()) }
+                if order.count > 24 { cache.removeValue(forKey: order.removeFirst()) }
             }
             for point in points where point.coordinate.latitude >= bounds.south && point.coordinate.latitude <= bounds.north &&
-                point.coordinate.longitude >= bounds.west && point.coordinate.longitude <= bounds.east { result[point.id] = point }
+                point.coordinate.longitude >= bounds.west && point.coordinate.longitude <= bounds.east {
+                // Only places the current zoom band can draw compete for the hand-off below.
+                let eligible = landmarks.contains(point.kind) ? point.rank <= 3 :
+                    ordinary.contains(point.kind) && point.rank <= maximumRank
+                if eligible { result[point.id] = point }
+            }
         } }
+        if failures > 0, failures == tiles {
+            // Every tile failed: the cached tile list may name a retired data version.
+            self.configuration = nil
+            throw FeedError.invalid("Place tiles unavailable")
+        }
         let center = Coordinate(latitude: (bounds.south + bounds.north) / 2, longitude: (bounds.west + bounds.east) / 2)
-        let landmarks: Set<String> = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
-        let ordered = result.values.sorted { a, b in
-            let al = landmarks.contains(a.kind), bl = landmarks.contains(b.kind)
-            if al != bl { return al }
-            let ad = Int(a.coordinate.distance(to: center) / 20), bd = Int(b.coordinate.distance(to: center) / 20)
-            if ad != bd { return ad < bd }
-            return a.rank == b.rank ? a.id < b.id : a.rank < b.rank
+        let keyed = result.values.map { ($0, landmarks.contains($0.kind), Int($0.coordinate.distance(to: center) / 20)) }
+        let ordered = keyed.sorted { a, b in
+            if a.1 != b.1 { return a.1 }
+            if a.2 != b.2 { return a.2 < b.2 }
+            return a.0.rank == b.0.rank ? a.0.id < b.0.id : a.0.rank < b.0.rank
         }
         // A pathological dense tile never delivers thousands of UIKit objects.
-        return Array(ordered.prefix(512))
+        return ordered.prefix(512).map(\.0)
     }
 }
