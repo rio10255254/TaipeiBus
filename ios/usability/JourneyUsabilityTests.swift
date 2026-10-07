@@ -1242,7 +1242,7 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
     }
     func profile(_ mode: String, cycles: Int = 2) -> [String: Any] {
         button("zoom-probe-" + mode).press(forDuration: 0.15)
-        wait { $0["zoomMode"] as? String == mode }
+        wait { $0["zoomMode"] as? String == mode && $0["zoomStyleReady"] as? Bool == true }
         Thread.sleep(forTimeInterval: 2)
         button("zoom-probe-begin").press(forDuration: 0.15)
         wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == false }
@@ -1291,5 +1291,30 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         wait { ($0["vehicle"] as? String ?? "") == "" }
         XCTAssertEqual(app.state, .runningForeground)
         capture("zoom-following-returned")
+    }
+    func testBoundedPlacesImproveFlatAndThreeDimensionalZoom() {
+        launch(["--test-map-controls", "--test-zoom-performance"])
+        wait { ($0["placeLabels"] as? [String: Any])?["bounded"] as? Bool == true &&
+            (($0["placeLabels"] as? [String: Any])?["count"] as? Int ?? 0) > 0 }
+        capture("zoom-fixed-place-design-before")
+        var reports: [[String: Any]] = []
+        for view in ["flat-view", "3d-view"] {
+            button("zoom-probe-" + view).press(forDuration: 0.15)
+            wait { abs(($0["pitch"] as? Double ?? -100) - (view == "3d-view" ? 57 : 0)) < 1 }
+            let fixed = profile("baseline")
+            let places = state()["placeLabels"] as? [String: Any] ?? [:]
+            XCTAssertEqual(places["bounded"] as? Bool, true)
+            XCTAssertLessThanOrEqual(places["count"] as? Int ?? 1000, 96)
+            let legacy = profile("legacy-poi")
+            let fixedTime = (fixed["map_encoding"] as? [String: Any])?["median_ms"] as? Double ?? 10000
+            let legacyTime = (legacy["map_encoding"] as? [String: Any])?["median_ms"] as? Double ?? 0
+            XCTAssertGreaterThan(legacyTime, 10)
+            XCTAssertLessThan(fixedTime, legacyTime * 0.5, "Nearby place selection must remove at least half the measured rendering work")
+            reports.append(["view": view, "fixed": fixed, "legacy": legacy, "places": places])
+            _ = profile("baseline", cycles: 1)
+        }
+        let bytes = try! JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys, .prettyPrinted])
+        let comparison = XCTAttachment(string: String(decoding: bytes, as: UTF8.self))
+        comparison.name = "zoom-fixed-comparison"; comparison.lifetime = .keepAlways; add(comparison)
     }
 }

@@ -12,6 +12,15 @@
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
+    },
+    "viewport-places": {
+      "type": "geojson",
+      "data": {
+        "type": "FeatureCollection",
+        "features": []
+      },
+      "maxzoom": 18,
+      "buffer": 64
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
@@ -4618,8 +4627,7 @@
     {
       "id": "poi_dense_street",
       "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
+      "source": "viewport-places",
       "minzoom": 17.5,
       "filter": [
         "all",
@@ -4913,8 +4921,7 @@
     {
       "id": "poi_dense",
       "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
+      "source": "viewport-places",
       "minzoom": 16.5,
       "filter": [
         "all",
@@ -5216,8 +5223,7 @@
     {
       "id": "poi",
       "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
+      "source": "viewport-places",
       "minzoom": 15.5,
       "filter": [
         "all",
@@ -5511,8 +5517,7 @@
     {
       "id": "poi_landmark",
       "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "poi",
+      "source": "viewport-places",
       "minzoom": 14,
       "filter": [
         "all",

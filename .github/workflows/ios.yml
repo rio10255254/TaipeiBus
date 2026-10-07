@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance']
+        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -418,6 +418,11 @@ jobs:
             selection+=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesImproveFlatAndThreeDimensionalZoom'
+              '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testLiveBusZoomAndReturn')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'journey-selection' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap')
           fi
@@ -514,6 +519,7 @@ jobs:
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \

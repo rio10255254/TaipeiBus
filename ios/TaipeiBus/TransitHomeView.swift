@@ -1372,7 +1372,7 @@ func distanceLabel(_ meters: Double) -> String {
 
 #if DEBUG
 private struct DebugZoomPerformanceControls: View {
-    private let modes = ["baseline", "no-poi", "no-text", "no-3d", "no-bus", "light-tick", "old-labels", "60hz", "begin", "end"]
+    private let modes = ["baseline", "no-poi", "legacy-poi", "flat-view", "3d-view", "light-tick", "old-labels", "60hz", "begin", "end"]
     var body: some View {
         LazyVGrid(columns: Array(repeating: GridItem(.fixed(58), spacing: 4), count: 5), spacing: 4) {
             ForEach(modes, id: \.self) { mode in

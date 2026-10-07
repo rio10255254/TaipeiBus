@@ -67,6 +67,7 @@ struct NativeBusMap: UIViewRepresentable {
         var darkMode = false
         private weak var map: MLNMapView?
         private var buses: NativeBusLayer?
+        private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
         private var lastRouteKey = ""
@@ -117,6 +118,9 @@ struct NativeBusMap: UIViewRepresentable {
         private var zoomProbeVisibility: [String: Bool] = [:]
         private var zoomProbeCamera: MLNMapCamera?
         private var zoomProbeMode = "baseline"
+        private var zoomProbeStyle = "bounded"
+        private var zoomProbeStyleReady = true
+        private var zoomProbeFullyRendered = false
         private struct CameraTransitionTrace {
             let started: CFTimeInterval
             let revision: Int
@@ -159,6 +163,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
         func stop() {
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
+            places.stop()
             displayLink?.invalidate(); displayLink = nil
 #if DEBUG
             if let zoomProbeObserver { NotificationCenter.default.removeObserver(zoomProbeObserver) }
@@ -168,6 +173,7 @@ struct NativeBusMap: UIViewRepresentable {
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            places.install(map: mapView, style: style)
             lastAppearance = nil; lastDarkMode = nil
             installRelief(style)
             captureDayPalette(style)
@@ -301,6 +307,12 @@ struct NativeBusMap: UIViewRepresentable {
             lastStationID = nil
             update(location: pendingLocation)
             updateNearbyStations(force: true)
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance"), let camera = zoomProbeCamera {
+                mapView.setCamera(savedCamera(camera), animated: false)
+            }
+            zoomProbeStyleReady = true
+#endif
         }
 
         private func addStationLayer(id: String, style: MLNStyle) -> MLNShapeSource {
@@ -654,6 +666,8 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) {
+            places.interacting = false
+            places.request()
             updateNearbyStations()
             let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
             DispatchQueue.main.async { [weak self] in self?.model.mapCenterChanged(center) }
@@ -663,8 +677,10 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+            places.request()
 #if DEBUG
             zoomProbe.frame(zoom: mapView.zoomLevel, busEncode: buses?.lastEncodeMilliseconds ?? 0)
+            zoomProbeFullyRendered = fullyRendered
 #endif
             if !positionedInitialCamera, mapView.bounds.width > 0 {
                 DispatchQueue.main.async { [weak self] in
@@ -693,7 +709,37 @@ struct NativeBusMap: UIViewRepresentable {
             if mode == "begin" { zoomProbe.begin(mode: zoomProbeMode); return }
             if mode == "end" { zoomProbe.end(); return }
             zoomProbe.end()
+            if mode == "flat-view" || mode == "3d-view" {
+                let camera = savedCamera(map.camera)
+                camera.pitch = mode == "3d-view" ? 57 : 0
+                camera.altitude = MLNAltitudeForZoomLevel(18, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)
+                zoomProbeCamera = savedCamera(camera); map.setCamera(camera, animated: false)
+                return
+            }
             if zoomProbeCamera == nil { zoomProbeCamera = savedCamera(map.camera) }
+            let desiredStyle = mode == "legacy-poi" ? "legacy" : "bounded"
+            if desiredStyle != zoomProbeStyle {
+                guard let url = Bundle.main.url(forResource: "taipei", withExtension: "json"),
+                      let bytes = try? Data(contentsOf: url),
+                      var document = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                      var layers = document["layers"] as? [[String: Any]],
+                      var sources = document["sources"] as? [String: Any] else { return }
+                if desiredStyle == "legacy" {
+                    sources.removeValue(forKey: "viewport-places")
+                    for i in layers.indices where (layers[i]["id"] as? String ?? "").hasPrefix("poi") {
+                        layers[i]["source"] = "openmaptiles"; layers[i]["source-layer"] = "poi"
+                    }
+                }
+                document["layers"] = layers; document["sources"] = sources
+                guard let encoded = try? JSONSerialization.data(withJSONObject: document) else { return }
+                let path = FileManager.default.temporaryDirectory.appendingPathComponent("zoom-\(desiredStyle).json")
+                guard (try? encoded.write(to: path, options: .atomic)) != nil else { return }
+                places.stop(); zoomProbeStyle = desiredStyle; zoomProbeMode = mode
+                zoomProbeStyleReady = false; zoomProbeFullyRendered = false
+                zoomProbeVisibility.removeAll(); lastTestCameraAt = 0
+                map.styleURL = path
+                return
+            }
             if zoomProbeVisibility.isEmpty {
                 zoomProbeVisibility = Dictionary(uniqueKeysWithValues: style.layers.map { ($0.identifier, $0.isVisible) })
             }
@@ -741,6 +787,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["themeBackground"] = darkMode ? "#1C1D20" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
+                state["placeLabels"] = places.diagnostics
                 state["fleetSampled"] = buses?.sampledVehicleCount ?? 0
                 state["routeFleetEmphasized"] = buses?.emphasizedIDs.count ?? 0
                 state["routeBoardingStop"] = model.routeBoardingStopID ?? ""
@@ -794,6 +841,9 @@ struct NativeBusMap: UIViewRepresentable {
                 if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
                     state["zoomPerformance"] = zoomProbe.summary
                     state["zoomMode"] = zoomProbeMode
+                    state["zoomStyle"] = zoomProbeStyle
+                    state["zoomStyleReady"] = zoomProbeStyleReady
+                    state["zoomFullyRendered"] = zoomProbeFullyRendered
                 }
                 DispatchQueue.main.async { [weak self] in self?.overlay.recordCamera(state) }
                 if let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
@@ -888,6 +938,8 @@ struct NativeBusMap: UIViewRepresentable {
             cameraMoveToken += 1
             let token = cameraMoveToken
             cameraMoving = seconds > 0
+            places.flying = cameraMoving
+            if cameraMoving { places.suspend() }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
                 if let index = cameraTransitions.indices.last, cameraTransitions[index].revision == model.focusRevision {
@@ -905,6 +957,8 @@ struct NativeBusMap: UIViewRepresentable {
                 animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut)) { [weak self, weak map] in
                 guard let self, let map, self.cameraMoveToken == token else { return }
                 self.cameraMoving = false
+                self.places.flying = false
+                self.places.request()
                 self.followSuspendedUntil = CACurrentMediaTime() + 0.04
                 self.applyPendingInset(map)
             }
@@ -1047,8 +1101,11 @@ struct NativeBusMap: UIViewRepresentable {
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
+                places.interacting = true
+                places.suspend()
                 lastFocusWasLeavingCity = false
                 cameraMoveToken += 1; cameraMoving = false
+                places.flying = false
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false
@@ -1395,3 +1452,156 @@ private final class ZoomPerformanceProbe {
     }
 }
 #endif
+
+/// Only nearby, budgeted places enter the symbol layout pipeline. Queries are
+/// coalesced after gestures and reused inside a buffered geographic viewport.
+private final class ViewportPlaceRenderer {
+    private weak var map: MLNMapView?
+    private var source: MLNShapeSource?
+    private var pending: DispatchWorkItem?
+    private var generation = 0
+    private var lastEvaluation = 0.0
+    private var lastPlacement = 0.0
+    private var cacheBounds: GeoBounds?
+    private var cacheBand = -1
+    private var cacheAt = 0.0
+    private var records: [String: MLNPointFeature] = [:]
+    private var previous = Set<String>()
+    private var lastStamp = ""
+    private var lastCenter: Coordinate?
+    private var lastZoom = -1.0
+    private var lastHeading = -1.0
+    private var lastPitch = -1.0
+    private var lastInset = UIEdgeInsets.zero
+    var interacting = false
+    var flying = false
+    private var count = 0
+    private var candidates = 0
+    private var queries = 0
+    private var reuses = 0
+    private var lastQueryMs = 0.0
+    private var maxQueryMs = 0.0
+    private var deferred = 0
+    private let landmarks = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
+    private var ordinary: [String] {
+        NativeBusMap.Coordinator.poiCategories.flatMap(\.classes).filter { !landmarks.contains($0) }
+    }
+    var diagnostics: [String: Any] {
+        ["bounded": source != nil, "count": count, "candidateCount": candidates, "queries": queries,
+         "cacheReuses": reuses, "queryMs": lastQueryMs, "maxQueryMs": maxQueryMs,
+         "deferred": deferred, "interacting": interacting, "flying": flying, "budget": PlaceLabelBudget.maximum]
+    }
+    func install(map: MLNMapView, style: MLNStyle) {
+        stop(); self.map = map; source = style.source(withIdentifier: "viewport-places") as? MLNShapeSource
+        cacheBounds = nil; cacheBand = -1; records.removeAll(); previous.removeAll()
+        lastStamp = ""; count = 0; lastCenter = nil; lastEvaluation = 0; lastPlacement = 0
+        request()
+    }
+    func stop() { generation += 1; pending?.cancel(); pending = nil; source = nil }
+    func suspend() { pending?.cancel(); pending = nil; deferred += 1 }
+    private func band(_ zoom: Double) -> Int { zoom < 14 ? 0 : zoom < 15.5 ? 1 : zoom < 16.5 ? 2 : zoom < 17.5 ? 3 : 4 }
+    func request() {
+        guard let map, source != nil else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastEvaluation >= 0.25 else { return }
+        lastEvaluation = now
+        guard !interacting, !flying else { return }
+        let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+        let footprint = map.bounds.inset(by: map.contentInset)
+        guard footprint.width > 40, footprint.height > 40 else { return }
+        let scale = 40_075_016.0 * cos(center.latitude * .pi / 180) / (512 * pow(2, map.zoomLevel))
+        let distance = max(5, scale * 28)
+        let needs = lastCenter.map { $0.distance(to: center) > distance } ?? true
+        let changed = needs || abs(map.zoomLevel - lastZoom) > 0.25 ||
+            abs(map.direction - lastHeading) > 12 || abs(map.camera.pitch - lastPitch) > 8 || lastInset != map.contentInset
+        let emptyRetry = records.isEmpty && now - cacheAt > 2
+        guard changed || emptyRetry else { return }
+        guard pending == nil else { return }
+        let token = generation
+        let job = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.pending = nil
+            guard !self.interacting, !self.flying else { self.deferred += 1; return }
+            self.refresh()
+        }
+        pending = job
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.16, 0.65 - (now - lastPlacement)), execute: job)
+    }
+    private func bounds(_ rect: CGRect, map: MLNMapView) -> GeoBounds? {
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)]
+            .map { map.convert($0, toCoordinateFrom: map) }
+        guard corners.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite && abs($0.latitude) < 85 && abs($0.longitude) <= 180 }) else { return nil }
+        return GeoBounds(south: corners.map(\.latitude).min()!, west: corners.map(\.longitude).min()!,
+                         north: corners.map(\.latitude).max()!, east: corners.map(\.longitude).max()!)
+    }
+    private func covers(_ outer: GeoBounds, _ inner: GeoBounds) -> Bool {
+        outer.south <= inner.south && outer.north >= inner.north && outer.west <= inner.west && outer.east >= inner.east
+    }
+    private func refresh() {
+        guard !interacting, !flying, let map, let source, let vector = map.style?.source(withIdentifier: "openmaptiles") as? MLNVectorTileSource else { return }
+        let now = CACurrentMediaTime(), zoom = map.zoomLevel, currentBand = band(zoom)
+        let viewport = map.bounds.inset(by: map.contentInset)
+        guard viewport.width > 40, viewport.height > 40 else { return }
+        if currentBand == 0 {
+            if count != 0 { source.shape = nil; count = 0; previous.removeAll(); lastStamp = "" }
+            cacheBounds = nil; records.removeAll(); cacheAt = now; remember(map, at: now); return
+        }
+        guard let needed = bounds(viewport.insetBy(dx: -16, dy: -16), map: map),
+              let buffered = bounds(viewport.insetBy(dx: -80, dy: -80), map: map) else { return }
+        let reuse = cacheBounds.map { covers($0, needed) } == true && currentBand == cacheBand && now - cacheAt < 30 && !records.isEmpty
+        if !reuse {
+            var ring = [CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.west),
+                        CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.east),
+                        CLLocationCoordinate2D(latitude: buffered.north, longitude: buffered.east),
+                        CLLocationCoordinate2D(latitude: buffered.north, longitude: buffered.west),
+                        CLLocationCoordinate2D(latitude: buffered.south, longitude: buffered.west)]
+            let polygon = MLNPolygon(coordinates: &ring, count: UInt(ring.count))
+            let land = NSPredicate(format: "class IN %@ AND rank <= 3 AND name != NIL", landmarks)
+            let rank = currentBand == 2 ? 25 : currentBand == 3 ? 120 : 1_000_000
+            let local = NSPredicate(format: "class IN %@ AND rank <= %d AND name != NIL", ordinary, rank)
+            let eligible = currentBand == 1 ? land : NSCompoundPredicate(orPredicateWithSubpredicates: [land, local])
+            let query = NSCompoundPredicate(andPredicateWithSubpredicates: [eligible, NSPredicate(format: "SELF IN %@", polygon)])
+            let start = CACurrentMediaTime()
+            let features = vector.features(sourceLayerIdentifiers: Set(["poi"]), predicate: query)
+            queries += 1; lastQueryMs = (CACurrentMediaTime() - start) * 1000; maxQueryMs = max(maxQueryMs, lastQueryMs)
+            var fresh: [String: MLNPointFeature] = [:]
+            for feature in features {
+                guard let point = feature as? MLNPointFeature, point.coordinate.latitude.isFinite, point.coordinate.longitude.isFinite,
+                      let name = point.attribute(forKey: "name") as? String, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      let kind = point.attribute(forKey: "class") as? String else { continue }
+                let rank = (point.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
+                guard rank.isFinite, rank >= 0 else { continue }
+                let fallback = "\(kind):\(name):\(String(format: "%.6f", point.coordinate.latitude)):\(String(format: "%.6f", point.coordinate.longitude))"
+                let id = point.identifier.map { "\(kind):\($0)" } ?? fallback
+                let copy = MLNPointFeature(); copy.coordinate = point.coordinate; copy.identifier = id
+                var attributes: [String: Any] = ["class": kind, "name": name, "rank": rank]
+                for key in ["name:zh", "name:en", "name_en", "name:latin"] {
+                    if let value = point.attribute(forKey: key) as? String, !value.isEmpty { attributes[key] = value }
+                }
+                copy.attributes = attributes; fresh[id] = copy
+            }
+            records = fresh; cacheBounds = buffered; cacheBand = currentBand; cacheAt = now
+        } else { reuses += 1 }
+        let projected = records.map { id, feature -> PlaceLabelCandidate in
+            let pixel = map.convert(feature.coordinate, toPointTo: map)
+            let kind = feature.attribute(forKey: "class") as? String ?? ""
+            let rank = (feature.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
+            return PlaceLabelCandidate(id: id, x: pixel.x - viewport.minX, y: pixel.y - viewport.minY,
+                                       rank: rank, landmark: landmarks.contains(kind))
+        }
+        candidates = projected.count
+        let ids = PlaceLabelBudget.select(projected, zoom: zoom, width: viewport.width, height: viewport.height, previous: previous).sorted()
+        let stamp = ids.joined(separator: "|")
+        if stamp != lastStamp {
+            source.shape = MLNShapeCollectionFeature(shapes: ids.compactMap { records[$0] })
+            lastStamp = stamp; previous = Set(ids); count = ids.count
+        }
+        remember(map, at: now)
+    }
+    private func remember(_ map: MLNMapView, at time: Double) {
+        lastCenter = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+        lastZoom = map.zoomLevel; lastHeading = map.direction; lastPitch = map.camera.pitch
+        lastInset = map.contentInset; lastPlacement = time
+    }
+}
