@@ -1292,7 +1292,7 @@ private struct AppInformationView: View {
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
-                    Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖與 AWS Terrain Tiles 地形。道路匹配受 GPS 與軌跡精度影響。"))
+                    Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
                     Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
                     Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     NavigationLink(AppText.text("開源授權")) { LicenseView() }
@@ -1334,7 +1334,7 @@ private struct PrivacyExplanationView: View {
                 Text(AppText.text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。"))
             }
             Section(AppText.text("網路服務")) {
-                Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供，地形由 AWS Terrain Tiles 提供。服務商可能依自己的政策處理連線紀錄。"))
+                Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
                 Link(AppText.text("OpenFreeMap 隱私政策"), destination: URL(string: "https://openfreemap.org/privacy/")!)
             }
             Section(AppText.text("測試回饋")) {

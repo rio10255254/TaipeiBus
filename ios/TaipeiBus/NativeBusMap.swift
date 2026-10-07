@@ -151,6 +151,7 @@ struct NativeBusMap: UIViewRepresentable {
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
             lastAppearance = nil; lastDarkMode = nil
+            installRelief(style)
             captureDayPalette(style)
             buildingLayer = style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer
             buildingOpacity = 1; buildingOpacityTarget = 1
@@ -995,7 +996,6 @@ struct NativeBusMap: UIViewRepresentable {
                     paints["pattern"] = layer.fillPattern
                 }
                 if let layer = layer as? MLNLineStyleLayer { paints["line"] = layer.lineColor }
-                if let layer = layer as? MLNHillshadeStyleLayer { paints["exaggeration"] = layer.hillshadeExaggeration }
                 if let layer = layer as? MLNSymbolStyleLayer {
                     paints["text"] = layer.textColor; paints["halo"] = layer.textHaloColor
                     paints["labelField"] = layer.text
@@ -1065,6 +1065,37 @@ struct NativeBusMap: UIViewRepresentable {
             moveCamera(camera, map: map, duration: 0.5)
         }
 
+        /// Terrain relief is baked ahead of time, as mainstream maps do, into one bundled
+        /// Web-Mercator image for greater Taipei. Drawing it is a plain texture blend, so camera
+        /// flights never wait on on-device elevation processing.
+        private func installRelief(_ style: MLNStyle) {
+            guard style.source(withIdentifier: "relief") == nil,
+                  let url = Bundle.main.url(forResource: "hillshade-taipei", withExtension: "png"),
+                  let image = UIImage(contentsOfFile: url.path) else { return }
+            let quad = MLNCoordinateQuad(topLeft: CLLocationCoordinate2D(latitude: 25.36, longitude: 120.95),
+                                         bottomLeft: CLLocationCoordinate2D(latitude: 24.55, longitude: 120.95),
+                                         bottomRight: CLLocationCoordinate2D(latitude: 24.55, longitude: 122.10),
+                                         topRight: CLLocationCoordinate2D(latitude: 25.36, longitude: 122.10))
+            let source = MLNImageSource(identifier: "relief", coordinateQuad: quad, image: image)
+            style.addSource(source)
+            let layer = MLNRasterStyleLayer(identifier: "relief", source: source)
+            layer.maximumZoomLevel = 15
+            layer.rasterFadeDuration = NSExpression(forConstantValue: 0)
+            if let water = style.layer(withIdentifier: "waterway_tunnel") { style.insertLayer(layer, below: water) }
+            else { style.addLayer(layer) }
+            reliefLayer = layer
+            applyReliefAppearance()
+        }
+        private weak var reliefLayer: MLNRasterStyleLayer?
+        private func applyReliefAppearance() {
+            guard let layer = reliefLayer else { return }
+            let peak = darkMode ? 0.55 : 0.9
+            layer.rasterOpacity = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
+                6, 0, 7, peak, 12, peak * 0.85, 13.5, peak * 0.4, 14.5, 0])
+            // Dark mode keeps the shadows but dims the highlights so slopes do not glow.
+            layer.rasterBrightnessMax = NSExpression(forConstantValue: darkMode ? 0.35 : 1)
+        }
+
         private func applyBasePalette(_ style: MLNStyle) {
             func color(_ value: String) -> NSExpression { NSExpression(forConstantValue: UIColor(liveHex: value)) }
             for (id, day) in dayPaints {
@@ -1110,16 +1141,12 @@ struct NativeBusMap: UIViewRepresentable {
                     }
                     layer.textHaloColor = darkMode ? color("#1C1D20") : day["halo"]
                 }
-                if let layer = layer as? MLNHillshadeStyleLayer {
-                    // Hillshade colours are colour arrays (one per light) in this MapLibre version and
-                    // must stay in the style; a single UIColor crashes. Dark mode only softens the relief.
-                    layer.hillshadeExaggeration = darkMode ? NSExpression(forConstantValue: 0.18) : day["exaggeration"]
-                }
             }
         }
 
         private func applyAppearance(_ style: MLNStyle) {
             applyBasePalette(style)
+            applyReliefAppearance()
             applyLabelLanguage(style)
             // Light map colours come from the bundled style; dark mode uses the
             // neutral palette in applyBasePalette. Route lines carry their own tint.

@@ -12,16 +12,6 @@
     "openmaptiles": {
       "type": "vector",
       "url": "https://tiles.openfreemap.org/planet"
-    },
-    "terrain": {
-      "type": "raster-dem",
-      "encoding": "terrarium",
-      "tileSize": 512,
-      "maxzoom": 11,
-      "tiles": [
-        "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
-      ],
-      "attribution": "Terrain © Mapzen, AWS Open Data"
     }
   },
   "sprite": "https://tiles.openfreemap.org/sprites/ofm_f384/ofm",
@@ -367,36 +357,6 @@
       ],
       "paint": {
         "fill-color": "#F1E6D6"
-      }
-    },
-    {
-      "id": "hillshade",
-      "type": "hillshade",
-      "source": "terrain",
-      "maxzoom": 14,
-      "paint": {
-        "hillshade-exaggeration": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          6,
-          0.5,
-          12,
-          0.4,
-          14,
-          0.15
-        ],
-        "hillshade-shadow-color": "#4E5F4A",
-        "hillshade-highlight-color": "#FFFFFF",
-        "hillshade-accent-color": "#6E7F62",
-        "hillshade-illumination-anchor": "viewport"
-      },
-      "layout": {
-        "visibility": "none"
       }
     },
     {
