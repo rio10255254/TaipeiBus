@@ -16,7 +16,7 @@ struct JourneyPlanningView: View {
     @FocusState private var focused: Bool
     @State private var query = ""
     @State private var editingOrigin = false
-    @State private var editingDestination = true
+    @State private var editingDestination: Bool
     @State private var resolving = false
     @State private var searchError: String?
     @State private var resolveTask: Task<Void, Never>?
@@ -26,6 +26,16 @@ struct JourneyPlanningView: View {
     @State private var stationResultQuery = ""
     @State private var showingRankingInfo = false
     @State private var searchReturnToItinerary = false
+
+    init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
+         compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
+        self.model = model; self.planner = planner; self.location = location
+        _showingItinerary = showingItinerary
+        self.compact = compact; self.expand = expand; self.collapse = collapse
+        // Start on the page the sheet will actually show. Starting on place search and flipping
+        // in onAppear animated a squeezed search page into every itinerary opening.
+        _editingDestination = State(initialValue: planner.destination == nil)
+    }
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
     private var searchContext: Coordinate? {
@@ -753,7 +763,8 @@ struct JourneyOptionsView: View {
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
                 if compact, !planner.options.isEmpty {
-                    TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first!.id }, set: { id in
+                    // SwiftUI can read this binding once more while a new search empties the options.
+                    TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
                         if let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
                     })) {
                         ForEach(planner.options) { option in compactCard(option, at: timeline.date).tag(option.id) }
@@ -1234,7 +1245,7 @@ private struct WaitingBannerContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
-                    Text(live.text("上車 · ") + ride.boarding.localizedName).liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
+                    BannerTitle(text: live.text("上車 · ") + ride.boarding.localizedName)
                     if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                     if ride.route.displayName != ride.route.name,
                        model.metadata.routeIDs(serving: ride).filter({ model.metadata.routes[$0] != nil }).count <= 1 {
@@ -1264,6 +1275,20 @@ private struct WaitingBannerContent: View {
     }
 }
 
+/// A stop name in the navigation banner stays on one line when a slightly smaller size fits,
+/// and only wraps for names too long for that; it never breaks a short name in the middle.
+private struct BannerTitle: View {
+    let text: String
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            Text(text).liveFont(.title3, weight: .bold).lineLimit(1)
+            Text(text).liveFont(.headline, weight: .bold).lineLimit(1)
+            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1)
+            Text(text).liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
+        }
+    }
+}
+
 private struct RidingBannerContent: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
@@ -1282,9 +1307,8 @@ private struct RidingBannerContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
-                    // Same "action · stop" form as the boarding banner, so the stop name keeps one line.
-                    Text((progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : live.text("下車 · ") + ride.alighting.localizedName)
-                        .liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
+                    // Same "action · stop" form as the boarding banner.
+                    BannerTitle(text: (progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : live.text("下車 · ") + ride.alighting.localizedName)
                     if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                 }
                 Spacer(minLength: 4)
