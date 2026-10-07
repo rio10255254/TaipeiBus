@@ -1245,6 +1245,7 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         wait { $0["zoomMode"] as? String == mode }
         Thread.sleep(forTimeInterval: 2)
         button("zoom-probe-begin").press(forDuration: 0.15)
+        wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == false }
         for _ in 0..<cycles {
             map.pinch(withScale: 1.85, velocity: 0.8)
             map.pinch(withScale: 1 / 1.85, velocity: -0.8)
@@ -1258,6 +1259,7 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         button("zoom-probe-end").press(forDuration: 0.15)
         wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == true }
         let result = state()["zoomPerformance"] as? [String: Any] ?? [:]
+        XCTAssertEqual(result["mode"] as? String, mode)
         XCTAssertGreaterThan(result["render_callbacks"] as? Int ?? 0, 10)
         XCTAssertGreaterThan((result["max_zoom"] as? Double ?? 0) - (result["min_zoom"] as? Double ?? 0), 0.6)
         let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys, .prettyPrinted])

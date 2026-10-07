@@ -1379,11 +1379,12 @@ private final class ZoomPerformanceProbe {
         let elapsed = CACurrentMediaTime() - began
         func stats(_ values: [Double]) -> [String: Any] {
             let ordered = values.sorted()
+            let maximum: Double = ordered.last ?? 0
             func percentile(_ p: Double) -> Double {
                 ordered.isEmpty ? 0 : ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * p))]
             }
             return ["samples": ordered.count, "median_ms": percentile(0.5), "p95_ms": percentile(0.95),
-                "p99_ms": percentile(0.99), "max_ms": ordered.last ?? 0,
+                "p99_ms": percentile(0.99), "max_ms": maximum,
                 "over_33ms": ordered.filter { $0 > 33.34 }.count, "over_100ms": ordered.filter { $0 > 100 }.count]
         }
         summary = ["mode": mode, "complete": true, "elapsed_seconds": elapsed, "render_callbacks": frames,
