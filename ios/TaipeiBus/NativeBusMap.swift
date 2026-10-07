@@ -392,12 +392,6 @@ struct NativeBusMap: UIViewRepresentable {
             ("poi-worship", "building.fill", "#8A8A8E", "#B8B8BD", ["place_of_worship"]),
             ("poi-rail", "tram.fill", "#2F7BE5", "#6EA8FF", ["railway"]),
         ]
-        static func poiTextColor(dark: Bool) -> NSExpression {
-            var match: [Any] = ["match", ["get", "class"]]
-            for category in poiCategories { match.append(category.classes); match.append(dark ? category.darkHex : category.hex) }
-            match.append(dark ? "#C7C9CF" : "#6E6C66")
-            return NSExpression(mglJSONObject: ["to-color", match])
-        }
         private func poiIcon(symbol: String, color: UIColor) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
                 let disc = UIBezierPath(ovalIn: CGRect(x: 1.5, y: 1.5, width: 21, height: 21))
@@ -998,6 +992,7 @@ struct NativeBusMap: UIViewRepresentable {
                     paints["pattern"] = layer.fillPattern
                 }
                 if let layer = layer as? MLNLineStyleLayer { paints["line"] = layer.lineColor }
+                if let layer = layer as? MLNHillshadeStyleLayer { paints["exaggeration"] = layer.hillshadeExaggeration }
                 if let layer = layer as? MLNSymbolStyleLayer {
                     paints["text"] = layer.textColor; paints["halo"] = layer.textHaloColor
                     paints["labelField"] = layer.text
@@ -1098,16 +1093,18 @@ struct NativeBusMap: UIViewRepresentable {
                 if let layer = layer as? MLNSymbolStyleLayer {
                     if id.hasPrefix("poi") {
                         // Places keep their category colour, lifted for the dark map.
-                        layer.textColor = darkMode ? Self.poiTextColor(dark: true) : day["text"]
+                        let key = "poi-" + id.replacingOccurrences(of: "poi_major_", with: "").replacingOccurrences(of: "poi_", with: "")
+                        let category = Self.poiCategories.first { $0.name == key }
+                        layer.textColor = darkMode ? color(category?.darkHex ?? "#C7C9CF") : day["text"]
                     } else {
                         layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
                     }
                     layer.textHaloColor = darkMode ? color("#1C1D20") : day["halo"]
                 }
                 if let layer = layer as? MLNHillshadeStyleLayer {
-                    layer.hillshadeShadowColor = color(darkMode ? "#000000" : "#4E5F4A")
-                    layer.hillshadeHighlightColor = darkMode ? NSExpression(forConstantValue: UIColor(white: 1, alpha: 0.06)) : color("#FFFFFF")
-                    layer.hillshadeAccentColor = color(darkMode ? "#101114" : "#6E7F62")
+                    // Hillshade colours are colour arrays (one per light) in this MapLibre version and
+                    // must stay in the style; a single UIColor crashes. Dark mode only softens the relief.
+                    layer.hillshadeExaggeration = darkMode ? NSExpression(forConstantValue: 0.18) : day["exaggeration"]
                 }
             }
         }
