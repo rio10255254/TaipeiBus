@@ -2,7 +2,7 @@ import Foundation
 
 /// The private operator feed is normalized on the server. No account keys are
 /// distributed to phones, and station arrival events cannot invent train IDs.
-public struct MetroTrainReport: Codable, Identifiable, Sendable {
+public struct MetroTrainReport: Codable, Identifiable, Equatable, Sendable {
     public let id: String
     public let operatorID: String
     public let patternID: String
@@ -13,7 +13,7 @@ public struct MetroTrainReport: Codable, Identifiable, Sendable {
     public let observedAt: Date
     public let atPlatform: Bool
 }
-public struct MetroArrival: Codable, Sendable {
+public struct MetroArrival: Codable, Equatable, Sendable {
     public let stationID: String
     public let patternID: String
     public let direction: String
@@ -28,7 +28,7 @@ public struct MetroArrival: Codable, Sendable {
         return max(0, seconds - Int(max(0, age)))
     }
 }
-public struct MetroRealtime: Codable, Sendable {
+public struct MetroRealtime: Codable, Equatable, Sendable {
     public let schema: Int
     public let source: String
     public let trains: [MetroTrainReport]

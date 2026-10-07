@@ -261,7 +261,7 @@ struct JourneyPlanningView: View {
                 Divider()
             }
             let stations = stationResultQuery == query ? stationResults : []
-            if !stations.isEmpty { Text(live.text("公車站牌")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale)) }
+            if !stations.isEmpty { Text(live.text("車站與站牌")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale)) }
             ForEach(StationSearch.groups(stations)) { group in
                 DisclosureGroup {
                 ForEach(group.stations) { station in
@@ -269,7 +269,7 @@ struct JourneyPlanningView: View {
                         choose(TravelPlace(name: station.name, address: "\(station.localizedBearing) · \(station.address)", coordinate: station.coordinate, englishName: station.englishName))
                     } label: {
                         HStack(spacing: 12) {
-                            Image(systemName: "bus.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
+                            Image(systemName: station.mode == .bus ? "bus.fill" : "tram.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(station.localizedBearing.isEmpty ? station.localizedName : station.localizedBearing).liveFont(.subheadline, weight: .medium)
                                 Text(station.address.isEmpty ? station.localizedName : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -281,7 +281,7 @@ struct JourneyPlanningView: View {
                 }
                 } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "bus.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
+                        Image(systemName: group.stations.contains(where: { $0.mode != .bus }) ? "tram.fill" : "bus.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: 22)
                         BilingualName(chinese: group.name, english: group.localizedName).liveFont(.body, weight: .medium)
                         Spacer(minLength: 4)
                         Text(AppText.text("%@ 處", group.stations.count)).liveFont(.caption).foregroundStyle(.secondary)
@@ -721,13 +721,15 @@ private struct JourneyWaitingActions: View {
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 12) {
+                if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer != true {
                 Button { model.showWalkOnMap(index) } label: {
-                    Label(live.text("走到站牌"), systemImage: "figure.walk")
+                    Label(planner.activeRide?.route.mode == .bus ? live.text("走到站牌") : live.text("走到車站"), systemImage: "figure.walk")
                         .liveFont(.body, weight: .semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
                 }.buttonStyle(MapActionStyle())
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                     .accessibilityIdentifier("journey-walk-to-stop")
+                }
                 Button(action: board) {
                     Text(live.text("已上車")).liveFont(.body, weight: .bold).lineLimit(1).minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity, minHeight: 50)

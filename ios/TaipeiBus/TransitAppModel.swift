@@ -268,10 +268,10 @@ final class TransitAppModel: ObservableObject {
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
-                    let packet = await service.metroRealtime(network: metadata.metro)
-                    if let packet { metroRealtime = packet; metroRevision += 1 }
+                    async let rail = service.metroRealtime(network: metadata.metro)
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
+                    if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()

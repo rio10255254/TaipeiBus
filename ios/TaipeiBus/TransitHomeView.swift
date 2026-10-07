@@ -167,7 +167,7 @@ struct TransitHomeView: View {
                         .accessibilityLabel(AppText.text("切換路線方向"))
                 }
                 Button { showDetails = true } label: {
-                    Label(String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
+                    Label(route.mode == .bus ? String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) : AppText.text("列車"), systemImage: route.mode == .bus ? "bus.fill" : "tram.fill")
                         .liveFont(.subheadline, weight: .medium).monospacedDigit().frame(minWidth: 44, minHeight: 44)
                 }.accessibilityLabel(AppText.text("查看此路線公車")).accessibilityIdentifier("route-map-vehicles")
             }.padding(.leading, 10).padding(.trailing, 8).phoneGlass(in: Capsule())
@@ -215,7 +215,7 @@ struct TransitHomeView: View {
                 ForEach(nearbyStations) { station in
                     Button { model.selectStation(station) } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "bus.fill").liveFont(.caption, weight: .semibold)
+                            Image(systemName: station.mode == .bus ? "bus.fill" : "tram.fill").liveFont(.caption, weight: .semibold)
                                 .foregroundStyle(RouteTint.color(for: ""))
                                 .frame(width: 28, height: 28)
                                 .background(Circle().strokeBorder(RouteTint.color(for: ""), lineWidth: 1.6))
@@ -882,12 +882,12 @@ private struct TransitPanel: View {
                 }
                 Button { model.selectStation(station) } label: {
                     HStack(alignment: .center, spacing: 12) {
-                        Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : "mappin.circle.fill")
+                        Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : station.mode == .bus ? "mappin.circle.fill" : "tram.circle.fill")
                             .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color(liveHex: live.appearance.accentColor))
                             .liveFont(.title2).frame(width: 30)
                         VStack(alignment: .leading, spacing: 5) {
                             HStack { BilingualName(station).liveFont(.body, weight: .semibold); Text(station.localizedBearing).liveFont(.caption).foregroundStyle(.secondary) }
-                            Text(station.address.isEmpty ? AppText.text("站牌 %@", station.id) : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(station.mode != .bus ? model.metadata.metro.station(station.id)?.code ?? "" : station.address.isEmpty ? AppText.text("站牌 %@", station.id) : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                         Spacer(minLength: 0)
                         if let position = location.usableCoordinate, position.isInServiceArea {

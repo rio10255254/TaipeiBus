@@ -484,5 +484,8 @@
   "列車方向": "Train directions",
   "班距 %@ 分": "Every %@ min",
   "介面驗證用資料 · 非即時列車": "Interface test data · not live trains",
-  "沿線車站": "Stations on this line"
+  "沿線車站": "Stations on this line",
+  "列車": "Trains",
+  "車站與站牌": "Stations and bus stops",
+  "走到車站": "Walk to station"
 }

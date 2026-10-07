@@ -11,6 +11,13 @@ public struct TransitRide: Identifiable, Sendable {
     public var railService: BusDayService? = nil
     public var boardingAccessSeconds: Double = 0
     public var alightingAccessSeconds: Double = 0
+    public init(route: BusRoute, direction: String, stops: [BusStop], coordinates: [Coordinate],
+                fullRouteSeconds: Double = 0, boardingOffsetSeconds: Double = 0, railService: BusDayService? = nil,
+                boardingAccessSeconds: Double = 0, alightingAccessSeconds: Double = 0) {
+        self.route = route; self.direction = direction; self.stops = stops; self.coordinates = coordinates
+        self.fullRouteSeconds = fullRouteSeconds; self.boardingOffsetSeconds = boardingOffsetSeconds
+        self.railService = railService; self.boardingAccessSeconds = boardingAccessSeconds; self.alightingAccessSeconds = alightingAccessSeconds
+    }
     public var boarding: BusStop { stops.first! }
     public var alighting: BusStop { stops.last! }
     public var stopCount: Int { stops.count - 1 }
