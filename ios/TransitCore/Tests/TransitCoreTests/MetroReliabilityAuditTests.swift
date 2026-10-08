@@ -70,4 +70,14 @@ final class MetroReliabilityAuditTests: XCTestCase {
         let badRows = Data("[{\"Station\":\"未知站\",\"Destination\":\"大安站\",\"UpdateTime\":\"20261008131602\"},{\"Station\":\"士林站\",\"Destination\":\"大安站\",\"UpdateTime\":\"20261007131602\"}]".utf8)
         XCTAssertTrue(try MetroPlatformFeed.parse(badRows,network:metro,serverDate:now,receivedAt:now).isEmpty)
     }
+    func testOldFarUpstreamSightingCannotReappearAsTheNextTrainAfterTrackingExpired() throws {
+        let metro = try network(), p = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
+        let now = Date(timeIntervalSince1970:1_800_000_000), upstream = 5, board = 10
+        let journey = try XCTUnwrap(metro.ridingSeconds(routeID:p.id,direction:p.direction,from:p.stationIDs[upstream],to:p.stationIDs[board]))
+        let event = MetroPlatformEvent(stationID:p.stationIDs[upstream],patternID:p.id,direction:p.direction,
+            observedAt:now-(journey+MetroTrainTimeline.dwell(p,upstream)-60))
+        let value = MetroPlatformFeed.nextArrival(routeID:p.id,direction:p.direction,boardingStationID:p.stationIDs[board],
+            alightingStationID:p.stationIDs[board+1],events:[event],network:metro,at:now,longestGap:300)
+        XCTAssertNil(value,"A minutes-old signal cannot become an apparently near train many stations later")
+    }
 }
