@@ -1,0 +1,25 @@
+{
+  "license": "ODbL 1.0, © OpenStreetMap contributors",
+  "collectedAt": "2026-10-08T08:08:55.966382+00:00",
+  "bbox": "24.92,121.31,25.19,121.64",
+  "files": {
+    "tracks": {
+      "endpoint": "https://lz4.overpass-api.de/api/interpreter",
+      "query": "[out:json][timeout:150];way[\"railway\"~\"^(subway|light_rail|monorail)$\"](24.92,121.31,25.19,121.64);out tags geom;",
+      "elements": 1236,
+      "osmBase": "2026-10-08T08:06:35Z"
+    },
+    "platforms": {
+      "endpoint": "https://overpass-api.de/api/interpreter",
+      "query": "[out:json][timeout:150];(nwr[\"railway\"=\"platform\"](24.92,121.31,25.19,121.64);nwr[\"public_transport\"=\"platform\"][\"train\"!=\"yes\"][\"bus\"!=\"yes\"](24.92,121.31,25.19,121.64););out tags center;",
+      "elements": 346,
+      "osmBase": "2026-10-08T08:06:35Z"
+    },
+    "stations": {
+      "endpoint": "https://overpass-api.de/api/interpreter",
+      "query": "[out:json][timeout:150];nwr[\"railway\"~\"^(station|halt)$\"][\"station\"~\"subway|light_rail|monorail\"](24.92,121.31,25.19,121.64);out tags center;",
+      "elements": 164,
+      "osmBase": "2026-10-08T08:06:35Z"
+    }
+  }
+}

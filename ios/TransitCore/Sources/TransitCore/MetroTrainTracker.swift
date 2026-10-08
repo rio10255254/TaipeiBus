@@ -217,7 +217,9 @@ public struct MetroTrainTracker: Sendable {
 public struct MetroPatternGeometry: Sendable {
     public let line: RouteLine
     public let stationAlong: [Double]
-    public init?(pattern: MetroPattern) {
+    public let profile: MetroHeightProfile?
+    public init?(pattern: MetroPattern, profile: MetroHeightProfile? = nil) {
+        self.profile = profile
         let line = RouteLine(coordinates: pattern.coordinates)
         guard line.length > 0 else { return nil }
         var along: [Double] = []
@@ -237,6 +239,7 @@ public struct MetroPatternGeometry: Sendable {
         let from = stationAlong[state.previousIndex], to = stationAlong[state.nextIndex]
         return from + (to - from) * eased
     }
+    public func height(along: Double) -> Double { profile?.height(at: along) ?? 0 }
     public func sample(along: Double) -> (Coordinate, Double) {
         line.sample(fraction: max(0, min(line.length, along)) / line.length)
     }

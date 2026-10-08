@@ -64,6 +64,8 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     if (uniforms.mode.x == 2) {
         out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.10,0.57,1.0) : float3(0.12,0.42,0.96), bus.style.y * 0.9);
     }
+    // A train in a tunnel: a cool translucent ghost beneath the street.
+    else if (bus.style.z > 1.5) { out.color.rgb = mix(out.color.rgb, float3(0.62, 0.70, 0.80), 0.3); out.color.a *= 0.4; }
     else if (bus.style.z > 0) { out.color.a *= 0.48; }
     return out;
 }
@@ -105,12 +107,16 @@ vertex BusFragment busShadowVertex(uint vertexID [[vertex_id]], uint instanceID 
     const BusVertex v = vertices[vertexID];
     const BusInstance bus = instances[instanceID];
     const float c = cos(bus.style.x), s = sin(bus.style.x);
-    float3 p = float3(c * v.position.x + s * v.position.y, -s * v.position.x + c * v.position.y, 0.035) + bus.position.xyz;
+    // The shadow falls on the street even for a train on a viaduct.
+    float3 p = float3(c * v.position.x + s * v.position.y, -s * v.position.x + c * v.position.y, 0.035) + float3(bus.position.xy, 0);
     BusFragment out;
     out.position = readableBus(uniforms.matrix * float4(p, 1),
                                uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.uv = v.normal.xy;
-    out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.025) : float3(0.10,0.12,0.15), bus.style.z > 0 ? 0.10 : 0.22);
+    // Nothing is cast from a tunnel; a viaduct train's shadow is softer for its height.
+    const float lift = clamp(bus.position.z / 30.0, 0.0, 0.6);
+    out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.025) : float3(0.10,0.12,0.15),
+                       bus.style.z > 1.5 ? 0.0 : (bus.style.z > 0 ? 0.10 : 0.22 * (1.0 - lift)));
     out.color.a *= max(uniforms.mode.z, bus.style.y);
     out.normal = float3(0, 0, 1);
     out.material = 0;

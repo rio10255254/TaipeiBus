@@ -351,6 +351,21 @@ struct NativeBusMap: UIViewRepresentable {
 
         private var markerBlue: UIColor { UIColor(liveHex: darkMode ? MapChrome.walkingDark : RouteTint.general) }
 
+        /// City zoom shows every line solid, like the official map. Toward street zoom a tunnel
+        /// hands over to its dashed trace and a viaduct's ground line fades to a footprint under
+        /// the 3D deck, so the three levels never sit on one plane.
+        static func metroLineOpacity(dimmed: Bool, casing: Bool) -> NSExpression {
+            let f = (dimmed ? (casing ? 0.4 : 0.32) : 1.0)
+            func level(_ underground: Double, _ elevated: Double) -> [Any] {
+                ["match", ["get", "structure"], "underground", underground * f, "elevated", elevated * f, f]
+            }
+            return NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
+                13, level(1, 1), 14.8, level(0, 1), 15.5, level(0, casing ? 0 : 0.45), 17, level(0, casing ? 0 : 0.3)])
+        }
+        static func metroTunnelOpacity(dimmed: Bool) -> NSExpression {
+            NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 13, 0, 14.8, dimmed ? 0.22 : 0.62, 17, dimmed ? 0.2 : 0.5])
+        }
+
         /// The metro is drawn as part of the map itself, like Apple Maps' transit lines: full
         /// line colours on the ground beneath buildings and labels, widening with zoom.
         private func installMetro(_ style: MLNStyle) {
@@ -374,10 +389,21 @@ struct NativeBusMap: UIViewRepresentable {
             lines.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
             lines.lineWidth = zoomed([9: 1.4, 12: 2.8, 14: 4.2, 16: 5.6, 18: 7.5])
             lines.lineJoin = NSExpression(forConstantValue: "round"); lines.lineCap = NSExpression(forConstantValue: "round")
+            // Tunnels: a quiet dashed trace that takes over from the solid line at street zoom,
+            // where the trains themselves are drawn below the street.
+            let tunnels = MLNLineStyleLayer(identifier: "metro-network-tunnels", source: source)
+            tunnels.predicate = NSPredicate(format: "structure == 'underground'")
+            tunnels.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
+            tunnels.lineWidth = zoomed([13: 1.6, 16: 3.2, 18: 4.4])
+            tunnels.lineDashPattern = NSExpression(forConstantValue: [1.4, 1.2])
+            tunnels.minimumZoomLevel = 13
+            casing.lineOpacity = Self.metroLineOpacity(dimmed: false, casing: true)
+            lines.lineOpacity = Self.metroLineOpacity(dimmed: false, casing: false)
+            tunnels.lineOpacity = Self.metroTunnelOpacity(dimmed: false)
             // Ground level: above streets, under 3D buildings and every label.
             if let below = style.layer(withIdentifier: "building") {
-                style.insertLayer(casing, below: below); style.insertLayer(lines, below: below)
-            } else { style.addLayer(casing); style.addLayer(lines) }
+                style.insertLayer(tunnels, below: below); style.insertLayer(casing, below: below); style.insertLayer(lines, below: below)
+            } else { style.addLayer(tunnels); style.addLayer(casing); style.addLayer(lines) }
             let stations = MLNShapeSource(identifier: "metro-stations", shape: nil, options: nil)
             style.addSource(stations); metroStationsSource = stations
             let dots = MLNCircleStyleLayer(identifier: "metro-station-dots", source: stations)
@@ -416,14 +442,20 @@ struct NativeBusMap: UIViewRepresentable {
             if key != lastMetroKey {
             lastMetroKey = key
             var seen = Set<String>()
-            let lines = network.patterns.filter { $0.direction == "0" }.compactMap { pattern -> MLNPolylineFeature? in
+            let lines = network.patterns.filter { $0.direction == "0" }.compactMap { pattern -> [MLNPolylineFeature]? in
                 // Operating branches remain visible; exact duplicate shapes are drawn once.
                 let signature = pattern.stationIDs.joined(separator: "|")
                 guard seen.insert(signature).inserted, let line = network.line(pattern.lineID) else { return nil }
-                var points = pattern.coordinates.map(\.locationCoordinate)
-                let feature = MLNPolylineFeature(coordinates: &points, count: UInt(points.count))
-                feature.attributes = ["color": RouteTint.mapHex(for: line.name, dark: darkMode)]; return feature
-            }
+                let color = RouteTint.mapHex(for: line.name, dark: darkMode)
+                // Tunnel, at-grade and viaduct pieces are styled apart at street zoom.
+                let pieces = network.heightProfile(pattern)?.pieces(of: RouteLine(coordinates: pattern.coordinates))
+                    ?? [(MetroStructure.ground, pattern.coordinates)]
+                return pieces.map { piece -> MLNPolylineFeature in
+                    var points = piece.coordinates.map(\.locationCoordinate)
+                    let feature = MLNPolylineFeature(coordinates: &points, count: UInt(points.count))
+                    feature.attributes = ["color": color, "structure": piece.structure.rawValue]; return feature
+                }
+            }.flatMap { $0 }
             metroSource?.shape = MLNShapeCollectionFeature(shapes: lines)
             // One stop per physical station: platforms of different lines sharing a name and
             // standing within a short walk are drawn as a single interchange.
@@ -470,9 +502,12 @@ struct NativeBusMap: UIViewRepresentable {
                 lastMetroFocusKey = focusKey
                 let dimmed = focusKey == "dim"
                 (style.layer(withIdentifier: "metro-network-lines") as? MLNLineStyleLayer)?.lineOpacity =
-                    NSExpression(forConstantValue: dimmed ? 0.32 : 1)
+                    Self.metroLineOpacity(dimmed: dimmed, casing: false)
                 (style.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer)?.lineOpacity =
-                    NSExpression(forConstantValue: dimmed ? 0.4 : 1)
+                    Self.metroLineOpacity(dimmed: dimmed, casing: true)
+                (style.layer(withIdentifier: "metro-network-tunnels") as? MLNLineStyleLayer)?.lineOpacity =
+                    Self.metroTunnelOpacity(dimmed: dimmed)
+                trains?.dimmed = dimmed
                 (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleOpacity =
                     NSExpression(forConstantValue: dimmed ? 0.45 : 1)
                 (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleStrokeOpacity =
@@ -1089,8 +1124,10 @@ struct NativeBusMap: UIViewRepresentable {
             case .metroTrain(let id):
                 guard let report = model.metroTrain(id),
                       let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
-                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: 250,
-                    pitch: 52, heading: pose.heading)
+                // A tunnel train is seen through the street at a gentler angle; a viaduct train from a little higher.
+                let elevation = PreparedMetroTrain(report: report, network: model.metadata.metro)?.renderPose(at: Date())?.elevation ?? 0
+                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: elevation < -3 ? 300 : 260,
+                    pitch: elevation < -3 ? 40 : 54, heading: pose.heading)
                 moveCamera(camera, map: map, duration: 0.8)
             case .coordinate(let position):
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)

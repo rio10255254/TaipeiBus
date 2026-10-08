@@ -16,13 +16,25 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         trainOrigins = Dictionary(trains.compactMap { track in trainPose(track, at: now).map { (track.report.id,$0.coordinate) } }, uniquingKeysWith: { a,_ in a })
         trainBlendStarted = now
         if network.generatedAt != geometryGeneration { patternGeometry = [:]; geometryGeneration = network.generatedAt }
+        let key = "\(network.generatedAt):\(network.heightProfiles.count):\(darkAppearance)"
+        if key != structureKey {
+            structureKey = key
+            let metersPerWorld = Self.circumference * cos(Self.origin.latitude * .pi / 180)
+            let dark = darkAppearance
+            structureVertices = MetroStructureMesh.viaducts(network: network, origin: Self.origin, metersPerWorld: metersPerWorld) { line in
+                Self.rgb(RouteTint.mapHex(for: line.name, dark: dark))
+            }.map { v in
+                Vertex(position: SIMD4(v.x, v.y, v.z, 0), normal: SIMD4(v.nx, v.ny, v.nz, v.material), color: SIMD4(v.r, v.g, v.b, 1))
+            }
+            structureBuffer = nil; structureCount = 0
+        }
         trains = reports.compactMap { report in
             guard report.isEstimated, let pattern = network.pattern(report.patternID, direction: report.direction) else {
                 return PreparedMetroTrain(report: report, network: network)
             }
             // Sighting-based trains share one prepared track per pattern.
             let key = pattern.id + "|" + pattern.direction
-            if patternGeometry[key] == nil { patternGeometry[key] = .some(MetroPatternGeometry(pattern: pattern)) }
+            if patternGeometry[key] == nil { patternGeometry[key] = .some(MetroPatternGeometry(pattern: pattern, profile: network.heightProfile(pattern))) }
             guard let geometry = patternGeometry[key] ?? nil else { return nil }
             return PreparedMetroTrain(report: report, network: network, geometry: geometry)
         }
@@ -36,6 +48,13 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
     private var trainLivery: [String: Float] = [:]
     private var patternGeometry: [String: MetroPatternGeometry?] = [:]
+    /// Viaducts are static: built once per network and appearance, drawn under the trains.
+    private var structureVertices: [Vertex] = []
+    private var structureBuffer: MTLBuffer?
+    private var structureCount = 0
+    private var structureKey = ""
+    /// A bus in focus pushes the metro back; viaducts stay as quiet context.
+    var dimmed = false { didSet { if dimmed != oldValue { setNeedsDisplay() } } }
     private static let trainBlendSeconds = 1.8
     private var trainsOnScreen = 0
     private var trainRedrawInterval: CFTimeInterval = 1 / 60
@@ -43,6 +62,10 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private var geometryGeneration = ""
     /// 16 + 0xRRGGBB. Buses use this slot for wheel rotation, which stays below 2π, so the
     /// shader can tell a train livery apart from a wheel angle.
+    private static func rgb(_ hex: String) -> (Float, Float, Float) {
+        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x1F6FD1
+        return (Float((value >> 16) & 255) / 255, Float((value >> 8) & 255) / 255, Float(value & 255) / 255)
+    }
     private static func packedColor(_ hex: String) -> Float {
         let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x1F6FD1
         return Float(16 + (value & 0xFFFFFF))
@@ -219,6 +242,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     override func willMove(from mapView: MLNMapView) {
+        structureBuffer = nil; structureCount = 0
         pipeline = nil; outlinePipeline = nil; shadowPipeline = nil
         vertexBuffer = nil; compactVertexBuffer = nil; outlineBuffer = nil; shadowBuffer = nil
         instanceBuffers = []; hitPoints = []
@@ -280,11 +304,14 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         var candidates: [Candidate] = []
         candidates.reserveCapacity(poses.count)
         let minimumLength = 5.5 + min(1, max(0, (context.zoomLevel - 11) / 3)) * 1.5
+        // At street zoom a train in a tunnel is drawn as a translucent ghost below the street.
+        let ghostTunnels = trainMode && context.zoomLevel >= 13.5
         for pose in poses {
             let mercator = pose.coordinate.mercator
             let east = (mercator.x - origin.x) * metersPerWorld
             let north = -(mercator.y - origin.y) * metersPerWorld
-            let clip = projection * SIMD4(east, north, 1.75, 1)
+            let up = pose.elevation
+            let clip = projection * SIMD4(east, north, up + 1.75, 1)
             guard clip.w > 0 else { continue }
             let ndc = clip / clip.w
             guard abs(ndc.x) < 1.2, abs(ndc.y) < 1.2 else { continue }
@@ -293,14 +320,14 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let selected = pose.id == selectedID
             let emphasized = emphasizedIDs.contains(pose.id)
             let angle = pose.heading * .pi / 180
-            let front = projection * SIMD4(east + sin(angle) * 6, north + cos(angle) * 6, 1.75, 1)
+            let front = projection * SIMD4(east + sin(angle) * 6, north + cos(angle) * 6, up + 1.75, 1)
             let screenLength = hypot((front.x / front.w - ndc.x) * context.size.width / 2,
                                      (front.y / front.w - ndc.y) * context.size.height / 2)
             let naturalLength = max(0.01, screenLength * 2)
             let scale = Float(max(1, minimumLength / naturalLength))
-            let instance = Instance(position: SIMD4(Float(east), Float(north), 0, scale),
+            let instance = Instance(position: SIMD4(Float(east), Float(north), Float(up), scale),
                                     style: SIMD4(Float(angle), selected ? selectionStrength : emphasized ? selectionStrength * 0.7 : 0,
-                                                 pose.stale ? 1 : 0, trainMode ? trainLivery[pose.id] ?? Self.packedColor(RouteTint.general) :
+                                                 ghostTunnels && up < -3 ? 2 : pose.stale ? 1 : 0, trainMode ? trainLivery[pose.id] ?? Self.packedColor(RouteTint.general) :
                                                     Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
             candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
                                selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))
@@ -335,6 +362,26 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         // Custom layers inherit a 2D sublayer depth range. Restore the native 3D viewport.
         encoder.setViewport(MTLViewport(originX: 0, originY: 0, width: drawableSize.width, height: drawableSize.height, znear: 0, zfar: 1))
         encoder.setCullMode(.none)
+        if trainMode, context.zoomLevel >= 12.5, !structureVertices.isEmpty {
+            if structureBuffer == nil, let device = mapView.backendResource().device {
+                structureBuffer = structureVertices.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
+                structureCount = structureBuffer == nil ? 0 : structureVertices.count
+            }
+            if let structureBuffer, structureCount > 0 {
+                // Fades in toward street zoom; one identity instance places the static mesh.
+                let fade = Float(min(1, max(0, context.zoomLevel - 12.5)))
+                var structureUniforms = uniforms
+                structureUniforms.mode = SIMD4(0, 0, 1, fade * (dimmed ? 0.45 : 1))
+                var identity = Instance(position: SIMD4(0, 0, 0, 1), style: .zero)
+                encoder.setRenderPipelineState(pipeline)
+                encoder.setDepthStencilState(normalDepth)
+                encoder.setVertexBuffer(structureBuffer, offset: 0, index: 0)
+                encoder.setVertexBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                encoder.setFragmentBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                encoder.setVertexBytes(&identity, length: MemoryLayout<Instance>.stride, index: 2)
+                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: structureCount, instanceCount: 1)
+            }
+        }
         if !compact.isEmpty {
             let distanceBlend = Float(min(1, max(0, (context.zoomLevel - 11) / 4)))
             let definition = distanceBlend * distanceBlend * (3 - 2 * distanceBlend)

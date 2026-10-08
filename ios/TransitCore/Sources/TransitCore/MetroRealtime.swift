@@ -148,14 +148,18 @@ public struct PreparedMetroTrain: Sendable {
     /// Sighting-based trains move along their whole pattern on a timeline instead of one segment.
     private let pattern: MetroPattern?
     private let geometry: MetroPatternGeometry?
+    /// Height along the track; an official report's short segment starts `profileOffset` in.
+    private let profile: MetroHeightProfile?
+    private let profileOffset: Double
     public init?(report: MetroTrainReport, network: MetroNetwork, geometry shared: MetroPatternGeometry? = nil) {
         guard let pattern = network.pattern(report.patternID, direction: report.direction),
               let index = pattern.stationIDs.firstIndex(of: report.nextStationID) else { return nil }
         self.report = report
         if report.plan != nil {
-            guard let geometry = shared ?? MetroPatternGeometry(pattern: pattern) else { return nil }
+            guard let geometry = shared ?? MetroPatternGeometry(pattern: pattern, profile: network.heightProfile(pattern)) else { return nil }
             self.pattern = pattern; self.geometry = geometry
             segment = geometry.line; duration = 0; atStart = false
+            profile = geometry.profile; profileOffset = 0
             return
         }
         self.pattern = nil; geometry = nil
@@ -164,6 +168,7 @@ public struct PreparedMetroTrain: Sendable {
         let first = atStart ? 0 : index - 1, last = atStart ? 1 : index
         guard let from = line.match(pattern.stationCoordinates[first], heading: nil),
               let to = line.match(pattern.stationCoordinates[last], heading: nil) else { return nil }
+        profile = network.heightProfile(pattern); profileOffset = min(from.along, to.along)
         segment = RouteLine(coordinates: line.slice(from: from, to: to))
         duration = report.atPlatform || atStart ? 0 : pattern.seconds[index - 1]
     }
@@ -207,6 +212,7 @@ public struct PreparedMetroTrain: Sendable {
         }
         let sample = segment.sample(fraction: position / segment.length)
         return VehiclePose(id: report.id, coordinate: coordinate ?? sample.0, heading: heading ?? sample.1,
-            stale: false, traveledDistance: 0, observedAt: report.observedAt)
+            stale: false, traveledDistance: 0, observedAt: report.observedAt,
+            elevation: profile?.height(at: profileOffset + position) ?? 0)
     }
 }

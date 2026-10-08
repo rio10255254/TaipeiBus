@@ -9,6 +9,8 @@ public struct VehiclePose: Sendable {
     public let traveledDistance: Double
     /// GPS time represented by this point on the buffered, received trajectory.
     public let observedAt: Date
+    /// Metres above the street: positive on a viaduct, negative in a tunnel.
+    public var elevation: Double = 0
 }
 
 /// Animates only between received observations on an official route. No future extrapolation.

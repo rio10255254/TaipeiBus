@@ -69,6 +69,9 @@ public struct MetroNetwork: Codable, Sendable {
     public let stations: [MetroStation]
     public let patterns: [MetroPattern]
     public let transfers: [MetroTransfer]
+    /// Track heights, attached from MetroLevels after decoding.
+    public internal(set) var heightProfiles: [String: MetroHeightProfile] = [:]
+    private enum CodingKeys: String, CodingKey { case schema, generatedAt, source, lines, stations, patterns, transfers }
     public static let empty = MetroNetwork(schema: 1, generatedAt: "", source: "", lines: [], stations: [], patterns: [], transfers: [])
     public init(data: Data) throws {
         self = try JSONDecoder().decode(Self.self, from: data)

@@ -149,7 +149,12 @@ actor TransitService {
 
     private func installMetro(in metadata: inout TransitMetadata) {
         guard let url = Bundle.main.url(forResource: "MetroNetwork", withExtension: "json"),
-              let data = try? Data(contentsOf: url), let metro = try? MetroNetwork(data: data) else { return }
+              let data = try? Data(contentsOf: url), var metro = try? MetroNetwork(data: data) else { return }
+        // Underground / at-grade / viaduct heights; without them trains stay on the street plane.
+        if let url = Bundle.main.url(forResource: "MetroLevels", withExtension: "json"),
+           let bytes = try? Data(contentsOf: url), let levels = try? MetroLevels(data: bytes) {
+            metro = metro.withLevels(levels)
+        }
         metro.attach(to: &metadata)
     }
 
