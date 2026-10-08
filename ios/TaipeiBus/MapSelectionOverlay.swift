@@ -195,27 +195,42 @@ private struct MapContextLabelContent: View, Equatable {
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).readableMapSurface().fixedSize()
-        } else if let id = model.selectedTrainID, let report = model.metroRealtime?.trains.first(where: { $0.id == id }) {
+        } else if let id = model.selectedTrainID, let report = model.metroTrain(id) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                if (-15...60).contains(timeline.date.timeIntervalSince(report.observedAt)),
-                   let pattern = model.metadata.metro.pattern(report.patternID, direction: report.direction),
-                   let line = model.metadata.metro.line(pattern.lineID), let station = model.metadata.metro.station(report.nextStationID) {
+                let metro = model.metadata.metro
+                if let state = report.state(network: metro, at: timeline.date),
+                   let pattern = metro.pattern(report.patternID, direction: report.direction),
+                   let line = metro.line(pattern.lineID) {
+                    // Standing at a platform shows that station; moving shows the next stop and its time.
+                    let stationIndex = state.atPlatform ? state.previousIndex : state.nextIndex
+                    let station = metro.station(pattern.stationIDs[stationIndex])
+                    let terminus = metro.station(report.destinationStationID)
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 8) {
                             RouteBadge(name: line.code, tintName: line.name, compact: true)
-                            Text(report.id).font(.caption.weight(.semibold)).lineLimit(1)
+                            Text(report.isEstimated ? AppText.text("往 %@", terminus.map { AppLanguage.current == .english ? $0.englishName : $0.name } ?? "") : report.id)
+                                .font(.caption.weight(.semibold)).lineLimit(1)
                             Spacer(minLength: 2)
-                            Button { model.metroRevisionForSelection() } label: { Image(systemName:"scope").frame(width:32,height:32) }
-                                .accessibilityLabel(AppText.text("跟隨列車"))
+                            Button { model.metroRevisionForSelection() } label: {
+                                Image(systemName: model.followingTrain ? "scope" : "location.viewfinder").frame(width:32,height:32)
+                            }.accessibilityLabel(AppText.text("跟隨列車"))
                         }
-                        HStack {
-                            Text(AppText.text("下一站 · ") + (AppLanguage.current == .english ? station.englishName : station.name)).font(.subheadline.weight(.semibold))
-                            Spacer(minLength:4)
-                            Text(MetroCountdown.label(max(0,Int(report.remainingSeconds - max(0,timeline.date.timeIntervalSince(report.observedAt)))))).font(.subheadline).monospacedDigit()
+                        if let station {
+                            HStack {
+                                Text((state.atPlatform ? AppText.text("停靠 · ") : AppText.text("下一站 · ")) + (AppLanguage.current == .english ? station.englishName : station.name))
+                                    .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                                Spacer(minLength:4)
+                                if !state.atPlatform {
+                                    Text(MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))).font(.subheadline).monospacedDigit()
+                                        .contentTransition(.numericText(countsDown: true))
+                                }
+                            }
+                            if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
                         }
-                        if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
-                        Text(AppText.text("官方列車訊號 · 位置為估計")).font(.caption2).foregroundStyle(.secondary)
-                    }.mapLabelSurface().accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
+                        Text(report.isEstimated ? (state.holding ? AppText.text("等待下一筆進站紀錄") : AppText.text("依進站紀錄推估位置")) : AppText.text("官方列車訊號 · 位置為估計"))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.mapLabelSurface().animation(.smooth(duration: 0.3), value: stationIndex)
+                    .accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
                 }
             }
         }

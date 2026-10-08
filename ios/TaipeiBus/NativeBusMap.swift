@@ -481,9 +481,10 @@ struct NativeBusMap: UIViewRepresentable {
             }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
             trains?.selectedID = model.selectedTrainID
-            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? "")"
+            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? ""):\(focusKey):\(focusKey == "dim" ? model.selectedTrainID ?? "" : "")"
             guard trainKey != lastMetroTrainKey else { return }; lastMetroTrainKey = trainKey
-            var reports = model.metroRealtime?.trains ?? []
+            // Trains step back with the rest of the metro while a bus is in focus.
+            var reports = focusKey == "dim" ? model.metroTrains.filter { $0.id == model.selectedTrainID } : model.metroTrains
             if let route = model.selectedRoute, route.mode != .bus {
                 let ids = Set(model.metadata.variants(routeID: route.id).map(\.id))
                 reports = reports.filter { ids.contains($0.patternID) }
@@ -1086,7 +1087,7 @@ struct NativeBusMap: UIViewRepresentable {
             else { lastFocusWasLeavingCity = false }
             switch focus {
             case .metroTrain(let id):
-                guard let report = model.metroRealtime?.trains.first(where: { $0.id == id }),
+                guard let report = model.metroTrain(id),
                       let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
                 let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: 250,
                     pitch: 52, heading: pose.heading)

@@ -20,21 +20,29 @@ actor TransitService {
         } catch { return metroPacket }
     }
     private var platformFetchedAt = Date.distantPast
-    /// Taipei Metro's free open-data "train entering station" feed, about every 30 s. It has no
-    /// countdown or train identity; the app uses it only to estimate the next train.
+    private var platformTag: String?
+    /// Taipei Metro's free open-data "train entering station" feed. The file is rewritten about
+    /// every 16 s; a conditional request costs no body when nothing changed. It has no countdown
+    /// or train identity, so the app estimates waits and places trains from it.
     func metroPlatformEvents(network: MetroNetwork) async -> [MetroPlatformEvent]? {
-        guard Date().timeIntervalSince(platformFetchedAt) >= 25, !network.stations.isEmpty else { return nil }
+        guard Date().timeIntervalSince(platformFetchedAt) >= 14, !network.stations.isEmpty else { return nil }
         platformFetchedAt = Date()
         var request = URLRequest(url: MetroPlatformFeed.url)
         request.timeoutInterval = 8; request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let platformTag { request.setValue(platformTag, forHTTPHeaderField: "If-None-Match") }
         do {
             let (bytes, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            guard let http = response as? HTTPURLResponse else { return nil }
+            if http.statusCode == 304 { return [] }
+            guard http.statusCode == 200 else { return nil }
+            let tag = http.value(forHTTPHeaderField: "ETag")
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(identifier: "GMT")
             formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
             let server = (http.value(forHTTPHeaderField: "Date")).flatMap(formatter.date(from:))
-            return try MetroPlatformFeed.parse(bytes, network: network, serverDate: server, receivedAt: Date())
+            let events = try MetroPlatformFeed.parse(bytes, network: network, serverDate: server, receivedAt: Date())
+            platformTag = tag
+            return events
         } catch { return nil }
     }
     private let transport: ConditionalFeedTransport

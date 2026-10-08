@@ -57,12 +57,35 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var metroRevision = 0
     /// Recent official "train entering station" sightings, kept for 15 minutes.
     @Published private(set) var metroPlatformEvents: [MetroPlatformEvent] = []
-    private var needsMetroPlatform: Bool {
-        planner.selected?.rides.contains { $0.route.mode != .bus } == true || selectedStation?.mode == .metro
+    /// Trains placed from platform sightings until an authorized per-train feed is connected.
+    @Published private(set) var estimatedTrains: [MetroTrainReport] = []
+    private var trainTracker = MetroTrainTracker()
+    /// Official trains when an authorized feed is live, otherwise the sighting-based estimates.
+    var metroTrains: [MetroTrainReport] {
+        let now = Date()
+        if let official = metroRealtime?.trains.filter({ (-15...60).contains(now.timeIntervalSince($0.observedAt)) }), !official.isEmpty {
+            return official
+        }
+        return estimatedTrains
     }
+    func metroTrain(_ id: String?) -> MetroTrainReport? {
+        guard let id else { return nil }
+        return metroTrains.first { $0.id == id }
+    }
+    /// The open feed is a few kilobytes and answers "not modified" between rewrites, so it is
+    /// polled whenever the app is in the foreground and trains are drawn on the map.
     private func platformIfNeeded() async -> [MetroPlatformEvent]? {
-        guard needsMetroPlatform else { return nil }
-        return await service.metroPlatformEvents(network: metadata.metro)
+        await service.metroPlatformEvents(network: metadata.metro)
+    }
+    private func updateEstimatedTrains(with sightings: [MetroPlatformEvent]?) {
+        let now = Date()
+        if let sightings { trainTracker.ingest(sightings, network: metadata.metro, at: now) } else { trainTracker.prune(network: metadata.metro, at: now) }
+        let reports = trainTracker.reports(network: metadata.metro, at: now)
+        // Reports carry their own timeline, so the map only reloads when a plan changes.
+        guard reports.map({ $0.id }) != estimatedTrains.map({ $0.id }) || reports.map({ $0.plan }) != estimatedTrains.map({ $0.plan }) else { return }
+        estimatedTrains = reports
+        reacquireBoardedTrain(at: now)
+        metroRevision += 1
     }
     @Published var selectedTrainID: String?
     @Published var followingTrain = false
@@ -292,10 +315,12 @@ final class TransitAppModel: ObservableObject {
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
-                    if let sightings = await platform {
+                    let sightings = await platform
+                    if let sightings, !sightings.isEmpty {
                         let merged = MetroPlatformFeed.merge(metroPlatformEvents, sightings, at: Date())
                         if merged != metroPlatformEvents { metroPlatformEvents = merged }
                     }
+                    updateEstimatedTrains(with: sightings)
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
@@ -607,7 +632,7 @@ final class TransitAppModel: ObservableObject {
         if onboard, let first = remainingRides.first, !riding.isEmpty {
             if first.route.mode != .bus {
                 let remaining = metroRemaining(first, at: date)
-                riding[0] = remaining.seconds; positionUncertain = !remaining.officialPosition
+                riding[0] = remaining.seconds; positionUncertain = remaining.source == .schedule
             } else if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
                let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
                let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
@@ -657,9 +682,9 @@ final class TransitAppModel: ObservableObject {
 #endif
         boardedAt = Date()
         if ride.route.mode != .bus {
-            let selected = metroRealtime?.trains.first { $0.id == selectedTrainID }
+            let selected = metroTrain(selectedTrainID)
             if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
-                selectedTrainID = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: Date())?.trainID
+                selectedTrainID = boardingTrain(for: ride, at: Date())?.id
             }
         }
         boardedVehicle = nil
@@ -735,9 +760,77 @@ final class TransitAppModel: ObservableObject {
     func metroRevisionForSelection() {
         metroRevision += 1
         followingTrain = true
-        guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
-              let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
+        guard let id = selectedTrainID, let report = metroTrain(id),
+              MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) != nil else { return }
         focusMap(.metroTrain(id))
+    }
+    /// The train a rider who just confirmed boarding is most likely on: one standing at or just
+    /// leaving the boarding platform, otherwise the next one due there.
+    func boardingTrain(for ride: TransitRide, at date: Date) -> MetroTrainReport? {
+        if let id = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.trainID, let train = metroTrain(id) { return train }
+        let metro = metadata.metro
+        var best: (train: MetroTrainReport, score: Double)?
+        for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction),
+                  let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
+                  let state = train.state(network: metro, at: date) else { continue }
+            let score: Double
+            if state.previousIndex == board, state.atPlatform || state.progress < 0.6 { score = state.atPlatform ? 0 : 20 }
+            else if let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern), seconds <= 240 { score = 30 + seconds }
+            else { continue }
+            if best.map({ score < $0.score }) ?? true { best = (train, score) }
+        }
+        return best?.train
+    }
+    /// A sighting-based train can be dropped and re-created after missed sightings; keep the
+    /// rider attached to the train that is where theirs should be.
+    private func reacquireBoardedTrain(at date: Date) {
+        guard boardedAt != nil, metroTrain(selectedTrainID) == nil, case .ride(let index) = planner.currentStep,
+              let rides = planner.selected?.rides, rides.indices.contains(index), rides[index].route.mode != .bus else { return }
+        let ride = rides[index]
+        let expected = metroScheduleRemaining(ride, at: date).seconds
+        let metro = metadata.metro
+        var best: (id: String, error: Double)?
+        for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction),
+                  let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
+                  let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
+                  let state = train.state(network: metro, at: date), state.previousIndex >= board, state.previousIndex < alight,
+                  let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) else { continue }
+            let error = abs(seconds - expected)
+            if error <= 150, best.map({ error < $0.error }) ?? true { best = (train.id, error) }
+        }
+        if let best { selectedTrainID = best.id }
+    }
+    /// The soonest tracked train due at a station that continues to `alighting`.
+    func nextTrackedTrain(routeID: String, direction: String, boardingStationID: String, alightingStationID: String?,
+                          at date: Date) -> (train: MetroTrainReport, seconds: Double, entering: Bool)? {
+        let metro = metadata.metro
+        guard let planned = metro.pattern(routeID, direction: direction) else { return nil }
+        var best: (train: MetroTrainReport, seconds: Double, entering: Bool)?
+        for train in metroTrains where train.direction == direction {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction), pattern.lineID == planned.lineID,
+                  let board = pattern.stationIDs.firstIndex(of: boardingStationID), board < pattern.stationIDs.count - 1,
+                  let state = train.state(network: metro, at: date),
+                  let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern) else { continue }
+            if let alightingStationID {
+                guard let alight = pattern.stationIDs.firstIndex(of: alightingStationID), alight > board else { continue }
+            }
+            if best.map({ seconds < $0.seconds }) ?? true { best = (train, seconds, seconds == 0 && !state.holding) }
+        }
+        return best
+    }
+    /// A tracked train first, then a single recent sighting projected forward. Past one full
+    /// headway an unseen earlier train is likely, so the caller falls back to the headway.
+    private func sightingWait(routeID: String, direction: String, boardingStationID: String, alightingStationID: String?,
+                              at date: Date, longestGap: Double) -> MetroPlatformEstimate? {
+        if let tracked = nextTrackedTrain(routeID: routeID, direction: direction, boardingStationID: boardingStationID,
+                                          alightingStationID: alightingStationID, at: date), tracked.seconds <= max(120, longestGap) {
+            return MetroPlatformEstimate(seconds: tracked.seconds, entering: tracked.entering, observedAt: tracked.train.plan?.lastSeen ?? tracked.train.observedAt)
+        }
+        guard !metroPlatformEvents.isEmpty else { return nil }
+        return MetroPlatformFeed.nextArrival(routeID: routeID, direction: direction, boardingStationID: boardingStationID,
+            alightingStationID: alightingStationID, events: metroPlatformEvents, network: metadata.metro, at: date, longestGap: longestGap)
     }
     /// Every train that can carry the rider from boarding to alighting, at their current frequency.
     func metroHeadway(_ ride: TransitRide, at date: Date) -> BusHeadway? {
@@ -747,9 +840,9 @@ final class TransitAppModel: ObservableObject {
     }
     /// The next train placed by a recent official platform sighting and official running times.
     func metroPlatformEstimate(_ ride: TransitRide, at date: Date) -> MetroPlatformEstimate? {
-        guard ride.route.mode != .bus, !metroPlatformEvents.isEmpty else { return nil }
-        return MetroPlatformFeed.nextArrival(ride: ride, events: metroPlatformEvents, network: metadata.metro,
-            at: date, longestGap: metroHeadway(ride, at: date)?.upperSeconds ?? 600)
+        guard ride.route.mode != .bus else { return nil }
+        return sightingWait(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
+            alightingStationID: ride.alighting.stationID, at: date, longestGap: metroHeadway(ride, at: date)?.upperSeconds ?? 600)
     }
     /// Official countdown first, then a sighting-based estimate, then the expected wait from the
     /// combined headway (half a headway on average for a rider arriving at a random moment).
@@ -775,8 +868,8 @@ final class TransitAppModel: ObservableObject {
         let metro = metadata.metro
         guard metro.isOperating(routeID: serviceID, direction: direction, stationID: stationID, at: date) else { return AppText.text("營運時間外") }
         let headway = metro.combinedService(routeID: serviceID, direction: direction, from: stationID, at: date)?.headway
-        if let estimate = MetroPlatformFeed.nextArrival(routeID: serviceID, direction: direction, boardingStationID: stationID,
-                alightingStationID: nil, events: metroPlatformEvents, network: metro, at: date, longestGap: headway?.upperSeconds ?? 600) {
+        if let estimate = sightingWait(routeID: serviceID, direction: direction, boardingStationID: stationID,
+                alightingStationID: nil, at: date, longestGap: headway?.upperSeconds ?? 600) {
             if estimate.entering { return AppText.text("進站中") }
             return estimate.seconds < 45 ? AppText.text("即將進站") : AppText.text("約 %@ 分", max(1, Int((estimate.seconds / 60).rounded())))
         }
@@ -787,16 +880,36 @@ final class TransitAppModel: ObservableObject {
         let lower = max(1, Int((headway.lowerSeconds / 60).rounded())), upper = max(lower, Int((headway.upperSeconds / 60).rounded()))
         return lower == upper ? AppText.text("每 %@ 分一班", lower) : AppText.text("每 %@–%@ 分一班", lower, upper)
     }
-    func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], officialPosition: Bool) {
-        let report = metroRealtime?.trains.first { $0.id == selectedTrainID &&
-            metadata.metro.canServe(ride,patternID:$0.patternID,direction:$0.direction,destinationStationID:$0.destinationStationID) &&
-            (-15...60).contains(date.timeIntervalSince($0.observedAt)) }
-        if let report, let next = ride.stops.firstIndex(where: { $0.stationID == report.nextStationID }) {
-            let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
-                from: report.nextStationID, to: ride.alighting.stationID) ?? 0
-            return (max(0, report.remainingSeconds - max(0, date.timeIntervalSince(report.observedAt))) + after,
-                Array(ride.stops[max(1,next)...]), true)
+    enum MetroPositionSource { case official, sightings, schedule }
+    func metroPositionLabel(_ source: MetroPositionSource, detailed: Bool) -> String {
+        switch source {
+        case .official: return detailed ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("官方列車訊號")
+        case .sightings: return detailed ? AppText.text("依進站紀錄推估 · 到站請確認站名") : AppText.text("依進站紀錄推估")
+        case .schedule: return detailed ? AppText.text("依站間車程估計 · 到站請確認站名") : AppText.text("依站間車程估計")
         }
+    }
+    func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], source: MetroPositionSource) {
+        let metro = metadata.metro
+        if let train = metroTrain(selectedTrainID),
+           metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID),
+           let pattern = metro.pattern(train.patternID, direction: train.direction),
+           let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
+           let state = train.state(network: metro, at: date) {
+            let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) ?? 0
+            // Standing at a platform, the next stop is the one after it.
+            let upcoming = state.atPlatform ? state.previousIndex + 1 : state.nextIndex
+            let stops: [BusStop]
+            if pattern.stationIDs.indices.contains(upcoming), let next = ride.stops.firstIndex(where: { $0.stationID == pattern.stationIDs[upcoming] }) {
+                stops = Array(ride.stops[max(1, next)...])
+            } else {
+                stops = upcoming <= alight ? Array(ride.stops.dropFirst()) : []
+            }
+            return (seconds, stops, train.isEstimated ? .sightings : .official)
+        }
+        let schedule = metroScheduleRemaining(ride, at: date)
+        return (schedule.seconds, schedule.stops, .schedule)
+    }
+    private func metroScheduleRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop]) {
         let elapsed = boardedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0
         var reached = 0
         for index in ride.stops.indices.dropFirst() {
@@ -807,7 +920,7 @@ final class TransitAppModel: ObservableObject {
         let remaining = Array(ride.stops.dropFirst(min(reached + 1, ride.stops.count)))
         let total = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) ?? 0
-        return (max(0,total - elapsed), remaining, false)
+        return (max(0,total - elapsed), remaining)
     }
     func metroStopLabel(_ ride: TransitRide, stop: BusStop, at date: Date) -> String {
         let remaining = metroRemaining(ride, at: date)

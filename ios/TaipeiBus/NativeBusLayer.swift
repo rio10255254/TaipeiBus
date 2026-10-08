@@ -15,7 +15,17 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let now = Date()
         trainOrigins = Dictionary(trains.compactMap { track in trainPose(track, at: now).map { (track.report.id,$0.coordinate) } }, uniquingKeysWith: { a,_ in a })
         trainBlendStarted = now
-        trains = reports.compactMap { PreparedMetroTrain(report: $0, network: network) }
+        if network.generatedAt != geometryGeneration { patternGeometry = [:]; geometryGeneration = network.generatedAt }
+        trains = reports.compactMap { report in
+            guard report.isEstimated, let pattern = network.pattern(report.patternID, direction: report.direction) else {
+                return PreparedMetroTrain(report: report, network: network)
+            }
+            // Sighting-based trains share one prepared track per pattern.
+            let key = pattern.id + "|" + pattern.direction
+            if patternGeometry[key] == nil { patternGeometry[key] = .some(MetroPatternGeometry(pattern: pattern)) }
+            guard let geometry = patternGeometry[key] ?? nil else { return nil }
+            return PreparedMetroTrain(report: report, network: network, geometry: geometry)
+        }
         // Each train carries its line colour as a stripe, packed into the instance for the shader.
         trainLivery = Dictionary(reports.map { report -> (String, Float) in
             let name = network.pattern(report.patternID, direction: report.direction)
@@ -25,6 +35,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         setNeedsDisplay()
     }
     private var trainLivery: [String: Float] = [:]
+    private var patternGeometry: [String: MetroPatternGeometry?] = [:]
+    private static let trainBlendSeconds = 1.8
+    private var trainsOnScreen = 0
+    private var trainRedrawInterval: CFTimeInterval = 1 / 60
+    private var lastTrainDraw: CFTimeInterval = 0
+    private var geometryGeneration = ""
     /// 16 + 0xRRGGBB. Buses use this slot for wheel rotation, which stays below 2π, so the
     /// shader can tell a train livery apart from a wheel angle.
     private static func packedColor(_ hex: String) -> Float {
@@ -32,9 +48,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         return Float(16 + (value & 0xFFFFFF))
     }
     private func trainPose(_ track: PreparedMetroTrain, at now: Date) -> VehiclePose? {
-        guard (-15...60).contains(now.timeIntervalSince(track.report.observedAt)) else { return nil }
-        return track.renderPose(at: reduceMotion ? track.report.observedAt : now,
-            blendingFrom: reduceMotion ? nil : trainOrigins[track.report.id], fraction: now.timeIntervalSince(trainBlendStarted))
+        // Reduced motion shows where the train is now without gliding between corrections.
+        return track.renderPose(at: now,
+            blendingFrom: reduceMotion ? nil : trainOrigins[track.report.id], fraction: now.timeIntervalSince(trainBlendStarted) / Self.trainBlendSeconds)
     }
     var onError: ((String) -> Void)?
     var onSelectedPoint: ((CGPoint?) -> Void)?
@@ -124,9 +140,16 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
         if trainMode {
-            let visible = trains.contains { (-15...60).contains(now.timeIntervalSince($0.report.observedAt)) }
-            if visible != trainVisible { trainVisible = visible; setNeedsDisplay() }
-            return !reduceMotion && visible
+            if trains.isEmpty {
+                if trainVisible { trainVisible = false; setNeedsDisplay() }
+                return false
+            }
+            trainVisible = true
+            // A correction glides at full rate; otherwise trains are redrawn only as often as they
+            // move a fraction of a pixel, so a zoomed-out network costs a few frames a second.
+            if !reduceMotion, now.timeIntervalSince(trainBlendStarted) < Self.trainBlendSeconds { return true }
+            let interval = reduceMotion ? 5 : trainsOnScreen > 0 ? trainRedrawInterval : 2
+            return time - lastTrainDraw >= interval
         }
         return motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
     }
@@ -248,6 +271,11 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let poses = trainMode ? trains.compactMap { trainPose($0, at: Date()) }
             .filter { bounds.contains($0.coordinate) || $0.id == selectedID } : motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
         sampledVehicleCount = poses.count
+        if trainMode {
+            trainsOnScreen = poses.count; lastTrainDraw = CACurrentMediaTime()
+            // About 22 m/s at most between stations; 0.4 pt of movement per redraw looks continuous.
+            trainRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 22))
+        }
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
         candidates.reserveCapacity(poses.count)

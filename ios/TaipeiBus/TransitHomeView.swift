@@ -319,7 +319,7 @@ struct TransitHomeView: View {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
                 } ?? false
-                let sameTrain = model.metroRealtime?.trains.first(where: { $0.id == model.selectedTrainID }).map { report in
+                let sameTrain = model.metroTrain(model.selectedTrainID).map { report in
                     planner.activeRide.map { model.metadata.metro.canServe($0, patternID: report.patternID, direction: report.direction, destinationStationID: report.destinationStationID) } == true
                 } ?? false
                 if let index = model.walkingMapIndex, !userChangedJourney,

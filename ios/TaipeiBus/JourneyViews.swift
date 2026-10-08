@@ -1359,7 +1359,7 @@ private struct RidingBannerContent: View {
                     Image(systemName: "tram.fill")
                     Text(remaining.stops.first.map { AppText.text("下一站 · ") + $0.localizedName } ?? AppText.text("準備下車"))
                     Spacer()
-                    Text(remaining.officialPosition ? AppText.text("官方列車訊號") : AppText.text("依站間車程估計")).liveFont(.caption)
+                    Text(model.metroPositionLabel(remaining.source, detailed: false)).liveFont(.caption)
                 }
             }
         } else {
@@ -1447,6 +1447,13 @@ struct MetroBoardingRows: View {
                     Text(AppText.text("下班列車")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
                     Text(model.metroWaitLabel(ride, at: date)).liveFont(.subheadline, weight: .bold).monospacedDigit()
+                    if let tracked = model.nextTrackedTrain(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
+                                                            alightingStationID: ride.alighting.stationID, at: date) {
+                        Button { model.selectedTrainID = tracked.train.id; model.metroRevisionForSelection() } label: {
+                            Label(model.selectedTrainID == tracked.train.id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
+                                .liveFont(.caption, weight: .semibold).padding(8)
+                        }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-estimated")
+                    }
                 }
                 Text(model.metroWaitSource(ride, at: date)).liveFont(.caption).foregroundStyle(.secondary)
             } else {
@@ -1455,7 +1462,7 @@ struct MetroBoardingRows: View {
                         Text(index == 0 ? AppText.text("下班列車") : AppText.text("後續班次")).liveFont(.subheadline)
                         Spacer()
                         Text(MetroCountdown.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
-                        if let id = arrival.trainID, model.metroRealtime?.trains.contains(where: { $0.id == id }) == true {
+                        if let id = arrival.trainID, model.metroTrain(id) != nil {
                             Button { model.selectedTrainID = id; model.metroRevisionForSelection(); } label: {
                                 Label(AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold).padding(8)
                             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-arrival-" + id)
@@ -1487,7 +1494,7 @@ private struct MetroOnboardSummary: View {
                 Spacer()
                 if !compact { Text(AppText.remainingStops(remaining.stops.count)) }
             }.liveFont(.subheadline).foregroundStyle(.secondary)
-            Text(compact ? remaining.officialPosition ? AppText.text("官方列車訊號") : AppText.text("依站間車程估計") : remaining.officialPosition ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("依站間車程估計 · 到站請確認站名"))
+            Text(model.metroPositionLabel(remaining.source, detailed: !compact))
                 .liveFont(.caption).foregroundStyle(.secondary)
         }.accessibilityElement(children: .contain).accessibilityIdentifier("metro-onboard-summary")
     }

@@ -20,6 +20,9 @@ public struct MetroPlatformEstimate: Equatable, Sendable {
     /// A train for this direction is entering the rider's own station right now.
     public let entering: Bool
     public let observedAt: Date
+    public init(seconds: Double, entering: Bool, observedAt: Date) {
+        self.seconds = seconds; self.entering = entering; self.observedAt = observedAt
+    }
 }
 
 public enum MetroPlatformFeed {

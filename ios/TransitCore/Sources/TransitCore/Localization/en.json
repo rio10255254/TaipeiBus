@@ -506,5 +506,10 @@
   "下班列車": "Next train",
   "官方下班列車": "Official next train",
   "公車資料暫缺，捷運路線仍可使用": "Bus data is temporarily unavailable. Metro routes remain available.",
-  "路線與站牌使用內建官方資料，等待更新": "Using bundled official routes and stops while waiting for an update."
+  "路線與站牌使用內建官方資料，等待更新": "Using bundled official routes and stops while waiting for an update.",
+  "依進站紀錄推估 · 到站請確認站名": "Estimated from platform arrivals · check the station name",
+  "依進站紀錄推估": "Estimated from platform arrivals",
+  "停靠 · ": "At · ",
+  "等待下一筆進站紀錄": "Waiting for the next platform report",
+  "依進站紀錄推估位置": "Position estimated from platform arrivals"
 }
