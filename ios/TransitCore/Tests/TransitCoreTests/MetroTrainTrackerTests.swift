@@ -55,9 +55,8 @@ final class MetroTrainTrackerTests: XCTestCase {
         let reach = arrival(pattern, from: 5, departure: seen + 25, to: 7)
         let held = try XCTUnwrap(MetroTrainTimeline.state(plan, pattern: pattern, at: reach + 30))
         XCTAssertTrue(held.holding); XCTAssertEqual(held.previousIndex, 7)
-        let leave = try XCTUnwrap(MetroTrainTimeline.secondsUntil(8, state: held, pattern: pattern))
-        XCTAssertEqual(leave, MetroTrainTimeline.dwell(pattern, 7) + MetroTrainTimeline.run(pattern, 7), accuracy: 0.1,
-                       "A held train still has to dwell and run to the next station")
+        XCTAssertNil(MetroTrainTimeline.secondsUntil(8, state: held, pattern: pattern),
+                     "A held estimate has no observed departure and cannot promise an arrival")
         XCTAssertNil(MetroTrainTimeline.state(plan, pattern: pattern, at: reach + MetroTrainTimeline.holdSeconds + 5),
                      "A train that is never seen again disappears instead of standing still forever")
     }

@@ -8,8 +8,11 @@ public struct MetroPlatformEvent: Equatable, Sendable {
     public let patternID: String
     public let direction: String
     public let observedAt: Date
-    public init(stationID: String, patternID: String, direction: String, observedAt: Date) {
+    /// Provider identity remains stable even when transport delay shifts the local clock anchor.
+    public let providerTimestamp: String?
+    public init(stationID: String, patternID: String, direction: String, observedAt: Date, providerTimestamp: String? = nil) {
         self.stationID = stationID; self.patternID = patternID; self.direction = direction; self.observedAt = observedAt
+        self.providerTimestamp = providerTimestamp
     }
 }
 
@@ -53,7 +56,7 @@ public enum MetroPlatformFeed {
                   let match = resolver.resolve(station: station, stationEnglish: row["StationEn"] as? String,
                                                destination: destination, destinationEnglish: row["DestinationEn"] as? String) else { continue }
             events.append(MetroPlatformEvent(stationID: match.stationID, patternID: match.patternID,
-                                             direction: match.direction, observedAt: receivedAt.addingTimeInterval(-max(0, age))))
+                                             direction: match.direction, observedAt: receivedAt.addingTimeInterval(-max(0, age)), providerTimestamp: stamp))
         }
         return events
     }
@@ -64,7 +67,8 @@ public enum MetroPlatformFeed {
         var result = old.filter { date.timeIntervalSince($0.observedAt) <= memory }
         for event in new where !result.contains(where: {
             $0.stationID == event.stationID && $0.patternID == event.patternID && $0.direction == event.direction &&
-                abs($0.observedAt.timeIntervalSince(event.observedAt)) < 20
+                (($0.providerTimestamp != nil && event.providerTimestamp != nil) ? $0.providerTimestamp == event.providerTimestamp :
+                    abs($0.observedAt.timeIntervalSince(event.observedAt)) < 20)
         }) { result.append(event) }
         return Array(result.sorted { $0.observedAt > $1.observedAt }.prefix(2000))
     }
@@ -87,7 +91,8 @@ public enum MetroPlatformFeed {
             guard let pattern = network.pattern(event.patternID, direction: event.direction), pattern.lineID == planned.lineID,
                   let seen = pattern.stationIDs.firstIndex(of: event.stationID),
                   let board = pattern.stationIDs.firstIndex(of: boardingStationID),
-                  seen <= board, board < pattern.stationIDs.count - 1 else { continue }
+                  seen <= board, board - seen <= MetroTrainTimeline.coastStations,
+                  board < pattern.stationIDs.count - 1 else { continue }
             if let alightingStationID {
                 guard let alight = pattern.stationIDs.firstIndex(of: alightingStationID), board < alight else { continue }
             }
@@ -100,8 +105,10 @@ public enum MetroPlatformFeed {
             }
             guard travel <= 30 * 60 else { continue }
             let remaining = event.observedAt.addingTimeInterval(travel).timeIntervalSince(date)
-            // A train entering the platform stays for its dwell; a little past due still counts.
-            guard remaining >= -40, remaining <= max(120, longestGap) else { continue }
+            // Only an actual sighting at this platform can confirm arrival. An upstream
+            // prediction that is already due cannot override missing follow-up evidence.
+            let stillAtObservedPlatform = seen == board && remaining >= -40
+            guard (stillAtObservedPlatform || remaining > 0), remaining <= max(120, longestGap) else { continue }
             let estimate = MetroPlatformEstimate(seconds: max(0, remaining),
                 entering: seen == board && date.timeIntervalSince(event.observedAt) <= 45, observedAt: event.observedAt)
             if best.map({ estimate.seconds < $0.seconds }) ?? true { best = estimate }

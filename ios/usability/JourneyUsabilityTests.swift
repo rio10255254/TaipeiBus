@@ -53,6 +53,45 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "內湖")).firstMatch.exists)
         capture("metro-05-english")
     }
+    func testRoutePreviewAndBackNeverStartNavigation() {
+        launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-map-controls", "--test-journey-selection"])
+        XCTAssertTrue(app.buttons["journey-options"].waitForExistence(timeout:100))
+        func started() -> Bool? {
+            guard let data = app.staticTexts["journey-timing-state"].label.data(using:.utf8),
+                  let state = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return nil }
+            return state["started"] as? Bool
+        }
+        XCTAssertEqual(started(),false)
+        XCTAssertFalse(app.buttons["journey-board"].exists)
+        app.buttons["journey-options"].tap()
+        let row = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-option-")).firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout:10)); row.tap()
+        XCTAssertTrue(app.buttons["journey-start-navigation"].waitForExistence(timeout:10))
+        XCTAssertEqual(started(),false)
+        capture("preview-01-selected-route")
+        app.buttons["journey-back"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout:10))
+        XCTAssertEqual(started(),false)
+        app.buttons["journey-back"].tap()
+        XCTAssertTrue(app.buttons["journey-preview-start"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["journey-board"].exists)
+        XCTAssertEqual(started(),false)
+        capture("preview-02-returned-map")
+        app.buttons["journey-preview-steps"].tap()
+        XCTAssertTrue(app.buttons["journey-in-app-walk-0"].waitForExistence(timeout:10))
+        app.buttons["journey-in-app-walk-0"].tap()
+        XCTAssertTrue(app.buttons["journey-preview-start"].waitForExistence(timeout:10))
+        XCTAssertEqual(started(),false,"Viewing a walking segment remains a preview")
+        XCTAssertFalse(app.buttons["journey-board"].exists)
+        capture("preview-03-walking-segment")
+        app.buttons["journey-options"].tap()
+        XCTAssertTrue(row.waitForExistence(timeout:10)); row.tap()
+        XCTAssertTrue(app.buttons["journey-start-navigation"].waitForExistence(timeout:10))
+        app.buttons["journey-start-navigation"].tap()
+        XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout:10))
+        XCTAssertEqual(started(),true)
+        capture("preview-04-explicitly-started")
+    }
 }
 
 class JourneyUsabilityTestBase: XCTestCase {
@@ -298,7 +337,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-alight").isHittable)
     }
     func testTransferShowsTheNextBus() throws {
-        launch(["--preview-boarding-fixture", "--preview-transfer-fixture", "--usability-fixture"])
+        launch(["--preview-boarding-fixture", "--preview-transfer-fixture", "--usability-fixture", "--test-map-controls"])
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
         let firstRoute = app.staticTexts["boarding-route"].label
         capture("transfer-first-bus")

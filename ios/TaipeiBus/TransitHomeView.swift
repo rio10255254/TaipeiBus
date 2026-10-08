@@ -38,7 +38,7 @@ struct TransitHomeView: View {
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
-        (planner.selected != nil || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
+        (planner.started || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
     }
     private var bannerOffset: CGFloat { showsBanner ? bannerHeight + 10 : 0 }
     private var nearbyStations: [Station] {
@@ -112,8 +112,8 @@ struct TransitHomeView: View {
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                     bottomChrome
                 }
-                if let error = model.mapError ?? model.loadError {
-                    Text(live.text(error)).liveFont(.caption).padding(12)
+                if model.metadata.routes.isEmpty, model.loadError != nil {
+                    Text(live.text("更新中")).liveFont(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
@@ -196,10 +196,14 @@ struct TransitHomeView: View {
         Group {
         if stationWalk.isActive {
             StationWalkingDock(model: model, navigation: stationWalk)
-        } else if planner.started || planner.selected?.walkingOnly == true {
+        } else if planner.started {
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
         } else if planner.selected != nil {
-            JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
+            JourneyPreviewDock(model: model, planner: planner, showChoices: {
+                model.clearWalkingMap(); showJourneyItinerary = false; journeyDetent = .large; showJourney = true
+            }, showItinerary: {
+                model.clearWalkingMap(); showJourneyItinerary = true; journeyDetent = .large; showJourney = true
+            })
         }
         }
         .smoothChanges(planner.currentStep)
@@ -503,11 +507,8 @@ private struct SourceStatusView: View {
                 Button(action: refresh) {
                     HStack(spacing: 7) {
                         // A static dot: a spinner would animate for as long as data is unavailable.
-                        Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
-                        Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
-                        if !waiting, let age, age >= 120 {
-                            Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
-                        }
+                        Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                        Text(AppText.text("更新中")).liveFont(.subheadline, weight: .semibold)
                     }
                     .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
                     .phoneGlass(in: Capsule())
@@ -719,10 +720,11 @@ private struct TransitPanel: View {
                 VStack(spacing: 12) {
                     ProgressView(); Text(live.text("取得站牌與路線中")).liveFont(.subheadline).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = model.loadError {
-                ContentUnavailableView {
-                    Label(live.text("無法連線"), systemImage: "wifi.exclamationmark")
-                } description: { Text(live.text(error)) } actions: { Button(live.text("重試")) { model.retry() }.buttonStyle(.borderedProminent) }
+            } else if model.loadError != nil, model.metadata.routes.isEmpty {
+                VStack(spacing:12) {
+                    Text(live.text("更新中")).liveFont(.subheadline).foregroundStyle(.secondary)
+                    Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
+                }.frame(maxWidth:.infinity,maxHeight:.infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {

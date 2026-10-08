@@ -17,6 +17,9 @@ public actor ConditionalFeedTransport {
     public init(session: URLSession, baseURL: URL) {
         self.session = session; self.baseURL = baseURL
     }
+    /// A 200 response can contain a provider error page. Rejected bytes must not
+    /// become the body reused by future 304 responses.
+    public func invalidate(_ name: String) { cache.removeValue(forKey:name) }
 
     public func data(_ name: String) async throws -> Data {
         let previous = cache[name]

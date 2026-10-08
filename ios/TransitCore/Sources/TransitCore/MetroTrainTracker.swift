@@ -57,15 +57,19 @@ public enum MetroTrainTimeline {
         let index = min(pattern.stationIDs.count - 1, max(0, Int(floor)))
         let start = floor - Double(index)
         let next = min(pattern.stationIDs.count - 1, index + 1)
+        if state.holding {
+            return MetroTrainState(previousIndex: index, nextIndex: next, progress: min(1, start),
+                                   secondsToNext: 0, atPlatform: start <= 0, holding: true)
+        }
         guard start > 0, next > index, let remaining = secondsUntil(next, state: state, pattern: pattern) else {
             return MetroTrainState(previousIndex: index, nextIndex: next, progress: 0,
                                    secondsToNext: secondsUntil(next, state: state, pattern: pattern) ?? state.secondsToNext,
-                                   atPlatform: true, holding: false)
+                                   atPlatform: true, holding: state.holding)
         }
         let elapsed = max(0, date.timeIntervalSince(plan.floorAt ?? date))
         let progress = start + (1 - start) * (elapsed + remaining > 0 ? elapsed / (elapsed + remaining) : 1)
         return MetroTrainState(previousIndex: index, nextIndex: next, progress: min(1, progress), secondsToNext: remaining,
-                               atPlatform: false, holding: false)
+                               atPlatform: false, holding: state.holding)
     }
     static func rawState(_ plan: MetroTrainPlan, pattern: MetroPattern, at date: Date) -> MetroTrainState? {
         let last = pattern.stationIDs.count - 1
@@ -108,6 +112,8 @@ public enum MetroTrainTimeline {
         state(plan, pattern: pattern, at: date).flatMap { secondsUntil(stationIndex, state: $0, pattern: pattern) }
     }
     public static func secondsUntil(_ stationIndex: Int, state: MetroTrainState, pattern: MetroPattern) -> Double? {
+        // Holding is a lost observation, not evidence that the train reached this station.
+        guard !state.holding else { return nil }
         if state.atPlatform, state.previousIndex == stationIndex { return 0 }
         guard stationIndex > state.previousIndex, stationIndex < pattern.stationIDs.count else { return nil }
         var total: Double, from: Int
@@ -141,7 +147,7 @@ public struct MetroTrainTracker: Sendable {
     public init() {}
 
     private static func key(_ event: MetroPlatformEvent) -> String {
-        "\(event.patternID)|\(event.direction)|\(event.stationID)|\(Int(event.observedAt.timeIntervalSince1970))"
+        "\(event.patternID)|\(event.direction)|\(event.stationID)|\(event.providerTimestamp ?? String(Int(event.observedAt.timeIntervalSince1970)))"
     }
 
     public mutating func ingest(_ events: [MetroPlatformEvent], network: MetroNetwork, at date: Date) {
@@ -149,6 +155,7 @@ public struct MetroTrainTracker: Sendable {
         let fresh = events.filter { processed[Self.key($0)] == nil && date.timeIntervalSince($0.observedAt) <= MetroPlatformFeed.memory }
             .sorted { $0.observedAt < $1.observedAt }
         for event in fresh {
+            guard processed[Self.key(event)] == nil else { continue }
             processed[Self.key(event)] = event.observedAt
             guard let pattern = network.pattern(event.patternID, direction: event.direction),
                   let index = pattern.stationIDs.firstIndex(of: event.stationID) else { continue }

@@ -48,7 +48,7 @@ final class CooperatedRouteTests: XCTestCase {
                                    estimates: recorded.estimates, revision: 1)
         let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: empty, at: date)
         XCTAssertEqual(guide.estimateSeconds, 528)
-        XCTAssertEqual(guide.emptyPositionLabel, "到站預估可用 · GPS 暫缺")
+        XCTAssertEqual(guide.emptyPositionLabel, "依官方到站預估")
         XCTAssertTrue(guide.nextBusWithoutPosition)
     }
 
@@ -65,7 +65,7 @@ final class CooperatedRouteTests: XCTestCase {
         let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: date)
         XCTAssertTrue(guide.approaches.isEmpty)
         XCTAssertEqual(guide.estimateSeconds, 528)
-        XCTAssertEqual(guide.emptyPositionLabel, "前車已過站 · 下一班尚未回報位置")
+        XCTAssertEqual(guide.emptyPositionLabel, "下一班")
         XCTAssertTrue(guide.nextBusWithoutPosition)
     }
 

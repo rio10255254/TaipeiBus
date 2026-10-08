@@ -76,18 +76,20 @@ final class TransitAppModel: ObservableObject {
     /// polled whenever the app is in the foreground and trains are drawn on the map. It runs on its
     /// own task: a slow metro response must never hold back bus positions.
     private var platformTask: Task<Void, Never>?
+    private var platformGeneration = UUID()
     private func pollPlatformInBackground() {
-        guard platformTask == nil else { return }
+        guard isActive, platformTask == nil else { return }
+        let token = UUID(); platformGeneration = token
         let network = metadata.metro
         platformTask = Task { [weak self] in
             guard let self else { return }
             let sightings = await self.service.metroPlatformEvents(network: network)
-            if !Task.isCancelled, let sightings, !sightings.isEmpty {
+            if !Task.isCancelled, self.isActive, self.platformGeneration == token, let sightings, !sightings.isEmpty {
                 let merged = MetroPlatformFeed.merge(self.metroPlatformEvents, sightings, at: Date())
                 if merged != self.metroPlatformEvents { self.metroPlatformEvents = merged }
                 self.updateEstimatedTrains(with: sightings)
             }
-            self.platformTask = nil
+            if self.platformGeneration == token { self.platformTask = nil }
         }
     }
     private func updateEstimatedTrains(with sightings: [MetroPlatformEvent]?) {
@@ -290,7 +292,11 @@ final class TransitAppModel: ObservableObject {
         guard isActive != active else { return }
         isActive = active
         location.setActive(active)
-        if !active { updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil; return }
+        if !active {
+            updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
+            platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+            return
+        }
         settingsTask = Task { [weak self] in
             guard let self else { return }
             if let cached = await liveService.cached() { await applyLiveSettings(cached) }
@@ -397,6 +403,7 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var walkingMapIndex: Int?
     var activeWalkingIndex: Int? {
         if stationWalk.isActive { return nil }
+        guard planner.started else { return nil }
         if let walkingMapIndex { return walkingMapIndex }
         if planner.started, case .walk(let index) = planner.currentStep {
             if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer == true { return nil }
@@ -410,6 +417,14 @@ final class TransitAppModel: ObservableObject {
             stationWalk.update(location: location)
             return
         }
+#if DEBUG
+        // Synthetic boarding journeys have their own origin. The test device's fixed city
+        // location must not reroute them into a real walk across town; walking QA uses its own fix.
+        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil {
+            location.setWalkingNavigation(false)
+            return
+        }
+#endif
         let index = activeWalkingIndex
         location.setWalkingNavigation(index != nil)
         guard let index else {
@@ -783,7 +798,7 @@ final class TransitAppModel: ObservableObject {
         for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
             guard let pattern = metro.pattern(train.patternID, direction: train.direction),
                   let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
-                  let state = train.state(network: metro, at: date) else { continue }
+                  let state = train.state(network: metro, at: date), !state.holding else { continue }
             let score: Double
             if state.previousIndex == board, state.atPlatform || state.progress < 0.6 { score = state.atPlatform ? 0 : 20 }
             else if let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern), seconds <= 240 { score = 30 + seconds }
@@ -805,7 +820,7 @@ final class TransitAppModel: ObservableObject {
             guard let pattern = metro.pattern(train.patternID, direction: train.direction),
                   let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
                   let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
-                  let state = train.state(network: metro, at: date), state.previousIndex >= board, state.previousIndex < alight,
+                  let state = train.state(network: metro, at: date), !state.holding, state.previousIndex >= board, state.previousIndex < alight,
                   let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) else { continue }
             let error = abs(seconds - expected)
             if error <= 150, best.map({ error < $0.error }) ?? true { best = (train.id, error) }
@@ -904,7 +919,7 @@ final class TransitAppModel: ObservableObject {
            metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID),
            let pattern = metro.pattern(train.patternID, direction: train.direction),
            let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
-           let state = train.state(network: metro, at: date) {
+           let state = train.state(network: metro, at: date), !state.holding {
             let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) ?? 0
             // Standing at a platform, the next stop is the one after it.
             let upcoming = state.atPlatform ? state.previousIndex + 1 : state.nextIndex
@@ -1100,12 +1115,18 @@ final class TransitAppModel: ObservableObject {
                 selectStation(station); previewSelectionApplied = true
             }
         } else if arguments.contains("--preview-route-stop-fixture") || arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
-            previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
-                browse: arguments.contains("--preview-browse-fixture"))
-            if let token = value(after: "--preview-capture"), previewSelectionApplied,
-               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+            previewSelectionApplied = true
+            let captureToken = value(after: "--preview-capture")
+            Task { [weak self] in
+                guard let self else { return }
+                let ready = await self.prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
+                    transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
+                    browse: arguments.contains("--preview-browse-fixture"))
+                if let token = captureToken, ready,
+                   let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+                }
+                if !ready { self.previewSelectionApplied = false }
             }
             return
         } else if arguments.contains("--preview-journey-search") {
@@ -1262,20 +1283,24 @@ final class TransitAppModel: ObservableObject {
               let packet = try? MetroRealtime(data: bytes, network: metadata.metro, at: now) else { return false }
         metroRealtime = packet; metroRevision += 1
         snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
-        planner.updateSnapshot(snapshot, forecast: arrivalForecast); planner.prepareBoardingPreview(trip)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        planner.prepareBoardingPreview(trip, started: !ProcessInfo.processInfo.arguments.contains("--preview-route-only"))
         selectedTrainID = "QA-TRAIN-01"
         previewNotice = "介面驗證用資料 · 非即時列車"
         focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
         return true
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {
         var planningMetadata = metadata
         if cooperated {
             planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
             planningMetadata.rebuildRouteCatalog()
         }
-        let network = TripPlanner(metadata: planningMetadata)
+        let source = planningMetadata
+        let chosen = await Task.detached(priority: .userInitiated) {
+            let metadata = source
+        let network = TripPlanner(metadata: metadata)
         var chosen: TransitTrip?
         if transfer {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
@@ -1307,6 +1332,8 @@ final class TransitAppModel: ObservableObject {
             if chosen != nil { break }
         }
         }
+            return chosen
+        }.value
         guard let trip = chosen, let ride = trip.rides.first,
               let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let line = metadata.line(ride.route.id, direction: ride.direction),

@@ -509,7 +509,7 @@ final class JourneyPlannerModel: ObservableObject {
     func returnToWaiting() {
         guard case .ride(let index) = currentStep,
               let target = steps.firstIndex(of: .walk(index)) else { return }
-        started = index > 0; stepIndex = target; mapRevision += 1
+        started = true; stepIndex = target; mapRevision += 1
     }
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
@@ -547,12 +547,12 @@ final class JourneyPlannerModel: ObservableObject {
         } catch { return }
     }
 
-    func prepareBoardingPreview(_ trip: TransitTrip) {
+    func prepareBoardingPreview(_ trip: TransitTrip, started: Bool = true) {
         cancelRequests()
         guard let first = trip.rides.first, let last = trip.rides.last else { return }
         origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate, englishName: first.boarding.englishName)
         destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate, englishName: last.alighting.englishName)
-        usingLocation = false; started = false; stepIndex = 0
+        usingLocation = false; self.started = started; stepIndex = 0
         var walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0)]
         for index in trip.rides.indices.dropFirst() {
             let from = trip.rides[index - 1].alighting.coordinate, to = trip.rides[index].boarding.coordinate

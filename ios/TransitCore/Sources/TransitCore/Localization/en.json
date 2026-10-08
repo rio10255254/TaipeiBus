@@ -512,5 +512,11 @@
   "停靠 · ": "At · ",
   "等待下一筆進站紀錄": "Waiting for the next platform report",
   "依進站紀錄推估位置": "Position estimated from platform arrivals",
-  "停止跟隨": "Stop following"
+  "停止跟隨": "Stop following",
+  "依官方到站預估": "Official arrival estimate",
+  "班次資訊更新中": "Updating service information",
+  "重新整理": "Refresh",
+  "路線預覽": "Route preview",
+  "關閉預覽": "Close preview",
+  "預覽步行至%@": "Preview walk to %@"
 }
