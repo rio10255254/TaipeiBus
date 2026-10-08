@@ -214,7 +214,8 @@ actor TransitService {
         }
         do {
             let bytes = try await fetch(name)
-            try FeedDecoder.validateMetadataFeed(bytes)
+            do { try FeedDecoder.validateMetadataFeed(bytes) }
+            catch { await transport.invalidate(name); throw error }
             try bytes.write(to: url, options: .atomic)
             return (name, bytes, nil)
         } catch {
@@ -255,7 +256,10 @@ actor TransitService {
                             snapshot.vehicles = value.vehicles; snapshot.sourceUpdatedAt = date
                             snapshot.receivedAt = Date(); snapshot.vehicleError = nil
                         } else { snapshot.vehicleError = AppText.text("定位來源回報較舊，保留最後資料") }
-                    } catch { snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報") }
+                    } catch {
+                        if bytes != nil { await transport.invalidate("GetBusData") }
+                        snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報")
+                    }
                 case .estimates(let bytes):
                     do {
                         guard let bytes else { throw FeedError.invalid(AppText.text("到站預估")) }
@@ -263,7 +267,10 @@ actor TransitService {
                         if let date = value.updatedAt, snapshot.estimates.updatedAt.map({ date >= $0 }) ?? true {
                             snapshot.estimates = value
                         } else { snapshot.estimates.error = AppText.text("到站預估來源回報較舊") }
-                    } catch { snapshot.estimates.error = AppText.text("到站預估來源連線中斷") }
+                    } catch {
+                        if bytes != nil { await transport.invalidate("GetEstimateTime") }
+                        snapshot.estimates.error = AppText.text("到站預估來源連線中斷")
+                    }
                 }
                 snapshot.revision += 1
                 await onPartial(snapshot)
@@ -274,7 +281,8 @@ actor TransitService {
 
     private func fetch(_ name: String) async throws -> Data {
         let data = try await transport.data(name)
-        return try inflate(data)
+        do { return try inflate(data) }
+        catch { await transport.invalidate(name); throw error }
     }
     private func inflate(_ data: Data) throws -> Data {
         guard data.starts(with: [0x1f, 0x8b]) else { return data }
