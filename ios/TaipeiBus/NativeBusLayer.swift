@@ -21,12 +21,20 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             structureKey = key
             let metersPerWorld = Self.circumference * cos(Self.origin.latitude * .pi / 180)
             let dark = darkAppearance
-            structureVertices = MetroStructureMesh.viaducts(network: network, origin: Self.origin, metersPerWorld: metersPerWorld) { line in
-                Self.rgb(RouteTint.mapHex(for: line.name, dark: dark))
-            }.map { v in
-                Vertex(position: SIMD4(v.x, v.y, v.z, 0), normal: SIMD4(v.nx, v.ny, v.nz, v.material), color: SIMD4(v.r, v.g, v.b, 1))
+            let colors = Dictionary(network.lines.map { ($0.id, Self.rgb(RouteTint.mapHex(for: $0.name, dark: dark))) }, uniquingKeysWith: { a, _ in a })
+            // About a hundred thousand vertices: built off the main thread, swapped in when ready.
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let vertices = MetroStructureMesh.viaducts(network: network, origin: Self.origin, metersPerWorld: metersPerWorld) { line in
+                    colors[line.id] ?? (0.12, 0.44, 0.82)
+                }.map { v in
+                    Vertex(position: SIMD4(v.x, v.y, v.z, 0), normal: SIMD4(v.nx, v.ny, v.nz, v.material), color: SIMD4(v.r, v.g, v.b, 1))
+                }
+                DispatchQueue.main.async {
+                    guard let self, self.structureKey == key else { return }
+                    self.structureVertices = vertices; self.structureBuffer = nil; self.structureCount = 0
+                    self.setNeedsDisplay()
+                }
             }
-            structureBuffer = nil; structureCount = 0
         }
         trains = reports.compactMap { report in
             guard report.isEstimated, let pattern = network.pattern(report.patternID, direction: report.direction) else {

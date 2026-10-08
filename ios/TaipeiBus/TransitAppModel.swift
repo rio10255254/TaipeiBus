@@ -73,9 +73,22 @@ final class TransitAppModel: ObservableObject {
         return metroTrains.first { $0.id == id }
     }
     /// The open feed is a few kilobytes and answers "not modified" between rewrites, so it is
-    /// polled whenever the app is in the foreground and trains are drawn on the map.
-    private func platformIfNeeded() async -> [MetroPlatformEvent]? {
-        await service.metroPlatformEvents(network: metadata.metro)
+    /// polled whenever the app is in the foreground and trains are drawn on the map. It runs on its
+    /// own task: a slow metro response must never hold back bus positions.
+    private var platformTask: Task<Void, Never>?
+    private func pollPlatformInBackground() {
+        guard platformTask == nil else { return }
+        let network = metadata.metro
+        platformTask = Task { [weak self] in
+            guard let self else { return }
+            let sightings = await self.service.metroPlatformEvents(network: network)
+            if !Task.isCancelled, let sightings, !sightings.isEmpty {
+                let merged = MetroPlatformFeed.merge(self.metroPlatformEvents, sightings, at: Date())
+                if merged != self.metroPlatformEvents { self.metroPlatformEvents = merged }
+                self.updateEstimatedTrains(with: sightings)
+            }
+            self.platformTask = nil
+        }
     }
     private func updateEstimatedTrains(with sightings: [MetroPlatformEvent]?) {
         let now = Date()
@@ -311,17 +324,12 @@ final class TransitAppModel: ObservableObject {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     async let rail = service.metroRealtime(network: metadata.metro)
-                    async let platform = platformIfNeeded()
+                    pollPlatformInBackground()
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
-                    let sightings = await platform
-                    if let sightings, !sightings.isEmpty {
-                        let merged = MetroPlatformFeed.merge(metroPlatformEvents, sightings, at: Date())
-                        if merged != metroPlatformEvents { metroPlatformEvents = merged }
-                    }
-                    updateEstimatedTrains(with: sightings)
                     applySnapshot(result)
+                    updateEstimatedTrains(with: nil)
 #if DEBUG
                     applyPreviewSelection()
 #endif
