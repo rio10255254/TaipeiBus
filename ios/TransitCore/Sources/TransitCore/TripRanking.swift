@@ -81,16 +81,15 @@ public enum TripRanking {
     public static func assessment(_ trip: TransitTrip, estimates: EstimateFeed, at date: Date,
                                   preferences: LiveSettings.Planning = .init(),
                                   walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil) -> TripAssessment {
-        let distances = [trip.accessDistance] + (trip.transfers > 0 ? [trip.transferDistance] : []) + [trip.egressDistance]
-        let walking = distances.enumerated().map { index, distance -> Double in
+        let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
-            return distance * 1.25 / 1.2
+            return seconds
         }
         return assess(riding: ridingDurations ?? trip.rideSeconds, walking: walking,
             arrivals: trip.rides.map { estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
             preferences: preferences, minimumServiceWaits: trip.rides.map {
                 $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds)
-            }, services: trip.rides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
+            }, services: trip.rides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: trip.rides.map(\.boardingOffsetSeconds), at: date)
     }
 

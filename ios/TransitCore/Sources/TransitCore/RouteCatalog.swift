@@ -31,6 +31,9 @@ public struct RouteCatalog: Sendable {
     public init(routes: [BusRoute] = []) {
         let orderedGroups = Dictionary(grouping: routes, by: \.parentID).values.map { rows in
             let variants = rows.sorted { a, b in
+                if a.mode != .bus && b.mode != .bus {
+                    return a.id.localizedStandardCompare(b.id) == .orderedAscending
+                }
                 let aBase = a.variantName.isEmpty || a.variantName == a.name
                 let bBase = b.variantName.isEmpty || b.variantName == b.name
                 if aBase != bBase { return aBase }
@@ -47,7 +50,7 @@ public struct RouteCatalog: Sendable {
         groupsByID = Dictionary(uniqueKeysWithValues: orderedGroups.map { ($0.id, $0) })
         entries = orderedGroups.map { group in
             Entry(group: group,
-                  names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName] }
+                  names: Array(Set(group.variants.flatMap { [$0.name, $0.englishName, $0.aliasName, $0.lineCode] }
                     .flatMap(Self.searchNames).filter { !$0.isEmpty })),
                   destinations: Array(Set(group.variants.flatMap { [$0.departure, $0.destination, $0.englishDeparture, $0.englishDestination] }
                     .map(Self.normalize).filter { !$0.isEmpty })),
@@ -61,6 +64,9 @@ public struct RouteCatalog: Sendable {
     public func search(_ query: String) -> [RouteSearchResult] {
         let text = Self.normalize(query)
         guard !text.isEmpty else { return groups.map { RouteSearchResult(group: $0, matchedVariant: nil) } }
+        if ["捷運","mrt","metro"].contains(text), groups.contains(where:{ $0.route.mode != .bus }) {
+            return groups.filter { $0.route.mode != .bus }.map { RouteSearchResult(group:$0,matchedVariant:nil) }
+        }
         // Exact names precede partial names and endpoints. Catalog order breaks all ties.
         return entries.enumerated().compactMap { index, entry -> (Int, Int, RouteSearchResult)? in
             let exactName = entry.names.contains(text)
@@ -80,6 +86,7 @@ public struct RouteCatalog: Sendable {
                       locale: Locale(identifier: "zh_TW"))
             .replacingOccurrences(of: "臺", with: "台")
             .filter { !$0.isWhitespace }
+        if let alias = ["brownline":"棕線","redline":"紅線","greenline":"綠線","orangeline":"橘線","blueline":"藍線","yellowline":"黃線"][name] { return alias }
         // Localized keypad tokens still address the same canonical route names.
         for (english, chinese) in [("neihutech", "內科"), ("nangangsw", "南軟"), ("civic", "市民"),
             ("huai-en", "懷恩"), ("maokong", "貓空"), ("minibus", "小"), ("metrobus", "幹線"),

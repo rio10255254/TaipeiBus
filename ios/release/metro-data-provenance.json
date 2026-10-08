@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "collectedAt": "2026-10-07",
+  "operators": [
+    "TRTC",
+    "NTMC"
+  ],
+  "dependencies": {
+    "networkx": "3.3"
+  },
+  "inputs": [
+    {
+      "file": "raw/metro-raw.json",
+      "sha256": "f266dbd70761c0d29ed3a29639ca53181bd00d66b006bcd3887f6da47f7101ff"
+    },
+    {
+      "file": "extra/metro-raw.json",
+      "sha256": "db040dd7a0f6256b60796adefd80a0867f9f3acd5bba2f151d670fc2daa26688"
+    },
+    {
+      "file": "transfers/metro-raw.json",
+      "sha256": "6da6d8cd877dcf220970936c7878f2e708073d99b25f9245d0d83cdec9128dfa"
+    },
+    {
+      "file": "travel.csv",
+      "sha256": "2f90d1901f3c4533b1dc2f21e01ccfebf8761552ccbd92751724997aa9ffd296"
+    },
+    {
+      "file": "transfers.csv",
+      "sha256": "5f5129274536a55ad8c01ffbe6518f5a1f3a442e5068bf2bfe2f1c31ce4c9351"
+    }
+  ],
+  "outputSha256": "84deadfad843c40d866f6c7d5481ddd7a207a34ea88d454b9fbcee92133330fa",
+  "counts": {
+    "lines": 7,
+    "stations": 148,
+    "patterns": 26,
+    "exits": 486
+  },
+  "officialSources": [
+    "https://tdx.transportdata.tw/api-service/swagger",
+    "https://data.taipei/dataset/detail?id=513e97fe-6a98-4a0d-b7dc-11122c8638d4",
+    "https://data.taipei/dataset/detail?id=782c2b71-8f5a-4575-9bf2-e86999be2863",
+    "https://www.hackrail.tw/info/dataguide"
+  ],
+  "collectionRuns": [
+    37665089435,
+    37665974383,
+    37668310116
+  ],
+  "dwellSemantics": "TDX StopTime is FromStationID dwell; terminal boarding and final alighting dwell are excluded",
+  "profilePriority": "TRTC published effective-20260830 directed pair, then official TDX pair/reverse where not published"
+}

@@ -142,6 +142,9 @@ struct BilingualName: View {
 enum RouteTint {
     static let general = "#1F6FD1"
     static func hex(for name: String) -> String {
+        let metro = ["文湖線":"#b57a25", "板南線":"#0a59ae", "淡水信義線":"#d90023", "松山新店線":"#107547", "中和新蘆線":"#f5a818", "環狀線":"#fedb00", "三鶯線":"#47C1E1",
+            "Wenhu Line":"#b57a25", "Bannan Line":"#0a59ae", "Tamsui-Xinyi Line":"#d90023", "Songshan-Xindian Line":"#107547", "Zhonghe-Xinlu Line":"#f5a818", "Circular Line":"#fedb00", "Sanying Line":"#47C1E1"]
+        if let color = metro[name] { return color }
         let value = name.trimmingCharacters(in: .whitespaces)
         let lower = value.lowercased()
         func starts(_ chinese: String, _ english: String) -> Bool { value.hasPrefix(chinese) || lower.hasPrefix(english) }
@@ -156,6 +159,13 @@ enum RouteTint {
         return general
     }
     static func color(for name: String) -> Color { Color(liveHex: hex(for: name)) }
+    static func signInk(for name: String) -> Color {
+        ["中和新蘆線","環狀線","三鶯線","Zhonghe-Xinlu Line","Circular Line","Sanying Line"].contains(name) ? .black : .white
+    }
+    /// The route colour for text and lines on a sheet, lifted in dark mode to stay readable.
+    static func accent(for name: String) -> Color {
+        Color(uiColor: UIColor { UIColor(liveHex: mapHex(for: name, dark: $0.userInterfaceStyle == .dark)) })
+    }
     /// Map lines draw on a dark basemap in dark mode, so lift them toward white.
     static func mapHex(for name: String, dark: Bool) -> String {
         guard dark else { return hex(for: name) }

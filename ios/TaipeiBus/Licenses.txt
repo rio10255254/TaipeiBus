@@ -1,4 +1,6 @@
 TaipeiBus uses MapLibre Native (BSD-2-Clause), OpenFreeMap, OpenMapTiles and OpenStreetMap.
+Terrain relief is pre-rendered (bundled, not downloaded at runtime) from Terrain Tiles on the AWS Open Data Registry (Mapzen terrarium; sources include SRTM, public domain, and other open elevation datasets).
+https://registry.opendata.aws/terrain-tiles/
 Map style adapted from Liberty and OpenFreeMap.
 https://maplibre.org
 https://openfreemap.org
@@ -151,3 +153,14 @@ Public station-to-station time-of-day profiles are compacted for use in TaipeiBu
 Source: https://tdx.transportdata.tw/api-service/swagger
 Data authorization: https://tdx.transportdata.tw/term
 The data does not identify a particular arriving vehicle and is not a guaranteed arrival.
+
+
+Metro network data
+Providers: Taipei Metro (TRTC), New Taipei Metro (NTMC), MOTC TDX and Taipei Open Data.
+Official lines, operating patterns, track geometry, station exits, service periods, first/last trains and station-pair travel times.
+Sources: https://tdx.transportdata.tw/api-service/swagger
+https://data.taipei/dataset/detail?id=513e97fe-6a98-4a0d-b7dc-11122c8638d4
+https://data.taipei/dataset/detail?id=782c2b71-8f5a-4575-9bf2-e86999be2863
+License: Open Government Data License 1.0 https://data.gov.tw/license
+Train countdowns and train reports require separate Taipei Metro API membership.
+Estimated train positions are projected onto official track geometry, never described as GPS coordinates.

@@ -1,5 +1,60 @@
 import XCTest
 
+final class MetroUsabilityTests: JourneyUsabilityTestBase {
+    var nativeMap: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func camera() -> [String: Any] {
+        let probe = app.staticTexts["map-camera-state"]
+        guard let bytes = (probe.exists ? probe.label : nativeMap.value as? String ?? "").data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    func waitCamera(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.camera()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 20), .completed, description + ": " + String(describing: camera()))
+    }
+    func ready() {
+        XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout:100))
+    }
+    func testMetroUsesExistingBoardingOnboardAndExitFlow() {
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
+        waitCamera("Official metro geometry must be installed") { ($0["metroStations"] as? Int ?? 0) == 148 }
+        capture("metro-01-waiting")
+        let board = app.buttons["journey-board"]
+        XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-onboard-summary").firstMatch.waitForExistence(timeout:10))
+        capture("metro-02-onboard")
+        XCTAssertFalse(app.staticTexts["選擇車牌即可看沿途時間"].exists)
+        XCTAssertFalse(app.buttons["journey-onboard-vehicle"].exists)
+        app.buttons["journey-alight"].tap()
+        XCTAssertTrue(app.buttons["journey-arrive"].waitForExistence(timeout:10))
+        capture("metro-06-exit")
+    }
+    func testMetroTrainIsThreeDimensionalAndMapZoomRemainsResponsive() {
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
+        waitCamera("Metro train geometry is rendered") { ($0["trainModels"] as? Int ?? 0) >= 1 }
+        let follow = app.buttons["metro-track-arrival-QA-TRAIN-01"]
+        XCTAssertTrue(follow.waitForExistence(timeout:10)); follow.tap()
+        waitCamera("Following the train reaches street scale") { ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 0) > 45 }
+        capture("metro-07-train-closeup")
+        XCTAssertGreaterThanOrEqual(camera()["trainModels"] as? Int ?? 0,1)
+        let beforeZoom = camera()["zoom"] as? Double ?? 0
+        nativeMap.pinch(withScale: 3, velocity: 1)
+        waitCamera("Train zoom must respond to the pinch") { ($0["zoom"] as? Double ?? 0) > beforeZoom + 0.8 }
+        capture("metro-03-train-map")
+        XCTAssertLessThan(camera()["trainEncodeMs"] as? Double ?? .infinity, 16)
+        nativeMap.pinch(withScale: 0.3, velocity: -1)
+        waitCamera("Can return from train zoom") { ($0["metroLines"] as? Int ?? 0) == 7 }
+        capture("metro-04-overview")
+    }
+    func testEnglishMetroRetainsChineseStationNames() {
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls", "--test-language", "en"]); ready()
+        waitCamera("Metro appears in English") { ($0["metroStations"] as? Int ?? 0) == 148 }
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "Neihu")).firstMatch.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format:"label CONTAINS %@", "內湖")).firstMatch.exists)
+        capture("metro-05-english")
+    }
+}
+
 class JourneyUsabilityTestBase: XCTestCase {
     let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
     override func setUpWithError() throws { continueAfterFailure = false }
@@ -493,6 +548,10 @@ final class AnimationUsabilityTests: JourneyUsabilityTestBase {
         wait("Controlled fleet and initial street camera are ready") { ($0["fleetInput"] as? Int) == 2500 && ($0["zoom"] as? Double ?? 0) > 16 && ($0["pitch"] as? Double ?? 90) < 1 && ($0["cameraMoving"] as? Bool) == false }
         let local = camera()
         button("city-fleet-toggle").press(forDuration: 0.15)
+        Thread.sleep(forTimeInterval: 1)
+        if camera()["cityMode"] as? Bool != true {
+            button("city-fleet-toggle").tap()
+        }
         wait("City framing settles") { state in
             let trace = (state["transitions"] as? [[String: Any]])?.last
             let samples = trace?["samples"] as? [[String: Double]] ?? []
@@ -609,6 +668,9 @@ final class StopFocusUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertLessThan(label.frame.height, 125)
         capture("station-name-and-arrivals-without-a-card")
         button("map-station-expand").press(forDuration: 0.15)
+        if !button("map-station-details").waitForExistence(timeout: 2) {
+            button("map-station-expand").tap()
+        }
         XCTAssertTrue(button("map-station-details").waitForExistence(timeout: 5))
         button("map-station-details").press(forDuration: 0.15)
         expandDetails()
@@ -1235,5 +1297,118 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         capture("clear-english-compact-map-preview")
         button("journey-all-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 10))
+    }
+}
+
+final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
+    var map: XCUIElement { app.descendants(matching: .any).matching(identifier: "native-map").firstMatch }
+    func state() -> [String: Any] {
+        let value = app.staticTexts["map-camera-state"].label
+        guard let bytes = value.data(using: .utf8),
+              let result = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return result
+    }
+    func wait(_ condition: @escaping ([String: Any]) -> Bool) {
+        let test = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.state()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [test], timeout: 90), .completed)
+    }
+    func profile(_ mode: String, cycles: Int = 2) -> [String: Any] {
+        button("zoom-probe-" + mode).press(forDuration: 0.15)
+        wait { $0["zoomMode"] as? String == mode && $0["zoomStyleReady"] as? Bool == true }
+        Thread.sleep(forTimeInterval: 2)
+        button("zoom-probe-begin").press(forDuration: 0.15)
+        wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == false }
+        for _ in 0..<cycles {
+            map.pinch(withScale: 1.85, velocity: 0.8)
+            map.pinch(withScale: 1 / 1.85, velocity: -0.8)
+        }
+        let a = map.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.55))
+        let b = map.coordinate(withNormalizedOffset: CGVector(dx: 0.55, dy: 0.6))
+        a.press(forDuration: 0.1, thenDragTo: b, withVelocity: .slow, thenHoldForDuration: 0.1)
+        b.press(forDuration: 0.1, thenDragTo: a, withVelocity: .slow, thenHoldForDuration: 0.1)
+        map.rotate(.pi / 6, withVelocity: 0.6)
+        map.rotate(-.pi / 6, withVelocity: -0.6)
+        button("zoom-probe-end").press(forDuration: 0.15)
+        wait { ($0["zoomPerformance"] as? [String: Any])?["complete"] as? Bool == true }
+        let result = state()["zoomPerformance"] as? [String: Any] ?? [:]
+        XCTAssertEqual(result["mode"] as? String, mode)
+        XCTAssertGreaterThan(result["render_callbacks"] as? Int ?? 0, 10)
+        XCTAssertGreaterThan((result["max_zoom"] as? Double ?? 0) - (result["min_zoom"] as? Double ?? 0), 0.6)
+        let data = try! JSONSerialization.data(withJSONObject: result, options: [.sortedKeys, .prettyPrinted])
+        let attachment = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        attachment.name = "zoom-performance-" + mode; attachment.lifetime = .keepAlways; add(attachment)
+        capture("zoom-street-" + mode)
+        return result
+    }
+    func testStreetZoomLayerCosts() {
+        launch(["--test-map-controls", "--test-zoom-performance"])
+        wait { ($0["zoom"] as? Double ?? 0) > 17 && ($0["fleetInput"] as? Int ?? 0) > 0 }
+        // Warm the same vector tiles first; every mode reuses this installed app and cache.
+        map.pinch(withScale: 1.85, velocity: 0.8)
+        map.pinch(withScale: 1 / 1.85, velocity: -0.8)
+        var reports: [[String: Any]] = []
+        for mode in ["baseline", "no-poi", "old-labels", "no-text", "no-3d", "no-bus", "light-tick", "baseline"] {
+            reports.append(profile(mode))
+        }
+        let data = try! JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys, .prettyPrinted])
+        let all = XCTAttachment(string: String(decoding: data, as: UTF8.self))
+        all.name = "zoom-performance-comparison"; all.lifetime = .keepAlways; add(all)
+    }
+    func testLiveBusZoomAndReturn() {
+        launch(["--test-map-controls", "--test-zoom-performance", "--preview-vehicle-route", "__live__"])
+        wait { !($0["vehicle"] as? String ?? "").isEmpty && ($0["zoom"] as? Double ?? 0) > 17 }
+        capture("zoom-following-before")
+        _ = profile("baseline", cycles: 3)
+        button("關閉選取").press(forDuration: 0.15)
+        wait { ($0["vehicle"] as? String ?? "") == "" }
+        XCTAssertEqual(app.state, .runningForeground)
+        capture("zoom-following-returned")
+    }
+    func testBoundedPlacesImproveFlatAndThreeDimensionalZoom() {
+        launch(["--test-map-controls", "--test-zoom-performance"])
+        wait { ($0["placeLabels"] as? [String: Any])?["bounded"] as? Bool == true &&
+            (($0["placeLabels"] as? [String: Any])?["count"] as? Int ?? 0) > 0 }
+        capture("zoom-fixed-place-design-before")
+        var reports: [[String: Any]] = []
+        for view in ["flat-view", "3d-view"] {
+            button("zoom-probe-" + view).press(forDuration: 0.15)
+            wait { abs(($0["pitch"] as? Double ?? -100) - (view == "3d-view" ? 57 : 0)) < 1 }
+            let fixed = profile("baseline")
+            let places = state()["placeLabels"] as? [String: Any] ?? [:]
+            XCTAssertEqual(places["bounded"] as? Bool, true)
+            XCTAssertLessThanOrEqual(places["count"] as? Int ?? 1000, 96)
+            let legacy = profile("legacy-poi")
+            let fixedTime = (fixed["map_encoding"] as? [String: Any])?["median_ms"] as? Double ?? 10000
+            let legacyTime = (legacy["map_encoding"] as? [String: Any])?["median_ms"] as? Double ?? 0
+            XCTAssertGreaterThan(legacyTime, 10)
+            XCTAssertLessThan(fixedTime, legacyTime * 0.5, "Nearby place selection must remove at least half the measured rendering work")
+            reports.append(["view": view, "fixed": fixed, "legacy": legacy, "places": places])
+            _ = profile("baseline", cycles: 1)
+        }
+        let bytes = try! JSONSerialization.data(withJSONObject: reports, options: [.sortedKeys, .prettyPrinted])
+        let comparison = XCTAttachment(string: String(decoding: bytes, as: UTF8.self))
+        comparison.name = "zoom-fixed-comparison"; comparison.lifetime = .keepAlways; add(comparison)
+    }
+    func testTappedPlaceOpensACardAndStartsATrip() {
+        launch(["--test-map-controls"])
+        wait { $0["placeX"] is Double && $0["placeY"] is Double }
+        let target = state()
+        let x = target["placeX"] as? Double ?? 0, y = target["placeY"] as? Double ?? 0
+        map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+        XCTAssertTrue(button("place-card-route").waitForExistence(timeout: 15))
+        XCTAssertFalse((state()["tappedPlace"] as? String ?? "").isEmpty)
+        capture("place-card")
+        button("place-card-route").tap()
+        XCTAssertTrue(app.navigationBars["路線"].waitForExistence(timeout: 20))
+        capture("place-card-route")
+    }
+    func testBoundedPlacesRetainEnglishNamesAndTheme() {
+        launch(["--test-map-controls", "--test-language", "en"])
+        wait { (($0["placeLabels"] as? [String: Any])?["count"] as? Int ?? 0) > 0 }
+        XCTAssertEqual(state()["language"] as? String, "en")
+        XCTAssertEqual(state()["darkMode"] as? Bool, ProcessInfo.processInfo.environment["BUS_TEST_DARK"] == "true")
+        let labels = state()["placeLabels"] as? [String: Any] ?? [:]
+        XCTAssertLessThanOrEqual(labels["count"] as? Int ?? 1000, 96)
+        capture("zoom-fixed-english-place-design")
     }
 }

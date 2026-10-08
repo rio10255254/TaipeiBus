@@ -10,6 +10,11 @@ struct WalkingLeg: Sendable {
     var duration: TimeInterval?
     var instructions: [String] = []
     var road: RouteLine?
+    var stationSeconds: Double = 0
+    var stationInstruction: String? = nil
+    var internalTransfer = false
+    var minimumDuration: Double = 0
+    var streetDuration: Double? = nil
     var verified: Bool { duration != nil }
     var timeLabel: String {
         duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
@@ -39,17 +44,17 @@ enum JourneyStep: Equatable {
 }
 
 private actor TripNetwork {
-    private var planner: TripPlanner?
+    private var planner: MultimodalPlanner?
     private var key = ""
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning,
                  estimates: EstimateFeed) -> [TransitTrip] {
         let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
-            planner = TripPlanner(metadata: metadata); key = signature; builtAt = Date()
+            planner = MultimodalPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
         return planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: 36,
-                             preferences: preferences, estimates: estimates, preservePlatforms: true)
+                             preferences: preferences, estimates: estimates)
 
     }
 }
@@ -108,10 +113,11 @@ final class JourneyPlannerModel: ObservableObject {
     func updateWalking(index: Int, coordinate: Coordinate, accuracy: Double, timestamp: Date, now: Date) {
         guard let option = selected, option.walks.indices.contains(index) else { return }
         let leg = option.walks[index]
+        guard !leg.internalTransfer else { return }
         let first = walkingLegIndex != index
         if first {
             endWalkingGuidance(); walkingLegIndex = index
-            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.duration ?? 0)
+            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.streetDuration ?? leg.duration ?? 0)
         }
         guard var progress = walkingProgress else { return }
         let firstReliable = progress.lastFix == nil
@@ -127,13 +133,17 @@ final class JourneyPlannerModel: ObservableObject {
         walkingTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let refreshed = try await walk(WalkingLeg(from: coordinate, to: leg.to), guidance: true)
+                var refreshed = try await walk(WalkingLeg(from: coordinate, to: leg.to), guidance: true)
                 guard !Task.isCancelled, walkingGeneration == token, selectedID == optionID,
                       walkingLegIndex == index, let slot = options.firstIndex(where: { $0.id == optionID }) else { return }
                 walkingRecalculating = false
                 guard refreshed.verified else { walkingRouteUnavailable = true; return }
+                refreshed.streetDuration = refreshed.duration
+                refreshed.stationSeconds = leg.stationSeconds; refreshed.stationInstruction = leg.stationInstruction
+                let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
+                refreshed.duration = (refreshed.duration ?? 0) + stationAllowance
                 options[slot].walks[index] = refreshed
-                walkingProgress = WalkingProgress(coordinates: refreshed.coordinates, distance: refreshed.distance ?? 0, seconds: refreshed.duration ?? 0)
+                walkingProgress = WalkingProgress(coordinates: refreshed.coordinates, distance: refreshed.distance ?? 0, seconds: refreshed.streetDuration ?? refreshed.duration ?? 0)
                 walkingRevision += 1; walkingRouteRevision += 1
             } catch {
                 if walkingGeneration == token, !Task.isCancelled { walkingRecalculating = false; walkingRouteUnavailable = true }
@@ -181,7 +191,7 @@ final class JourneyPlannerModel: ObservableObject {
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
+                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : estimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
             return duration
         }
         return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
@@ -346,11 +356,31 @@ final class JourneyPlannerModel: ObservableObject {
             let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, limit: 36, ridingDurations: initialRiding, diverse: false)
             func option(_ trip: TransitTrip) -> JourneyOption {
-                var walks = [WalkingLeg(from: origin.coordinate, to: trip.rides[0].boarding.coordinate)]
-                for index in trip.rides.indices.dropFirst() {
-                    walks.append(WalkingLeg(from: trip.rides[index - 1].alighting.coordinate, to: trip.rides[index].boarding.coordinate))
+                func entrance(_ stop: BusStop, toward point: Coordinate) -> Coordinate {
+                    metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
                 }
-                walks.append(WalkingLeg(from: trip.rides.last!.alighting.coordinate, to: destination.coordinate))
+                let first = trip.rides[0], last = trip.rides.last!
+                let firstExit = metadata.metro.nearestExit(stationID: first.boarding.stationID, to: origin.coordinate)
+                var walks = [WalkingLeg(from: origin.coordinate, to: entrance(first.boarding, toward: origin.coordinate),
+                    stationSeconds: first.boardingAccessSeconds, stationInstruction: firstExit.map { AppText.text("從 %@ 進站", AppLanguage.current == .english ? $0.englishName : $0.name) })]
+                for index in trip.rides.indices.dropFirst() {
+                    let a = trip.rides[index - 1].alighting, b = trip.rides[index].boarding
+                    let transfer = metadata.metro.transfers.first { $0.from == a.stationID && $0.to == b.stationID }
+                    let internalTransfer = a.mode != .bus && b.mode != .bus && (a.stationID == b.stationID || transfer?.external == false)
+                    let officialSeconds = trip.transferSeconds.indices.contains(index - 1) ? trip.transferSeconds[index - 1] : 0
+                    if internalTransfer {
+                        walks.append(WalkingLeg(from: a.coordinate, to: b.coordinate, distance: 0, duration: officialSeconds,
+                            instructions: [AppText.text("站內轉乘")], internalTransfer: true))
+                    } else {
+                        walks.append(WalkingLeg(from: entrance(a, toward: b.coordinate), to: entrance(b, toward: a.coordinate),
+                            stationSeconds: trip.rides[index - 1].alightingAccessSeconds + trip.rides[index].boardingAccessSeconds,
+                            stationInstruction: b.mode != .bus ? AppText.text("進站至月台") : nil,
+                            minimumDuration: transfer?.seconds ?? 0))
+                    }
+                }
+                let lastExit = metadata.metro.nearestExit(stationID: last.alighting.stationID, to: destination.coordinate)
+                walks.append(WalkingLeg(from: entrance(last.alighting, toward: destination.coordinate), to: destination.coordinate,
+                    stationSeconds: last.alightingAccessSeconds, stationInstruction: lastExit.map { AppText.text("從 %@ 出站", AppLanguage.current == .english ? $0.englishName : $0.name) }))
                 return JourneyOption(id: trip.id, trip: trip, walks: walks)
             }
             // Verify several families plus their alternative platforms, not just the three eventual rows.
@@ -417,7 +447,12 @@ final class JourneyPlannerModel: ObservableObject {
         var result = option
         for index in option.walks.indices {
             try Task.checkCancellation()
+            if option.walks[index].internalTransfer { continue }
             result.walks[index] = try await walk(option.walks[index])
+            result.walks[index].streetDuration = result.walks[index].duration
+            result.walks[index].stationSeconds = option.walks[index].stationSeconds
+            result.walks[index].stationInstruction = option.walks[index].stationInstruction
+            if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
             let transfer = index > 0 && index < result.walks.count - 1

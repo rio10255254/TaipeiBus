@@ -274,6 +274,9 @@ public struct StationSearchIndex: Sendable {
                 let ar = recentOrder[a.station.id] ?? Int.max, br = recentOrder[b.station.id] ?? Int.max
                 if ar != br { return ar < br }
             } else if a.rank != b.rank { return a.rank < b.rank }
+            if !input.text.isEmpty, a.rank <= 1, b.rank <= 1, a.station.mode != b.station.mode {
+                return a.station.mode != .bus
+            }
             if input.transit, a.metro != b.metro { return a.metro }
             return a.distance == b.distance ? a.station.id < b.station.id : a.distance < b.distance
         }.prefix(limit).map { $0.station }

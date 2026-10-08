@@ -49,6 +49,24 @@ final class CooperatedRouteTests: XCTestCase {
         let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: empty, at: date)
         XCTAssertEqual(guide.estimateSeconds, 528)
         XCTAssertEqual(guide.emptyPositionLabel, "到站預估可用 · GPS 暫缺")
+        XCTAssertTrue(guide.nextBusWithoutPosition)
+    }
+
+    func testPassedBusesDoNotHideAnOfficiallyTimedNextBus() throws {
+        let (metadata, ride, recorded, date) = try recorded630()
+        // Keep only buses that have already passed the boarding stop.
+        let approaching = Set(BoardingGuide.vehicles(ride: ride, metadata: metadata, snapshot: recorded, at: date,
+                                                     approachingOnly: true).map(\.vehicle.id))
+        let passed = BoardingGuide.vehicles(ride: ride, metadata: metadata, snapshot: recorded, at: date,
+                                            approachingOnly: false).map(\.vehicle).filter { !approaching.contains($0.id) }
+        try XCTSkipIf(passed.isEmpty, "Recording has no bus past the boarding stop")
+        let snapshot = TransitSnapshot(vehicles: passed, sourceUpdatedAt: date, receivedAt: date,
+                                       estimates: recorded.estimates, revision: 1)
+        let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: date)
+        XCTAssertTrue(guide.approaches.isEmpty)
+        XCTAssertEqual(guide.estimateSeconds, 528)
+        XCTAssertEqual(guide.emptyPositionLabel, "前車已過站 · 下一班尚未回報位置")
+        XCTAssertTrue(guide.nextBusWithoutPosition)
     }
 
     func testLiveAllPublishedRoutesAndCooperatedVehicleCoverage() throws {

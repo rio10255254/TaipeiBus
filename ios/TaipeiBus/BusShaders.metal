@@ -11,7 +11,15 @@ struct BusFragment {
     float material;
     float2 uv;
     float selection;
+    float3 tint;
 };
+
+// Trains carry 16 + 0xRRGGBB in style.w; buses keep a wheel angle (< 2π) there.
+inline float3 livery(float packed) {
+    if (packed < 15.5) { return float3(-1.0); }
+    const uint value = uint(packed - 16.0 + 0.5);
+    return float3(float((value >> 16) & 255u), float((value >> 8) & 255u), float(value & 255u)) / 255.0;
+}
 
 // Keep the original 3D bus readable at city scale. Only its projected footprint
 // grows; depth remains tied to the real road, rather than becoming a giant bus.
@@ -31,7 +39,7 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     const float c = cos(bus.style.x), s = sin(bus.style.x);
     float3 local = v.position.xyz;
     float3 normal = v.normal.xyz;
-    if (v.position.w != 0) {
+    if (v.position.w != 0 && bus.style.w < 15.5) {
         // Tires roll by actual distance along received GPS geometry. Stops also stop the wheels.
         const float wc = cos(bus.style.w), ws = sin(bus.style.w);
         const float2 wheel = local.yz - float2(v.position.w, 0.51);
@@ -44,6 +52,9 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     out.position = readableBus(uniforms.matrix * float4(p, 1),
                                uniforms.matrix * float4(bus.position.xyz + float3(0,0,1.75), 1), bus.position.w);
     out.color = v.color;
+    out.tint = livery(bus.style.w);
+    // The line-colour stripe takes the train's own livery.
+    if (v.normal.w > 3.5 && out.tint.x >= 0) { out.color.rgb = out.tint; }
     if (uniforms.mode.x == 0) { out.color.a *= max(uniforms.mode.z, bus.style.y) * uniforms.mode.w; }
     out.normal = float3(c * normal.x + s * normal.y, -s * normal.x + c * normal.y, normal.z);
     out.material = v.normal.w;
@@ -70,11 +81,16 @@ fragment float4 busFragment(BusFragment in [[stage_in]], constant BusUniforms &u
         color += specular * (in.material > 0.5 ? 0.12 : 0.055);
         color += rim * float3(0.035, 0.042, 0.050);
     }
-    if (in.material > 2.5) { color = in.color.rgb; }
+    // Lamps are self-lit; the livery stripe (material 4) is shaded like paint.
+    if (in.material > 2.5 && in.material < 3.5) { color = in.color.rgb; }
     // Far-away buses retain their body geometry, but lose harsh window/roof
-    // contrast smoothly so many vehicles read as a quiet neutral-gray flow.
+    // contrast smoothly. A muted transit blue keeps the flow quiet while making
+    // it read as vehicles rather than as gray road texture on the city map.
     if (uniforms.mode.x == 0 && uniforms.mode.y > 0) {
-        color = mix(color, float3(0.73) * diffuse, uniforms.mode.y * 0.55);
+        // Distant trains settle into their own line colour rather than the bus-flow blue.
+        const float3 flow = in.tint.x >= 0 ? in.tint :
+            (uniforms.viewDirection.w > 0 ? float3(0.56, 0.69, 0.86) : float3(0.38, 0.53, 0.73));
+        color = mix(color, flow * diffuse, uniforms.mode.y * 0.6);
     }
     if (uniforms.mode.x == 0 && in.material < 0.5) {
         color = mix(color, uniforms.viewDirection.w > 0 ? float3(0.24,0.64,0.96) : float3(0.31,0.59,0.85), in.selection * 0.55);
@@ -99,6 +115,7 @@ vertex BusFragment busShadowVertex(uint vertexID [[vertex_id]], uint instanceID 
     out.normal = float3(0, 0, 1);
     out.material = 0;
     out.selection = bus.style.y;
+    out.tint = float3(-1.0);
     return out;
 }
 

@@ -1,5 +1,6 @@
 import SwiftUI
 import MapLibre
+import CoreLocation
 import MetalKit
 import TransitCore
 
@@ -67,6 +68,19 @@ struct NativeBusMap: UIViewRepresentable {
         var darkMode = false
         private weak var map: MLNMapView?
         private var buses: NativeBusLayer?
+        private var trains: NativeBusLayer?
+        private var metroSource: MLNShapeSource?
+        private var metroStationsSource: MLNShapeSource?
+        private var metroExitsSource: MLNShapeSource?
+        private var lastMetroKey = ""
+        private var lastMetroTrainKey = ""
+        private var lastMetroFocusKey = ""
+        private var metroFocusKey: String {
+            let busRoute = model.selectedRoute.map { $0.mode == .bus } ?? false
+            let busTrip = model.planner.selected.map { option in option.rides.allSatisfy { $0.route.mode == .bus } } ?? false
+            return busRoute || busTrip || model.selectedVehicleID != nil ? "dim" : "full"
+        }
+        private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
         private var lastSnapshotRevision = -1
         private var lastRouteKey = ""
@@ -78,6 +92,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var cameraMoving = false
         private var cameraMoveToken = 0
         private var lastPowerCheck: CFTimeInterval = 0
+        private var lastPreferredRate = 0
         private var lastMotionSetting: Bool?
         private var lastNearbyUpdate: CFTimeInterval = 0
         private var lastNearbyCenter: Coordinate?
@@ -104,6 +119,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastFocusWasLeavingCity = false
         private var insetWork: DispatchWorkItem?
         private var pendingInset: UIEdgeInsets?
+        private var refitEasesOut = false
         private var lastVisibilityCheck: CFTimeInterval = 0
         private var lastVisibilityTarget: Coordinate?
         private var visibilityVehicleID: String?
@@ -112,6 +128,14 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastVisibilityAdjustmentAt: CFTimeInterval = 0
 #if DEBUG
         private var lastTestCameraAt: CFTimeInterval = 0
+        private let zoomProbe = ZoomPerformanceProbe()
+        private var zoomProbeObserver: NSObjectProtocol?
+        private var zoomProbeVisibility: [String: Bool] = [:]
+        private var zoomProbeCamera: MLNMapCamera?
+        private var zoomProbeMode = "baseline"
+        private var zoomProbeStyle = "bounded"
+        private var zoomProbeStyleReady = true
+        private var zoomProbeFullyRendered = false
         private struct CameraTransitionTrace {
             let started: CFTimeInterval
             let revision: Int
@@ -135,20 +159,40 @@ struct NativeBusMap: UIViewRepresentable {
             self.map = map
             map.addSubview(locationMarker)
             let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
-            let rate: Float = 60
-            link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: rate, preferred: rate)
+            let rate = Float(fullFrameRate)
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
+            lastPreferredRate = Int(rate)
             link.add(to: .main, forMode: .common)
             displayLink = link
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                zoomProbeObserver = NotificationCenter.default.addObserver(forName: Notification.Name("zoom-performance-control"),
+                    object: nil, queue: .main) { [weak self] note in
+                    guard let mode = note.object as? String else { return }
+                    self?.setZoomProbeMode(mode)
+                }
+            }
+#endif
         }
+        /// ProMotion screens run the map, the 3D buses and the camera at up to 120 Hz.
+        private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
         func stop() {
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
+            places.stop()
             displayLink?.invalidate(); displayLink = nil
+#if DEBUG
+            if let zoomProbeObserver { NotificationCenter.default.removeObserver(zoomProbeObserver) }
+            zoomProbeObserver = nil
+#endif
         }
         deinit { displayLink?.invalidate() }
 
         func mapView(_ mapView: MLNMapView, didFinishLoading style: MLNStyle) {
+            installMetro(style)
+            places.install(map: mapView, style: style)
             lastAppearance = nil; lastDarkMode = nil
+            installRelief(style)
             captureDayPalette(style)
             buildingLayer = style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer
             buildingOpacity = 1; buildingOpacityTarget = 1
@@ -205,9 +249,19 @@ struct NativeBusMap: UIViewRepresentable {
             style.addSource(tripStops); tripStopsSource = tripStops
             installMarkerImages(style)
             let tripDots = MLNSymbolStyleLayer(identifier: "journey-stop-dots", source: tripStops)
+            tripDots.predicate = NSPredicate(format: "waypoint != 1")
             tripDots.iconImageName = NSExpression(forKeyPath: "icon")
             tripDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(tripDots)
+            // Boarding, transfer and alighting stops always show. Intermediate stops appear once
+            // the street is close enough and only where they do not crowd each other or an endpoint.
+            let waypointDots = MLNSymbolStyleLayer(identifier: "journey-waypoint-dots", source: tripStops)
+            waypointDots.predicate = NSPredicate(format: "waypoint == 1")
+            waypointDots.minimumZoomLevel = 12.5
+            waypointDots.iconImageName = NSExpression(forKeyPath: "icon")
+            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: false)
+            waypointDots.iconPadding = NSExpression(forConstantValue: 4)
+            style.insertLayer(waypointDots, below: tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
             tripNames.predicate = NSPredicate(format: "waypoint == 0")
             tripNames.text = NSExpression(forKeyPath: "name")
@@ -220,7 +274,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(tripNames)
             let waypointNames = MLNSymbolStyleLayer(identifier: "journey-waypoint-names", source: tripStops)
             waypointNames.predicate = NSPredicate(format: "waypoint == 1")
-            waypointNames.minimumZoomLevel = 10.5
+            waypointNames.minimumZoomLevel = 14.5
             waypointNames.text = NSExpression(forKeyPath: "name")
             waypointNames.textFontSize = NSExpression(forConstantValue: 11)
             waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
@@ -246,12 +300,19 @@ struct NativeBusMap: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
             }
             style.addLayer(layer); buses = layer
+            let rail = NativeBusLayer(identifier: "native-metro-trains"); rail.trainMode = true
+            rail.onSelectedPoint = { [weak self, weak mapView] point in
+                guard let self, let mapView, self.model.selectedTrainID != nil, self.model.mapLabelStation == nil else { return }
+                let global = point.map { mapView.convert($0, to: nil) }
+                DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
+            }
+            style.addLayer(rail); trains = rail
             stationSource = addStationLayer(id: "selected-station", style: style)
             let nearby = MLNShapeSource(identifier: "nearby-stations", shape: nil, options: nil)
             style.addSource(nearby); nearbySource = nearby
             let dots = MLNSymbolStyleLayer(identifier: "nearby-station-dots", source: nearby)
             dots.minimumZoomLevel = 15.7
-            dots.iconImageName = NSExpression(forConstantValue: "station-marker")
+            dots.iconImageName = NSExpression(mglJSONObject: ["coalesce", ["get", "icon"], "station-marker"])
             dots.iconScale = NSExpression(forConstantValue: 0.85)
             dots.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(dots)
@@ -265,24 +326,170 @@ struct NativeBusMap: UIViewRepresentable {
             names.textHaloWidth = NSExpression(forConstantValue: 2)
             names.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: 13)))
             style.addLayer(names)
-            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1
+            lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""; lastMetroFocusKey = ""
             lastStationBrowsing = nil
             lastStationID = nil
             update(location: pendingLocation)
             updateNearbyStations(force: true)
+#if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance"), let camera = zoomProbeCamera {
+                mapView.setCamera(savedCamera(camera), animated: false)
+            }
+            zoomProbeStyleReady = true
+#endif
         }
 
         private func addStationLayer(id: String, style: MLNStyle) -> MLNShapeSource {
             let source = MLNShapeSource(identifier: id, shape: nil, options: nil)
             style.addSource(source)
             let layer = MLNSymbolStyleLayer(identifier: "\(id)-dot", source: source)
-            layer.iconImageName = NSExpression(forConstantValue: "selected-station-marker")
+            layer.iconImageName = NSExpression(mglJSONObject: ["coalesce", ["get", "icon"], "selected-station-marker"])
             layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
             style.addLayer(layer)
             return source
         }
 
         private var markerBlue: UIColor { UIColor(liveHex: darkMode ? MapChrome.walkingDark : RouteTint.general) }
+
+        /// The metro is drawn as part of the map itself, like Apple Maps' transit lines: full
+        /// line colours on the ground beneath buildings and labels, widening with zoom.
+        private func installMetro(_ style: MLNStyle) {
+            // The base map's grey OSM metro tracks would double every coloured line.
+            for id in ["tunnel_transit_rail", "tunnel_transit_rail_hatching", "road_transit_rail",
+                       "road_transit_rail_hatching", "bridge_transit_rail", "bridge_transit_rail_hatching"] {
+                style.layer(withIdentifier: id)?.isVisible = false
+            }
+            func zoomed(_ stops: [Double: Double]) -> NSExpression {
+                let head: [Any] = ["interpolate", ["exponential", 1.5], ["zoom"]]
+                let tail: [Any] = stops.sorted { $0.key < $1.key }.flatMap { [$0.key, $0.value] as [Any] }
+                return NSExpression(mglJSONObject: head + tail)
+            }
+            let source = MLNShapeSource(identifier: "metro-network", shape: nil, options: nil)
+            style.addSource(source); metroSource = source
+            let casing = MLNLineStyleLayer(identifier: "metro-network-casing", source: source)
+            casing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            casing.lineWidth = zoomed([9: 2.6, 12: 4.8, 14: 6.8, 16: 8.6, 18: 11])
+            casing.lineJoin = NSExpression(forConstantValue: "round"); casing.lineCap = NSExpression(forConstantValue: "round")
+            let lines = MLNLineStyleLayer(identifier: "metro-network-lines", source: source)
+            lines.lineColor = NSExpression(mglJSONObject: ["to-color", ["get", "color"]])
+            lines.lineWidth = zoomed([9: 1.4, 12: 2.8, 14: 4.2, 16: 5.6, 18: 7.5])
+            lines.lineJoin = NSExpression(forConstantValue: "round"); lines.lineCap = NSExpression(forConstantValue: "round")
+            // Ground level: above streets, under 3D buildings and every label.
+            if let below = style.layer(withIdentifier: "building") {
+                style.insertLayer(casing, below: below); style.insertLayer(lines, below: below)
+            } else { style.addLayer(casing); style.addLayer(lines) }
+            let stations = MLNShapeSource(identifier: "metro-stations", shape: nil, options: nil)
+            style.addSource(stations); metroStationsSource = stations
+            let dots = MLNCircleStyleLayer(identifier: "metro-station-dots", source: stations)
+            dots.minimumZoomLevel = 11.5
+            // Interchanges read as larger white stops with a dark rim, like the official map.
+            dots.circleRadius = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
+                11.5, ["case", ["get", "transfer"], 3.4, 2.2], 14, ["case", ["get", "transfer"], 5.6, 3.8],
+                17, ["case", ["get", "transfer"], 8, 5.6]])
+            dots.circleColor = NSExpression(forConstantValue: UIColor.white)
+            dots.circleStrokeColor = NSExpression(mglJSONObject: ["to-color", ["get", "rim"]])
+            dots.circleStrokeWidth = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 11.5, 1.2, 15, 2.2])
+            dots.circlePitchAlignment = NSExpression(forConstantValue: "map")
+            style.addLayer(dots)
+            let names = MLNSymbolStyleLayer(identifier: "metro-station-names", source: stations)
+            names.minimumZoomLevel = 12.5
+            names.text = NSExpression(forKeyPath: "name")
+            names.textFontNames = NSExpression(forConstantValue: ["Noto Sans Bold", "Noto Sans Regular"])
+            names.textFontSize = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 12.5, 10.5, 16, 13])
+            names.textHaloWidth = NSExpression(forConstantValue: 1.6)
+            names.textVariableAnchor = NSExpression(forConstantValue: ["top", "bottom", "left", "right"])
+            names.textRadialOffset = NSExpression(forConstantValue: 0.95)
+            names.symbolSortKey = NSExpression(mglJSONObject: ["case", ["get", "transfer"], 0, 1])
+            // Interchanges stay labelled first; ordinary stations appear as room allows.
+            style.addLayer(names)
+            let exits = MLNShapeSource(identifier: "metro-exits", shape: nil, options: nil)
+            style.addSource(exits); metroExitsSource = exits
+            let labels = MLNSymbolStyleLayer(identifier: "metro-exit-labels", source: exits)
+            labels.minimumZoomLevel = 17; labels.text = NSExpression(forKeyPath: "name")
+            labels.textFontSize = NSExpression(forConstantValue: 10)
+            labels.textHaloWidth = NSExpression(forConstantValue: 1.6)
+            style.addLayer(labels)
+        }
+        private func updateMetro(map: MLNMapView) {
+            let network = model.metadata.metro
+            let key = "\(network.generatedAt):\(network.stations.count):\(darkMode):\(AppLanguage.current)"
+            if key != lastMetroKey {
+            lastMetroKey = key
+            var seen = Set<String>()
+            let lines = network.patterns.filter { $0.direction == "0" }.compactMap { pattern -> MLNPolylineFeature? in
+                // Operating branches remain visible; exact duplicate shapes are drawn once.
+                let signature = pattern.stationIDs.joined(separator: "|")
+                guard seen.insert(signature).inserted, let line = network.line(pattern.lineID) else { return nil }
+                var points = pattern.coordinates.map(\.locationCoordinate)
+                let feature = MLNPolylineFeature(coordinates: &points, count: UInt(points.count))
+                feature.attributes = ["color": RouteTint.mapHex(for: line.name, dark: darkMode)]; return feature
+            }
+            metroSource?.shape = MLNShapeCollectionFeature(shapes: lines)
+            // One stop per physical station: platforms of different lines sharing a name and
+            // standing within a short walk are drawn as a single interchange.
+            var groups: [(stations: [MetroStation], center: Coordinate)] = []
+            for station in network.stations {
+                if let index = groups.firstIndex(where: { $0.stations[0].name == station.name && $0.center.distance(to: station.coordinate) < 400 }) {
+                    groups[index].stations.append(station)
+                } else { groups.append(([station], station.coordinate)) }
+            }
+            let stations = groups.map { group -> MLNPointFeature in
+                let lead = group.stations[0]
+                let lineColors = group.stations.compactMap { station in network.lines.first { station.code.hasPrefix($0.code) } }
+                    .map { RouteTint.mapHex(for: $0.name, dark: darkMode) }
+                let transfer = Set(lineColors).count > 1
+                let feature = MLNPointFeature(); feature.coordinate = lead.coordinate.locationCoordinate
+                feature.attributes = ["stationID": lead.id, "transfer": transfer,
+                    "name": AppLanguage.current == .english ? lead.englishName : lead.name,
+                    "rim": transfer ? (darkMode ? "#E6E8EB" : "#3A3D42") : lineColors.first ?? RouteTint.general]
+                return feature
+            }
+            metroStationsSource?.shape = MLNShapeCollectionFeature(shapes: stations)
+            if let casing = map.style?.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer {
+                casing.lineColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1C1D20") : UIColor.white)
+            }
+            if let dots = map.style?.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer {
+                dots.circleColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#2A2C30") : UIColor.white)
+            }
+            let exits = network.stations.flatMap { station in station.exits.map { exit -> MLNPointFeature in
+                let feature = MLNPointFeature(); feature.coordinate = exit.coordinate.locationCoordinate
+                feature.attributes = ["stationID": station.id, "name": AppLanguage.current == .english ? exit.englishName : exit.name]; return feature
+            } }
+            metroExitsSource?.shape = MLNShapeCollectionFeature(shapes: exits)
+            for id in ["metro-station-names", "metro-exit-labels"] {
+                if let layer = map.style?.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
+                    layer.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#E6E8EB" : "#33363B"))
+                    layer.textHaloColor = NSExpression(forConstantValue: darkMode ? UIColor(liveHex: "#1C1D20") : UIColor.white)
+                }
+            }
+            }
+            // A bus route or trip in focus pushes the metro back, the way Apple Maps dims other
+            // transit; a selected metro line stays fully drawn.
+            let focusKey = metroFocusKey
+            if focusKey != lastMetroFocusKey, let style = map.style {
+                lastMetroFocusKey = focusKey
+                let dimmed = focusKey == "dim"
+                (style.layer(withIdentifier: "metro-network-lines") as? MLNLineStyleLayer)?.lineOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.32 : 1)
+                (style.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer)?.lineOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.4 : 1)
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleStrokeOpacity =
+                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
+                (style.layer(withIdentifier: "metro-station-names") as? MLNSymbolStyleLayer)?.isVisible = !dimmed
+            }
+            trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
+            trains?.selectedID = model.selectedTrainID
+            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? "")"
+            guard trainKey != lastMetroTrainKey else { return }; lastMetroTrainKey = trainKey
+            var reports = model.metroRealtime?.trains ?? []
+            if let route = model.selectedRoute, route.mode != .bus {
+                let ids = Set(model.metadata.variants(routeID: route.id).map(\.id))
+                reports = reports.filter { ids.contains($0.patternID) }
+            }
+            trains?.ingestTrains(reports, network: network)
+        }
 
         /// Street-level stop: a white disc with a blue rim and bus glyph, like Apple Maps transit stops.
         private func stationIcon(size: CGFloat, symbol: String = "bus.fill") -> UIImage {
@@ -326,12 +533,24 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
-        private func journeyStopIcon() -> UIImage {
+        private func journeyStopIcon(color: UIColor? = nil) -> UIImage {
             UIGraphicsImageRenderer(size: CGSize(width: 14, height: 14)).image { _ in
                 let circle = UIBezierPath(ovalIn: CGRect(x: 2.5, y: 2.5, width: 9, height: 9))
                 UIColor(liveHex: darkMode ? "#2C2C2E" : "#FFFFFF").setFill(); circle.fill()
-                markerBlue.setStroke(); circle.lineWidth = 2.2; circle.stroke()
+                (color ?? markerBlue).setStroke(); circle.lineWidth = 2.2; circle.stroke()
             }
+        }
+        /// Stop markers take the colour of the route that serves them, like its line.
+        private var tintedTripIcons: Set<String> = []
+        private func tripIcon(_ kind: String, route: String) -> String {
+            let hex = RouteTint.mapHex(for: route, dark: darkMode)
+            let name = "journey-\(kind)-\(hex)"
+            guard !tintedTripIcons.contains(name), let style = map?.style else { return name }
+            let color = UIColor(liveHex: hex)
+            let image = kind == "waypoint" ? journeyStopIcon(color: color)
+                : journeyEndpointIcon(symbol: kind == "alighting" ? "arrow.down" : model.metadata.metro.lines.contains(where: { $0.name == route }) ? "tram.fill" : "bus.fill", color: color)
+            style.setImage(image, forName: name); tintedTripIcons.insert(name)
+            return name
         }
 
         private func journeyEndpointIcon(symbol: String, color: UIColor) -> UIImage {
@@ -355,9 +574,48 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        /// Point-of-interest categories, coloured like Apple Maps. Keep in sync with taipei.json.
+        static let poiCategories: [(name: String, symbol: String, hex: String, darkHex: String, classes: [String])] = [
+            ("poi-food", "fork.knife", "#E8730C", "#FF9F45", ["restaurant", "fast_food", "bar", "beer", "bakery", "ice_cream"]),
+            ("poi-cafe", "cup.and.saucer.fill", "#E8730C", "#FF9F45", ["cafe"]),
+            ("poi-shop", "bag.fill", "#C99700", "#F2C94C", ["shop", "clothing_store", "alcohol_shop", "butcher", "jewelry", "books", "mobile_phone", "music"]),
+            ("poi-grocery", "cart.fill", "#C99700", "#F2C94C", ["grocery"]),
+            ("poi-health", "cross.fill", "#E0405E", "#FF7A93", ["hospital", "pharmacy", "dentist", "doctors", "veterinary"]),
+            ("poi-education", "graduationcap.fill", "#9A6B3F", "#D4A373", ["school", "college", "library", "kindergarten"]),
+            ("poi-park", "leaf.fill", "#3E9B4F", "#6FCF7F", ["park", "garden", "playground", "zoo"]),
+            ("poi-culture", "star.fill", "#C2479C", "#E889CB", ["museum", "art_gallery", "attraction", "monument", "castle", "theatre", "cinema"]),
+            ("poi-lodging", "bed.double.fill", "#7B61D9", "#A99BFF", ["lodging"]),
+            ("poi-service", "building.columns.fill", "#6E7C91", "#A7B3C6", ["bank", "post", "town_hall", "police", "fire_station"]),
+            ("poi-worship", "building.fill", "#8A8A8E", "#B8B8BD", ["place_of_worship"]),
+            ("poi-rail", "tram.fill", "#2F7BE5", "#6EA8FF", ["railway"]),
+        ]
+        /// Category colours lifted for the dark map, matched on the place class.
+        static let poiDarkTextColor: NSExpression = {
+            var match: [Any] = ["match", ["get", "class"]]
+            for category in poiCategories { match.append(category.classes); match.append(category.darkHex) }
+            match.append("#C7C9CF")
+            return NSExpression(mglJSONObject: ["to-color", match])
+        }()
+        private func poiIcon(symbol: String, color: UIColor) -> UIImage {
+            UIGraphicsImageRenderer(size: CGSize(width: 24, height: 24)).image { _ in
+                let disc = UIBezierPath(ovalIn: CGRect(x: 1.5, y: 1.5, width: 21, height: 21))
+                color.setFill(); disc.fill()
+                UIColor.white.setStroke(); disc.lineWidth = 1.5; disc.stroke()
+                let configuration = UIImage.SymbolConfiguration(pointSize: 10.5, weight: .bold)
+                if let glyph = UIImage(systemName: symbol, withConfiguration: configuration)?.withTintColor(.white, renderingMode: .alwaysOriginal) {
+                    glyph.draw(in: CGRect(x: 12 - glyph.size.width / 2, y: 12 - glyph.size.height / 2, width: glyph.size.width, height: glyph.size.height))
+                }
+            }
+        }
         private func installMarkerImages(_ style: MLNStyle) {
+            tintedTripIcons = []
+            for category in Self.poiCategories {
+                style.setImage(poiIcon(symbol: category.symbol, color: UIColor(liveHex: darkMode ? category.darkHex : category.hex)), forName: category.name)
+            }
             style.setImage(stationIcon(size: 22), forName: "station-marker")
+            style.setImage(stationIcon(size: 22, symbol: "tram.fill"), forName: "metro-station-marker")
             style.setImage(pinIcon(symbol: "bus.fill", color: markerBlue), forName: "selected-station-marker")
+            style.setImage(pinIcon(symbol: "tram.fill", color: markerBlue), forName: "selected-metro-station-marker")
             style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "destination-marker")
             style.setImage(journeyStopIcon(), forName: "journey-waypoint")
             style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: markerBlue), forName: "journey-boarding")
@@ -369,8 +627,8 @@ struct NativeBusMap: UIViewRepresentable {
             if pendingInset == inset, !reduceMotion { return false }
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
             guard map.contentInset != inset else { return false }
-            if map.contentInset == .zero || reduceMotion {
-                map.setContentInset(inset, animated: false)
+            if !positionedInitialCamera || reduceMotion {
+                setInset(inset, keepingViewOf: map)
                 return true
             }
             // Geometry reports every frame while a panel animates. Apply the final
@@ -386,13 +644,42 @@ struct NativeBusMap: UIViewRepresentable {
             return false
         }
 
-        private func applyPendingInset(_ map: MLNMapView) {
-            guard !cameraMoving, insetWork == nil, let inset = pendingInset else { return }
-            pendingInset = nil
-            // Padding and a camera flight must not run competing native animations.
-            // Refit once after the explicit movement and panel layout have settled.
+        /// Changes the map padding without moving anything on screen. MapLibre keeps the
+        /// center coordinate when padding changes, which shifts the whole map in one frame;
+        /// re-centering on what is already shown at the new padded center cancels that out.
+        /// Any intended reframing then animates from exactly what the rider sees.
+        private func setInset(_ inset: UIEdgeInsets, keepingViewOf map: MLNMapView) {
+            let bounds = map.bounds
+            guard positionedInitialCamera, bounds.width > 0, bounds.height > 0 else {
+                map.setContentInset(inset, animated: false); return
+            }
+            let anchor = CGPoint(x: bounds.minX + inset.left + (bounds.width - inset.left - inset.right) / 2,
+                                 y: bounds.minY + inset.top + (bounds.height - inset.top - inset.bottom) / 2)
+            let coordinate = map.convert(anchor, toCoordinateFrom: map)
+            let zoom = map.zoomLevel, direction = map.direction
             map.setContentInset(inset, animated: false)
-            update(location: pendingLocation, viewportChanged: true)
+            guard CLLocationCoordinate2DIsValid(coordinate) else { return }
+            map.setCenter(coordinate, zoomLevel: zoom, direction: direction, animated: false)
+        }
+
+        private func applyPendingInset(_ map: MLNMapView) {
+            guard insetWork == nil, let inset = pendingInset else { return }
+            pendingInset = nil
+            // Padding and a camera flight must not run competing native animations. The
+            // padding changes invisibly, then one movement (or a flight already under way,
+            // retargeted from where it is now) frames the content for the new viewport.
+            let flying = cameraMoving
+            setInset(inset, keepingViewOf: map)
+            guard flying else { update(location: pendingLocation, viewportChanged: true); return }
+            // Re-centering stopped the flight where it was; continue it to the target as
+            // framed for the new viewport, decelerating only, so it reads as one motion.
+            let token = cameraMoveToken
+            refitEasesOut = true
+            if let focus = model.focus, !model.mapWasMoved { self.focus(focus, map: map, duration: 0.4) }
+            else if let target = lastCameraTarget { moveCamera(savedCamera(target), map: map, duration: 0.4) }
+            refitEasesOut = false
+            if cameraMoveToken == token { cameraMoving = false; places.flying = false; places.request() }
+            lastFocusRevision = model.focusRevision
         }
 
         func update(location: Coordinate?, viewportChanged: Bool = false) {
@@ -406,10 +693,12 @@ struct NativeBusMap: UIViewRepresentable {
                                           altitude: 650, pitch: 54, heading: 0), animated: false)
             }
             // Finish an explicit focus even when panels resize during the animation or tiles are still loading.
-            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil &&
+            // A sheet covering most of the map leaves nothing worth reframing; the map stays still.
+            let visibleHeight = map.bounds.height - map.contentInset.top - map.contentInset.bottom
+            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil && visibleHeight > 220 &&
                 (model.selectedVehicleID == nil || model.following)
             if (lastFocusRevision != model.focusRevision || refit), map.bounds.width > 0, map.bounds.height > 0 {
-                focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.28)
+                focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.38)
                 lastFocusRevision = model.focusRevision
             }
             guard buses != nil else { return }
@@ -421,6 +710,7 @@ struct NativeBusMap: UIViewRepresentable {
                 updateNearbyStations(force: true); updateTripStops()
                 lastLanguage = model.language
             }
+            if let style = map.style { updateTappedPlace(style) }
             guard let buses else { return }
             buses.darkAppearance = darkMode
             if lastMetadataCount != model.metadata.stations.count {
@@ -429,7 +719,8 @@ struct NativeBusMap: UIViewRepresentable {
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
             let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
-            let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil)"
+            let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil):anchor\(model.anchorRevision)"
+            updateMetro(map: map)
             if lastSnapshotRevision != model.snapshot.revision || vehicleKey != lastVehicleKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.cityFleetMode { vehicles = model.cityVehicles }
@@ -497,7 +788,9 @@ struct NativeBusMap: UIViewRepresentable {
                 buildingLayer?.fillExtrusionOpacity = NSExpression(forConstantValue: buildingOpacity)
             }
             if lastStationID != model.mapLabelStation?.id {
-                stationSource?.shape = point(model.mapLabelStation?.coordinate)
+                let marker = point(model.mapLabelStation?.coordinate)
+                marker?.attributes = ["icon": model.mapLabelStation?.mode == .bus ? "selected-station-marker" : "selected-metro-station-marker"]
+                stationSource?.shape = marker
                 lastStationID = model.mapLabelStation?.id
                 updateNearbyStations(force: true)
             }
@@ -522,13 +815,16 @@ struct NativeBusMap: UIViewRepresentable {
                 !model.planner.started || model.planner.activeRide?.id == ride.id
             }
             for (index, ride) in visibleRides {
+                let route = ride.route.name
                 for stop in ride.stops.dropFirst().dropLast() where features[stop.stationID] == nil {
                     add(stop.coordinate, id: stop.stationID, title: stop.bilingualName, waypoint: true)
+                    features[stop.stationID]?.attributes["icon"] = tripIcon("waypoint", route: route)
                 }
                 add(ride.boarding.coordinate, id: ride.boarding.stationID, title: AppText.text(index == 0 ? "上車" : "轉乘") + " · " + ride.boarding.bilingualName)
+                features[ride.boarding.stationID]?.attributes["icon"] = tripIcon("boarding", route: route)
                 add(ride.alighting.coordinate, id: ride.alighting.stationID,
                     title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
-                features[ride.alighting.stationID]?.attributes["icon"] = "journey-alighting"
+                features[ride.alighting.stationID]?.attributes["icon"] = tripIcon("alighting", route: route)
             }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
@@ -556,7 +852,8 @@ struct NativeBusMap: UIViewRepresentable {
             let features = stations.map { station -> MLNPointFeature in
                 let feature = MLNPointFeature()
                 feature.coordinate = station.coordinate.locationCoordinate
-                feature.attributes = ["stationID": station.id, "name": station.id == model.mapLabelStation?.id ? "" : station.bilingualName + " · " + station.localizedBearing]
+                feature.attributes = ["stationID": station.id, "name": station.id == model.mapLabelStation?.id ? "" : station.bilingualName + (station.mode == .bus ? " · " + station.localizedBearing : ""),
+                    "icon": station.mode == .bus ? "station-marker" : "metro-station-marker"]
                 return feature
             }
             nearbySource?.shape = MLNShapeCollectionFeature(shapes: features)
@@ -571,6 +868,8 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MLNMapView, regionDidChangeWith reason: MLNCameraChangeReason, animated: Bool) {
+            places.interacting = false
+            places.request()
             updateNearbyStations()
             let center = Coordinate(latitude: mapView.centerCoordinate.latitude, longitude: mapView.centerCoordinate.longitude)
             DispatchQueue.main.async { [weak self] in self?.model.mapCenterChanged(center) }
@@ -580,6 +879,12 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
         func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool) {
+            places.dataReady = fullyRendered
+            places.request()
+#if DEBUG
+            zoomProbe.frame(zoom: mapView.zoomLevel, busEncode: buses?.lastEncodeMilliseconds ?? 0)
+            zoomProbeFullyRendered = fullyRendered
+#endif
             if !positionedInitialCamera, mapView.bounds.width > 0 {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -595,6 +900,66 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
 #if DEBUG
+        func mapViewDidFinishRenderingFrame(_ mapView: MLNMapView, fullyRendered: Bool,
+            frameEncodingTime: Double, frameRenderingTime: Double) {
+            zoomProbe.renderer(encoding: frameEncodingTime, rendering: frameRenderingTime)
+            // MapLibre selects one delegate overload; preserve the normal frame callback.
+            mapViewDidFinishRenderingFrame(mapView, fullyRendered: fullyRendered)
+        }
+
+        private func setZoomProbeMode(_ mode: String) {
+            guard let map, let style = map.style else { return }
+            if mode == "begin" { zoomProbe.begin(mode: zoomProbeMode); return }
+            if mode == "end" { zoomProbe.end(); return }
+            zoomProbe.end()
+            if mode == "flat-view" || mode == "3d-view" {
+                let camera = savedCamera(map.camera)
+                camera.pitch = mode == "3d-view" ? 57 : 0
+                camera.altitude = MLNAltitudeForZoomLevel(18, camera.pitch, camera.centerCoordinate.latitude, map.bounds.size)
+                zoomProbeCamera = savedCamera(camera); map.setCamera(camera, animated: false)
+                return
+            }
+            if zoomProbeCamera == nil { zoomProbeCamera = savedCamera(map.camera) }
+            let desiredStyle = mode == "legacy-poi" ? "legacy" : "bounded"
+            if desiredStyle != zoomProbeStyle {
+                guard let url = Bundle.main.url(forResource: "taipei", withExtension: "json"),
+                      let bytes = try? Data(contentsOf: url),
+                      var document = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any],
+                      var layers = document["layers"] as? [[String: Any]],
+                      var sources = document["sources"] as? [String: Any] else { return }
+                if desiredStyle == "legacy" {
+                    sources.removeValue(forKey: "viewport-places")
+                    for i in layers.indices where (layers[i]["id"] as? String ?? "").hasPrefix("poi") {
+                        layers[i]["source"] = "openmaptiles"; layers[i]["source-layer"] = "poi"
+                    }
+                }
+                document["layers"] = layers; document["sources"] = sources
+                guard let encoded = try? JSONSerialization.data(withJSONObject: document) else { return }
+                let path = FileManager.default.temporaryDirectory.appendingPathComponent("zoom-\(desiredStyle).json")
+                guard (try? encoded.write(to: path, options: .atomic)) != nil else { return }
+                places.stop(); zoomProbeStyle = desiredStyle; zoomProbeMode = mode
+                zoomProbeStyleReady = false; zoomProbeFullyRendered = false
+                zoomProbeVisibility.removeAll(); lastTestCameraAt = 0
+                map.styleURL = path
+                return
+            }
+            if zoomProbeVisibility.isEmpty {
+                zoomProbeVisibility = Dictionary(uniqueKeysWithValues: style.layers.map { ($0.identifier, $0.isVisible) })
+            }
+            zoomProbeMode = mode
+            for layer in style.layers {
+                var visible = zoomProbeVisibility[layer.identifier] ?? layer.isVisible
+                if mode == "no-poi", layer.identifier.hasPrefix("poi") { visible = false }
+                if mode == "no-text", layer is MLNSymbolStyleLayer { visible = false }
+                if mode == "no-3d", layer is MLNFillExtrusionStyleLayer { visible = false }
+                if mode == "no-bus", layer === buses { visible = false }
+                if mode == "old-labels", layer.identifier == "poi_dense_street" { visible = false }
+                layer.isVisible = visible
+            }
+            if let camera = zoomProbeCamera { map.setCamera(savedCamera(camera), animated: false) }
+            lastTestCameraAt = 0
+        }
+
         private func recordTestCamera(_ mapView: MLNMapView) {
             if ProcessInfo.processInfo.arguments.contains("--test-map-controls"), mapView.style != nil,
                CACurrentMediaTime() - lastTestCameraAt >= 0.5 {
@@ -625,6 +990,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["themeBackground"] = darkMode ? "#1C1D20" : "light"
                 state["pid"] = ProcessInfo.processInfo.processIdentifier
                 state["fleetInput"] = buses?.inputVehicleCount ?? 0
+                state["placeLabels"] = places.diagnostics
                 state["fleetSampled"] = buses?.sampledVehicleCount ?? 0
                 state["routeFleetEmphasized"] = buses?.emphasizedIDs.count ?? 0
                 state["routeBoardingStop"] = model.routeBoardingStopID ?? ""
@@ -645,6 +1011,11 @@ struct NativeBusMap: UIViewRepresentable {
                 state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
+                state["metroLines"] = model.metadata.metro.lines.count
+                state["metroStations"] = model.metadata.metro.stations.count
+                state["trainModels"] = trains?.modelVehicleCount ?? 0
+                state["selectedTrain"] = model.selectedTrainID ?? ""
+                state["trainEncodeMs"] = trains?.lastEncodeMilliseconds ?? 0
                 state["fleetCompactModels"] = buses?.compactVehicleCount ?? 0
                 state["fleetDetailedModels"] = buses?.detailedVehicleCount ?? 0
                 state["fleetEncodeMs"] = buses?.lastEncodeMilliseconds ?? 0
@@ -667,6 +1038,16 @@ struct NativeBusMap: UIViewRepresentable {
                 if let point = buses?.testVisiblePoint(in: mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 32, dy: 32)) {
                     state["busHitID"] = point.id; state["busHitX"] = point.point.x; state["busHitY"] = point.point.y
                 }
+                if model.tappedPlace == nil, model.selectedStationID == nil, model.planner.selected == nil {
+                    // A rendered place well inside the open map, for the tap-to-route check.
+                    let open = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 60, dy: 60)
+                    if let place = mapView.visibleFeatures(in: open, styleLayerIdentifiers: Self.placeLayerIDs)
+                        .compactMap({ $0 as? MLNPointFeature }).first {
+                        let pixel = mapView.convert(place.coordinate, toPointTo: mapView)
+                        state["placeX"] = pixel.x; state["placeY"] = pixel.y
+                    }
+                }
+                state["tappedPlace"] = model.tappedPlace?.name ?? ""
                 if model.stationBrowsing {
                     let visible = mapView.bounds.inset(by: mapView.contentInset).insetBy(dx: 24, dy: 24)
                     let markers = mapView.visibleFeatures(in: visible, styleLayerIdentifiers: Set(["nearby-station-dots"]))
@@ -674,6 +1055,13 @@ struct NativeBusMap: UIViewRepresentable {
                         let pixel = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)
                         state["markerX"] = pixel.x; state["markerY"] = pixel.y; state["markerID"] = id
                     }
+                }
+                if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                    state["zoomPerformance"] = zoomProbe.summary
+                    state["zoomMode"] = zoomProbeMode
+                    state["zoomStyle"] = zoomProbeStyle
+                    state["zoomStyleReady"] = zoomProbeStyleReady
+                    state["zoomFullyRendered"] = zoomProbeFullyRendered
                 }
                 DispatchQueue.main.async { [weak self] in self?.overlay.recordCamera(state) }
                 if let folder = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first,
@@ -697,6 +1085,12 @@ struct NativeBusMap: UIViewRepresentable {
             if case .leaveCity = focus { lastFocusWasLeavingCity = true }
             else { lastFocusWasLeavingCity = false }
             switch focus {
+            case .metroTrain(let id):
+                guard let report = model.metroRealtime?.trains.first(where: { $0.id == id }),
+                      let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
+                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: 250,
+                    pitch: 52, heading: pose.heading)
+                moveCamera(camera, map: map, duration: 0.8)
             case .coordinate(let position):
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
             case .station(let id):
@@ -768,6 +1162,8 @@ struct NativeBusMap: UIViewRepresentable {
             cameraMoveToken += 1
             let token = cameraMoveToken
             cameraMoving = seconds > 0
+            places.flying = cameraMoving
+            if cameraMoving { places.suspend() }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
                 if let index = cameraTransitions.indices.last, cameraTransitions[index].revision == model.focusRevision {
@@ -781,20 +1177,23 @@ struct NativeBusMap: UIViewRepresentable {
                 recordCameraSample(map)
             }
 #endif
+            // A flight retargeted mid-way is already moving; easing in again would visibly stall it.
             map.setCamera(camera, withDuration: seconds,
-                animationTimingFunction: CAMediaTimingFunction(name: .easeInEaseOut)) { [weak self, weak map] in
+                animationTimingFunction: CAMediaTimingFunction(name: refitEasesOut ? .easeOut : .easeInEaseOut)) { [weak self, weak map] in
                 guard let self, let map, self.cameraMoveToken == token else { return }
                 self.cameraMoving = false
+                self.places.flying = false
+                self.places.request()
                 self.followSuspendedUntil = CACurrentMediaTime() + 0.04
                 self.applyPendingInset(map)
             }
         }
 
         private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
+            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)) else { return nil }
-            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: pitch) else { return nil }
             // Convert the existing verified framing to one camera, so center, zoom,
             // tilt and padding travel together instead of two instantaneous moves.
             let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)
@@ -829,7 +1228,7 @@ struct NativeBusMap: UIViewRepresentable {
             else { coordinates = model.routePaths.flatMap { $0 } }
             let expected = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom))
+                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: Double(map.camera.pitch))
             let state: [String: Any] = ["token": arguments[index + 1], "route": model.selectedRouteName ?? model.planner.destination?.name ?? "",
                 "latitude": center.latitude, "longitude": center.longitude, "zoom": map.zoomLevel, "fully_rendered": true,
                 "expected_latitude": expected?.center.latitude ?? center.latitude,
@@ -845,6 +1244,13 @@ struct NativeBusMap: UIViewRepresentable {
         @objc private func tick(_ link: CADisplayLink) {
             guard model.isActive, let map else { return }
 #if DEBUG
+            let tickStarted = CACurrentMediaTime()
+            defer { zoomProbe.tick(milliseconds: (CACurrentMediaTime() - tickStarted) * 1000) }
+            if zoomProbeMode == "light-tick" {
+                recordTestCamera(map)
+                buses?.setNeedsDisplay()
+                return
+            }
             if ProcessInfo.processInfo.arguments.contains("--test-transitions") { recordCameraSample(map) }
             recordTestCamera(map)
 #endif
@@ -855,12 +1261,20 @@ struct NativeBusMap: UIViewRepresentable {
             guard let buses else { return }
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
-                let rate = lowPower || reduceMotion ? 30 : 60
-                link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: Float(rate), preferred: Float(rate))
-                map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
+                // Low Power Mode and a hot device fall back to 60 Hz; motion stays smooth either way.
+                var rate = lowPower ? 60 : fullFrameRate
+#if DEBUG
+                if zoomProbeMode == "60hz" { rate = 60 }
+#endif
+                if rate != lastPreferredRate {
+                    link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
+                    map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
+                    lastPreferredRate = rate
+                }
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
+            if trains?.isAnimating(time: now, now: date) == true { trains?.setNeedsDisplay() }
             // Tile loading can delay a flight beyond its requested duration. Wait
             // for MapLibre's completion before following or avoiding buildings.
             guard !cameraMoving else { return }
@@ -891,16 +1305,24 @@ struct NativeBusMap: UIViewRepresentable {
                 }
                 lastFollowTime = now
             }
+            if model.followingTrain, now >= followSuspendedUntil, let id = model.selectedTrainID,
+               let pose = trains?.pose(id: id, time: now, now: date), !pose.stale {
+                let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+                let camera = map.camera
+                camera.centerCoordinate = center.interpolate(to: pose.coordinate, fraction: reduceMotion ? 1 : 1 - exp(-dt / 0.12)).locationCoordinate
+                map.setCamera(camera, animated: false)
+            }
         }
 
         private func updateLocationMarker(_ map: MLNMapView, elapsed: Double) {
             locationMotion.update(coordinate: model.location.displayCoordinate, heading: model.location.currentHeading,
                                   elapsed: elapsed, reduceMotion: reduceMotion)
-            guard let point = locationMotion.coordinate else { locationMarker.isHidden = true; return }
+            guard let point = locationMotion.coordinate else { locationMarker.isHidden = true; overlay.userPoint = nil; return }
             let screen = map.convert(point.locationCoordinate, toPointTo: map)
             guard screen.x.isFinite, screen.y.isFinite else { locationMarker.isHidden = true; return }
             locationMarker.isHidden = !map.bounds.insetBy(dx: -48, dy: -48).contains(screen)
             locationMarker.center = screen
+            overlay.userPoint = locationMarker.isHidden ? nil : map.convert(screen, to: nil)
             var angle: Double?
             if let bearing = locationMotion.heading {
                 let radians = bearing * .pi / 180
@@ -915,11 +1337,15 @@ struct NativeBusMap: UIViewRepresentable {
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
+                places.interacting = true
+                places.suspend()
                 lastFocusWasLeavingCity = false
                 cameraMoveToken += 1; cameraMoving = false
+                places.flying = false
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false
+                    self?.model.followingTrain = false
                     self?.model.stopUserTracking()
                     if let self, let map = self.map { self.applyPendingInset(map) }
                 }
@@ -928,7 +1354,8 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func captureDayPalette(_ style: MLNStyle) {
             dayPaints = [:]
-            for layer in style.layers {
+            // Metro layers carry their own line colours in both appearances.
+            for layer in style.layers where !layer.identifier.hasPrefix("metro-") {
                 var paints: [String: NSExpression] = [:]
                 if let layer = layer as? MLNBackgroundStyleLayer { paints["background"] = layer.backgroundColor }
                 if let layer = layer as? MLNFillStyleLayer {
@@ -958,7 +1385,13 @@ struct NativeBusMap: UIViewRepresentable {
                 polygon.getCoordinates(&points, range: NSRange(location: 0, length: points.count))
                 return points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
             }
-            let features = map.visibleFeatures(in: map.bounds, styleLayerIdentifiers: Set(["building-3d"]))
+            // Only buildings between the camera and the bus can hide it: on screen that is the
+            // band below and beside the bus. Querying just that band keeps the check off the frame budget.
+            let busPoint = map.convert(point.locationCoordinate, toPointTo: map)
+            let band = CGRect(x: busPoint.x - 170, y: busPoint.y - 40, width: 340, height: map.bounds.maxY - busPoint.y + 40)
+                .intersection(map.bounds)
+            guard !band.isNull, !band.isEmpty else { return }
+            let features = map.visibleFeatures(in: band, styleLayerIdentifiers: Set(["building-3d"]))
             var footprints = features.flatMap { feature -> [MapBuilding] in
                 let value = feature.attribute(forKey: "render_height")
                 let height = (value as? NSNumber)?.doubleValue ?? Double(value as? String ?? "") ?? 0
@@ -999,6 +1432,41 @@ struct NativeBusMap: UIViewRepresentable {
             moveCamera(camera, map: map, duration: 0.5)
         }
 
+        /// Terrain relief is baked ahead of time, as mainstream maps do, into one bundled
+        /// Web-Mercator image for greater Taipei. Drawing it is a plain texture blend, so camera
+        /// flights never wait on on-device elevation processing.
+        private func installRelief(_ style: MLNStyle) {
+            guard style.source(withIdentifier: "relief") == nil,
+                  let url = Bundle.main.url(forResource: "hillshade-taipei", withExtension: "png"),
+                  let image = UIImage(contentsOfFile: url.path) else { return }
+            let quad = MLNCoordinateQuad(topLeft: CLLocationCoordinate2D(latitude: 25.36, longitude: 120.95),
+                                         bottomLeft: CLLocationCoordinate2D(latitude: 24.55, longitude: 120.95),
+                                         bottomRight: CLLocationCoordinate2D(latitude: 24.55, longitude: 122.10),
+                                         topRight: CLLocationCoordinate2D(latitude: 25.36, longitude: 122.10))
+            let source = MLNImageSource(identifier: "relief", coordinateQuad: quad, image: image)
+            style.addSource(source)
+            let layer = MLNRasterStyleLayer(identifier: "relief", source: source)
+            layer.maximumZoomLevel = 15
+            layer.rasterFadeDuration = NSExpression(forConstantValue: 0)
+            if let water = style.layer(withIdentifier: "waterway_tunnel") { style.insertLayer(layer, below: water) }
+            else { style.addLayer(layer) }
+            reliefLayer = layer
+            applyReliefAppearance()
+        }
+        private weak var reliefLayer: MLNRasterStyleLayer?
+        private func applyReliefAppearance() {
+            guard let layer = reliefLayer else { return }
+            // Relief reads as a backdrop, like the mainstream maps: strongest when the whole region
+            // is in view, eased off at city scale where buses and labels need the contrast.
+            let peak = darkMode ? 0.5 : 0.78
+            layer.rasterOpacity = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"],
+                6, 0, 7, peak, 10, peak * 0.85, 12, peak * 0.7, 13.5, peak * 0.35, 14.5, 0])
+            // Dark mode keeps the shadows but dims the highlights so slopes do not glow; light mode
+            // lifts the deepest shadows a little so valleys stay green rather than turning muddy.
+            layer.maximumRasterBrightness = NSExpression(forConstantValue: darkMode ? 0.35 : 1)
+            layer.minimumRasterBrightness = NSExpression(forConstantValue: darkMode ? 0 : 0.1)
+        }
+
         private func applyBasePalette(_ style: MLNStyle) {
             func color(_ value: String) -> NSExpression { NSExpression(forConstantValue: UIColor(liveHex: value)) }
             for (id, day) in dayPaints {
@@ -1009,14 +1477,18 @@ struct NativeBusMap: UIViewRepresentable {
                 if let layer = layer as? MLNFillStyleLayer {
                     let shade: String
                     if id.contains("water") { shade = "#1D3A52" }
-                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch"].contains(where: id.contains) { shade = "#21352A" }
+                    else if ["park", "wood", "grass", "wetland", "cemetery", "pitch", "farmland"].contains(where: id.contains) { shade = "#21352A" }
+                    else if id.contains("commercial") { shade = "#2B2826" }
+                    else if id.contains("industrial") { shade = "#26252B" }
                     else if id.contains("building") { shade = "#2E3035" }
                     else if id.contains("hospital") { shade = "#33282B" }
                     else if id.contains("sand") { shade = "#2F2D25" }
                     else { shade = "#222327" }
                     layer.fillColor = darkMode ? color(shade) : day["fill"]
                     layer.fillOutlineColor = darkMode ? color(shade) : day["outline"]
-                    layer.fillPattern = darkMode ? nil : day["pattern"]
+                    // Only the road-area layer has a pattern. Writing a captured empty pattern
+                    // back to ordinary fills stops them drawing, so water and parks vanished.
+                    if id == "road_area_pattern" { layer.fillPattern = darkMode ? nil : day["pattern"] }
                 }
                 if let layer = layer as? MLNLineStyleLayer {
                     let shade: String
@@ -1030,7 +1502,12 @@ struct NativeBusMap: UIViewRepresentable {
                     layer.lineColor = darkMode ? color(shade) : day["line"]
                 }
                 if let layer = layer as? MLNSymbolStyleLayer {
-                    layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
+                    if id.hasPrefix("poi") {
+                        // Places keep their category colour, lifted for the dark map.
+                        layer.textColor = darkMode ? Self.poiDarkTextColor : day["text"]
+                    } else {
+                        layer.textColor = darkMode ? color(id.contains("water") ? "#7FB2DA" : "#C7C9CF") : day["text"]
+                    }
                     layer.textHaloColor = darkMode ? color("#1C1D20") : day["halo"]
                 }
             }
@@ -1038,6 +1515,7 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func applyAppearance(_ style: MLNStyle) {
             applyBasePalette(style)
+            applyReliefAppearance()
             applyLabelLanguage(style)
             // Light map colours come from the bundled style; dark mode uses the
             // neutral palette in applyBasePalette. Route lines carry their own tint.
@@ -1075,7 +1553,7 @@ struct NativeBusMap: UIViewRepresentable {
             model.recordMapTap("map-tap:\(Int(point.x)),\(Int(point.y))")
 #endif
             let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
-            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-stop-names"]))
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-waypoint-dots", "journey-stop-names", "metro-station-dots", "metro-station-names", "metro-exit-labels"]))
             let station = features.compactMap { feature -> Station? in
                 guard let id = feature.attribute(forKey: "stationID") as? String else { return nil }
                 return model.metadata.stations[id]
@@ -1084,12 +1562,14 @@ struct NativeBusMap: UIViewRepresentable {
                 let y = map.convert(b.coordinate.locationCoordinate, toPointTo: map)
                 return hypot(x.x - point.x, x.y - point.y) < hypot(y.x - point.x, y.y - point.y)
             }
+            if let id = trains?.hitTest(point) { model.selectedTrainID = id; model.metroRevisionForSelection(); return }
             if model.stationBrowsing, let station { model.selectStation(station); return }
             guard let id = buses.hitTest(point), let bus = model.snapshot.vehicles.first(where: { $0.id == id }) else {
 #if DEBUG
                 model.recordMapTap("map-tap:no-bus")
 #endif
-                if let station { model.selectStation(station) }
+                if let station { model.tappedPlace = nil; model.selectStation(station) }
+                else { selectPlace(at: point, map: map) }
                 return
             }
             // Only rendered 3D buildings can occlude a bus. Cached building
@@ -1105,6 +1585,62 @@ struct NativeBusMap: UIViewRepresentable {
 #endif
             if occluded { return }
             model.selectVehicle(bus)
+        }
+        /// Places are only offered while the map is free to browse, never over a trip or a
+        /// selected stop, route or bus. A tap on empty map clears the current place.
+        private func selectPlace(at point: CGPoint, map: MLNMapView) {
+            let browsing = model.selectedStationID == nil && model.selectedRouteID == nil &&
+                model.selectedVehicleID == nil && model.planner.selected == nil && !model.cityFleetMode
+            guard browsing else { return }
+            let rect = CGRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48)
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Self.placeLayerIDs)
+            let nearest = features.compactMap { $0 as? MLNPointFeature }.min { a, b in
+                let x = map.convert(a.coordinate, toPointTo: map), y = map.convert(b.coordinate, toPointTo: map)
+                return hypot(x.x - point.x, x.y - point.y) < hypot(y.x - point.x, y.y - point.y)
+            }
+            guard let feature = nearest, let kind = feature.attribute(forKey: "class") as? String,
+                  let name = (feature.attribute(forKey: "name:zh") ?? feature.attribute(forKey: "name")) as? String else {
+                if model.tappedPlace != nil { model.tappedPlace = nil }
+                return
+            }
+            let english = (feature.attribute(forKey: "name:en") ?? feature.attribute(forKey: "name_en")) as? String
+            let place = MapPlaceSelection(name: name, englishName: english, kind: kind,
+                coordinate: Coordinate(latitude: feature.coordinate.latitude, longitude: feature.coordinate.longitude))
+            model.tappedPlace = model.tappedPlace == place ? nil : place
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+        static let placeLayerIDs: Set<String> = ["poi", "poi_dense", "poi_dense_street", "poi_landmark"]
+        static func placeCategory(_ kind: String) -> (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {
+            poiCategories.first { $0.classes.contains(kind) }
+        }
+
+        private var lastTappedPlace: MapPlaceSelection?
+        private var lastTappedDark = false
+        private func updateTappedPlace(_ style: MLNStyle) {
+            guard lastTappedPlace != model.tappedPlace || lastTappedDark != darkMode ||
+                  style.source(withIdentifier: "tapped-place") == nil else { return }
+            lastTappedPlace = model.tappedPlace; lastTappedDark = darkMode
+            let source = (style.source(withIdentifier: "tapped-place") as? MLNShapeSource) ?? {
+                let source = MLNShapeSource(identifier: "tapped-place", shape: nil, options: nil)
+                style.addSource(source)
+                let layer = MLNSymbolStyleLayer(identifier: "tapped-place-pin", source: source)
+                layer.iconImageName = NSExpression(forKeyPath: "icon")
+                // pinIcon draws the tip at the image center, so the default center anchor lands it on the place.
+                layer.iconAllowsOverlap = NSExpression(forConstantValue: true)
+                layer.iconIgnoresPlacement = NSExpression(forConstantValue: true)
+                style.addLayer(layer)
+                return source
+            }()
+            guard let place = model.tappedPlace else { source.shape = nil; return }
+            let category = Self.placeCategory(place.kind)
+            let icon = "tapped-place-" + (category?.name ?? "poi") + (darkMode ? "-dark" : "")
+            if style.image(forName: icon) == nil {
+                style.setImage(pinIcon(symbol: category?.symbol ?? "mappin",
+                                       color: UIColor(liveHex: darkMode ? category?.darkHex ?? "#A7B3C6" : category?.hex ?? "#6E7C91")), forName: icon)
+            }
+            let feature = MLNPointFeature(); feature.coordinate = place.coordinate.locationCoordinate
+            feature.attributes = ["icon": icon]
+            source.shape = feature
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool { true }
     }
@@ -1153,5 +1689,359 @@ private final class DeviceLocationMarker: UIView {
             lastAccuracy = accuracy
         }
         CATransaction.commit()
+    }
+}
+
+#if DEBUG
+/// Callback cadence is a simulator rendering measurement, not a physical-display FPS claim.
+private final class ZoomPerformanceProbe {
+    private var active = false
+    private var mode = "baseline"
+    private var began = 0.0
+    private var lastFrame = 0.0
+    private var frames = 0
+    private var gaps: [Double] = []
+    private var busTimes: [Double] = []
+    private var tickTimes: [Double] = []
+    private var encodingTimes: [Double] = []
+    private var renderingTimes: [Double] = []
+    private var minZoom = 99.0
+    private var maxZoom = 0.0
+    private(set) var summary: [String: Any] = ["complete": false]
+    func begin(mode: String) {
+        self.mode = mode; began = CACurrentMediaTime(); lastFrame = 0; frames = 0
+        gaps.removeAll(keepingCapacity: true); busTimes.removeAll(keepingCapacity: true)
+        tickTimes.removeAll(keepingCapacity: true); encodingTimes.removeAll(keepingCapacity: true)
+        renderingTimes.removeAll(keepingCapacity: true); minZoom = 99; maxZoom = 0
+        summary = ["mode": mode, "complete": false]; active = true
+    }
+    func frame(zoom: Double, busEncode: Double) {
+        guard active else { return }
+        let now = CACurrentMediaTime()
+        if lastFrame > 0, gaps.count < 6000 { gaps.append((now - lastFrame) * 1000) }
+        lastFrame = now; frames += 1; minZoom = min(minZoom, zoom); maxZoom = max(maxZoom, zoom)
+        if busTimes.count < 6000 { busTimes.append(busEncode) }
+    }
+    func tick(milliseconds: Double) {
+        if active, tickTimes.count < 6000 { tickTimes.append(milliseconds) }
+    }
+    func renderer(encoding: Double, rendering: Double) {
+        guard active else { return }
+        // MapLibre 6.31's MonotonicTimer duration<double> reports seconds.
+        if encoding.isFinite, encoding >= 0, encodingTimes.count < 6000 { encodingTimes.append(encoding * 1000) }
+        if rendering.isFinite, rendering >= 0, renderingTimes.count < 6000 { renderingTimes.append(rendering * 1000) }
+    }
+    func end() {
+        guard active else { return }
+        active = false
+        let elapsed = CACurrentMediaTime() - began
+        func stats(_ values: [Double]) -> [String: Any] {
+            let ordered = values.sorted()
+            let maximum: Double = ordered.last ?? 0
+            func percentile(_ p: Double) -> Double {
+                ordered.isEmpty ? 0 : ordered[min(ordered.count - 1, Int(Double(ordered.count - 1) * p))]
+            }
+            return ["samples": ordered.count, "median_ms": percentile(0.5), "p95_ms": percentile(0.95),
+                "p99_ms": percentile(0.99), "max_ms": maximum,
+                "over_33ms": ordered.filter { $0 > 33.34 }.count, "over_100ms": ordered.filter { $0 > 100 }.count]
+        }
+        summary = ["mode": mode, "complete": true, "elapsed_seconds": elapsed, "render_callbacks": frames,
+            "render_callbacks_per_second": Double(frames) / max(0.001, elapsed), "min_zoom": minZoom, "max_zoom": maxZoom,
+            "callback_gap": stats(gaps), "bus_encode": stats(busTimes), "tick": stats(tickTimes),
+            "map_encoding": stats(encodingTimes), "map_rendering": stats(renderingTimes)]
+    }
+}
+#endif
+
+/// Only nearby, budgeted places enter the symbol layout pipeline. Queries are
+/// coalesced after gestures and reused inside a buffered geographic viewport.
+private final class ViewportPlaceRenderer {
+    static let landmarkClasses: Set<String> = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
+    static let ordinaryClasses: Set<String> = Set(NativeBusMap.Coordinator.poiCategories.flatMap(\.classes)).subtracting(landmarkClasses)
+    /// Labels are pre-placed this far past each screen edge so a short pan shows places at once.
+    private static let overscan: CGFloat = 120
+    private weak var map: MLNMapView?
+    private var source: MLNShapeSource?
+    private var pending: DispatchWorkItem?
+    private var trailing: DispatchWorkItem?
+    private var generation = 0
+    private var loadGeneration = 0
+    private var lastEvaluation = 0.0
+    private var lastPlacement = 0.0
+    private var cacheBounds: GeoBounds?
+    private var cacheBand = -1
+    private var cacheAt = 0.0
+    private var records: [String: MLNPointFeature] = [:]
+    private var previous = Set<String>()
+    private var lastStamp = ""
+    private var lastCenter: Coordinate?
+    private var lastZoom = -1.0
+    private var lastHeading = -1.0
+    private var lastPitch = -1.0
+    private var lastInset = UIEdgeInsets.zero
+    private var unpublished = false
+    var interacting = false
+    var flying = false
+    var dataReady = false
+    private var emptyAttempts = 0
+    private var count = 0
+    private var ringCount = 0
+    private var candidates = 0
+    private var queries = 0
+    private var reuses = 0
+    private var lastQueryMs = 0.0
+    private var maxQueryMs = 0.0
+    private var deferred = 0
+    private var sourceCount = 0
+    private let provider = PlaceTileProvider()
+    private var loadTask: Task<Void, Never>?
+    var diagnostics: [String: Any] {
+        ["bounded": source != nil, "count": count, "ringCount": ringCount, "candidateCount": candidates, "queries": queries,
+         "cacheReuses": reuses, "queryMs": lastQueryMs, "maxQueryMs": maxQueryMs,
+         "deferred": deferred, "interacting": interacting, "flying": flying, "ready": dataReady,
+         "band": cacheBand, "sourceCount": sourceCount, "budget": PlaceLabelBudget.maximum]
+    }
+    func install(map: MLNMapView, style: MLNStyle) {
+        stop(); self.map = map; source = style.source(withIdentifier: "viewport-places") as? MLNShapeSource
+        cacheBounds = nil; cacheBand = -1; records.removeAll(); previous.removeAll()
+        lastStamp = ""; count = 0; ringCount = 0; lastCenter = nil; lastEvaluation = 0; lastPlacement = 0
+        dataReady = false; emptyAttempts = 0; unpublished = false
+        request()
+    }
+    func stop() {
+        generation += 1; loadGeneration += 1
+        pending?.cancel(); pending = nil; trailing?.cancel(); trailing = nil
+        loadTask?.cancel(); loadTask = nil; source = nil
+    }
+    /// Gestures only hold back publication. A tile fetch already under way keeps going in
+    /// the background so its places are ready the moment the map settles.
+    func suspend() { generation += 1; pending?.cancel(); pending = nil; deferred += 1 }
+    private func band(_ zoom: Double) -> Int { zoom < 14 ? 0 : zoom < 15.5 ? 1 : zoom < 16.5 ? 2 : zoom < 17.5 ? 3 : 4 }
+    func request() {
+        guard let map, source != nil else { return }
+        let now = CACurrentMediaTime()
+        guard now - lastEvaluation >= 0.25 else {
+            // Never drop the last request of a burst: the map stops rendering once it is idle.
+            if trailing == nil {
+                let job = DispatchWorkItem { [weak self] in self?.trailing = nil; self?.request() }
+                trailing = job
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.26 - (now - lastEvaluation), execute: job)
+            }
+            return
+        }
+        lastEvaluation = now
+        guard !interacting, !flying else { return }
+        let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+        let footprint = map.bounds.inset(by: map.contentInset)
+        guard footprint.width > 40, footprint.height > 40 else { return }
+        let scale = 40_075_016.0 * cos(center.latitude * .pi / 180) / (512 * pow(2, map.zoomLevel))
+        let distance = max(5, scale * 28)
+        let needs = lastCenter.map { $0.distance(to: center) > distance } ?? true
+        let changed = needs || unpublished || band(map.zoomLevel) != cacheBand || abs(map.zoomLevel - lastZoom) > 0.25 ||
+            abs(map.direction - lastHeading) > 12 || abs(map.camera.pitch - lastPitch) > 8 || lastInset != map.contentInset
+        let emptyRetry = records.isEmpty && emptyAttempts < 3 && now - cacheAt > 2
+        guard changed || emptyRetry else { return }
+        guard pending == nil else { return }
+        let token = generation
+        let job = DispatchWorkItem { [weak self] in
+            guard let self, self.generation == token else { return }
+            self.pending = nil
+            guard !self.interacting, !self.flying else { self.deferred += 1; return }
+            self.refresh()
+        }
+        pending = job
+        // Places already loaded for this area appear almost at once; new ones wait a beat so a
+        // quick follow-up gesture does not pay for a layout it will immediately discard.
+        let delay = unpublished ? 0.08 : max(0.16, 0.65 - (now - lastPlacement))
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: job)
+    }
+    private func bounds(_ rect: CGRect, map: MLNMapView) -> GeoBounds? {
+        let corners = [CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
+                       CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)]
+            .map { map.convert($0, toCoordinateFrom: map) }
+        guard corners.allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite && abs($0.latitude) < 85 && abs($0.longitude) <= 180 }) else { return nil }
+        return GeoBounds(south: corners.map(\.latitude).min()!, west: corners.map(\.longitude).min()!,
+                         north: corners.map(\.latitude).max()!, east: corners.map(\.longitude).max()!)
+    }
+    private func covers(_ outer: GeoBounds, _ inner: GeoBounds) -> Bool {
+        outer.south <= inner.south && outer.north >= inner.north && outer.west <= inner.west && outer.east >= inner.east
+    }
+    private func refresh() {
+        guard !interacting, !flying, let map, let source else { return }
+        let now = CACurrentMediaTime(), zoom = map.zoomLevel, currentBand = band(zoom)
+        let viewport = map.bounds.inset(by: map.contentInset)
+        guard viewport.width > 40, viewport.height > 40 else { return }
+        if currentBand == 0 {
+            if count + ringCount != 0 { source.shape = nil; count = 0; ringCount = 0; previous.removeAll(); lastStamp = "" }
+            cacheBounds = nil; records.removeAll(); cacheAt = now; cacheBand = 0; emptyAttempts = 3; unpublished = false
+            remember(map, at: now); return
+        }
+        // A tilted camera already sees far ahead; a ring past its top edge would reach toward
+        // the horizon and multiply the area to load for little benefit.
+        let outer = ring(for: map)
+        guard let needed = bounds(viewport.insetBy(dx: -outer - 16, dy: -outer - 16), map: map),
+              let buffered = bounds(viewport.insetBy(dx: -outer - 80, dy: -outer - 80), map: map) else { return }
+        let reuse = cacheBounds.map { covers($0, needed) } == true && currentBand == cacheBand && !records.isEmpty
+        if reuse { reuses += 1; publish(map, source: source, zoom: zoom, viewport: viewport); return }
+        // A fetch for an older area finishes first and then asks again (see below).
+        guard loadTask == nil else { return }
+        let token = loadGeneration
+        let started = CACurrentMediaTime()
+        queries += 1
+        let maximumRank = currentBand == 2 ? 25.0 : currentBand == 3 ? 120.0 : 1_000_000.0
+        let ordinary = currentBand > 1 ? Self.ordinaryClasses : []
+        loadTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { if self.loadGeneration == token { self.loadTask = nil } }
+            do {
+                let values = try await self.provider.places(in: buffered, landmarks: Self.landmarkClasses,
+                                                            ordinary: ordinary, maximumRank: maximumRank)
+                try Task.checkCancellation()
+                guard self.loadGeneration == token, self.source != nil else { return }
+                self.sourceCount = values.count
+                self.lastQueryMs = (CACurrentMediaTime() - started) * 1000
+                self.maxQueryMs = max(self.maxQueryMs, self.lastQueryMs)
+                var fresh: [String: MLNPointFeature] = [:]
+                fresh.reserveCapacity(values.count)
+                for place in values {
+                    let feature = MLNPointFeature(); feature.coordinate = place.coordinate.locationCoordinate
+                    feature.identifier = place.id
+                    var attributes: [String: Any] = ["class": place.kind, "rank": place.rank]
+                    for (key, value) in place.names { attributes[key] = value }
+                    feature.attributes = attributes; fresh[place.id] = feature
+                }
+                self.records = fresh; self.cacheBounds = buffered; self.cacheBand = currentBand; self.cacheAt = CACurrentMediaTime()
+                self.emptyAttempts = fresh.isEmpty ? self.emptyAttempts + 1 : 0
+                // Publish now if the map is still, otherwise as soon as it settles. If the camera
+                // moved on meanwhile, the next request reuses or replaces this area.
+                self.unpublished = true
+                self.loadTask = nil
+                self.lastEvaluation = 0
+                self.request()
+            } catch {
+                if self.loadGeneration == token { self.cacheAt = CACurrentMediaTime(); self.emptyAttempts += 1 }
+            }
+        }
+    }
+    private func ring(for map: MLNMapView) -> CGFloat { map.camera.pitch > 20 ? 40 : Self.overscan }
+    private func publish(_ map: MLNMapView, source: MLNShapeSource, zoom: Double, viewport: CGRect) {
+        let projected = records.map { id, feature -> PlaceLabelCandidate in
+            let pixel = map.convert(feature.coordinate, toPointTo: map)
+            let kind = feature.attribute(forKey: "class") as? String ?? ""
+            let rank = (feature.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
+            return PlaceLabelCandidate(id: id, x: pixel.x - viewport.minX, y: pixel.y - viewport.minY,
+                                       rank: rank, landmark: Self.landmarkClasses.contains(kind))
+        }
+        candidates = projected.count
+        let ids = PlaceLabelBudget.select(projected, zoom: zoom, width: viewport.width, height: viewport.height,
+                                          previous: previous, overscan: Double(ring(for: map))).sorted()
+        // Identifiers already carry the class, name and position of each place.
+        let stamp = ids.joined(separator: "|")
+        if stamp != lastStamp {
+            source.shape = MLNShapeCollectionFeature(shapes: ids.compactMap { records[$0] })
+            lastStamp = stamp; previous = Set(ids)
+            let onScreen = Set(projected.lazy.filter {
+                $0.x >= -48 && $0.x <= viewport.width + 48 && $0.y >= -48 && $0.y <= viewport.height + 48
+            }.map(\.id))
+            count = ids.filter(onScreen.contains).count; ringCount = ids.count - count
+        }
+        unpublished = false
+        remember(map, at: CACurrentMediaTime())
+    }
+    private func remember(_ map: MLNMapView, at time: Double) {
+        lastCenter = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
+        lastZoom = map.zoomLevel; lastHeading = map.direction; lastPitch = map.camera.pitch
+        lastInset = map.contentInset; lastPlacement = time
+    }
+}
+
+/// Actor isolation keeps HTTP, protobuf decoding and geographic scans off the UI thread.
+private actor PlaceTileProvider {
+    private struct Configuration: Decodable { let tiles: [String]; let maxzoom: Int? }
+    private var configuration: Configuration?
+    private var cache: [String: [MapPlace]] = [:]
+    private var order: [String] = []
+    /// Tile URLs carry the data version, so a dedicated disk cache can serve them across
+    /// launches without a second download of what the map itself already fetched once.
+    private let session: URLSession = {
+        let folder = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("place-tiles", isDirectory: true)
+        let configuration = URLSessionConfiguration.default
+        configuration.urlCache = URLCache(memoryCapacity: 4 * 1024 * 1024, diskCapacity: 96 * 1024 * 1024, directory: folder)
+        configuration.waitsForConnectivity = false
+        return URLSession(configuration: configuration)
+    }()
+    private let agent = "TaipeiBus/" + (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1")
+    private func bytes(_ url: URL, policy: URLRequest.CachePolicy) async throws -> Data {
+        guard url.scheme == "https", url.host == "tiles.openfreemap.org" else { throw FeedError.invalid("Place tile endpoint") }
+        var request = URLRequest(url: url, cachePolicy: policy, timeoutInterval: 20)
+        request.setValue(agent, forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await session.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 8 * 1024 * 1024 else { throw FeedError.invalid("Place tile response") }
+        return data
+    }
+    func places(in bounds: GeoBounds, landmarks: Set<String>, ordinary: Set<String>, maximumRank: Double) async throws -> [MapPlace] {
+        if configuration == nil {
+            // The tile list names the current data version; revalidate it so an old cached
+            // version that the server has retired never leaves the map without places.
+            let data = try await bytes(URL(string: "https://tiles.openfreemap.org/planet")!, policy: .useProtocolCachePolicy)
+            configuration = try JSONDecoder().decode(Configuration.self, from: data)
+        }
+        guard let configuration, let template = configuration.tiles.first else { return [] }
+        var zoom = min(14, max(0, configuration.maxzoom ?? 14)), size = 1 << zoom
+        func tileX(_ longitude: Double) -> Int { min(size - 1, max(0, Int(floor((longitude + 180) / 360 * Double(size))))) }
+        func tileY(_ latitude: Double) -> Int {
+            let value = min(85, max(-85, latitude)) * .pi / 180
+            return min(size - 1, max(0, Int(floor((1 - log(tan(value) + 1 / cos(value)) / .pi) / 2 * Double(size)))))
+        }
+        var west = tileX(bounds.west), east = tileX(bounds.east), north = tileY(bounds.north), south = tileY(bounds.south)
+        while (east - west + 1) * (south - north + 1) > 16 && zoom > 10 {
+            zoom -= 1; size = 1 << zoom
+            west = tileX(bounds.west); east = tileX(bounds.east); north = tileY(bounds.north); south = tileY(bounds.south)
+        }
+        guard east >= west, south >= north, (east - west + 1) * (south - north + 1) <= 16 else { return [] }
+        var result: [String: MapPlace] = [:]
+        var failures = 0, tiles = 0
+        for x in west...east { for y in north...south {
+            try Task.checkCancellation()
+            tiles += 1
+            let key = "\(zoom)/\(x)/\(y)"
+            let points: [MapPlace]
+            if let cached = cache[key] { points = cached }
+            else {
+                let text = template.replacingOccurrences(of: "{z}", with: String(zoom)).replacingOccurrences(of: "{x}", with: String(x)).replacingOccurrences(of: "{y}", with: String(y))
+                guard let url = URL(string: text) else { continue }
+                // One unreachable tile leaves a gap instead of blanking the whole screen.
+                do {
+                    points = try MapPlaceTile.decode(try await bytes(url, policy: .returnCacheDataElseLoad), zoom: zoom, x: x, y: y)
+                } catch {
+                    if Task.isCancelled { throw CancellationError() }
+                    failures += 1; continue
+                }
+                cache[key] = points; order.removeAll { $0 == key }; order.append(key)
+                if order.count > 24 { cache.removeValue(forKey: order.removeFirst()) }
+            }
+            for point in points where point.coordinate.latitude >= bounds.south && point.coordinate.latitude <= bounds.north &&
+                point.coordinate.longitude >= bounds.west && point.coordinate.longitude <= bounds.east {
+                // Only places the current zoom band can draw compete for the hand-off below.
+                let eligible = landmarks.contains(point.kind) ? point.rank <= 3 :
+                    ordinary.contains(point.kind) && point.rank <= maximumRank
+                if eligible { result[point.id] = point }
+            }
+        } }
+        if failures > 0, failures == tiles {
+            // Every tile failed: the cached tile list may name a retired data version.
+            self.configuration = nil
+            throw FeedError.invalid("Place tiles unavailable")
+        }
+        let center = Coordinate(latitude: (bounds.south + bounds.north) / 2, longitude: (bounds.west + bounds.east) / 2)
+        let keyed = result.values.map { ($0, landmarks.contains($0.kind), Int($0.coordinate.distance(to: center) / 20)) }
+        let ordered = keyed.sorted { a, b in
+            if a.1 != b.1 { return a.1 }
+            if a.2 != b.2 { return a.2 < b.2 }
+            return a.0.rank == b.0.rank ? a.0.id < b.0.id : a.0.rank < b.0.rank
+        }
+        // A pathological dense tile never delivers thousands of UIKit objects.
+        return ordered.prefix(512).map(\.0)
     }
 }

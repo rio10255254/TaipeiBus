@@ -1,7 +1,7 @@
 {
   "app_name": "台北公車",
   "bundle_id": "com.rio10255254.TaipeiBus",
-  "version": "1.2.0",
+  "version": "1.3.1",
   "sku": "TaipeiBus-iOS",
   "locale": "zh-Hant",
   "internal_group": "TaipeiBus Internal",
@@ -9,5 +9,5 @@
   "minimum_upload_sdk": 26,
   "description_file": "beta-description.zh-Hant.txt",
   "what_to_test_file": "what-to-test.zh-Hant.txt",
-  "distribution": "app-store"
+  "distribution": "testflight-only"
 }

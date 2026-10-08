@@ -8,12 +8,25 @@ enum BrowseMode: String, CaseIterable, Identifiable {
     var id: Self { self }
 }
 
+/// A shop, landmark or other place tapped on the map; it can become a trip destination.
+struct MapPlaceSelection: Equatable {
+    let name: String
+    let englishName: String?
+    let kind: String
+    let coordinate: Coordinate
+    var localizedName: String { AppLanguage.current == .english ? englishName ?? name : name }
+    static func == (a: MapPlaceSelection, b: MapPlaceSelection) -> Bool {
+        a.name == b.name && a.kind == b.kind && a.coordinate.latitude == b.coordinate.latitude && a.coordinate.longitude == b.coordinate.longitude
+    }
+}
+
 enum MapFocus {
     case coordinate(Coordinate)
     case station(String)
     case userLocation
     case route(String)
     case vehicle(String)
+    case metroTrain(String)
     case journey([Coordinate])
     case cityOverview
     case returnToCity
@@ -40,6 +53,10 @@ private actor StationLookup {
 final class TransitAppModel: ObservableObject {
     @Published private(set) var metadata = TransitMetadata()
     @Published private(set) var snapshot = TransitSnapshot()
+    @Published private(set) var metroRealtime: MetroRealtime?
+    @Published private(set) var metroRevision = 0
+    @Published var selectedTrainID: String?
+    @Published var followingTrain = false
     @Published private(set) var loading = true
     @Published private(set) var loadError: String?
     @Published private(set) var metadataNotice: String?
@@ -81,6 +98,7 @@ final class TransitAppModel: ObservableObject {
     /// waiting card while it settles cannot drop the request.
     @Published var showingArrivingVehicles = false
     @Published var focus: MapFocus?
+    @Published var tappedPlace: MapPlaceSelection?
     @Published var focusRevision = 0
     @Published var selectionRevision = 0
     @Published var mapError: String?
@@ -125,9 +143,14 @@ final class TransitAppModel: ObservableObject {
             vehicle: selectedVehicleID, boarding: routeBoardingStopID, direction: direction,
             variants: allRouteVariants, following: following, focus: focus,
             originStation: routeOriginStationID, walkingIndex: walkingMapIndex, detent: sheetDetent)
-        following = false; stopUserTracking()
+        following = false; followingTrain = false; stopUserTracking()
         location.setWalkingNavigation(true); location.request()
-        stationWalk.begin(station, location: location)
+        var target = station
+        if station.mode != .bus, let exit = metadata.metro.nearestExit(stationID:station.id,to:location.displayCoordinate ?? station.coordinate) {
+            target = Station(id:station.id,name:station.name + " · " + exit.name,coordinate:exit.coordinate,
+                address:station.address,bearing:station.bearing,stopIDs:station.stopIDs,englishName:station.englishName + " · " + exit.englishName,mode:station.mode)
+        }
+        stationWalk.begin(target, location: location)
     }
     func showStationWalkOverview() {
         guard !stationWalk.coordinates.isEmpty else { return }
@@ -239,6 +262,10 @@ final class TransitAppModel: ObservableObject {
             guard let self else { return }
             do {
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
+                else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--preview-metro-fixture") { applyPreviewSelection() }
+#endif
                 async let prepared = service.prepare()
                 if !metadata.routes.isEmpty {
                     let current = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
@@ -251,8 +278,10 @@ final class TransitAppModel: ObservableObject {
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
+                    async let rail = service.metroRealtime(network: metadata.metro)
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
+                    if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
@@ -303,8 +332,10 @@ final class TransitAppModel: ObservableObject {
 #endif
         guard result.revision > snapshot.revision else { return }
         snapshot = result
+        if let metroRealtime { snapshot.estimates = metroRealtime.applying(to: result.estimates, network: metadata.metro, at: Date()) }
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
-        planner.updateSnapshot(result, forecast: arrivalForecast)
+        anchorBoardedVehicle(publish: false)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
 #if DEBUG
         markLiveSettingsPreview()
 #endif
@@ -320,7 +351,10 @@ final class TransitAppModel: ObservableObject {
     var activeWalkingIndex: Int? {
         if stationWalk.isActive { return nil }
         if let walkingMapIndex { return walkingMapIndex }
-        if planner.started, case .walk(let index) = planner.currentStep { return index }
+        if planner.started, case .walk(let index) = planner.currentStep {
+            if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer == true { return nil }
+            return index
+        }
         return nil
     }
     func updateWalkingLocation() {
@@ -349,6 +383,7 @@ final class TransitAppModel: ObservableObject {
     }
     func stopUserTracking() { userMapMode = .free }
     func cycleUserTracking() {
+        followingTrain = false
         cityFleetMode = false
         let next: UserMapMode = userMapMode == .north ? .heading : .north
         if planner.selected == nil { clearSelection() }
@@ -394,6 +429,7 @@ final class TransitAppModel: ObservableObject {
         focusMap(.journey(points.isEmpty ? [walk.from, walk.to] : points))
     }
     func selectStation(_ station: Station) {
+        selectedTrainID = nil; followingTrain = false
         routeOverviewReturn = nil; routeOriginStationID = nil
         if selectedStationID == nil { browseQuery = query }
         stationBrowsing = false
@@ -406,6 +442,7 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
+        selectedTrainID = nil; followingTrain = false
         if let station = selectedStationID { routeOriginStationID = station }
         else if selectedRoute?.parentID != route.parentID { routeOriginStationID = nil }
         let context = boardingStopID ?? selectedStation?.stopIDs.first {
@@ -462,6 +499,7 @@ final class TransitAppModel: ObservableObject {
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func clearSelection() {
+        selectedTrainID = nil; followingTrain = false
         routeOverviewReturn = nil; routeOriginStationID = nil
 #if DEBUG
         debugActions.append("clear-selection")
@@ -517,6 +555,15 @@ final class TransitAppModel: ObservableObject {
         return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
     }
 
+    /// The last movement-based arrival while on board. A momentarily stale feed report must not
+    /// swap the remaining time for the much more conservative planned ride time and back again.
+    private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
+    private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
+        guard let onboardArrival, onboardArrival.rideID == ride.id,
+              (0...300).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
+        return max(60, onboardArrival.arrival.timeIntervalSince(date))
+    }
+
     func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
@@ -537,38 +584,54 @@ final class TransitAppModel: ObservableObject {
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
            let progress = planner.walkingProgress, progress.locationConfirmed,
            let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
-            walking[0] = progress.remainingSeconds
+            let leg = option.walks[index]
+            let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
+            walking[0] = progress.remainingSeconds + stationAllowance
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
         if onboard, let first = remainingRides.first, !riding.isEmpty {
-            if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
+            if first.route.mode != .bus {
+                let remaining = metroRemaining(first, at: date)
+                riding[0] = remaining.seconds; positionUncertain = !remaining.officialPosition
+            } else if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
                let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
                let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
                 if progress.distance < -20 { riding[0] = 0 }
                 else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
                     riding[0] = prediction.seconds
+                    onboardArrival = (first.id, date.addingTimeInterval(prediction.seconds), date)
+                } else if let held = heldOnboardSeconds(first, at: date) {
+                    riding[0] = held
                 } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
                           let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
                     let total = abs(alight.match.along - board.match.along)
-                    if total > 1 { riding[0] *= min(1.5, max(0, progress.distance / total)) }
+                    // A delayed report can still sit before the boarding stop; never stretch the ride beyond its plan.
+                    if total > 1 { riding[0] *= min(1, max(0, progress.distance / total)) }
                 }
+            } else if let held = heldOnboardSeconds(first, at: date) {
+                riding[0] = held
             } else if let boardedAt {
                 riding[0] = max(60, riding[0] - max(0, date.timeIntervalSince(boardedAt)))
                 positionUncertain = true
             } else {
                 positionUncertain = true
             }
+            // Without new movement the bus is at worst where it was, so a fallback never exceeds the
+            // last movement-based remaining time; that is what jumped from 23 to 83 min and back.
+            if let last = onboardArrival, last.rideID == first.id, last.at != date {
+                riding[0] = min(riding[0], max(60, last.arrival.timeIntervalSince(last.at)))
+            }
             walking[0] = 0; arrivals[0] = 0
         }
         var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
-            services: remainingRides.map { $0.route.servicePlans[$0.direction]?.service(at: date) },
+            services: remainingRides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : .stationHistory
+            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : rideEstimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
         return duration
     }
 
@@ -579,6 +642,12 @@ final class TransitAppModel: ObservableObject {
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
         boardedAt = Date()
+        if ride.route.mode != .bus {
+            let selected = metroRealtime?.trains.first { $0.id == selectedTrainID }
+            if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
+                selectedTrainID = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: Date())?.trainID
+            }
+        }
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
             confirmBoardedVehicle(bus, ride: ride)
@@ -597,8 +666,98 @@ final class TransitAppModel: ObservableObject {
         return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) }
     }
 
+    /// The feed reports each bus only every 20–60 s, so on board the rider's phone is ahead of
+    /// the reported bus. While the plate is confirmed, a precise fix on that bus's route replaces
+    /// the delayed report. Nothing is extrapolated; every position is a real reading.
+    @Published private(set) var anchorRevision = 0
+    private var riderAnchored: BusVehicle?
+    func anchorBoardedVehicle(publish: Bool = true) {
+        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
+              let boardedVehicle, boardedVehicle.rideID == ride.id,
+              let index = snapshot.vehicles.firstIndex(where: { $0.id == boardedVehicle.vehicleID }) else {
+            riderAnchored = nil; location.setRidingNavigation(false); return
+        }
+        location.setRidingNavigation(true)
+        let bus = snapshot.vehicles[index]
+        let now = Date()
+        if riderAnchored?.id != bus.id { riderAnchored = nil }
+        var next: BusVehicle?
+        if let position = location.usableCoordinate, let accuracy = location.accuracy, let fixedAt = location.updatedAt,
+           let line = metadata.line(bus.routeID, direction: bus.direction) {
+            next = RiderAnchor.anchor(bus, rider: position, accuracy: accuracy, fixedAt: fixedAt,
+                                      previous: riderAnchored?.roadMatch, line: line,
+                                      journey: metadata.journey(routeID: bus.routeID, direction: bus.direction), now: now)
+        }
+        if next == nil, var held = riderAnchored, now.timeIntervalSince(held.observedAt) < 90,
+           let anchored = held.roadMatch, let reported = bus.roadMatch, bus.travelDirection != 0,
+           (anchored.along - reported.along) * Double(bus.travelDirection) > 0 {
+            // A stationary phone sends no new fix; keep the rider's last reading instead of
+            // stepping back to an older feed report that is behind the bus.
+            held.path = [held.coordinate]
+            next = held
+        }
+        guard let next else { riderAnchored = nil; return }
+        if riderAnchored?.observedAt == next.observedAt, riderAnchored?.coordinate == next.coordinate,
+           snapshot.vehicles[index].observedAt == next.observedAt { return }
+        riderAnchored = next
+        snapshot.vehicles[index] = next
+        guard publish else { return }
+        anchorRevision += 1
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+    }
+
+    /// True while the boarded bus is drawn from the rider's own fix rather than the delayed feed.
+    func isRiderAnchored(_ bus: BusVehicle) -> Bool {
+        riderAnchored.map { $0.id == bus.id && $0.observedAt == bus.observedAt } ?? false
+    }
+
     func onboardPlate(for ride: TransitRide) -> String? {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
+    }
+
+    func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {
+        metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.remaining(at: date)
+    }
+    func metroRevisionForSelection() {
+        metroRevision += 1
+        followingTrain = true
+        guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
+              let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
+        focusMap(.metroTrain(id))
+    }
+    func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
+        if let value = metroArrival(ride, at: date) { return MetroCountdown.label(value) }
+        guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date),
+              let headway = metadata.metro.service(routeID: ride.route.id, direction: ride.direction, at: date)?.headway else { return AppText.text("營運時間外") }
+        return AppText.text("約 %@–%@ 分", 1, max(1, Int(ceil(headway.upperSeconds / 60))))
+    }
+    func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], officialPosition: Bool) {
+        let report = metroRealtime?.trains.first { $0.id == selectedTrainID &&
+            metadata.metro.canServe(ride,patternID:$0.patternID,direction:$0.direction,destinationStationID:$0.destinationStationID) &&
+            (-15...60).contains(date.timeIntervalSince($0.observedAt)) }
+        if let report, let next = ride.stops.firstIndex(where: { $0.stationID == report.nextStationID }) {
+            let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+                from: report.nextStationID, to: ride.alighting.stationID) ?? 0
+            return (max(0, report.remainingSeconds - max(0, date.timeIntervalSince(report.observedAt))) + after,
+                Array(ride.stops[max(1,next)...]), true)
+        }
+        let elapsed = boardedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0
+        var reached = 0
+        for index in ride.stops.indices.dropFirst() {
+            let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+                from: ride.boarding.stationID, to: ride.stops[index].stationID) ?? .infinity
+            if seconds <= elapsed { reached = index }
+        }
+        let remaining = Array(ride.stops.dropFirst(min(reached + 1, ride.stops.count)))
+        let total = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+            from: ride.boarding.stationID, to: ride.alighting.stationID) ?? 0
+        return (max(0,total - elapsed), remaining, false)
+    }
+    func metroStopLabel(_ ride: TransitRide, stop: BusStop, at date: Date) -> String {
+        let remaining = metroRemaining(ride, at: date)
+        let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
+            from: stop.stationID, to: ride.alighting.stationID) ?? 0
+        return AppText.text("約 %@ 分", max(0, Int(ceil(max(0, remaining.seconds - after) / 60))))
     }
 
     /// Boarding is confirmed by the rider. A delayed GPS fix must not put the
@@ -628,10 +787,10 @@ final class TransitAppModel: ObservableObject {
 
     func returnToWaiting() {
         boardedVehicle = nil; planner.returnToWaiting()
-        boardedAt = nil
+        boardedAt = nil; anchorBoardedVehicle()
     }
-    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; planner.finish(); clearSelection() }
+    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); clearSelection(); anchorBoardedVehicle() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {
@@ -708,6 +867,11 @@ final class TransitAppModel: ObservableObject {
         func value(after flag: String) -> String? {
             guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
             return arguments[index + 1]
+        }
+        if arguments.contains("--preview-metro-fixture") {
+            previewSelectionApplied = true
+            Task { [weak self] in _ = await self?.prepareMetroFixture() }
+            return
         }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
@@ -894,6 +1058,36 @@ final class TransitAppModel: ObservableObject {
             try? data.write(to: directory.appendingPathComponent("place-search-audit.json"), options: .atomic)
         }
         try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+    }
+
+    private func prepareMetroFixture() async -> Bool {
+        guard let from = metadata.metro.stations.first(where: { $0.code == "BR19" }),
+              let to = metadata.metro.stations.first(where: { $0.code == "BR10" }) else { return false }
+        let noon = ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")!
+        let network = metadata.metro
+        let planned = await Task.detached(priority: .userInitiated) {
+            var source = TransitMetadata(); network.attach(to: &source)
+            return MultimodalPlanner(metadata: source).plan(from: from.coordinate, to: to.coordinate,
+                maximumWalk: 200, limit: 3, at: noon).first
+        }.value
+        guard let trip = planned, let ride = trip.rides.first else { return false }
+        let now = Date(), stamp = ISO8601DateFormatter().string(from: now)
+        let pattern = metadata.metro.pattern(ride.route.id, direction: ride.direction)!
+        let nextIndex = pattern.stationIDs.firstIndex(of: from.id)!
+        let report: [String: Any] = ["id":"QA-TRAIN-01", "operatorID":"TRTC", "patternID":ride.route.id, "direction":ride.direction,
+            "nextStationID":from.id, "destinationStationID":pattern.stationIDs.last!, "remainingSeconds":60,
+            "observedAt":stamp, "atPlatform":false]
+        let arrival: [String: Any] = ["stationID":from.id,"patternID":ride.route.id,"direction":ride.direction,
+            "destinationStationID":pattern.stationIDs.last!,"trainID":"QA-TRAIN-01","seconds":60,"observedAt":stamp]
+        guard nextIndex > 0, let bytes = try? JSONSerialization.data(withJSONObject:["schema":1,"source":"Taipei Metro authorized API","trains":[report],"arrivals":[arrival]]),
+              let packet = try? MetroRealtime(data: bytes, network: metadata.metro, at: now) else { return false }
+        metroRealtime = packet; metroRevision += 1
+        snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast); planner.prepareBoardingPreview(trip)
+        selectedTrainID = "QA-TRAIN-01"
+        previewNotice = "介面驗證用資料 · 非即時列車"
+        focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
+        return true
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {

@@ -6,8 +6,12 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times']
+        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data']
         default: 'check-only'
+      metro_endpoints:
+        description: 'Optional bounded metro metadata endpoint subset'
+        type: string
+        default: ''
       route_ids:
         description: 'For official travel times: comma-separated published route IDs; empty uses every route'
         type: string
@@ -46,7 +50,7 @@ env:
 
 jobs:
   release:
-    if: inputs.operation != 'collect-route-times'
+    if: inputs.operation != 'collect-route-times' && inputs.operation != 'collect-metro-data'
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -251,3 +255,22 @@ jobs:
         if: inputs.publish_data
         run: |
           gh release upload travel-time-data "$RUNNER_TEMP/route-times/official-times.json" "$RUNNER_TEMP/route-times/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
+
+  metro:
+    if: inputs.operation == 'collect-metro-data'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+      TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect bounded official metro metadata
+        run: python3 ios/release/collect-metro-data.py --out "$RUNNER_TEMP/metro" --endpoints "${{ inputs.metro_endpoints }}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: official-metro-metadata
+          path: ${{ runner.temp }}/metro
+          if-no-files-found: ignore
+          retention-days: 30

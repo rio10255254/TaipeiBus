@@ -6,6 +6,36 @@ import TransitCore
 
 /// Bus geometry participates in MLNMapView's Metal render pass and native 3D depth buffer.
 final class NativeBusLayer: MLNCustomStyleLayer {
+    var trainMode = false
+    private var trains: [PreparedMetroTrain] = []
+    private var trainOrigins: [String: Coordinate] = [:]
+    private var trainBlendStarted = Date.distantPast
+    private var trainVisible = false
+    func ingestTrains(_ reports: [MetroTrainReport], network: MetroNetwork) {
+        let now = Date()
+        trainOrigins = Dictionary(trains.compactMap { track in trainPose(track, at: now).map { (track.report.id,$0.coordinate) } }, uniquingKeysWith: { a,_ in a })
+        trainBlendStarted = now
+        trains = reports.compactMap { PreparedMetroTrain(report: $0, network: network) }
+        // Each train carries its line colour as a stripe, packed into the instance for the shader.
+        trainLivery = Dictionary(reports.map { report -> (String, Float) in
+            let name = network.pattern(report.patternID, direction: report.direction)
+                .flatMap { network.line($0.lineID)?.name } ?? ""
+            return (report.id, Self.packedColor(RouteTint.mapHex(for: name, dark: darkAppearance)))
+        }, uniquingKeysWith: { a, _ in a })
+        setNeedsDisplay()
+    }
+    private var trainLivery: [String: Float] = [:]
+    /// 16 + 0xRRGGBB. Buses use this slot for wheel rotation, which stays below 2π, so the
+    /// shader can tell a train livery apart from a wheel angle.
+    private static func packedColor(_ hex: String) -> Float {
+        let value = UInt32(hex.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x1F6FD1
+        return Float(16 + (value & 0xFFFFFF))
+    }
+    private func trainPose(_ track: PreparedMetroTrain, at now: Date) -> VehiclePose? {
+        guard (-15...60).contains(now.timeIntervalSince(track.report.observedAt)) else { return nil }
+        return track.renderPose(at: reduceMotion ? track.report.observedAt : now,
+            blendingFrom: reduceMotion ? nil : trainOrigins[track.report.id], fraction: now.timeIntervalSince(trainBlendStarted))
+    }
     var onError: ((String) -> Void)?
     var onSelectedPoint: ((CGPoint?) -> Void)?
     var selectedID: String? {
@@ -88,9 +118,17 @@ final class NativeBusLayer: MLNCustomStyleLayer {
 #endif
         setNeedsDisplay()
     }
-    func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? { motion.pose(id: id, time: time, now: now) }
+    func pose(id: String, time: TimeInterval, now: Date) -> VehiclePose? {
+        if trainMode { return trains.first { $0.report.id == id }.flatMap { trainPose($0, at: now) } }
+        return motion.pose(id: id, time: time, now: now)
+    }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
-        motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
+        if trainMode {
+            let visible = trains.contains { (-15...60).contains(now.timeIntervalSince($0.report.observedAt)) }
+            if visible != trainVisible { trainVisible = visible; setNeedsDisplay() }
+            return !reduceMotion && visible
+        }
+        return motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
     }
 
     override func didMove(to mapView: MLNMapView) {
@@ -140,10 +178,12 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let edges = outline()
             outlineCount = edges.count
             outlineBuffer = edges.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
-            let shadowPositions: [SIMD2<Float>] = [SIMD2(-1.75,-6.4),SIMD2(1.75,-6.4),SIMD2(1.75,6.4),
-                                                    SIMD2(-1.75,-6.4),SIMD2(1.75,6.4),SIMD2(-1.75,6.4)]
+            // The soft contact shadow follows the vehicle's real footprint (bus or three-car train).
+            let half = trainMode ? SIMD2<Float>(1.75, 18.9) : SIMD2<Float>(1.75, 6.4)
+            let shadowPositions: [SIMD2<Float>] = [SIMD2(-half.x,-half.y),SIMD2(half.x,-half.y),SIMD2(half.x,half.y),
+                                                    SIMD2(-half.x,-half.y),SIMD2(half.x,half.y),SIMD2(-half.x,half.y)]
             let shadow = shadowPositions.map { p in
-                Vertex(position: SIMD4(p.x,p.y,0.035,0), normal: SIMD4(p.x / 1.75,p.y / 6.4,0,0), color: .zero)
+                Vertex(position: SIMD4(p.x,p.y,0.035,0), normal: SIMD4(p.x / half.x,p.y / half.y,0,0), color: .zero)
             }
             shadowBuffer = shadow.withUnsafeBytes { device.makeBuffer(bytes: $0.baseAddress!, length: $0.count, options: .storageModeShared) }
             instanceBuffers = (0..<3).compactMap { _ in device.makeBuffer(length: MemoryLayout<Instance>.stride * 512, options: .storageModeShared) }
@@ -205,7 +245,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let longitudeMargin = latitudeMargin / cos(Self.origin.latitude * .pi / 180)
         let bounds = GeoBounds(south: viewport.sw.latitude - latitudeMargin, west: viewport.sw.longitude - longitudeMargin,
                                north: viewport.ne.latitude + latitudeMargin, east: viewport.ne.longitude + longitudeMargin)
-        let poses = motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
+        let poses = trainMode ? trains.compactMap { trainPose($0, at: Date()) }
+            .filter { bounds.contains($0.coordinate) || $0.id == selectedID } : motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
         sampledVehicleCount = poses.count
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
@@ -231,7 +272,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let scale = Float(max(1, minimumLength / naturalLength))
             let instance = Instance(position: SIMD4(Float(east), Float(north), 0, scale),
                                     style: SIMD4(Float(angle), selected ? selectionStrength : emphasized ? selectionStrength * 0.7 : 0,
-                                                 pose.stale ? 1 : 0, Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
+                                                 pose.stale ? 1 : 0, trainMode ? trainLivery[pose.id] ?? Self.packedColor(RouteTint.general) :
+                                                    Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
             candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
                                selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))
         }
@@ -270,7 +312,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let definition = distanceBlend * distanceBlend * (3 - 2 * distanceBlend)
             var compactUniforms = uniforms
             compactUniforms.mode.y = 1 - definition
-            compactUniforms.mode.w = 0.52 + definition * 0.48
+            compactUniforms.mode.w = 0.68 + definition * 0.32
             encoder.setRenderPipelineState(pipeline)
             encoder.setDepthStencilState(normalDepth)
             encoder.setVertexBuffer(compactVertexBuffer, offset: 0, index: 0)
@@ -357,6 +399,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     private func mesh(compact: Bool = false) -> [Vertex] {
+        if trainMode { return trainMesh(compact: compact) }
         var vertices: [Vertex] = []
         func triangle(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, color: SIMD3<Float>,
                       normal: SIMD3<Float>? = nil, material: Float = 0, wheelY: Float = 0) {
@@ -445,6 +488,98 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         return vertices
     }
 
+    /// A three-car Taipei metro EMU: brushed stainless body, a continuous dark window band,
+    /// the line colour as a stripe (material 4, tinted per train in the shader), sloped cab
+    /// ends with windshields, headlights forward and tail lights behind, and gangways.
+    private func trainMesh(compact: Bool) -> [Vertex] {
+        var vertices: [Vertex] = []
+        func quad(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ c: SIMD3<Float>, _ d: SIMD3<Float>,
+                  shade: SIMD3<Float>, normal: SIMD3<Float>? = nil, material: Float = 0) {
+            let n = normal ?? simd_normalize(simd_cross(b - a, c - a))
+            for p in [a,b,c,a,c,d] {
+                vertices.append(Vertex(position: SIMD4(p.x,p.y,p.z,0), normal: SIMD4(n.x,n.y,n.z,material), color: SIMD4(shade.x,shade.y,shade.z,1)))
+            }
+        }
+        let steel = SIMD3<Float>(0.86, 0.87, 0.88), roofShade = SIMD3<Float>(0.8, 0.81, 0.83)
+        let glass = SIMD3<Float>(0.13, 0.16, 0.19), skirt = SIMD3<Float>(0.24, 0.25, 0.27)
+        let carLength: Float = 11.9, gap: Float = 0.55, width: Float = 2.7
+        let centers: [Float] = [-(carLength + gap), 0, carLength + gap]
+        let halfWidth = width / 2
+        for (index, center) in centers.enumerated() {
+            let lead = index == centers.count - 1, tail = index == 0
+            // Cab cars lean their outer face back towards the roof so the train reads as a nose.
+            // The lean stays within the corner bevel, keeping every ring convex for the roof fan.
+            func ring(_ w: Float, _ z: Float, nose: Float = 0) -> [SIMD3<Float>] {
+                var r = bodyRing(width: w, length: carLength, z: z, y: center)
+                if lead { for i in [4,5] { r[i].y -= nose } }
+                if tail { for i in [0,1] { r[i].y += nose } }
+                return r
+            }
+            let base = ring(width - 0.2, 0.28), lower = ring(width, 0.62), upper = ring(width, 2.9, nose: 0.1)
+            let eave = ring(width - 0.3, 3.28, nose: 0.15), top = ring(width - 0.75, 3.42, nose: 0.18)
+            for i in 0..<8 {
+                let j = (i + 1) % 8
+                quad(base[i], base[j], lower[j], lower[i], shade: skirt)
+                quad(lower[i], lower[j], upper[j], upper[i], shade: steel)
+                quad(upper[i], upper[j], eave[j], eave[i], shade: steel * 0.96)
+                quad(eave[i], eave[j], top[j], top[i], shade: roofShade)
+            }
+            for i in 1..<7 { quad(top[0], top[i], top[i + 1], top[0], shade: roofShade, normal: SIMD3(0, 0, 1)) }
+            let y0 = center - carLength / 2 + 0.55, y1 = center + carLength / 2 - 0.55
+            for side: Float in [-1, 1] {
+                let x = side * (halfWidth + 0.012), n = SIMD3<Float>(side, 0, 0)
+                // Continuous ribbon glazing and the line-colour stripe beneath it.
+                quad(SIMD3(x, y0, 1.72), SIMD3(x, y1, 1.72), SIMD3(x, y1, 2.62), SIMD3(x, y0, 2.62), shade: glass, normal: n, material: 1)
+                quad(SIMD3(x, y0 - 0.3, 1.18), SIMD3(x, y1 + 0.3, 1.18), SIMD3(x, y1 + 0.3, 1.46), SIMD3(x, y0 - 0.3, 1.46),
+                     shade: steel, normal: n, material: 4)
+                if !compact {
+                    // Four door pairs per side, as dark seams through the stripe and glazing.
+                    for k in 0..<4 {
+                        let doorCenter = center - carLength / 2 + carLength * (Float(k) + 0.5) / 4
+                        let x2 = side * (halfWidth + 0.02)
+                        for edge: Float in [-0.66, 0.66] {
+                            quad(SIMD3(x2, doorCenter + edge - 0.035, 0.7), SIMD3(x2, doorCenter + edge + 0.035, 0.7),
+                                 SIMD3(x2, doorCenter + edge + 0.035, 2.72), SIMD3(x2, doorCenter + edge - 0.035, 2.72),
+                                 shade: SIMD3(repeating: 0.5), normal: n)
+                        }
+                    }
+                }
+            }
+            if !compact {
+                // One low roof equipment fairing per car, close to the roof tone so the roof
+                // reads as a clean surface rather than patches.
+                let box = [SIMD3<Float>(-0.58, center - 3.6, 3.42), SIMD3(0.58, center - 3.6, 3.42),
+                           SIMD3(0.58, center + 3.6, 3.42), SIMD3(-0.58, center + 3.6, 3.42)]
+                let lid = box.map { SIMD3($0.x * 0.88, $0.y + ($0.y > center ? -0.25 : 0.25), 3.58) }
+                for i in 0..<4 { let j = (i + 1) % 4; quad(box[i], box[j], lid[j], lid[i], shade: roofShade * 0.97) }
+                quad(lid[0], lid[1], lid[2], lid[3], shade: roofShade * 1.02, normal: SIMD3(0, 0, 1))
+            }
+            if lead || tail {
+                // Cab face: windshield, a stripe band and lamps. Forward is +y.
+                let sign: Float = lead ? 1 : -1
+                let n = simd_normalize(SIMD3<Float>(0, sign, 0.04))
+                // Just proud of the leaning face, so nothing z-fights with the body.
+                func faceY(_ z: Float) -> Float { center + sign * (carLength / 2 - 0.1 * max(0, z - 0.62) / 2.28 + 0.015) }
+                func faceQuad(_ x0: Float, _ x1: Float, _ z0: Float, _ z1: Float, shade: SIMD3<Float>, material: Float) {
+                    quad(SIMD3(x0, faceY(z0), z0), SIMD3(x1, faceY(z0), z0), SIMD3(x1, faceY(z1), z1), SIMD3(x0, faceY(z1), z1),
+                         shade: shade, normal: n, material: material)
+                }
+                faceQuad(-1.0, 1.0, 1.78, 2.74, shade: glass, material: 1)
+                faceQuad(-1.06, 1.06, 1.18, 1.46, shade: steel, material: 4)
+                let lamp = lead ? SIMD3<Float>(1, 0.96, 0.84) : SIMD3<Float>(0.86, 0.1, 0.08)
+                for x: Float in [-0.9, 0.7] { faceQuad(x, x + 0.2, 0.84, 1.02, shade: lamp, material: 3) }
+            }
+            if index < centers.count - 1 {
+                // Gangway bellows to the next car.
+                let y = center + carLength / 2, w: Float = 0.95
+                let g = SIMD3<Float>(repeating: 0.2)
+                quad(SIMD3(-w, y, 0.7), SIMD3(-w, y + gap, 0.7), SIMD3(-w, y + gap, 2.85), SIMD3(-w, y, 2.85), shade: g, normal: SIMD3(-1, 0, 0))
+                quad(SIMD3(w, y + gap, 0.7), SIMD3(w, y, 0.7), SIMD3(w, y, 2.85), SIMD3(w, y + gap, 2.85), shade: g, normal: SIMD3(1, 0, 0))
+                quad(SIMD3(-w, y, 2.85), SIMD3(-w, y + gap, 2.85), SIMD3(w, y + gap, 2.85), SIMD3(w, y, 2.85), shade: g, normal: SIMD3(0, 0, 1))
+            }
+        }
+        return vertices
+    }
     private func bodyRing(width: Float, length: Float, z: Float, y: Float = 0) -> [SIMD3<Float>] {
         let x = width/2, l = length/2, bevel: Float = min(0.22,width/5)
         return [SIMD3(-x+bevel,y-l,z),SIMD3(x-bevel,y-l,z),SIMD3(x,y-l+bevel,z),SIMD3(x,y+l-bevel,z),
@@ -452,7 +587,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     }
 
     private func outline() -> [Vertex] {
-        let lower = bodyRing(width:2.56,length:11.81,z:0.43), upper = bodyRing(width:2.32,length:11.56,z:3.42)
+        let lower = bodyRing(width:trainMode ? 2.7 : 2.56,length:trainMode ? 36.8 : 11.81,z:0.43), upper = bodyRing(width:trainMode ? 2.32 : 2.32,length:trainMode ? 36.6 : 11.56,z:3.42)
         var edges: [(SIMD3<Float>,SIMD3<Float>)] = []
         for i in 0..<8 {
             edges.append((lower[i],lower[(i+1)%8])); edges.append((upper[i],upper[(i+1)%8]))

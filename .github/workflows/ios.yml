@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy']
+        options: ['all', 'metro', 'metro-routing', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -56,7 +56,7 @@ env:
 jobs:
   simulator:
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || 30 }}
+    timeout-minutes: ${{ (inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -70,7 +70,7 @@ jobs:
           python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
       - name: Build native app
-        if: inputs.usability_scope != 'routing-only'
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -79,13 +79,13 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
       - name: Package simulator app for requested preview
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
-        if: inputs.usability_scope != 'routing-only'
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -127,13 +127,19 @@ jobs:
           swift test --package-path ios/TransitCore --filter RouteCatalogTests.testLiveOfficialCatalogMatchesEveryPublishedRouteAndVariant | tee "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter TripPlannerTests.testLiveOfficialTripsPreserveBranchStopOrderAndTransferConnections | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialNeihuQueryFindsMetroPlatformsBeforeHospitalStops | tee -a "$RUNNER_TEMP/routing-audit.log"
+          if [ '${{ inputs.usability_scope }}' != 'metro-routing' ]; then
           swift test --package-path ios/TransitCore --filter NavigationGuidanceTests.testLiveOfficialVehiclesProduceOrderedPerStopPredictionsWithExpiry | tee -a "$RUNNER_TEMP/routing-audit.log"
           swift test --package-path ios/TransitCore --filter CooperatedRouteTests.testLiveAllPublishedRoutesAndCooperatedVehicleCoverage | tee -a "$RUNNER_TEMP/routing-audit.log"
-          if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'routing-only' ] || [ '${{ inputs.usability_scope }}' = 'metro-routing' ]; then
+            swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+            swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log"
+            if [ '${{ inputs.usability_scope }}' = 'routing-only' ]; then
             swift test --package-path ios/TransitCore --filter RouteRecommendationAuditTests | tee -a "$RUNNER_TEMP/routing-audit.log"
+            fi
           fi
       - name: iPhone 17 launch and screenshots
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         timeout-minutes: 12
         run: |
           set -euo pipefail
@@ -401,9 +407,16 @@ jobs:
           fi
       - name: Tap through native user journeys
         id: native_journeys
-        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only'
+        if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
+            curl --fail --silent --show-error --location --max-time 45 \
+              https://tiles.openfreemap.org/planet/20261004_113936_pt/14/13724/7014.pbf \
+              --output "$RUNNER_TEMP/place-fixture.pbf"
+            BUS_PLACE_TILE_FIXTURE="$RUNNER_TEMP/place-fixture.pbf" swift test --package-path ios/TransitCore \
+              --filter MapPlaceTileTests.testActualPublishedPoiTileMatchesIndependentCount
+          fi
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
@@ -411,8 +424,30 @@ jobs:
           ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
           selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'metro' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+              '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'map-controls' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MapAndSearchUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-controls' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests/testCityCameraMovesContinuouslyAndReturnsToTheSameView'
+              '-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests/testRouteRetainsItsStopAndShowsApproachingBusesBeforeTheRest')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesImproveFlatAndThreeDimensionalZoom'
+              '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testLiveBusZoomAndReturn'
+              '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testTappedPlaceOpensACardAndStartsATrip'
+              '-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesRetainEnglishNamesAndTheme')
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'journey-selection' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testSearchCompareCancelAndReturnFromWalkingMap')
@@ -512,6 +547,8 @@ jobs:
           fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
+          if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
@@ -521,7 +558,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/usability-tests.log"
       - name: Verify system dark appearance with native journeys
-        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -530,6 +567,17 @@ jobs:
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           export TEST_RUNNER_BUS_TEST_DARK=true
           selection=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'metro' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests/testMetroUsesExistingBoardingOnboardAndExitFlow'
+              '-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests/testEnglishMetroRetainsChineseStationNames')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-controls' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/StopFocusUsabilityTests/testRouteRetainsItsStopAndShowsApproachingBusesBeforeTheRest')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/ZoomPerformanceUsabilityTests/testBoundedPlacesRetainEnglishNamesAndTheme'
+              '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'continuous-gps' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/ContinuousGpsUsabilityTests'
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
@@ -573,7 +621,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
+        if: always() && (steps.native_journeys.outcome == 'success' || steps.native_journeys.outcome == 'failure') && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
         run: |
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
@@ -626,7 +674,7 @@ jobs:
                   keep = []
                   for item in record.get('attachments', []):
                       label = item.get('suggestedHumanReadableName', '')
-                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-', 'continuous-', 'navigation-')) or any(label.startswith(name) for name in names):
+                      if item.get('isAssociatedWithFailure') or label.startswith(('city-', 'appearance-', 'continuous-', 'navigation-', 'zoom-')) or any(label.startswith(name) for name in names):
                           filename = Path(item['exportedFileName']).name
                           shutil.copyfile(manifest.parent / filename, target / filename)
                           keep.append(item)

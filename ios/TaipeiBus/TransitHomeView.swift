@@ -99,6 +99,9 @@ struct TransitHomeView: View {
                 if ProcessInfo.processInfo.arguments.contains("--test-map-controls") {
                     DebugMapCameraText(overlay: selectionOverlay)
                 }
+                if ProcessInfo.processInfo.arguments.contains("--test-zoom-performance") {
+                    DebugZoomPerformanceControls().padding(.top, 146)
+                }
                 if let notice = model.previewNotice {
                     Text(live.text(notice)).liveFont(.caption, weight: .semibold).padding(8)
                         .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80 * CGFloat(live.appearance.spacingScale))
@@ -164,7 +167,7 @@ struct TransitHomeView: View {
                         .accessibilityLabel(AppText.text("切換路線方向"))
                 }
                 Button { showDetails = true } label: {
-                    Label(String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count), systemImage: "bus.fill")
+                    Label(route.mode == .bus ? String(model.routeVehicles().filter { $0.hasReliablePosition(at: Date()) }.count) : AppText.text("列車"), systemImage: route.mode == .bus ? "bus.fill" : "tram.fill")
                         .liveFont(.subheadline, weight: .medium).monospacedDigit().frame(minWidth: 44, minHeight: 44)
                 }.accessibilityLabel(AppText.text("查看此路線公車")).accessibilityIdentifier("route-map-vehicles")
             }.padding(.leading, 10).padding(.trailing, 8).phoneGlass(in: Capsule())
@@ -203,12 +206,16 @@ struct TransitHomeView: View {
         .smoothChanges(planner.started)
         .smoothChanges(planner.selectedID)
         .smoothChanges(model.language)
-        if !nearbyStations.isEmpty, let position = location.usableCoordinate {
+        if let place = model.tappedPlace, !hasSelection {
+            MapPlaceCard(place: place, distance: location.usableCoordinate.map { $0.distance(to: place.coordinate) },
+                         route: { routeToPlace(place) }, close: { model.tappedPlace = nil })
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else if !nearbyStations.isEmpty, let position = location.usableCoordinate {
             HStack(spacing: 10) {
                 ForEach(nearbyStations) { station in
                     Button { model.selectStation(station) } label: {
                         HStack(spacing: 10) {
-                            Image(systemName: "bus.fill").liveFont(.caption, weight: .semibold)
+                            Image(systemName: station.mode == .bus ? "bus.fill" : "tram.fill").liveFont(.caption, weight: .semibold)
                                 .foregroundStyle(RouteTint.color(for: ""))
                                 .frame(width: 28, height: 28)
                                 .background(Circle().strokeBorder(RouteTint.color(for: ""), lineWidth: 1.6))
@@ -240,6 +247,17 @@ struct TransitHomeView: View {
     }
     .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
+    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.tappedPlace)
+    }
+
+    /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
+    private func routeToPlace(_ place: MapPlaceSelection) {
+        model.tappedPlace = nil
+        planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
+                               metadata: model.metadata, currentLocation: location.usableCoordinate)
+        showJourneyItinerary = false
+        journeyDetent = planner.origin == nil ? .large : .height(420)
+        showJourney = true
     }
 
 
@@ -280,6 +298,7 @@ struct TransitHomeView: View {
         }
         .onChange(of: location.revision, initial: true) { _, _ in
             model.updateWalkingLocation()
+            model.anchorBoardedVehicle()
             if let position = location.usableCoordinate { planner.locationArrived(position, metadata: model.metadata) }
             if model.userMapMode != .free, let position = location.displayCoordinate, lastLocationFocus != position {
                 lastLocationFocus = position; model.focusMap(.userLocation)
@@ -300,12 +319,15 @@ struct TransitHomeView: View {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
                 } ?? false
+                let sameTrain = model.metroRealtime?.trains.first(where: { $0.id == model.selectedTrainID }).map { report in
+                    planner.activeRide.map { model.metadata.metro.canServe($0, patternID: report.patternID, direction: report.direction, destinationStationID: report.destinationStationID) } == true
+                } ?? false
                 if let index = model.walkingMapIndex, !userChangedJourney,
                    planner.selected?.walks.indices.contains(index) == true {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
                     model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
-                } else if !sameVehicle {
+                } else if !sameVehicle && !sameTrain {
                     model.clearWalkingMap()
                     model.clearSelection()
                     if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
@@ -336,6 +358,7 @@ struct TransitHomeView: View {
             if !model.mapWasMoved { model.showStationWalkOverview() }
         }
         .onChange(of: planner.currentStep) { _, _ in model.updateWalkingLocation() }
+        .onChange(of: hasSelection) { _, selected in if selected { model.tappedPlace = nil } }
         .onChange(of: planner.walkingRouteRevision) { _, _ in
             if let index = model.activeWalkingIndex, !model.mapWasMoved {
                 model.focusMap(.journey(planner.walkingCoordinates(at: index)))
@@ -495,6 +518,52 @@ private struct SourceStatusView: View {
             }
         }
     }
+}
+
+/// Apple Maps-style place card: what was tapped, how far it is, and one tap to get there.
+private struct MapPlaceCard: View {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.colorScheme) private var colorScheme
+    let place: MapPlaceSelection
+    let distance: Double?
+    let route: () -> Void
+    let close: () -> Void
+    private var category: (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {
+        NativeBusMap.Coordinator.placeCategory(place.kind)
+    }
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: category?.symbol ?? "mappin").liveFont(.subheadline, weight: .semibold).foregroundStyle(.white)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color(liveHex: colorScheme == .dark ? category?.darkHex ?? "#A7B3C6" : category?.hex ?? "#6E7C91")))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(place.localizedName).liveFont(.headline, weight: .semibold).lineLimit(1)
+                Text([category.map { live.text(Self.categoryNames[$0.name] ?? "地點") } ?? live.text("地點"),
+                      distance.map { distanceLabel($0) }].compactMap { $0 }.joined(separator: " · "))
+                    .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            Button(action: route) {
+                Label(live.text("路線"), systemImage: "arrow.triangle.turn.up.right.diamond.fill")
+                    .liveFont(.subheadline, weight: .semibold).labelStyle(.titleAndIcon)
+                    .padding(.horizontal, 14).frame(minHeight: 40)
+            }
+            .buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
+            .accessibilityIdentifier("place-card-route")
+            Button(action: close) {
+                Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
+                    .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
+            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+        }
+        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
+        .phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
+    }
+    static let categoryNames: [String: String] = [
+        "poi-food": "餐廳", "poi-cafe": "咖啡廳", "poi-shop": "商店", "poi-grocery": "超市", "poi-health": "醫療",
+        "poi-education": "學校", "poi-park": "公園", "poi-culture": "文化景點", "poi-lodging": "住宿",
+        "poi-service": "公共服務", "poi-worship": "宗教場所", "poi-rail": "車站"
+    ]
 }
 
 /// Apple Maps keeps one search field at the bottom of the map. Stops and the
@@ -676,7 +745,14 @@ private struct TransitPanel: View {
     }
 
     var body: some View {
-        panelContent
+        // Search and details swap as whole pages. Letting the header, list and keypad each
+        // transition on their own made the old results slide over the search field mid-way.
+        ZStack(alignment: .top) {
+            panelContent
+                .id(isBrowsing)
+                .transition(.asymmetric(insertion: .opacity.animation(.easeOut(duration: 0.2).delay(0.05)),
+                                        removal: .opacity.animation(.easeIn(duration: 0.1))))
+        }
         .smoothChanges(model.mode)
         .smoothChanges(systemRouteKeyboard)
         .smoothChanges(isBrowsing)
@@ -716,7 +792,7 @@ private struct TransitPanel: View {
     private var browseTitle: String {
         switch model.mode {
         case .stops: return location.usableCoordinate?.isInServiceArea == true ? "附近站牌" : "選擇站牌"
-        case .routes: return "公車路線"
+        case .routes: return "公車／捷運路線"
         }
     }
 
@@ -809,12 +885,12 @@ private struct TransitPanel: View {
                 }
                 Button { model.selectStation(station) } label: {
                     HStack(alignment: .center, spacing: 12) {
-                        Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : "mappin.circle.fill")
+                        Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : station.mode == .bus ? "mappin.circle.fill" : "tram.circle.fill")
                             .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color(liveHex: live.appearance.accentColor))
                             .liveFont(.title2).frame(width: 30)
                         VStack(alignment: .leading, spacing: 5) {
                             HStack { BilingualName(station).liveFont(.body, weight: .semibold); Text(station.localizedBearing).liveFont(.caption).foregroundStyle(.secondary) }
-                            Text(station.address.isEmpty ? AppText.text("站牌 %@", station.id) : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(station.mode != .bus ? model.metadata.metro.station(station.id)?.code ?? "" : station.address.isEmpty ? AppText.text("站牌 %@", station.id) : station.address).liveFont(.caption).foregroundStyle(.secondary).lineLimit(2)
                         }
                         Spacer(minLength: 0)
                         if let position = location.usableCoordinate, position.isInServiceArea {
@@ -830,7 +906,7 @@ private struct TransitPanel: View {
             if routes.isEmpty { emptyResult }
             ForEach(routes) { result in
                 if model.query.isEmpty, routes.first?.id == result.id {
-                    Text(model.recentRouteIDs.isEmpty ? AppText.text("公車路線") : AppText.text("最近查看")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 8)
+                    Text(model.recentRouteIDs.isEmpty ? AppText.text("公車／捷運路線") : AppText.text("最近查看")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 8)
                 } else if model.query.isEmpty, let first = routes.first(where: { !model.recentRouteIDs.contains($0.id) }), first.id == result.id {
                     Text(AppText.text("其他路線")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 12)
                 }
@@ -934,7 +1010,7 @@ private struct StationDetails: View {
                     }
                 }.padding(.bottom, 18 * CGFloat(live.appearance.spacingScale))
                 HStack {
-                    Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
+                    Text(station.mode == .bus ? live.text("官方到站預估") : live.text("列車方向")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
                     if let time = model.snapshot.estimates.updatedAt {
                         Text(time.formatted(SourceStatusView.clockStyle)).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -947,16 +1023,20 @@ private struct StationDetails: View {
                             if let route = row.route { model.selectRoute(route, direction: row.stop.direction, boardingStopID: row.stop.id) }
                         } label: {
                             HStack(spacing: 12) {
-                                RouteBadge(name: row.route?.localizedName ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
+                                RouteBadge(name: row.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(EstimateFeed.label(row.estimateSeconds))
+                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : !model.metadata.metro.isOperating(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date) ? AppText.text("營運時間外") : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
                         }.buttonStyle(.plain).frame(minHeight: 44).accessibilityIdentifier("station-route-" + row.stop.routeID)
+                        if row.stop.mode != .bus, let window = model.metadata.metro.boardingWindow(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID) {
+                            Text(AppText.text("首班 %@ · 末班 %@", String(format:"%02d:%02d",window.firstMinute / 60,window.firstMinute % 60), String(format:"%02d:%02d",window.lastMinute / 60,window.lastMinute % 60)))
+                                .liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
                         if !row.approaches.isEmpty {
                             Text(live.text("同方向車輛")).liveFont(.caption2).foregroundStyle(.secondary)
                             HStack(spacing: 8) {
@@ -975,7 +1055,15 @@ private struct StationDetails: View {
                     }.padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
                     Divider()
                 }
-                Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                if station.mode == .bus {
+                    Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                } else {
+                    Text(AppText.text("依官方班距估計")).liveFont(.caption).foregroundStyle(.secondary)
+                    ForEach(model.metadata.metro.station(station.id)?.exits ?? []) { exit in
+                        HStack { Label(AppLanguage.current == .english ? exit.englishName : exit.name, systemImage: exit.accessible ? "figure.roll" : "door.left.hand.open"); Spacer() }
+                            .liveFont(.subheadline).padding(.vertical, 6)
+                    }
+                }
             }
         }
     }
@@ -1021,6 +1109,15 @@ private struct RouteDetails: View {
             }
             boardingStopSelector
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                if route.mode != .bus {
+                    if let stop = model.routeBoardingStop {
+                        let stops = model.metadata.orderedStops(routeID: route.id, direction: model.direction)
+                        if let index = stops.firstIndex(where: { $0.id == stop.id }), index < stops.count - 1 {
+                            let ride = TransitRide(route: route, direction: model.direction, stops: Array(stops[index...]), coordinates: [])
+                            MetroBoardingRows(model: model, ride: ride, date: timeline.date)
+                        }
+                    }
+                } else {
                 let buses = model.routeVehicles()
                 if let stop = model.routeBoardingStop {
                     let group = RouteBoardingVehicles(stop: stop, vehicles: buses, metadata: model.metadata, at: timeline.date)
@@ -1066,8 +1163,9 @@ private struct RouteDetails: View {
                         ForEach(buses) { bus in VehicleRow(vehicle: bus) { model.selectVehicle(bus) } }
                     }.liveFont(.subheadline)
                 }
+                }
             }
-            Text(model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
+            Text(route.mode != .bus ? AppText.text("沿線車站") : model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
                 .liveFont(.headline).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
             if model.allRouteVariants && model.routeVariants.count > 1 {
                 Text(live.text("切換上方走法，可看各支線停靠站。")).liveFont(.caption).foregroundStyle(.secondary)
@@ -1081,7 +1179,7 @@ private struct RouteDetails: View {
                             Image(systemName: model.routeBoardingStopID == stop.id ? "checkmark.circle.fill" : "circle").foregroundStyle(model.routeBoardingStopID == stop.id ? Color.accentColor : .secondary).frame(width: 26)
                             BilingualName(stop).liveFont(.subheadline)
                             Spacer(minLength: 8)
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)))
+                            Text(route.mode == .bus ? EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)) : model.metadata.metro.station(stop.stationID)?.code ?? "")
                                 .liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
                         }.frame(minHeight: 50).contentShape(Rectangle())
                     }.buttonStyle(.plain).accessibilityIdentifier("route-boarding-stop-" + stop.id)
@@ -1260,7 +1358,7 @@ struct RouteBadge: View {
             .monospacedDigit()
             .padding(.horizontal, (compact ? 7 : 10) * CGFloat(live.appearance.spacingScale))
             .padding(.vertical, (compact ? 3 : 6) * CGFloat(live.appearance.spacingScale)).frame(minWidth: compact ? 34 : 52)
-            .foregroundStyle(.white)
+            .foregroundStyle(RouteTint.signInk(for: tintName ?? name))
             .background(RouteTint.color(for: tintName ?? name), in: RoundedRectangle(cornerRadius: (compact ? 7 : 10) * CGFloat(live.appearance.cornerScale), style: .continuous))
     }
 }
@@ -1288,10 +1386,12 @@ private struct AppInformationView: View {
                     Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
                     Text(AppText.text("站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。"))
                     Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
+                    Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
+                    Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
-                    Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖。道路匹配受 GPS 與軌跡精度影響。"))
+                    Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
                     Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
                     Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                     NavigationLink(AppText.text("開源授權")) { LicenseView() }
@@ -1364,3 +1464,20 @@ private struct LicenseView: View {
 func distanceLabel(_ meters: Double) -> String {
     meters >= 1_000 ? String(format: "%.1f km", meters / 1_000) : "\(Int(meters.rounded())) m"
 }
+
+
+#if DEBUG
+private struct DebugZoomPerformanceControls: View {
+    private let modes = ["baseline", "no-poi", "legacy-poi", "flat-view", "3d-view", "light-tick", "old-labels", "60hz", "begin", "end"]
+    var body: some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.fixed(58), spacing: 4), count: 5), spacing: 4) {
+            ForEach(modes, id: \.self) { mode in
+                Button(mode) { NotificationCenter.default.post(name: Notification.Name("zoom-performance-control"), object: mode) }
+                    .font(.system(size: 9)).frame(width: 58, height: 30)
+                    .background(Color.white.opacity(0.94), in: RoundedRectangle(cornerRadius: 5))
+                    .accessibilityIdentifier("zoom-probe-" + mode).buttonStyle(.plain)
+            }
+        }.frame(width: 306)
+    }
+}
+#endif

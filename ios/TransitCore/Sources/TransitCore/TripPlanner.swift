@@ -8,6 +8,16 @@ public struct TransitRide: Identifiable, Sendable {
     public let coordinates: [Coordinate]
     public var fullRouteSeconds: Double = 0
     public var boardingOffsetSeconds: Double = 0
+    public var railService: BusDayService? = nil
+    public var boardingAccessSeconds: Double = 0
+    public var alightingAccessSeconds: Double = 0
+    public init(route: BusRoute, direction: String, stops: [BusStop], coordinates: [Coordinate],
+                fullRouteSeconds: Double = 0, boardingOffsetSeconds: Double = 0, railService: BusDayService? = nil,
+                boardingAccessSeconds: Double = 0, alightingAccessSeconds: Double = 0) {
+        self.route = route; self.direction = direction; self.stops = stops; self.coordinates = coordinates
+        self.fullRouteSeconds = fullRouteSeconds; self.boardingOffsetSeconds = boardingOffsetSeconds
+        self.railService = railService; self.boardingAccessSeconds = boardingAccessSeconds; self.alightingAccessSeconds = alightingAccessSeconds
+    }
     public var boarding: BusStop { stops.first! }
     public var alighting: BusStop { stops.last! }
     public var stopCount: Int { stops.count - 1 }
@@ -22,6 +32,24 @@ public struct TransitTrip: Identifiable, Sendable {
     public let transferDistance: Double
     public let score: Double
     public let rideSeconds: [Double]
+    public var transferDistances: [Double] = []
+    public var transferSeconds: [Double] = []
+    public var walkingDistances: [Double] {
+        [accessDistance] + (rides.count > 1 ? (transferDistances.count == rides.count - 1 ? transferDistances :
+            Array(repeating: transferDistance / Double(rides.count - 1), count: rides.count - 1)) : []) + [egressDistance]
+    }
+    public var planningWalkSeconds: [Double] {
+        var result = walkingDistances.map { $0 * 1.25 / 1.2 }
+        guard !rides.isEmpty else { return result }
+        result[0] += rides[0].boardingAccessSeconds
+        result[result.count - 1] += rides.last!.alightingAccessSeconds
+        for index in 0..<transfers {
+            if transferSeconds.indices.contains(index), transferSeconds[index] >= 0 {
+                result[index + 1] = transferSeconds[index]
+            } else { result[index + 1] += rides[index].alightingAccessSeconds + rides[index + 1].boardingAccessSeconds }
+        }
+        return result
+    }
     public var transfers: Int { max(0, rides.count - 1) }
     public var familyID: String { rides.map { "\($0.route.parentID):\($0.direction)" }.joined(separator: "|") }
 }
@@ -66,6 +94,7 @@ public struct TripPlanner: Sendable {
         var patterns: [Pattern] = [], occurrences: [String: [Occurrence]] = [:]
         var usedStations: [String: Station] = [:]
         for route in metadata.routes.values.sorted(by: { $0.id < $1.id }) {
+            guard route.mode == .bus else { continue }
             // These have special tickets or a restricted trip purpose. They remain
             // searchable, but are not interchangeable with ordinary city buses.
             guard !route.name.contains("觀光巴士"), !route.name.hasPrefix("懷恩專車") else { continue }
