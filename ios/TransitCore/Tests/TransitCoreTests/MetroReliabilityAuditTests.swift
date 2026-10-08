@@ -70,6 +70,7 @@ final class MetroReliabilityAuditTests: XCTestCase {
         plan.floor = Double(index+2)+0.5; plan.floorAt = reach
         let state = try XCTUnwrap(MetroTrainTimeline.state(plan,pattern:p,at:reach+60))
         XCTAssertTrue(state.holding,"Keeping the train from reversing must not renew its observation")
+        XCTAssertGreaterThanOrEqual(MetroTrainPlan.position(state),try XCTUnwrap(plan.floor),"Quiet recovery must not snap the visible train backwards")
         XCTAssertNil(MetroTrainTimeline.secondsUntil(state.previousIndex,state:state,pattern:p))
         XCTAssertNil(MetroTrainTimeline.secondsUntil(state.nextIndex,state:state,pattern:p))
     }

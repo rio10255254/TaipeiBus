@@ -57,6 +57,10 @@ public enum MetroTrainTimeline {
         let index = min(pattern.stationIDs.count - 1, max(0, Int(floor)))
         let start = floor - Double(index)
         let next = min(pattern.stationIDs.count - 1, index + 1)
+        if state.holding {
+            return MetroTrainState(previousIndex: index, nextIndex: next, progress: min(1, start),
+                                   secondsToNext: 0, atPlatform: start <= 0, holding: true)
+        }
         guard start > 0, next > index, let remaining = secondsUntil(next, state: state, pattern: pattern) else {
             return MetroTrainState(previousIndex: index, nextIndex: next, progress: 0,
                                    secondsToNext: secondsUntil(next, state: state, pattern: pattern) ?? state.secondsToNext,

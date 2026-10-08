@@ -229,7 +229,7 @@ private struct MapContextLabelContent: View, Equatable {
                                 Text((state.holding ? "" : state.atPlatform ? AppText.text("停靠 · ") : AppText.text("下一站 · ")) + (AppLanguage.current == .english ? station.englishName : station.name))
                                     .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                                 Spacer(minLength:4)
-                                if !state.atPlatform {
+                                if !state.atPlatform && !state.holding {
                                     Text(MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))).font(.subheadline).monospacedDigit()
                                         .contentTransition(.numericText(countsDown: true))
                                 }
