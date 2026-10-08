@@ -38,4 +38,36 @@ final class MetroReliabilityAuditTests: XCTestCase {
         XCTAssertNil(MetroTrainTimeline.secondsUntil(held.previousIndex,state:held,pattern:p),"Unconfirmed location must not say this train is arriving now")
         XCTAssertNil(MetroTrainTimeline.secondsUntil(held.previousIndex+1,state:held,pattern:p),"No departure is known after the signal is lost")
     }
+    func testAllPublishedPatternsHandleGapsAndExpireWithoutInvalidCoordinates() throws {
+        let metro = try network(), now = Date(timeIntervalSince1970:1_800_000_000)
+        for p in metro.patterns {
+            for index in [0,p.stationIDs.count/2,p.stationIDs.count-1] {
+                let plan = MetroTrainPlan(stationIndex:index,arrivedAt:now,departure:now+25,lastSeen:now)
+                let report = MetroTrainReport(id:"AUDIT",operatorID:"TRTC",patternID:p.id,direction:p.direction,
+                    nextStationID:p.stationIDs[index],destinationStationID:p.stationIDs.last!,remainingSeconds:0,
+                    observedAt:now,atPlatform:true,plan:plan)
+                let geometry = try XCTUnwrap(MetroPatternGeometry(pattern:p)), train = try XCTUnwrap(PreparedMetroTrain(report:report,network:metro,geometry:geometry))
+                var last = -1.0
+                for offset in stride(from:0.0,through:1200,by:10) {
+                    if let state = report.state(network:metro,at:now+offset) {
+                        XCTAssertTrue(p.stationIDs.indices.contains(state.previousIndex));XCTAssertTrue(p.stationIDs.indices.contains(state.nextIndex))
+                        let position = MetroTrainPlan.position(state)
+                        XCTAssertGreaterThanOrEqual(position,last);last=position
+                        let pose = try XCTUnwrap(train.renderPose(at:now+offset))
+                        XCTAssertTrue(pose.coordinate.latitude.isFinite && pose.coordinate.longitude.isFinite && pose.elevation.isFinite)
+                        if state.holding { XCTAssertNil(MetroTrainTimeline.secondsUntil(state.nextIndex,state:state,pattern:p)) }
+                    }
+                }
+                XCTAssertNil(report.state(network:metro,at:now+1200),"No train survives twenty minutes without a sighting")
+            }
+        }
+    }
+    func testMalformedStaleAndUnknownStationRowsCannotCreateTrains() throws {
+        let metro = try network(), now = ISO8601DateFormatter().date(from:"2026-10-08T05:16:21Z")!
+        for payload in ["null","{}","[0]","not json"] {
+            XCTAssertThrowsError(try MetroPlatformFeed.parse(Data(payload.utf8),network:metro,serverDate:now,receivedAt:now))
+        }
+        let badRows = Data("[{\"Station\":\"未知站\",\"Destination\":\"大安站\",\"UpdateTime\":\"20261008131602\"},{\"Station\":\"士林站\",\"Destination\":\"大安站\",\"UpdateTime\":\"20261007131602\"}]".utf8)
+        XCTAssertTrue(try MetroPlatformFeed.parse(badRows,network:metro,serverDate:now,receivedAt:now).isEmpty)
+    }
 }
