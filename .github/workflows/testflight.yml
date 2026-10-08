@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data']
+        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
         default: 'check-only'
       metro_endpoints:
         description: 'Optional bounded metro metadata endpoint subset'
@@ -50,7 +50,7 @@ env:
 
 jobs:
   release:
-    if: inputs.operation != 'collect-route-times' && inputs.operation != 'collect-metro-data'
+    if: inputs.operation != 'collect-route-times' && inputs.operation != 'collect-metro-data' && inputs.operation != 'collect-metro-levels'
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -272,5 +272,21 @@ jobs:
         with:
           name: official-metro-metadata
           path: ${{ runner.temp }}/metro
+          if-no-files-found: ignore
+          retention-days: 30
+
+  metro-levels:
+    if: inputs.operation == 'collect-metro-levels'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect OpenStreetMap metro track structure (no credentials)
+        run: python3 ios/release/collect-metro-levels.py --out "$RUNNER_TEMP/metro-levels"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: osm-metro-levels
+          path: ${{ runner.temp }}/metro-levels
           if-no-files-found: ignore
           retention-days: 30
