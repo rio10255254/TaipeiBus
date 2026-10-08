@@ -18,6 +18,10 @@ on:
         description: 'Recheck the live official fleet (disable for UI-only reruns after a passed data audit)'
         type: boolean
         default: true
+      bundled_catalog_audit:
+        description: 'Audit routing on the exact bundled official static catalog, independent of live endpoint failures'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -69,6 +73,23 @@ jobs:
           python3 ios/release-check.py
           python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
+      - name: Audit exact bundled catalog and release-mode routing
+        if: github.event_name == 'workflow_dispatch' && inputs.bundled_catalog_audit
+        run: |
+          set -euo pipefail
+          export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/bundled-official-catalog"
+          python3 - <<'PY'
+          import gzip,json,os
+          from pathlib import Path
+          root=Path(os.environ['BUS_LIVE_FEEDS_DIRECTORY']);root.mkdir(exist_ok=True)
+          for name in ['GetRoute','GetStop','GetPathDetail','GetBusShape']:
+              data=gzip.decompress((Path('ios/TaipeiBus/BusMetadata')/(name+'.gz')).read_bytes())
+              json.loads(data.decode('utf-8-sig'))
+              (root/(name+'.json')).write_bytes(data)
+          print('Source: exact bundled official metadata; live observations are not substituted.')
+          PY
+          swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log"
+          swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log"
       - name: Build native app
         if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
