@@ -84,9 +84,8 @@ public enum MetroStructureMesh {
                               r: color.0, g: color.1, b: color.2, material: material))
         }
     }
-    static let concrete: (Float, Float, Float) = (0.90, 0.91, 0.92)
-    static let concreteSide: (Float, Float, Float) = (0.82, 0.83, 0.85)
-    static let underside: (Float, Float, Float) = (0.66, 0.67, 0.70)
+    /// Piers stay neutral concrete so the coloured deck reads as the line.
+    static let concreteSide: (Float, Float, Float) = (0.80, 0.81, 0.83)
 
     private static func deck(_ out: inout [Vertex], a: (Double, Double), b: (Double, Double), h0: Double, h1: Double,
                              side: (Double, Double), stripe: (Float, Float, Float)) {
@@ -94,17 +93,16 @@ public enum MetroStructureMesh {
         let length = max(0.01, hypot(lx, ly))
         let left = (lx / length, ly / length, 0.0), right = (-lx / length, -ly / length, 0.0)
         // On the lowest part of a ramp the deck rests on the embankment rather than below the street.
-        let band0 = max(0, h0 - 0.85), band1 = max(0, h1 - 0.85)
         let floor0 = max(0, h0 - deckDepth), floor1 = max(0, h1 - deckDepth)
         func p(_ point: (Double, Double), _ s: Double, _ z: Double) -> (Double, Double, Double) { (point.0 + lx * s, point.1 + ly * s, z) }
-        // Running surface.
-        quad(&out, [p(a, 1, h0), p(b, 1, h1), p(b, -1, h1), p(a, -1, h0)], normal: (0, 0, 1), color: concrete)
-        // Each side: a line-colour band along the parapet, concrete below it.
+        // The deck is the line itself lifted into the air: its colour, a little lighter on top.
+        let surface = (stripe.0 + (1 - stripe.0) * 0.25, stripe.1 + (1 - stripe.1) * 0.25, stripe.2 + (1 - stripe.2) * 0.25)
+        let shade = (stripe.0 * 0.7, stripe.1 * 0.7, stripe.2 * 0.7)
+        quad(&out, [p(a, 1, h0), p(b, 1, h1), p(b, -1, h1), p(a, -1, h0)], normal: (0, 0, 1), color: surface)
         for (s, normal) in [(1.0, left), (-1.0, right)] {
-            quad(&out, [p(a, s, h0), p(b, s, h1), p(b, s, band1), p(a, s, band0)], normal: normal, color: stripe)
-            quad(&out, [p(a, s, band0), p(b, s, band1), p(b, s, floor1), p(a, s, floor0)], normal: normal, color: concreteSide)
+            quad(&out, [p(a, s, h0), p(b, s, h1), p(b, s, floor1), p(a, s, floor0)], normal: normal, color: stripe)
         }
-        quad(&out, [p(a, -1, floor0), p(b, -1, floor1), p(b, 1, floor1), p(a, 1, floor0)], normal: (0, 0, -1), color: underside)
+        quad(&out, [p(a, -1, floor0), p(b, -1, floor1), p(b, 1, floor1), p(a, 1, floor0)], normal: (0, 0, -1), color: shade)
     }
 
     private static func pier(_ out: inout [Vertex], at c: (Double, Double), along u: (Double, Double), height: Double, wide: Bool) {

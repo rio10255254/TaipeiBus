@@ -8,6 +8,14 @@ public struct MetroTrainPlan: Codable, Equatable, Sendable {
     public let arrivedAt: Date
     public let departure: Date
     public let lastSeen: Date
+    /// Where the train was already drawn when this plan replaced an older one (station index plus
+    /// progress). The train waits there rather than moving backwards until the plan catches up.
+    public var floor: Double? = nil
+    public var floorAt: Date? = nil
+    /// Position as a single number along the pattern: station index plus progress to the next.
+    public static func position(_ state: MetroTrainState) -> Double {
+        Double(state.previousIndex) + (state.atPlatform ? 0 : state.progress)
+    }
 }
 
 /// A train's live state, the same shape for an official report and a sighting-based plan.
@@ -31,6 +39,9 @@ public enum MetroTrainTimeline {
     /// A held train that is not seen again is dropped instead of drawn somewhere it is not.
     public static let holdSeconds: Double = 150
     public static let originLayover: Double = 8 * 60
+    /// A train stays listed while it is at the platform; across ten minutes of live data the next
+    /// station's first listing came a median 25 s plus the running time after the last listing.
+    public static let departAfterLastListing: Double = 25
     public static func dwell(_ pattern: MetroPattern, _ index: Int) -> Double {
         pattern.dwellSeconds.indices.contains(index) && pattern.dwellSeconds[index] > 0 ? pattern.dwellSeconds[index] : 25
     }
@@ -39,6 +50,24 @@ public enum MetroTrainTimeline {
     }
 
     public static func state(_ plan: MetroTrainPlan, pattern: MetroPattern, at date: Date) -> MetroTrainState? {
+        guard let state = rawState(plan, pattern: pattern, at: date) else { return nil }
+        guard let floor = plan.floor, MetroTrainPlan.position(state) < floor - 0.0001 else { return state }
+        // A correction never runs the train backwards. Standing at a platform it simply waits
+        // there; between stations it slows down to reach the next station when the plan does.
+        let index = min(pattern.stationIDs.count - 1, max(0, Int(floor)))
+        let start = floor - Double(index)
+        let next = min(pattern.stationIDs.count - 1, index + 1)
+        guard start > 0, next > index, let remaining = secondsUntil(next, state: state, pattern: pattern) else {
+            return MetroTrainState(previousIndex: index, nextIndex: next, progress: 0,
+                                   secondsToNext: secondsUntil(next, state: state, pattern: pattern) ?? state.secondsToNext,
+                                   atPlatform: true, holding: false)
+        }
+        let elapsed = max(0, date.timeIntervalSince(plan.floorAt ?? date))
+        let progress = start + (1 - start) * (elapsed + remaining > 0 ? elapsed / (elapsed + remaining) : 1)
+        return MetroTrainState(previousIndex: index, nextIndex: next, progress: min(1, progress), secondsToNext: remaining,
+                               atPlatform: false, holding: false)
+    }
+    static func rawState(_ plan: MetroTrainPlan, pattern: MetroPattern, at date: Date) -> MetroTrainState? {
         let last = pattern.stationIDs.count - 1
         guard pattern.stationIDs.indices.contains(plan.stationIndex), date.timeIntervalSince(plan.lastSeen) <= MetroPlatformFeed.memory else { return nil }
         var index = plan.stationIndex, leave = plan.departure
@@ -123,16 +152,16 @@ public struct MetroTrainTracker: Sendable {
             processed[Self.key(event)] = event.observedAt
             guard let pattern = network.pattern(event.patternID, direction: event.direction),
                   let index = pattern.stationIDs.firstIndex(of: event.stationID) else { continue }
-            if let slot = bestMatch(event, index: index, pattern: pattern, in: tracks) {
-                tracks[slot] = updated(tracks[slot], event: event, index: index, pattern: pattern)
-            } else if let slot = bestMatch(event, index: index, pattern: pattern, in: lost, revive: true) {
-                tracks.append(updated(lost.remove(at: slot), event: event, index: index, pattern: pattern))
+            if let slot = bestMatch(event, index: index, pattern: pattern, in: tracks, at: date) {
+                tracks[slot] = updated(tracks[slot], event: event, index: index, pattern: pattern, at: date)
+            } else if let slot = bestMatch(event, index: index, pattern: pattern, in: lost, revive: true, at: date) {
+                tracks.append(updated(lost.remove(at: slot), event: event, index: index, pattern: pattern, at: date, revived: true))
             } else {
                 counter += 1
                 let arrived = event.observedAt
                 tracks.append(Track(id: "est-\(pattern.lineID)-\(event.direction)-\(counter)", patternID: event.patternID,
                     direction: event.direction, plan: MetroTrainPlan(stationIndex: index, arrivedAt: arrived,
-                    departure: arrived.addingTimeInterval(MetroTrainTimeline.dwell(pattern, index)), lastSeen: arrived), sightings: 1))
+                    departure: Self.departure(arrived: arrived, lastSeen: arrived, pattern: pattern, index: index), lastSeen: arrived), sightings: 1))
             }
         }
         prune(network: network, at: date)
@@ -148,28 +177,44 @@ public struct MetroTrainTracker: Sendable {
         lost = Array(lost.filter { date.timeIntervalSince($0.plan.lastSeen) <= 12 * 60 }.suffix(200))
     }
 
-    private func updated(_ track: Track, event: MetroPlatformEvent, index: Int, pattern: MetroPattern) -> Track {
+    static func departure(arrived: Date, lastSeen: Date, pattern: MetroPattern, index: Int) -> Date {
+        max(arrived.addingTimeInterval(MetroTrainTimeline.dwell(pattern, index)),
+            lastSeen.addingTimeInterval(MetroTrainTimeline.departAfterLastListing))
+    }
+
+    private func updated(_ track: Track, event: MetroPlatformEvent, index: Int, pattern: MetroPattern, at date: Date, revived: Bool = false) -> Track {
         var track = track
         let plan = track.plan
+        var next: MetroTrainPlan
         if index == plan.stationIndex {
-            // Still at the platform: the train leaves a few seconds after its last listing at the earliest.
+            // Still listed at the platform, so it has not left yet.
             let seen = max(plan.lastSeen, event.observedAt)
-            track.plan = MetroTrainPlan(stationIndex: index, arrivedAt: plan.arrivedAt,
-                departure: max(plan.departure, seen.addingTimeInterval(5)), lastSeen: seen)
+            next = MetroTrainPlan(stationIndex: index, arrivedAt: plan.arrivedAt,
+                departure: max(plan.departure, Self.departure(arrived: plan.arrivedAt, lastSeen: seen, pattern: pattern, index: index)), lastSeen: seen)
         } else {
-            track.plan = MetroTrainPlan(stationIndex: index, arrivedAt: event.observedAt,
-                departure: event.observedAt.addingTimeInterval(MetroTrainTimeline.dwell(pattern, index)), lastSeen: event.observedAt)
+            next = MetroTrainPlan(stationIndex: index, arrivedAt: event.observedAt,
+                departure: Self.departure(arrived: event.observedAt, lastSeen: event.observedAt, pattern: pattern, index: index), lastSeen: event.observedAt)
         }
+        // Where the train is drawn now stays the minimum, so it never visibly backs up.
+        if !revived, let shown = MetroTrainTimeline.state(plan, pattern: pattern, at: date),
+           let fresh = MetroTrainTimeline.rawState(next, pattern: pattern, at: date),
+           MetroTrainPlan.position(fresh) < MetroTrainPlan.position(shown) {
+            next.floor = MetroTrainPlan.position(shown); next.floorAt = date
+        }
+        track.plan = next
         track.sightings += 1
         return track
     }
 
     /// The train expected at this station at this time: same service, at or behind the station,
     /// and arriving within a tolerance that grows with the distance travelled unseen.
-    private func bestMatch(_ event: MetroPlatformEvent, index: Int, pattern: MetroPattern, in list: [Track], revive: Bool = false) -> Int? {
+    private func bestMatch(_ event: MetroPlatformEvent, index: Int, pattern: MetroPattern, in list: [Track], revive: Bool = false, at date: Date) -> Int? {
         var best: (slot: Int, score: Double)?
         for (slot, track) in list.enumerated() where track.patternID == event.patternID && track.direction == event.direction {
             let plan = track.plan
+            // A train already drawn well past this station is a different train.
+            if !revive, let shown = MetroTrainTimeline.state(plan, pattern: pattern, at: date),
+               MetroTrainPlan.position(shown) > Double(index) + 1.2 { continue }
             var score: Double
             if index == plan.stationIndex {
                 let gap = event.observedAt.timeIntervalSince(plan.lastSeen)

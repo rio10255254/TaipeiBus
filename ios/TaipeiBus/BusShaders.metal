@@ -64,8 +64,8 @@ vertex BusFragment busVertex(uint vertexID [[vertex_id]], uint instanceID [[inst
     if (uniforms.mode.x == 2) {
         out.color = float4(uniforms.viewDirection.w > 0 ? float3(0.10,0.57,1.0) : float3(0.12,0.42,0.96), bus.style.y * 0.9);
     }
-    // A train in a tunnel: a cool translucent ghost beneath the street.
-    else if (bus.style.z > 1.5) { out.color.rgb = mix(out.color.rgb, float3(0.62, 0.70, 0.80), 0.3); out.color.a *= 0.4; }
+    // A train in a tunnel: the same grey cars, translucent beneath the street.
+    else if (bus.style.z > 1.5) { out.color.a *= 0.45; }
     else if (bus.style.z > 0) { out.color.a *= 0.48; }
     return out;
 }

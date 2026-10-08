@@ -153,3 +153,28 @@ final class MetroTrainTrackerTests: XCTestCase {
         XCTAssertFalse(report.isEstimated)
     }
 }
+
+extension MetroTrainTrackerTests {
+    func testRelistingAtThePlatformAndLateArrivalsNeverMoveATrainBackwards() throws {
+        let metro = try network(), pattern = try bannan(metro)
+        let start = Date(timeIntervalSince1970: 1_800_000_000)
+        var tracker = MetroTrainTracker()
+        var shown: [Double] = []
+        func record(_ t: Date) {
+            guard let track = tracker.tracks.first, let state = MetroTrainTimeline.state(track.plan, pattern: pattern, at: t) else { return }
+            shown.append(MetroTrainPlan.position(state))
+        }
+        // Listed at station 4 for 40 s (the feed relists a train while it stands at the platform)...
+        for offset in stride(from: 0.0, through: 40, by: 14) {
+            tracker.ingest([event(pattern, 4, start + offset)], network: metro, at: start + offset + 1)
+            record(start + offset + 1)
+        }
+        // ...then seen entering station 5 a little later than the running time predicts.
+        let late = start + 40 + MetroTrainTimeline.departAfterLastListing + MetroTrainTimeline.run(pattern, 4) + 15
+        for second in stride(from: start + 42, to: late, by: 2) { record(second) }
+        tracker.ingest([event(pattern, 5, late)], network: metro, at: late + 1)
+        for second in stride(from: late + 1, to: late + 120, by: 2) { record(second) }
+        XCTAssertEqual(tracker.tracks.count, 1)
+        for (a, b) in zip(shown, shown.dropFirst()) { XCTAssertGreaterThanOrEqual(b, a - 1e-9, "The drawn train only moves forward") }
+    }
+}
