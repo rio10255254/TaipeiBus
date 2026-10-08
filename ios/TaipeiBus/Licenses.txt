@@ -162,5 +162,8 @@ Sources: https://tdx.transportdata.tw/api-service/swagger
 https://data.taipei/dataset/detail?id=513e97fe-6a98-4a0d-b7dc-11122c8638d4
 https://data.taipei/dataset/detail?id=782c2b71-8f5a-4575-9bf2-e86999be2863
 License: Open Government Data License 1.0 https://data.gov.tw/license
+Train entering-station reports (station and terminus, updated about every 30 s):
+https://data.taipei/dataset/detail?id=6556e1e8-c908-42d5-b984-b3f7337b139b
+Used only to estimate the next train together with official running times; shown as an estimate.
 Train countdowns and train reports require separate Taipei Metro API membership.
 Estimated train positions are projected onto official track geometry, never described as GPS coordinates.

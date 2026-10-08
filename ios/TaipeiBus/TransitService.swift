@@ -19,6 +19,24 @@ actor TransitService {
             let packet = try MetroRealtime(data: bytes, network: network, at: Date()); metroPacket = packet; return packet
         } catch { return metroPacket }
     }
+    private var platformFetchedAt = Date.distantPast
+    /// Taipei Metro's free open-data "train entering station" feed, about every 30 s. It has no
+    /// countdown or train identity; the app uses it only to estimate the next train.
+    func metroPlatformEvents(network: MetroNetwork) async -> [MetroPlatformEvent]? {
+        guard Date().timeIntervalSince(platformFetchedAt) >= 25, !network.stations.isEmpty else { return nil }
+        platformFetchedAt = Date()
+        var request = URLRequest(url: MetroPlatformFeed.url)
+        request.timeoutInterval = 8; request.cachePolicy = .reloadIgnoringLocalCacheData
+        do {
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(identifier: "GMT")
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            let server = (http.value(forHTTPHeaderField: "Date")).flatMap(formatter.date(from:))
+            return try MetroPlatformFeed.parse(bytes, network: network, serverDate: server, receivedAt: Date())
+        } catch { return nil }
+    }
     private let transport: ConditionalFeedTransport
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()

@@ -112,8 +112,9 @@ public struct MetroNetwork: Codable, Sendable {
     public func nearestExit(stationID: String, to point: Coordinate) -> MetroExit? {
         station(stationID)?.exits.min { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) }
     }
-    public func service(routeID: String, direction: String, at date: Date) -> BusDayService? {
-        guard let pattern = pattern(routeID, direction: direction) else { return nil }
+    /// The headway band a pattern is actually running at, or nil when the timetable says
+    /// it does not run in this period (published as 0 for short-turn and branch services).
+    public func activeHeadway(_ pattern: MetroPattern, at date: Date) -> (lower: Double, upper: Double)? {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
         let weekday = calendar.component(.weekday, from: date) - 1
         let time = BusServiceWindow.secondsOfDay(at: date), holiday = TransitServiceCalendar.isHoliday(date)
@@ -124,9 +125,40 @@ public struct MetroNetwork: Codable, Sendable {
             let first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
             return first < last ? time >= first && time < last : time >= first || time < last
         }
-        let headway = BusHeadway(lowerSeconds: period?.minimumSeconds ?? pattern.headwaySeconds,
-                                upperSeconds: period?.maximumSeconds ?? pattern.headwaySeconds)
-        return BusDayService(window: BusServiceWindow(first: pattern.firstDeparture, last: pattern.lastDeparture), headway: headway)
+        let lower = period?.minimumSeconds ?? pattern.headwaySeconds
+        let upper = period?.maximumSeconds ?? pattern.headwaySeconds
+        guard lower > 0, upper > 0, lower.isFinite, upper.isFinite else { return nil }
+        return (lower, max(lower, upper))
+    }
+    public func service(routeID: String, direction: String, at date: Date) -> BusDayService? {
+        guard let pattern = pattern(routeID, direction: direction) else { return nil }
+        let window = BusServiceWindow(first: pattern.firstDeparture, last: pattern.lastDeparture)
+        let headway = activeHeadway(pattern, at: date).map { BusHeadway(lowerSeconds: $0.lower, upperSeconds: $0.upper) }
+        return BusDayService(window: window, headway: headway)
+    }
+    /// Every train that can actually take the rider from `from` to `to` counts, not only the
+    /// planned pattern: on a trunk shared by full-length and short-turn services the combined
+    /// frequency is what a rider on the platform experiences. Patterns that are not running
+    /// now, or not yet serving this station, are left out. Without `to`, a train only needs
+    /// to continue beyond `from`.
+    public func combinedService(routeID: String, direction: String, from: String, to: String? = nil, at date: Date) -> BusDayService? {
+        guard let base = pattern(routeID, direction: direction) else { return nil }
+        var lowerRate = 0.0, upperRate = 0.0
+        for candidate in patterns where candidate.lineID == base.lineID && candidate.direction == direction {
+            guard let start = candidate.stationIDs.firstIndex(of: from), start < candidate.stationIDs.count - 1 else { continue }
+            if let to { guard let end = candidate.stationIDs.firstIndex(of: to), end > start else { continue } }
+            guard isOperating(routeID: candidate.id, direction: direction, stationID: from, at: date),
+                  let headway = activeHeadway(candidate, at: date) else { continue }
+            lowerRate += 1 / headway.lower; upperRate += 1 / headway.upper
+        }
+        let window = BusServiceWindow(first: base.firstDeparture, last: base.lastDeparture)
+        guard lowerRate > 0, upperRate > 0 else { return BusDayService(window: window, headway: nil) }
+        return BusDayService(window: window, headway: BusHeadway(lowerSeconds: 1 / lowerRate, upperSeconds: 1 / upperRate))
+    }
+    /// Expected platform wait for a rider arriving at a random moment: half the headway on
+    /// average, never more than one full headway. Rounded to whole minutes for display.
+    public static func expectedWait(_ headway: BusHeadway) -> (typical: Double, longest: Double) {
+        (headway.midpoint / 2, headway.upperSeconds)
     }
     public func boardingWindow(routeID: String, direction: String, stationID: String) -> BusServiceWindow? {
         guard let p = pattern(routeID, direction: direction) else { return nil }

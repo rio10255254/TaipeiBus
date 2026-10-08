@@ -84,7 +84,7 @@ struct MapContextLabels: View {
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
                     .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
-                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.metroPlatformEvents.first?.observedAt.timeIntervalSince1970 ?? 0):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
                     expanded: expanded, compact: overlay.compactStation,
                     toggle: {
 #if DEBUG
@@ -149,7 +149,8 @@ private struct MapContextLabelContent: View, Equatable {
                         } label: {
                             HStack(spacing: 5) {
                                 RouteBadge(name: first.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
-                                Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) : AppText.text("看方向")).fontWeight(.semibold).monospacedDigit()
+                                Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) :
+                                        model.metroStationWaitLabel(serviceID: first.stop.serviceID, direction: first.stop.direction, stationID: first.stop.stationID, at: Date())).fontWeight(.semibold).monospacedDigit()
                                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                             }.font(.caption).padding(.leading, 4).padding(.trailing, 10).frame(minHeight: 32)
                                 .background(.regularMaterial, in: Capsule())

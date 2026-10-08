@@ -1301,8 +1301,8 @@ private struct WaitingBannerContent: View {
                         .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("boarding-official-arrival")
-                    Text(ride.route.mode != .bus ? (model.metroArrival(ride, at: date) == nil ? AppText.text("依官方班距估計") : AppText.text("官方下班列車")) : guide.estimateSeconds == nil ? AppText.text("暫無預估") : AppText.text("官方下一班"))
-                        .liveFont(.caption, weight: .semibold)
+                    Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : guide.estimateSeconds == nil ? AppText.text("暫無預估") : AppText.text("官方下一班"))
+                        .liveFont(.caption, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
                 }.layoutPriority(1)
             }
@@ -1448,7 +1448,7 @@ struct MetroBoardingRows: View {
                     Spacer()
                     Text(model.metroWaitLabel(ride, at: date)).liveFont(.subheadline, weight: .bold).monospacedDigit()
                 }
-                Text(AppText.text("依官方班距估計")).liveFont(.caption).foregroundStyle(.secondary)
+                Text(model.metroWaitSource(ride, at: date)).liveFont(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(Array(arrivals.prefix(3).enumerated()), id: \.offset) { index, arrival in
                     HStack {
@@ -1507,6 +1507,14 @@ private struct WalkingBannerContent: View {
                     .liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
                 if live.language == .english, let name = planner.destination?.name {
                     Text(name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
+                }
+                // Leaving a metro station: name the exit that faces the destination.
+                if !planner.arrived, let exit = planner.selected?.walks.last?.stationInstruction,
+                   planner.selected?.rides.last.map({ $0.alighting.mode != .bus }) == true {
+                    Label(exit, systemImage: "door.left.hand.open")
+                        .liveFont(.subheadline, weight: .semibold).foregroundStyle(Color.white.opacity(0.85))
+                        .lineLimit(1).minimumScaleFactor(0.75)
+                        .accessibilityIdentifier("walking-metro-exit")
                 }
             }
             Spacer(minLength: 0)

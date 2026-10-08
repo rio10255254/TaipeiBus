@@ -1027,7 +1027,8 @@ private struct StationDetails: View {
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : !model.metadata.metro.isOperating(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date) ? AppText.text("營運時間外") : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
+                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
+                                        model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)

@@ -55,6 +55,15 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var snapshot = TransitSnapshot()
     @Published private(set) var metroRealtime: MetroRealtime?
     @Published private(set) var metroRevision = 0
+    /// Recent official "train entering station" sightings, kept for 15 minutes.
+    @Published private(set) var metroPlatformEvents: [MetroPlatformEvent] = []
+    private var needsMetroPlatform: Bool {
+        planner.selected?.rides.contains { $0.route.mode != .bus } == true || selectedStation?.mode == .metro
+    }
+    private func platformIfNeeded() async -> [MetroPlatformEvent]? {
+        guard needsMetroPlatform else { return nil }
+        return await service.metroPlatformEvents(network: metadata.metro)
+    }
     @Published var selectedTrainID: String?
     @Published var followingTrain = false
     @Published private(set) var loading = true
@@ -279,9 +288,14 @@ final class TransitAppModel: ObservableObject {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     async let rail = service.metroRealtime(network: metadata.metro)
+                    async let platform = platformIfNeeded()
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
+                    if let sightings = await platform {
+                        let merged = MetroPlatformFeed.merge(metroPlatformEvents, sightings, at: Date())
+                        if merged != metroPlatformEvents { metroPlatformEvents = merged }
+                    }
                     applySnapshot(result)
 #if DEBUG
                     applyPreviewSelection()
@@ -725,11 +739,53 @@ final class TransitAppModel: ObservableObject {
               let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
         focusMap(.metroTrain(id))
     }
+    /// Every train that can carry the rider from boarding to alighting, at their current frequency.
+    func metroHeadway(_ ride: TransitRide, at date: Date) -> BusHeadway? {
+        guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date) else { return nil }
+        return metadata.metro.combinedService(routeID: ride.route.id, direction: ride.direction,
+            from: ride.boarding.stationID, to: ride.alighting.stationID, at: date)?.headway
+    }
+    /// The next train placed by a recent official platform sighting and official running times.
+    func metroPlatformEstimate(_ ride: TransitRide, at date: Date) -> MetroPlatformEstimate? {
+        guard ride.route.mode != .bus, !metroPlatformEvents.isEmpty else { return nil }
+        return MetroPlatformFeed.nextArrival(ride: ride, events: metroPlatformEvents, network: metadata.metro,
+            at: date, longestGap: metroHeadway(ride, at: date)?.upperSeconds ?? 600)
+    }
+    /// Official countdown first, then a sighting-based estimate, then the expected wait from the
+    /// combined headway (half a headway on average for a rider arriving at a random moment).
     func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
         if let value = metroArrival(ride, at: date) { return MetroCountdown.label(value) }
-        guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date),
-              let headway = metadata.metro.service(routeID: ride.route.id, direction: ride.direction, at: date)?.headway else { return AppText.text("營運時間外") }
-        return AppText.text("約 %@–%@ 分", 1, max(1, Int(ceil(headway.upperSeconds / 60))))
+        if let estimate = metroPlatformEstimate(ride, at: date) {
+            if estimate.entering { return AppText.text("進站中") }
+            return estimate.seconds < 45 ? AppText.text("即將進站") : AppText.text("約 %@ 分", max(1, Int((estimate.seconds / 60).rounded())))
+        }
+        guard let headway = metroHeadway(ride, at: date) else { return AppText.text("營運時間外") }
+        return AppText.text("約 %@ 分", max(1, Int((MetroNetwork.expectedWait(headway).typical / 60).rounded())))
+    }
+    /// Where the wait shown above comes from, so an estimate is never read as an official time.
+    func metroWaitSource(_ ride: TransitRide, at date: Date) -> String {
+        if metroArrival(ride, at: date) != nil { return AppText.text("官方下班列車") }
+        if metroPlatformEstimate(ride, at: date) != nil { return AppText.text("依列車進站紀錄推估") }
+        guard let headway = metroHeadway(ride, at: date) else { return AppText.text("依官方班距估計") }
+        return AppText.text("班距推估") + " · " + metroFrequencyLabel(headway)
+    }
+    /// A station departure row: the same order of evidence as a planned ride, for any train
+    /// continuing beyond this station in that direction.
+    func metroStationWaitLabel(serviceID: String, direction: String, stationID: String, at date: Date) -> String {
+        let metro = metadata.metro
+        guard metro.isOperating(routeID: serviceID, direction: direction, stationID: stationID, at: date) else { return AppText.text("營運時間外") }
+        let headway = metro.combinedService(routeID: serviceID, direction: direction, from: stationID, at: date)?.headway
+        if let estimate = MetroPlatformFeed.nextArrival(routeID: serviceID, direction: direction, boardingStationID: stationID,
+                alightingStationID: nil, events: metroPlatformEvents, network: metro, at: date, longestGap: headway?.upperSeconds ?? 600) {
+            if estimate.entering { return AppText.text("進站中") }
+            return estimate.seconds < 45 ? AppText.text("即將進站") : AppText.text("約 %@ 分", max(1, Int((estimate.seconds / 60).rounded())))
+        }
+        guard let headway else { return AppText.text("營運時間外") }
+        return metroFrequencyLabel(headway)
+    }
+    func metroFrequencyLabel(_ headway: BusHeadway) -> String {
+        let lower = max(1, Int((headway.lowerSeconds / 60).rounded())), upper = max(lower, Int((headway.upperSeconds / 60).rounded()))
+        return lower == upper ? AppText.text("每 %@ 分一班", lower) : AppText.text("每 %@–%@ 分一班", lower, upper)
     }
     func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], officialPosition: Bool) {
         let report = metroRealtime?.trains.first { $0.id == selectedTrainID &&
