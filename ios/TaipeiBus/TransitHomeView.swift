@@ -503,11 +503,8 @@ private struct SourceStatusView: View {
                 Button(action: refresh) {
                     HStack(spacing: 7) {
                         // A static dot: a spinner would animate for as long as data is unavailable.
-                        Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
-                        Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
-                        if !waiting, let age, age >= 120 {
-                            Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
-                        }
+                        Circle().fill(Color.secondary).frame(width: 7, height: 7)
+                        Text(AppText.text("更新中")).liveFont(.subheadline, weight: .semibold)
                     }
                     .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
                     .phoneGlass(in: Capsule())
