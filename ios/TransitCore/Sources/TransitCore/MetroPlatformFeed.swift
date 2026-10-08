@@ -91,7 +91,8 @@ public enum MetroPlatformFeed {
             guard let pattern = network.pattern(event.patternID, direction: event.direction), pattern.lineID == planned.lineID,
                   let seen = pattern.stationIDs.firstIndex(of: event.stationID),
                   let board = pattern.stationIDs.firstIndex(of: boardingStationID),
-                  seen <= board, board < pattern.stationIDs.count - 1 else { continue }
+                  seen <= board, board - seen <= MetroTrainTimeline.coastStations,
+                  board < pattern.stationIDs.count - 1 else { continue }
             if let alightingStationID {
                 guard let alight = pattern.stationIDs.firstIndex(of: alightingStationID), board < alight else { continue }
             }

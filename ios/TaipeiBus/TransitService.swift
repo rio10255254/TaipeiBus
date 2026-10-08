@@ -129,7 +129,15 @@ actor TransitService {
         }
         try Task.checkCancellation()
         let decodedBus: TransitMetadata
-        do { decodedBus = try FeedDecoder.metadata(feeds: feeds) }
+        do {
+            // A missing path feed cannot replace a complete catalog with guessed parent stop order.
+            guard ["GetRoute","GetStop","GetPathDetail"].allSatisfy({ feeds[$0] != nil }) else {
+                throw FeedError.invalid("Incomplete bus planning metadata")
+            }
+            let candidate = try FeedDecoder.metadata(feeds:feeds)
+            guard !candidate.paths.isEmpty else { throw FeedError.invalid("Missing bus stop order") }
+            decodedBus = candidate
+        }
         catch {
             if metadata.routes.isEmpty, let offline = offlineMetroMetadata() { metadata = offline }
             guard !metadata.routes.isEmpty else { throw error }
