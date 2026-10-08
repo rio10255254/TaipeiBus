@@ -64,8 +64,17 @@
       37812619099
     ],
     "correctedCoreCompileRun": 37814450063,
-    "fullBundledRoutingAndNativeRun": 37813388128,
-    "catalogSource": "Exact bundled official metadata, not a substitute for live train data"
+    "fullBundledRoutingAndNativeRun": 37816126206,
+    "catalogSource": "Exact bundled official metadata, not a substitute for live train data",
+    "firstVerifiedNativeRun": 37813388128,
+    "coreTests": 206,
+    "intentionalLiveSourceSkips": 9,
+    "releaseSearchSeconds": {
+      "NeihuZhongxiaoFuxing": 1.468930959701538,
+      "XinbeitouXiaobitan": 1.116900086402893,
+      "SanyingNeihu": 0.3573659658432007,
+      "LuzhouHuilong": 0.7376530170440674
+    }
   },
   "limits": [
     "Public Taipei Metro platform feed contains station, destination and update time, not train identity or GPS. Matched train identities and automatic on-board association are inferred.",
@@ -73,5 +82,7 @@
     "The platform-arrival feed covers Taipei Metro five lines. Circular and Sanying lines have static planning and map data but lack this live feed.",
     "Tunnel depth and structure heights are map models based on OSM tags, not survey measurements.",
     "Physical iPhone frame rate and long-duration battery behavior have not been verified in this audit."
-  ]
+  ],
+  "experiencePolicy": "Keep the established UI and continuity. Preserve cached data, recover quietly, use explicitly estimated waits where needed, and show no passenger-facing internal error, stale-data age alert or request for error handling.",
+  "reviewUrl": "https://github.com/rio10255254/TaipeiBus/pull/13"
 }
