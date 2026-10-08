@@ -60,12 +60,12 @@ public enum MetroTrainTimeline {
         guard start > 0, next > index, let remaining = secondsUntil(next, state: state, pattern: pattern) else {
             return MetroTrainState(previousIndex: index, nextIndex: next, progress: 0,
                                    secondsToNext: secondsUntil(next, state: state, pattern: pattern) ?? state.secondsToNext,
-                                   atPlatform: true, holding: false)
+                                   atPlatform: true, holding: state.holding)
         }
         let elapsed = max(0, date.timeIntervalSince(plan.floorAt ?? date))
         let progress = start + (1 - start) * (elapsed + remaining > 0 ? elapsed / (elapsed + remaining) : 1)
         return MetroTrainState(previousIndex: index, nextIndex: next, progress: min(1, progress), secondsToNext: remaining,
-                               atPlatform: false, holding: false)
+                               atPlatform: false, holding: state.holding)
     }
     static func rawState(_ plan: MetroTrainPlan, pattern: MetroPattern, at date: Date) -> MetroTrainState? {
         let last = pattern.stationIDs.count - 1

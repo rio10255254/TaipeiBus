@@ -62,6 +62,17 @@ final class MetroReliabilityAuditTests: XCTestCase {
             }
         }
     }
+    func testForwardOnlyPositionCorrectionCannotRestoreLostArrivalConfidence() throws {
+        let metro = try network(), p = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
+        let now = Date(timeIntervalSince1970:1_800_000_000), index = 5
+        var plan = MetroTrainPlan(stationIndex:index,arrivedAt:now,departure:now+25,lastSeen:now)
+        let reach = now+25+MetroTrainTimeline.run(p,index)+MetroTrainTimeline.dwell(p,index+1)+MetroTrainTimeline.run(p,index+1)
+        plan.floor = Double(index+2)+0.5; plan.floorAt = reach
+        let state = try XCTUnwrap(MetroTrainTimeline.state(plan,pattern:p,at:reach+60))
+        XCTAssertTrue(state.holding,"Keeping the train from reversing must not renew its observation")
+        XCTAssertNil(MetroTrainTimeline.secondsUntil(state.previousIndex,state:state,pattern:p))
+        XCTAssertNil(MetroTrainTimeline.secondsUntil(state.nextIndex,state:state,pattern:p))
+    }
     func testMalformedStaleAndUnknownStationRowsCannotCreateTrains() throws {
         let metro = try network(), now = ISO8601DateFormatter().date(from:"2026-10-08T05:16:21Z")!
         for payload in ["null","{}","[0]","not json"] {
