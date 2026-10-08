@@ -337,7 +337,7 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-alight").isHittable)
     }
     func testTransferShowsTheNextBus() throws {
-        launch(["--preview-boarding-fixture", "--preview-transfer-fixture", "--usability-fixture"])
+        launch(["--preview-boarding-fixture", "--preview-transfer-fixture", "--usability-fixture", "--test-map-controls"])
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
         let firstRoute = app.staticTexts["boarding-route"].label
         capture("transfer-first-bus")
