@@ -1106,12 +1106,18 @@ final class TransitAppModel: ObservableObject {
                 selectStation(station); previewSelectionApplied = true
             }
         } else if arguments.contains("--preview-route-stop-fixture") || arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
-            previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
-                browse: arguments.contains("--preview-browse-fixture"))
-            if let token = value(after: "--preview-capture"), previewSelectionApplied,
-               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+            previewSelectionApplied = true
+            let captureToken = value(after: "--preview-capture")
+            Task { [weak self] in
+                guard let self else { return }
+                let ready = await self.prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
+                    transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
+                    browse: arguments.contains("--preview-browse-fixture"))
+                if let token = captureToken, ready,
+                   let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+                }
+                if !ready { self.previewSelectionApplied = false }
             }
             return
         } else if arguments.contains("--preview-journey-search") {
@@ -1275,13 +1281,16 @@ final class TransitAppModel: ObservableObject {
         return true
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {
         var planningMetadata = metadata
         if cooperated {
             planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
             planningMetadata.rebuildRouteCatalog()
         }
-        let network = TripPlanner(metadata: planningMetadata)
+        let source = planningMetadata
+        let chosen = await Task.detached(priority: .userInitiated) {
+            let metadata = source
+        let network = TripPlanner(metadata: metadata)
         var chosen: TransitTrip?
         if transfer {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
@@ -1313,6 +1322,8 @@ final class TransitAppModel: ObservableObject {
             if chosen != nil { break }
         }
         }
+            return chosen
+        }.value
         guard let trip = chosen, let ride = trip.rides.first,
               let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let line = metadata.line(ride.route.id, direction: ride.direction),
