@@ -1,0 +1,77 @@
+{
+  "auditedVersion": "1.3.6",
+  "auditedBuild": "83.1.0",
+  "publishedBinaryCommit": "ce1e7c32ad69fec52853d7bcc80b5d26e385afc1",
+  "auditBase": "a2e20fb",
+  "status": "verification_in_progress",
+  "publishedVersionChanged": false,
+  "findings": [
+    {
+      "id": "held-arrival",
+      "severity": "high",
+      "cause": "A held inferred position continued to return zero or positive arrival seconds, so waiting and automatic boarding could use lost observations.",
+      "fix": "No arrival predictions or automatic boarding/reacquisition from holding states."
+    },
+    {
+      "id": "duplicate-observations",
+      "severity": "medium",
+      "cause": "Duplicate rows within a single packet were all selected before the processed set was updated.",
+      "fix": "Recheck each observation identity before ingesting it."
+    },
+    {
+      "id": "network-jitter-identity",
+      "severity": "medium",
+      "cause": "The same provider timestamp was assigned a different local timestamp when transport delay changed, refreshing the same sighting.",
+      "fix": "Retain the provider timestamp as the stable observation identity."
+    },
+    {
+      "id": "old-upstream-projection",
+      "severity": "high",
+      "cause": "A minutes-old observation many stations upstream could be extrapolated into a near arrival after track confidence expired.",
+      "fix": "Limit raw sighting projection to the tracker confidence horizon; only direct platform observations confirm an overdue arrival."
+    },
+    {
+      "id": "background-request",
+      "severity": "medium",
+      "cause": "Platform requests were not cancelled on background entry and could publish late results or clear a newer request.",
+      "fix": "Cancel requests on background entry and reject results from superseded requests."
+    },
+    {
+      "id": "partial-catalog",
+      "severity": "high",
+      "cause": "A complete catalog could be replaced with route and stop data that lacked the path feed, invoking guessed parent stop ordering.",
+      "fix": "Require all essential planning feeds and a nonempty path catalog before replacement."
+    },
+    {
+      "id": "rejected-cache-body",
+      "severity": "medium",
+      "cause": "An HTTP 200 provider error page was cached before its content was validated and could later be reused by 304 responses.",
+      "fix": "Invalidate rejected compressed or decoded feed bodies before further conditional requests."
+    }
+  ],
+  "upstreamSourceIncident": {
+    "files": [
+      "GetStop",
+      "GetPathDetail"
+    ],
+    "transportStatus": "HTTP request returned successfully",
+    "content": "HTML error page titled HTTP Status 500 – Internal Server Error",
+    "evidence": "work/audit-1.3.6/live-bus/audit.json"
+  },
+  "validation": {
+    "reproductionRuns": [
+      37811331332,
+      37812619099
+    ],
+    "correctedCoreCompileRun": 37814450063,
+    "fullBundledRoutingAndNativeRun": 37813388128,
+    "catalogSource": "Exact bundled official metadata, not a substitute for live train data"
+  },
+  "limits": [
+    "Public Taipei Metro platform feed contains station, destination and update time, not train identity or GPS. Matched train identities and automatic on-board association are inferred.",
+    "Route recommendation is a bounded heuristic search; bus-only trips allow one transfer, mixed trips allow up to three transfers and exclude consecutive bus feeder legs. It does not prove global optimality.",
+    "The platform-arrival feed covers Taipei Metro five lines. Circular and Sanying lines have static planning and map data but lack this live feed.",
+    "Tunnel depth and structure heights are map models based on OSM tags, not survey measurements.",
+    "Physical iPhone frame rate and long-duration battery behavior have not been verified in this audit."
+  ]
+}
