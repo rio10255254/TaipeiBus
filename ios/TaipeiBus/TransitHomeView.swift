@@ -112,8 +112,8 @@ struct TransitHomeView: View {
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                     bottomChrome
                 }
-                if let error = model.mapError ?? model.loadError {
-                    Text(live.text(error)).liveFont(.caption).padding(12)
+                if model.metadata.routes.isEmpty, model.loadError != nil {
+                    Text(live.text("更新中")).liveFont(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
@@ -716,10 +716,11 @@ private struct TransitPanel: View {
                 VStack(spacing: 12) {
                     ProgressView(); Text(live.text("取得站牌與路線中")).liveFont(.subheadline).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = model.loadError {
-                ContentUnavailableView {
-                    Label(live.text("無法連線"), systemImage: "wifi.exclamationmark")
-                } description: { Text(live.text(error)) } actions: { Button(live.text("重試")) { model.retry() }.buttonStyle(.borderedProminent) }
+            } else if model.loadError != nil, model.metadata.routes.isEmpty {
+                VStack(spacing:12) {
+                    Text(live.text("更新中")).liveFont(.subheadline).foregroundStyle(.secondary)
+                    Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
+                }.frame(maxWidth:.infinity,maxHeight:.infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
