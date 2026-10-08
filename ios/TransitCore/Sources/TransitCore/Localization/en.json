@@ -511,5 +511,6 @@
   "依進站紀錄推估": "Estimated from platform arrivals",
   "停靠 · ": "At · ",
   "等待下一筆進站紀錄": "Waiting for the next platform report",
-  "依進站紀錄推估位置": "Position estimated from platform arrivals"
+  "依進站紀錄推估位置": "Position estimated from platform arrivals",
+  "停止跟隨": "Stop following"
 }

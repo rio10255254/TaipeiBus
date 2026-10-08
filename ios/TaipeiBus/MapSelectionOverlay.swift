@@ -84,7 +84,7 @@ struct MapContextLabels: View {
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
                     .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
-                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.metroPlatformEvents.first?.observedAt.timeIntervalSince1970 ?? 0):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.metroPlatformEvents.first?.observedAt.timeIntervalSince1970 ?? 0):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.followingTrain):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
                     expanded: expanded, compact: overlay.compactStation,
                     toggle: {
 #if DEBUG
@@ -211,9 +211,18 @@ private struct MapContextLabelContent: View, Equatable {
                             Text(report.isEstimated ? AppText.text("往 %@", terminus.map { AppLanguage.current == .english ? $0.englishName : $0.name } ?? "") : report.id)
                                 .font(.caption.weight(.semibold)).lineLimit(1)
                             Spacer(minLength: 2)
-                            Button { model.metroRevisionForSelection() } label: {
-                                Image(systemName: model.followingTrain ? "scope" : "location.viewfinder").frame(width:32,height:32)
-                            }.accessibilityLabel(AppText.text("跟隨列車"))
+                            // One button starts and stops the chase camera; following shows as a filled chip.
+                            Button {
+                                if model.followingTrain { model.followingTrain = false } else { model.metroRevisionForSelection() }
+                            } label: {
+                                Image(systemName: "scope").font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(model.followingTrain ? Color.white : Color.accentColor)
+                                    .frame(width: 32, height: 32)
+                                    .background(model.followingTrain ? Color.accentColor : Color.accentColor.opacity(0.12), in: Circle())
+                                    .animation(.smooth(duration: 0.2), value: model.followingTrain)
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel(model.followingTrain ? AppText.text("停止跟隨") : AppText.text("跟隨列車"))
+                            .accessibilityIdentifier("map-metro-train-follow")
                         }
                         if let station {
                             HStack {

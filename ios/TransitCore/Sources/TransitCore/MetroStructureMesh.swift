@@ -17,12 +17,17 @@ public enum MetroStructureMesh {
     /// `metersPerWorld` converts Web Mercator units to metres at the origin's latitude.
     public static func viaducts(network: MetroNetwork, origin: Coordinate, metersPerWorld: Double,
                                 lineColor: (MetroLine) -> (Float, Float, Float)) -> [Vertex] {
+        viaductsByLine(network: network, origin: origin, metersPerWorld: metersPerWorld, lineColor: lineColor).flatMap(\.vertices)
+    }
+    /// The same mesh grouped per line, so a line out of focus can be drawn faded.
+    public static func viaductsByLine(network: MetroNetwork, origin: Coordinate, metersPerWorld: Double,
+                                      lineColor: (MetroLine) -> (Float, Float, Float)) -> [(lineID: String, vertices: [Vertex])] {
+        var groups: [String: [Vertex]] = [:]
         let base = origin.mercator
         func local(_ c: Coordinate) -> (Double, Double) {
             let m = c.mercator
             return ((m.x - base.x) * metersPerWorld, -(m.y - base.y) * metersPerWorld)
         }
-        var vertices: [Vertex] = []
         var built = Set<Int64>()
         func cell(_ p: (Double, Double)) -> Int64 { Int64((p.0 / 12).rounded()) &* 1_000_003 &+ Int64((p.1 / 12).rounded()) }
         func covered(_ p: (Double, Double)) -> Bool {
@@ -36,6 +41,8 @@ public enum MetroStructureMesh {
                   let profile = network.heightProfile(pattern), let line = network.line(pattern.lineID),
                   let geometry = MetroPatternGeometry(pattern: pattern, profile: profile) else { continue }
             let stripe = lineColor(line)
+            var vertices = groups[line.id] ?? []
+            defer { groups[line.id] = vertices }
             let track = geometry.line
             // Distances to sample: every geometry vertex, plus extra points along ramps and station ends.
             var marks = Set(track.cumulative.map { ($0 * 10).rounded() / 10 })
@@ -73,7 +80,7 @@ public enum MetroStructureMesh {
                 built.insert(cell(((a.0 + b.0) / 2, (a.1 + b.1) / 2)))
             }
         }
-        return vertices
+        return groups.filter { !$0.value.isEmpty }.map { ($0.key, $0.value) }.sorted { $0.lineID < $1.lineID }
     }
 
     private static func quad(_ out: inout [Vertex], _ p: [(Double, Double, Double)], normal: (Double, Double, Double),

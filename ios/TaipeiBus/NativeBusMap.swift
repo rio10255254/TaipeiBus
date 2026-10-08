@@ -78,7 +78,26 @@ struct NativeBusMap: UIViewRepresentable {
         private var metroFocusKey: String {
             let busRoute = model.selectedRoute.map { $0.mode == .bus } ?? false
             let busTrip = model.planner.selected.map { option in option.rides.allSatisfy { $0.route.mode == .bus } } ?? false
-            return busRoute || busTrip || model.selectedVehicleID != nil ? "dim" : "full"
+            if busRoute || busTrip || model.selectedVehicleID != nil { return "dim" }
+            let lines = metroFocusLines
+            return lines.isEmpty ? "full" : "focus:" + lines.sorted().joined(separator: ",")
+        }
+        /// The metro lines that matter right now: the selected train's line, a selected metro
+        /// route, or the lines a planned trip rides. Every other line steps back.
+        private var metroFocusLines: Set<String> {
+            let metro = model.metadata.metro
+            if let train = model.metroTrain(model.selectedTrainID), let pattern = metro.pattern(train.patternID, direction: train.direction) {
+                return [pattern.lineID]
+            }
+            if let route = model.selectedRoute, route.mode != .bus {
+                return Set(model.metadata.variants(routeID: route.id).compactMap { variant in
+                    metro.patterns.first { $0.id == variant.id }?.lineID
+                })
+            }
+            guard let option = model.planner.selected else { return [] }
+            return Set(option.rides.filter { $0.route.mode != .bus }.compactMap { ride in
+                metro.pattern(ride.route.id, direction: ride.direction)?.lineID
+            })
         }
         private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
@@ -356,7 +375,10 @@ struct NativeBusMap: UIViewRepresentable {
         /// above it carries the same colour and a second copy offset by the camera tilt reads as clutter.
         static func metroLineOpacity(dimmed: Bool, casing: Bool) -> NSExpression {
             let f = (dimmed ? (casing ? 0.4 : 0.32) : 1.0)
-            func level(_ elevated: Double) -> [Any] { ["match", ["get", "structure"], "elevated", elevated * f, f] }
+            func level(_ elevated: Double) -> [Any] {
+                ["*", ["case", ["get", "focus"], f, f * (casing ? 0.1 : 0.22)],
+                 ["match", ["get", "structure"], "elevated", elevated, 1]]
+            }
             return NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 15.5, level(1), 16.5, level(casing ? 0 : 0.25)])
         }
 
@@ -423,7 +445,8 @@ struct NativeBusMap: UIViewRepresentable {
         }
         private func updateMetro(map: MLNMapView) {
             let network = model.metadata.metro
-            let key = "\(network.generatedAt):\(network.stations.count):\(darkMode):\(AppLanguage.current)"
+            let focusLines = metroFocusLines
+            let key = "\(network.generatedAt):\(network.stations.count):\(darkMode):\(AppLanguage.current):\(focusLines.sorted())"
             if key != lastMetroKey {
             lastMetroKey = key
             var seen = Set<String>()
@@ -438,7 +461,8 @@ struct NativeBusMap: UIViewRepresentable {
                 return pieces.map { piece -> MLNPolylineFeature in
                     var points = piece.coordinates.map(\.locationCoordinate)
                     let feature = MLNPolylineFeature(coordinates: &points, count: UInt(points.count))
-                    feature.attributes = ["color": color, "structure": piece.structure.rawValue]; return feature
+                    feature.attributes = ["color": color, "structure": piece.structure.rawValue,
+                                          "focus": focusLines.isEmpty || focusLines.contains(pattern.lineID)]; return feature
                 }
             }.flatMap { $0 }
             metroSource?.shape = MLNShapeCollectionFeature(shapes: lines)
@@ -452,13 +476,14 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stations = groups.map { group -> MLNPointFeature in
                 let lead = group.stations[0]
-                let lineColors = group.stations.compactMap { station in network.lines.first { station.code.hasPrefix($0.code) } }
-                    .map { RouteTint.mapHex(for: $0.name, dark: darkMode) }
+                let stationLines = group.stations.compactMap { station in network.lines.first { station.code.hasPrefix($0.code) } }
+                let lineColors = stationLines.map { RouteTint.mapHex(for: $0.name, dark: darkMode) }
                 let transfer = Set(lineColors).count > 1
                 let feature = MLNPointFeature(); feature.coordinate = lead.coordinate.locationCoordinate
                 feature.attributes = ["stationID": lead.id, "transfer": transfer,
                     "name": AppLanguage.current == .english ? lead.englishName : lead.name,
-                    "rim": transfer ? (darkMode ? "#E6E8EB" : "#3A3D42") : lineColors.first ?? RouteTint.general]
+                    "rim": transfer ? (darkMode ? "#E6E8EB" : "#3A3D42") : lineColors.first ?? RouteTint.general,
+                    "focus": focusLines.isEmpty || stationLines.contains { focusLines.contains($0.id) }]
                 return feature
             }
             metroStationsSource?.shape = MLNShapeCollectionFeature(shapes: stations)
@@ -491,18 +516,37 @@ struct NativeBusMap: UIViewRepresentable {
                 (style.layer(withIdentifier: "metro-network-casing") as? MLNLineStyleLayer)?.lineOpacity =
                     Self.metroLineOpacity(dimmed: dimmed, casing: true)
                 trains?.dimmed = dimmed
-                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleOpacity =
-                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
-                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleStrokeOpacity =
-                    NSExpression(forConstantValue: dimmed ? 0.45 : 1)
+                trains?.focusLineIDs = metroFocusLines
+                // Stations off the focused lines fade with their lines and lose their names.
+                let stationOpacity = NSExpression(mglJSONObject: ["case", ["get", "focus"], dimmed ? 0.45 : 1, 0.3])
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleOpacity = stationOpacity
+                (style.layer(withIdentifier: "metro-station-dots") as? MLNCircleStyleLayer)?.circleStrokeOpacity = stationOpacity
                 (style.layer(withIdentifier: "metro-station-names") as? MLNSymbolStyleLayer)?.isVisible = !dimmed
+                (style.layer(withIdentifier: "metro-station-names") as? MLNSymbolStyleLayer)?.textOpacity =
+                    NSExpression(mglJSONObject: ["case", ["get", "focus"], 1, 0])
             }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
             trains?.selectedID = model.selectedTrainID
+            // While waiting for a metro ride, the train due at the platform is picked out on the map.
+            var due: Set<String> = []
+            if let index = model.planner.boardingRideIndex, let rides = model.planner.selected?.rides, rides.indices.contains(index),
+               rides[index].route.mode != .bus, model.selectedTrainID == nil,
+               let next = model.nextTrackedTrain(routeID: rides[index].route.id, direction: rides[index].direction,
+                   boardingStationID: rides[index].boarding.stationID, alightingStationID: rides[index].alighting.stationID, at: Date()) {
+                due = [next.train.id]
+            }
+            trains?.emphasizedIDs = due
             let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? ""):\(focusKey):\(focusKey == "dim" ? model.selectedTrainID ?? "" : "")"
             guard trainKey != lastMetroTrainKey else { return }; lastMetroTrainKey = trainKey
-            // Trains step back with the rest of the metro while a bus is in focus.
+            // Trains step back with the rest of the metro while a bus is in focus, and only trains
+            // on the focused lines stay while a trip or a train is being followed.
             var reports = focusKey == "dim" ? model.metroTrains.filter { $0.id == model.selectedTrainID } : model.metroTrains
+            if !focusLines.isEmpty {
+                reports = reports.filter { report in
+                    report.id == model.selectedTrainID ||
+                        network.pattern(report.patternID, direction: report.direction).map { focusLines.contains($0.lineID) } == true
+                }
+            }
             if let route = model.selectedRoute, route.mode != .bus {
                 let ids = Set(model.metadata.variants(routeID: route.id).map(\.id))
                 reports = reports.filter { ids.contains($0.patternID) }
@@ -1107,10 +1151,11 @@ struct NativeBusMap: UIViewRepresentable {
             case .metroTrain(let id):
                 guard let report = model.metroTrain(id),
                       let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
-                // A tunnel train is seen through the street at a gentler angle; a viaduct train from a little higher.
+                // Fly in behind the train; the chase camera takes over from there.
                 let elevation = PreparedMetroTrain(report: report, network: model.metadata.metro)?.renderPose(at: Date())?.elevation ?? 0
-                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: elevation < -3 ? 300 : 260,
-                    pitch: elevation < -3 ? 40 : 54, heading: pose.heading)
+                chaseHeading = nil; chaseOrbit = 0
+                let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: elevation < -3 ? 340 : 290,
+                    pitch: elevation < -3 ? 46 : 62, heading: pose.heading)
                 moveCamera(camera, map: map, duration: 0.8)
             case .coordinate(let position):
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
@@ -1328,11 +1373,37 @@ struct NativeBusMap: UIViewRepresentable {
             }
             if model.followingTrain, now >= followSuspendedUntil, let id = model.selectedTrainID,
                let pose = trains?.pose(id: id, time: now, now: date), !pose.stale {
-                let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
-                let camera = map.camera
-                camera.centerCoordinate = center.interpolate(to: pose.coordinate, fraction: reduceMotion ? 1 : 1 - exp(-dt / 0.12)).locationCoordinate
-                map.setCamera(camera, animated: false)
+                map.setCamera(chaseCamera(map.camera, pose: pose, trainID: id, at: date, dt: dt), animated: false)
             }
+        }
+
+        /// A chase camera for a followed train: it settles behind the train and turns with the
+        /// track, looking a little ahead while moving. At a platform it lifts and drifts slowly
+        /// around the station, then swings back behind as the train leaves. Every change is eased,
+        /// and Reduce Motion keeps the plain centred follow.
+        private var chaseHeading: Double?
+        private var chaseOrbit = 0.0
+        private func chaseCamera(_ camera: MLNMapCamera, pose: VehiclePose, trainID: String, at date: Date, dt: Double) -> MLNMapCamera {
+            let center = Coordinate(latitude: camera.centerCoordinate.latitude, longitude: camera.centerCoordinate.longitude)
+            if reduceMotion { camera.centerCoordinate = pose.coordinate.locationCoordinate; return camera }
+            func ease(_ seconds: Double) -> Double { 1 - exp(-dt / seconds) }
+            func wrap(_ angle: Double) -> Double { (angle + 540).truncatingRemainder(dividingBy: 360) - 180 }
+            let standing = model.metroTrain(trainID)?.state(network: model.metadata.metro, at: date)?.atPlatform ?? false
+            let underground = pose.elevation < -3
+            chaseOrbit = standing ? wrap(chaseOrbit + dt * 5) : wrap(chaseOrbit) * exp(-dt / 1.6)
+            let current = chaseHeading ?? camera.heading
+            let heading = current + wrap(pose.heading + chaseOrbit - current) * ease(1.4)
+            chaseHeading = heading
+            camera.heading = (heading + 360).truncatingRemainder(dividingBy: 360)
+            let pitch: Double = underground ? 46 : standing ? 54 : 62
+            camera.pitch += CGFloat(pitch - Double(camera.pitch)) * CGFloat(ease(1.2))
+            let altitude: Double = standing ? 430 : underground ? 340 : 290
+            camera.altitude += (altitude - camera.altitude) * ease(1.8)
+            let lead = standing ? 0.0 : 32.0, radians = pose.heading * .pi / 180
+            let ahead = Coordinate(latitude: pose.coordinate.latitude + cos(radians) * lead / 111_320,
+                                   longitude: pose.coordinate.longitude + sin(radians) * lead / (111_320 * cos(pose.coordinate.latitude * .pi / 180)))
+            camera.centerCoordinate = center.interpolate(to: ahead, fraction: ease(0.25)).locationCoordinate
+            return camera
         }
 
         private func updateLocationMarker(_ map: MLNMapView, elapsed: Double) {

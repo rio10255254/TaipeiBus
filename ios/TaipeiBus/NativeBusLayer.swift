@@ -24,14 +24,19 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             let colors = Dictionary(network.lines.map { ($0.id, Self.rgb(RouteTint.mapHex(for: $0.name, dark: dark))) }, uniquingKeysWith: { a, _ in a })
             // About a hundred thousand vertices: built off the main thread, swapped in when ready.
             DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                let vertices = MetroStructureMesh.viaducts(network: network, origin: Self.origin, metersPerWorld: metersPerWorld) { line in
+                var vertices: [Vertex] = [], ranges: [(lineID: String, range: Range<Int>)] = []
+                for group in MetroStructureMesh.viaductsByLine(network: network, origin: Self.origin, metersPerWorld: metersPerWorld, lineColor: { line in
                     colors[line.id] ?? (0.12, 0.44, 0.82)
-                }.map { v in
-                    Vertex(position: SIMD4(v.x, v.y, v.z, 0), normal: SIMD4(v.nx, v.ny, v.nz, v.material), color: SIMD4(v.r, v.g, v.b, 1))
+                }) {
+                    let start = vertices.count
+                    vertices += group.vertices.map { v in
+                        Vertex(position: SIMD4(v.x, v.y, v.z, 0), normal: SIMD4(v.nx, v.ny, v.nz, v.material), color: SIMD4(v.r, v.g, v.b, 1))
+                    }
+                    ranges.append((group.lineID, start..<vertices.count))
                 }
                 DispatchQueue.main.async {
                     guard let self, self.structureKey == key else { return }
-                    self.structureVertices = vertices; self.structureBuffer = nil; self.structureCount = 0
+                    self.structureVertices = vertices; self.structureRanges = ranges; self.structureBuffer = nil; self.structureCount = 0
                     self.setNeedsDisplay()
                 }
             }
@@ -61,8 +66,11 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private var structureBuffer: MTLBuffer?
     private var structureCount = 0
     private var structureKey = ""
+    private var structureRanges: [(lineID: String, range: Range<Int>)] = []
     /// A bus in focus pushes the metro back; viaducts stay as quiet context.
     var dimmed = false { didSet { if dimmed != oldValue { setNeedsDisplay() } } }
+    /// Lines in focus for a trip or a followed train; the others' viaducts fade like their lines.
+    var focusLineIDs: Set<String> = [] { didSet { if focusLineIDs != oldValue { setNeedsDisplay() } } }
     private static let trainBlendSeconds = 1.8
     private var trainsOnScreen = 0
     private var trainRedrawInterval: CFTimeInterval = 1 / 60
@@ -378,16 +386,21 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             if let structureBuffer, structureCount > 0 {
                 // Fades in toward street zoom; one identity instance places the static mesh.
                 let fade = Float(min(1, max(0, context.zoomLevel - 12.5)))
-                var structureUniforms = uniforms
-                structureUniforms.mode = SIMD4(0, 0, 1, fade * (dimmed ? 0.45 : 1))
                 var identity = Instance(position: SIMD4(0, 0, 0, 1), style: .zero)
                 encoder.setRenderPipelineState(pipeline)
                 encoder.setDepthStencilState(normalDepth)
                 encoder.setVertexBuffer(structureBuffer, offset: 0, index: 0)
-                encoder.setVertexBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
-                encoder.setFragmentBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
                 encoder.setVertexBytes(&identity, length: MemoryLayout<Instance>.stride, index: 2)
-                encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: structureCount, instanceCount: 1)
+                // Focused lines first so faded viaducts behind them never punch through.
+                let ordered = structureRanges.sorted { (focusLineIDs.contains($0.lineID) ? 0 : 1) < (focusLineIDs.contains($1.lineID) ? 0 : 1) }
+                for group in ordered where group.range.upperBound <= structureCount {
+                    let inFocus = focusLineIDs.isEmpty || focusLineIDs.contains(group.lineID)
+                    var structureUniforms = uniforms
+                    structureUniforms.mode = SIMD4(0, 0, 1, fade * (dimmed ? 0.45 : 1) * (inFocus ? 1 : 0.25))
+                    encoder.setVertexBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                    encoder.setFragmentBytes(&structureUniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
+                    encoder.drawPrimitives(type: .triangle, vertexStart: group.range.lowerBound, vertexCount: group.range.count, instanceCount: 1)
+                }
             }
         }
         if !compact.isEmpty {

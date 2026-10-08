@@ -694,6 +694,8 @@ final class TransitAppModel: ObservableObject {
             if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
                 selectedTrainID = boardingTrain(for: ride, at: Date())?.id
             }
+            // Riding a train the app has matched: the chase camera follows it, as it does a boarded bus.
+            if selectedTrainID != nil { metroRevisionForSelection() }
         }
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
