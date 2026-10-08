@@ -108,6 +108,8 @@ public enum MetroTrainTimeline {
         state(plan, pattern: pattern, at: date).flatMap { secondsUntil(stationIndex, state: $0, pattern: pattern) }
     }
     public static func secondsUntil(_ stationIndex: Int, state: MetroTrainState, pattern: MetroPattern) -> Double? {
+        // Holding is a lost observation, not evidence that the train reached this station.
+        guard !state.holding else { return nil }
         if state.atPlatform, state.previousIndex == stationIndex { return 0 }
         guard stationIndex > state.previousIndex, stationIndex < pattern.stationIDs.count else { return nil }
         var total: Double, from: Int
@@ -141,7 +143,7 @@ public struct MetroTrainTracker: Sendable {
     public init() {}
 
     private static func key(_ event: MetroPlatformEvent) -> String {
-        "\(event.patternID)|\(event.direction)|\(event.stationID)|\(Int(event.observedAt.timeIntervalSince1970))"
+        "\(event.patternID)|\(event.direction)|\(event.stationID)|\(event.providerTimestamp ?? String(Int(event.observedAt.timeIntervalSince1970)))"
     }
 
     public mutating func ingest(_ events: [MetroPlatformEvent], network: MetroNetwork, at date: Date) {
@@ -149,6 +151,7 @@ public struct MetroTrainTracker: Sendable {
         let fresh = events.filter { processed[Self.key($0)] == nil && date.timeIntervalSince($0.observedAt) <= MetroPlatformFeed.memory }
             .sorted { $0.observedAt < $1.observedAt }
         for event in fresh {
+            guard processed[Self.key(event)] == nil else { continue }
             processed[Self.key(event)] = event.observedAt
             guard let pattern = network.pattern(event.patternID, direction: event.direction),
                   let index = pattern.stationIDs.firstIndex(of: event.stationID) else { continue }

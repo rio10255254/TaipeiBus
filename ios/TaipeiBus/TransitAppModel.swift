@@ -76,18 +76,20 @@ final class TransitAppModel: ObservableObject {
     /// polled whenever the app is in the foreground and trains are drawn on the map. It runs on its
     /// own task: a slow metro response must never hold back bus positions.
     private var platformTask: Task<Void, Never>?
+    private var platformGeneration = UUID()
     private func pollPlatformInBackground() {
-        guard platformTask == nil else { return }
+        guard isActive, platformTask == nil else { return }
+        let token = UUID(); platformGeneration = token
         let network = metadata.metro
         platformTask = Task { [weak self] in
             guard let self else { return }
             let sightings = await self.service.metroPlatformEvents(network: network)
-            if !Task.isCancelled, let sightings, !sightings.isEmpty {
+            if !Task.isCancelled, self.isActive, self.platformGeneration == token, let sightings, !sightings.isEmpty {
                 let merged = MetroPlatformFeed.merge(self.metroPlatformEvents, sightings, at: Date())
                 if merged != self.metroPlatformEvents { self.metroPlatformEvents = merged }
                 self.updateEstimatedTrains(with: sightings)
             }
-            self.platformTask = nil
+            if self.platformGeneration == token { self.platformTask = nil }
         }
     }
     private func updateEstimatedTrains(with sightings: [MetroPlatformEvent]?) {
@@ -290,7 +292,11 @@ final class TransitAppModel: ObservableObject {
         guard isActive != active else { return }
         isActive = active
         location.setActive(active)
-        if !active { updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil; return }
+        if !active {
+            updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
+            platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+            return
+        }
         settingsTask = Task { [weak self] in
             guard let self else { return }
             if let cached = await liveService.cached() { await applyLiveSettings(cached) }
@@ -783,7 +789,7 @@ final class TransitAppModel: ObservableObject {
         for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
             guard let pattern = metro.pattern(train.patternID, direction: train.direction),
                   let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
-                  let state = train.state(network: metro, at: date) else { continue }
+                  let state = train.state(network: metro, at: date), !state.holding else { continue }
             let score: Double
             if state.previousIndex == board, state.atPlatform || state.progress < 0.6 { score = state.atPlatform ? 0 : 20 }
             else if let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern), seconds <= 240 { score = 30 + seconds }
@@ -805,7 +811,7 @@ final class TransitAppModel: ObservableObject {
             guard let pattern = metro.pattern(train.patternID, direction: train.direction),
                   let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
                   let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
-                  let state = train.state(network: metro, at: date), state.previousIndex >= board, state.previousIndex < alight,
+                  let state = train.state(network: metro, at: date), !state.holding, state.previousIndex >= board, state.previousIndex < alight,
                   let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) else { continue }
             let error = abs(seconds - expected)
             if error <= 150, best.map({ error < $0.error }) ?? true { best = (train.id, error) }
@@ -904,7 +910,7 @@ final class TransitAppModel: ObservableObject {
            metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID),
            let pattern = metro.pattern(train.patternID, direction: train.direction),
            let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
-           let state = train.state(network: metro, at: date) {
+           let state = train.state(network: metro, at: date), !state.holding {
             let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) ?? 0
             // Standing at a platform, the next stop is the one after it.
             let upcoming = state.atPlatform ? state.previousIndex + 1 : state.nextIndex

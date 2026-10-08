@@ -8,8 +8,11 @@ public struct MetroPlatformEvent: Equatable, Sendable {
     public let patternID: String
     public let direction: String
     public let observedAt: Date
-    public init(stationID: String, patternID: String, direction: String, observedAt: Date) {
+    /// Provider identity remains stable even when transport delay shifts the local clock anchor.
+    public let providerTimestamp: String?
+    public init(stationID: String, patternID: String, direction: String, observedAt: Date, providerTimestamp: String? = nil) {
         self.stationID = stationID; self.patternID = patternID; self.direction = direction; self.observedAt = observedAt
+        self.providerTimestamp = providerTimestamp
     }
 }
 
@@ -53,7 +56,7 @@ public enum MetroPlatformFeed {
                   let match = resolver.resolve(station: station, stationEnglish: row["StationEn"] as? String,
                                                destination: destination, destinationEnglish: row["DestinationEn"] as? String) else { continue }
             events.append(MetroPlatformEvent(stationID: match.stationID, patternID: match.patternID,
-                                             direction: match.direction, observedAt: receivedAt.addingTimeInterval(-max(0, age))))
+                                             direction: match.direction, observedAt: receivedAt.addingTimeInterval(-max(0, age)), providerTimestamp: stamp))
         }
         return events
     }
@@ -64,7 +67,8 @@ public enum MetroPlatformFeed {
         var result = old.filter { date.timeIntervalSince($0.observedAt) <= memory }
         for event in new where !result.contains(where: {
             $0.stationID == event.stationID && $0.patternID == event.patternID && $0.direction == event.direction &&
-                abs($0.observedAt.timeIntervalSince(event.observedAt)) < 20
+                (($0.providerTimestamp != nil && event.providerTimestamp != nil) ? $0.providerTimestamp == event.providerTimestamp :
+                    abs($0.observedAt.timeIntervalSince(event.observedAt)) < 20)
         }) { result.append(event) }
         return Array(result.sorted { $0.observedAt > $1.observedAt }.prefix(2000))
     }
