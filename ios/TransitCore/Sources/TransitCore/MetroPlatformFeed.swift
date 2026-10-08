@@ -105,8 +105,10 @@ public enum MetroPlatformFeed {
             }
             guard travel <= 30 * 60 else { continue }
             let remaining = event.observedAt.addingTimeInterval(travel).timeIntervalSince(date)
-            // A train entering the platform stays for its dwell; a little past due still counts.
-            guard remaining >= -40, remaining <= max(120, longestGap) else { continue }
+            // Only an actual sighting at this platform can confirm arrival. An upstream
+            // prediction that is already due cannot override missing follow-up evidence.
+            let stillAtObservedPlatform = seen == board && remaining >= -40
+            guard (stillAtObservedPlatform || remaining > 0), remaining <= max(120, longestGap) else { continue }
             let estimate = MetroPlatformEstimate(seconds: max(0, remaining),
                 entering: seen == board && date.timeIntervalSince(event.observedAt) <= 45, observedAt: event.observedAt)
             if best.map({ estimate.seconds < $0.seconds }) ?? true { best = estimate }

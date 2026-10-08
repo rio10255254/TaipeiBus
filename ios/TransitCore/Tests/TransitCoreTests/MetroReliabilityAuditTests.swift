@@ -80,4 +80,16 @@ final class MetroReliabilityAuditTests: XCTestCase {
             alightingStationID:p.stationIDs[board+1],events:[event],network:metro,at:now,longestGap:300)
         XCTAssertNil(value,"A minutes-old signal cannot become an apparently near train many stations later")
     }
+    func testPastDueUpstreamEstimateCannotOverrideMissingFollowup() throws {
+        let metro = try network(), p = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "0" })
+        let now = Date(timeIntervalSince1970:1_800_000_000), upstream = 5, board = 7
+        let run = try XCTUnwrap(metro.ridingSeconds(routeID:p.id,direction:p.direction,from:p.stationIDs[upstream],to:p.stationIDs[board]))
+        let old = MetroPlatformEvent(stationID:p.stationIDs[upstream],patternID:p.id,direction:p.direction,
+            observedAt:now-(run+MetroTrainTimeline.dwell(p,upstream)+20))
+        XCTAssertNil(MetroPlatformFeed.nextArrival(routeID:p.id,direction:p.direction,boardingStationID:p.stationIDs[board],
+            alightingStationID:p.stationIDs[board+1],events:[old],network:metro,at:now,longestGap:300))
+        let actual = MetroPlatformEvent(stationID:p.stationIDs[board],patternID:p.id,direction:p.direction,observedAt:now-10)
+        XCTAssertTrue(try XCTUnwrap(MetroPlatformFeed.nextArrival(routeID:p.id,direction:p.direction,
+            boardingStationID:p.stationIDs[board],alightingStationID:p.stationIDs[board+1],events:[actual],network:metro,at:now,longestGap:300)).entering)
+    }
 }
