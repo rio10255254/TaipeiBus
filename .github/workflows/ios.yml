@@ -34,7 +34,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'map-controls', 'journey-selection', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -528,6 +528,9 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
               '-only-testing:TaipeiBusUsabilityTests/AnimationUsabilityTests')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-home' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreHomeAndRouteSearch')
           fi
           if [ '${{ inputs.usability_scope }}' = 'app-store-3d' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D')
