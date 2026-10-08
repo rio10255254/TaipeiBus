@@ -84,9 +84,9 @@ public enum MetroStructureMesh {
                               r: color.0, g: color.1, b: color.2, material: material))
         }
     }
-    static let concrete: (Float, Float, Float) = (0.74, 0.75, 0.77)
-    static let concreteSide: (Float, Float, Float) = (0.64, 0.65, 0.68)
-    static let underside: (Float, Float, Float) = (0.50, 0.51, 0.53)
+    static let concrete: (Float, Float, Float) = (0.90, 0.91, 0.92)
+    static let concreteSide: (Float, Float, Float) = (0.82, 0.83, 0.85)
+    static let underside: (Float, Float, Float) = (0.66, 0.67, 0.70)
 
     private static func deck(_ out: inout [Vertex], a: (Double, Double), b: (Double, Double), h0: Double, h1: Double,
                              side: (Double, Double), stripe: (Float, Float, Float)) {
@@ -94,7 +94,7 @@ public enum MetroStructureMesh {
         let length = max(0.01, hypot(lx, ly))
         let left = (lx / length, ly / length, 0.0), right = (-lx / length, -ly / length, 0.0)
         // On the lowest part of a ramp the deck rests on the embankment rather than below the street.
-        let band0 = max(0, h0 - 0.5), band1 = max(0, h1 - 0.5)
+        let band0 = max(0, h0 - 0.85), band1 = max(0, h1 - 0.85)
         let floor0 = max(0, h0 - deckDepth), floor1 = max(0, h1 - deckDepth)
         func p(_ point: (Double, Double), _ s: Double, _ z: Double) -> (Double, Double, Double) { (point.0 + lx * s, point.1 + ly * s, z) }
         // Running surface.
