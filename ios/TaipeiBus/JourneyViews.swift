@@ -689,7 +689,7 @@ struct JourneyPreviewDock: View {
                         .disabled(!option.verified || option.walkIssue != nil || planner.unavailableBoarding(option) != nil)
                         .accessibilityLabel(AppText.text("開始導航")).accessibilityIdentifier("journey-preview-start")
                 }
-            }.journeyDockSurface().accessibilityIdentifier("journey-preview-dock")
+            }.journeyDockSurface()
         }
     }
 }

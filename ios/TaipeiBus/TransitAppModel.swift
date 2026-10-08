@@ -417,6 +417,14 @@ final class TransitAppModel: ObservableObject {
             stationWalk.update(location: location)
             return
         }
+#if DEBUG
+        // Synthetic boarding journeys have their own origin. The test device's fixed city
+        // location must not reroute them into a real walk across town; walking QA uses its own fix.
+        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil {
+            location.setWalkingNavigation(false)
+            return
+        }
+#endif
         let index = activeWalkingIndex
         location.setWalkingNavigation(index != nil)
         guard let index else {

@@ -509,7 +509,7 @@ final class JourneyPlannerModel: ObservableObject {
     func returnToWaiting() {
         guard case .ride(let index) = currentStep,
               let target = steps.firstIndex(of: .walk(index)) else { return }
-        started = index > 0; stepIndex = target; mapRevision += 1
+        started = true; stepIndex = target; mapRevision += 1
     }
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
