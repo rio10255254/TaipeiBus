@@ -38,7 +38,7 @@ struct TransitHomeView: View {
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
-        (planner.selected != nil || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
+        (planner.started || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
     }
     private var bannerOffset: CGFloat { showsBanner ? bannerHeight + 10 : 0 }
     private var nearbyStations: [Station] {
@@ -196,10 +196,14 @@ struct TransitHomeView: View {
         Group {
         if stationWalk.isActive {
             StationWalkingDock(model: model, navigation: stationWalk)
-        } else if planner.started || planner.selected?.walkingOnly == true {
+        } else if planner.started {
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
         } else if planner.selected != nil {
-            JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
+            JourneyPreviewDock(model: model, planner: planner, showChoices: {
+                model.clearWalkingMap(); showJourneyItinerary = false; journeyDetent = .large; showJourney = true
+            }, showItinerary: {
+                model.clearWalkingMap(); showJourneyItinerary = true; journeyDetent = .large; showJourney = true
+            })
         }
         }
         .smoothChanges(planner.currentStep)

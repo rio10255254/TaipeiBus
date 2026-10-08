@@ -637,6 +637,63 @@ private struct BoardedVehiclePicker: View {
     }
 }
 
+/// A selected route remains a preview until the rider explicitly starts it.
+struct JourneyPreviewDock: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    let showChoices: () -> Void
+    let showItinerary: () -> Void
+    var body: some View {
+        if let option = planner.selected {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(planner.destination?.localizedName ?? AppText.text("目的地"))
+                            .liveFont(.headline, weight: .bold).lineLimit(1)
+                        Text(AppText.text("路線預覽")).liveFont(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 4)
+                    Button { model.finishJourney() } label: {
+                        Image(systemName: "xmark").frame(width: 40, height: 40)
+                    }.buttonStyle(MapActionStyle(tint: Color.primary))
+                        .accessibilityLabel(AppText.text("關閉預覽")).accessibilityIdentifier("journey-preview-close")
+                }
+                TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                    if let duration = model.journeyDuration(option, at: timeline.date) {
+                        Text(duration.conciseLabel + " · " + duration.arrivalLabel)
+                            .liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                    }
+                }
+                Button(action: showItinerary) {
+                    HStack {
+                        JourneyRouteChain(option: option)
+                        Spacer(minLength: 4)
+                        Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold)
+                    }.frame(minHeight: 40).contentShape(Rectangle())
+                }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
+                    .accessibilityLabel(AppText.text("查看行程")).accessibilityIdentifier("journey-preview-steps")
+                HStack(spacing: 12) {
+                    Button(action: showChoices) {
+                        Label(AppText.text("返回路線"), systemImage: "chevron.left")
+                            .liveFont(.body, weight: .semibold).frame(maxWidth: .infinity, minHeight: 50)
+                    }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-options")
+                    Button {
+                        model.clearWalkingMap(); planner.begin()
+                        guard planner.started else { return }
+                        if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
+                    } label: {
+                        Text(AppText.text("出發")).liveFont(.body, weight: .bold)
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                    }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
+                        .disabled(!option.verified || option.walkIssue != nil || planner.unavailableBoarding(option) != nil)
+                        .accessibilityLabel(AppText.text("開始導航")).accessibilityIdentifier("journey-preview-start")
+                }
+            }.journeyDockSurface().accessibilityIdentifier("journey-preview-dock")
+        }
+    }
+}
+
 struct JourneyArrivalDock: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
@@ -1023,9 +1080,10 @@ private struct JourneyWalkingStep: View {
             }
             Spacer(minLength: 0)
             if !walked, !leg.internalTransfer, planner.currentStep == .walk(index) {
-                Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index); showMap() } label: {
+                Button { model.showWalkOnMap(index); showMap() } label: {
                     Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 40, height: 44)
-                }.accessibilityLabel(AppText.text("步行導航到%@", target)).accessibilityIdentifier("journey-in-app-walk-\(index)")
+                }.accessibilityLabel(planner.started ? AppText.text("步行導航到%@", target) : AppText.text("預覽步行至%@", target))
+                    .accessibilityIdentifier("journey-in-app-walk-\(index)")
             }
         }.padding(.vertical, 16)
     }

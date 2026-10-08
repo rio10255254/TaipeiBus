@@ -403,6 +403,7 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var walkingMapIndex: Int?
     var activeWalkingIndex: Int? {
         if stationWalk.isActive { return nil }
+        guard planner.started else { return nil }
         if let walkingMapIndex { return walkingMapIndex }
         if planner.started, case .walk(let index) = planner.currentStep {
             if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer == true { return nil }
@@ -1274,7 +1275,8 @@ final class TransitAppModel: ObservableObject {
               let packet = try? MetroRealtime(data: bytes, network: metadata.metro, at: now) else { return false }
         metroRealtime = packet; metroRevision += 1
         snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
-        planner.updateSnapshot(snapshot, forecast: arrivalForecast); planner.prepareBoardingPreview(trip)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        planner.prepareBoardingPreview(trip, started: !ProcessInfo.processInfo.arguments.contains("--preview-route-only"))
         selectedTrainID = "QA-TRAIN-01"
         previewNotice = "介面驗證用資料 · 非即時列車"
         focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
