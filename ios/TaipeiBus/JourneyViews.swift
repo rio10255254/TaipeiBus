@@ -113,7 +113,7 @@ struct JourneyPlanningView: View {
                             Button(live.text("更改")) { edit(origin: false) }
                         } else {
                             Button { model.finishJourney(); dismiss() } label: {
-                                Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 36, height: 36)
+                                Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.primary).frame(width: 36, height: 36)
                             }.accessibilityLabel(AppText.text("關閉路線"))
                                 .accessibilityIdentifier("journey-close")
                         }
@@ -125,7 +125,7 @@ struct JourneyPlanningView: View {
                                 Button(AppText.text("重新比較路線")) { planner.refreshRecommendations() }
                                 Button(AppText.text("推薦順序說明")) { showingRankingInfo = true }
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
-                            } label: { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                            } label: { Image(systemName: "ellipsis").foregroundStyle(.primary).frame(width: 36, height: 36) }
                                 .accessibilityLabel(live.text("更多行程選項"))
                         }
                     }
@@ -181,7 +181,7 @@ struct JourneyPlanningView: View {
         VStack(spacing: 0) {
             Button { edit(origin: true) } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: planner.usingLocation ? "location.circle.fill" : "circle.fill")
+                    Image(systemName: planner.usingLocation ? "location.circle.fill" : "mappin.circle.fill")
                         .foregroundStyle(.blue).liveFont(.title2).frame(width: 28)
                     Text(planner.origin?.localizedName ?? AppText.text("選擇出發地"))
                         .frame(maxWidth: .infinity, alignment: .leading).lineLimit(1)
@@ -912,7 +912,7 @@ struct JourneyOptionsView: View {
                     Text(AppText.text("步驟")).liveFont(.caption, weight: .bold)
                 }.frame(width: 58, height: 70)
                     .background(Color(liveHex: live.appearance.accentColor).opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }.buttonStyle(PhonePressStyle())
+            }.buttonStyle(PhonePressStyle()).foregroundStyle(Color(liveHex:live.appearance.accentColor))
                 .accessibilityLabel(AppText.text("查看搭乘步驟")).accessibilityIdentifier("journey-steps-" + option.id)
         }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
