@@ -18,6 +18,13 @@ unless tests
   end
   project.save
 end
+group = project.main_group.groups.find { |item| item.path == 'usability' } || project.main_group.new_group('usability', 'usability')
+existing = tests.source_build_phase.files.map { |item| item.file_ref&.path }
+Dir.glob(File.join(__dir__, '*.swift')).sort.each do |source|
+  name = File.basename(source)
+  tests.source_build_phase.add_file_reference(group.new_file(name)) unless existing.include?(name)
+end
+project.save
 scheme = Xcodeproj::XCScheme.new
 scheme.configure_with_targets(app, tests, launch_target: true)
 scheme.test_action.build_configuration = 'Debug'

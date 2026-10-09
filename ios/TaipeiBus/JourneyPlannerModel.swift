@@ -534,6 +534,24 @@ final class JourneyPlannerModel: ObservableObject {
     }
 
 #if DEBUG
+    /// Deterministic UI scenarios use actual planner routes and explicitly simulated walking.
+    func prepareRouteChoicesPreview(_ trips: [TransitTrip], from start: TravelPlace, to end: TravelPlace) {
+        cancelRequests(); origin = start; destination = end; usingLocation = false
+        started = false; stepIndex = 0; selectionConfirmed = true
+        options = trips.map { trip in
+            var walks: [WalkingLeg] = []
+            for index in 0...trip.rides.count {
+                let from = index == 0 ? start.coordinate : trip.rides[index - 1].alighting.coordinate
+                let to = index == trip.rides.count ? end.coordinate : trip.rides[index].boarding.coordinate
+                let distance = trip.walkingDistances[index], duration = trip.planningWalkSeconds[index]
+                var leg = WalkingLeg(from:from,to:to,coordinates:[from,to],distance:distance,duration:duration)
+                leg.road = RouteLine(coordinates:leg.coordinates); walks.append(leg)
+            }
+            return JourneyOption(id:trip.id,trip:trip,walks:walks)
+        }
+        selectedID = options.first?.id; optionLabels = [:]; message = nil; mapRevision += 1
+    }
+
     func prepareWalkingPreview() async {
         cancelRequests(); usingLocation = true
         let start = Coordinate.taipei, end = Coordinate(latitude: 25.0410, longitude: 121.5663)
