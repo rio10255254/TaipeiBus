@@ -771,11 +771,41 @@ private struct JourneyWaitingActions: View {
     }
 }
 
+/// Route signs wrap as complete segments instead of shrinking a mixed trip into tiny text.
+private struct JourneyChainLayout: Layout {
+    var spacing: CGFloat = 6
+    private func arrangement(_ subviews: Subviews, width: CGFloat) -> (sizes: [CGSize], points: [CGPoint], height: CGFloat) {
+        var sizes: [CGSize] = [], points: [CGPoint] = []
+        var x: CGFloat = 0, y: CGFloat = 0, row: CGFloat = 0
+        for item in subviews {
+            let natural = item.sizeThatFits(.unspecified)
+            let size = natural.width > width ? item.sizeThatFits(ProposedViewSize(width:width,height:nil)) : natural
+            if x > 0, x + size.width > width { x = 0; y += row + spacing; row = 0 }
+            sizes.append(size); points.append(CGPoint(x:x,y:y))
+            x += size.width + spacing; row = max(row,size.height)
+        }
+        return (sizes,points,y + row)
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        let width = proposal.width ?? subviews.map { $0.sizeThatFits(.unspecified).width + spacing }.reduce(0,+)
+        return CGSize(width:width,height:arrangement(subviews,width:max(1,width)).height)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let result = arrangement(subviews,width:max(1,bounds.width))
+        for index in subviews.indices {
+            subviews[index].place(at:CGPoint(x:bounds.minX + result.points[index].x,y:bounds.minY + result.points[index].y),
+                anchor:.topLeading,proposal:ProposedViewSize(width:result.sizes[index].width,height:result.sizes[index].height))
+        }
+    }
+}
+
 private struct JourneyRouteChain: View {
     let option: JourneyOption
     var body: some View {
-        HStack(spacing: 7) {
+        JourneyChainLayout {
             ForEach(option.walks.indices, id: \.self) { index in
+                if option.rides.indices.contains(index) || (option.walks[index].duration ?? 0) >= 30 {
+                HStack(spacing: 5) {
                 if let duration = option.walks[index].duration, duration >= 30 {
                     if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
                     HStack(spacing: 1) {
@@ -792,6 +822,8 @@ private struct JourneyRouteChain: View {
                     RouteBadge(name: option.rides[index].route.mode == .bus ? option.rides[index].route.localizedName : option.rides[index].route.lineCode, tintName: option.rides[index].route.name, compact: true)
                     Image(systemName: option.rides[index].route.mode == .bus ? "bus.fill" : "tram.fill")
                         .liveFont(.subheadline, weight: .semibold).foregroundStyle(.primary).accessibilityHidden(true)
+                }
+                }
                 }
             }
         }.lineLimit(1).minimumScaleFactor(0.8)
