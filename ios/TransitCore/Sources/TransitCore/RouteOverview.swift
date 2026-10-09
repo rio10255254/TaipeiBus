@@ -6,7 +6,7 @@ public struct RouteOverview: Sendable {
     public let center: Coordinate
     public let zoom: Double
 
-    public init?(coordinates: [Coordinate], viewportWidth: Double, viewportHeight: Double, pitch: Double = 35) {
+    public init?(coordinates: [Coordinate], viewportWidth: Double, viewportHeight: Double, pitch: Double = 35, padding: Double = 16) {
         let points = coordinates.filter { $0.latitude.isFinite && $0.longitude.isFinite &&
             (21...26).contains($0.latitude) && (119...123).contains($0.longitude) }
         guard !points.isEmpty, viewportWidth.isFinite, viewportHeight.isFinite,
@@ -17,8 +17,9 @@ public struct RouteOverview: Sendable {
         let x = (west + east) / 2, y = (north + south) / 2
         center = Coordinate(latitude: atan(sinh(.pi * (1 - 2 * y))) * 180 / .pi,
                             longitude: x * 360 - 180)
-        let horizontal = log2(max(80, viewportWidth - 32) / (512 * max(east - west, 0.000001)))
-        let vertical = log2(max(80, viewportHeight - 32) / (512 * max(south - north, 0.000001)))
+        let edge = padding.isFinite ? max(0,padding) * 2 : 32
+        let horizontal = log2(max(80, viewportWidth - edge) / (512 * max(east - west, 0.000001)))
+        let vertical = log2(max(80, viewportHeight - edge) / (512 * max(south - north, 0.000001)))
         let tilt = min(60, max(0, pitch.isFinite ? pitch : 0)) * .pi / 180
         let margin = log2(1 / cos(tilt)) + 0.05
         zoom = min(17.2, max(9, min(horizontal, vertical) - margin))

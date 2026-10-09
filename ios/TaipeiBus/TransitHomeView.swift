@@ -37,6 +37,7 @@ struct TransitHomeView: View {
 
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
+    private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
         (planner.started || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
@@ -73,6 +74,12 @@ struct TransitHomeView: View {
                     MapContextLabels(model: model, overlay: selectionOverlay, bottomClearance: bottomControlsHeight, topClearance: bannerOffset) { showDetails = true }
                 }
                 topChrome
+                if routeMapPreview, geometry.size.height - journeyPanelHeight > 220 {
+                    VStack {
+                        Spacer()
+                        HStack { Spacer(); MapLocationControl(model:model,location:location) }
+                    }.padding(.trailing,16).padding(.bottom,mapBottomInset(geometry) + 10)
+                }
 
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
@@ -148,7 +155,8 @@ struct TransitHomeView: View {
                 }
             }
             Spacer(minLength: 0)
-            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive) {
+            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive,
+                            showsLocation: !routeMapPreview) {
                 showInformation = true
             }
         }
@@ -671,6 +679,7 @@ private struct MapControlStack: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
     let showsCityFleet: Bool
+    var showsLocation = true
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     var body: some View {
@@ -694,6 +703,17 @@ private struct MapControlStack: View {
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
                 }
+                if showsLocation { MapLocationControl(model:model,location:location) }
+            }
+    }
+}
+
+private struct MapLocationControl: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var location: LocationService
+    private var accent: Color { Color(liveHex:live.appearance.accentColor) }
+    var body: some View {
                 Button {
                     model.cycleUserTracking()
                 } label: {
@@ -711,7 +731,6 @@ private struct MapControlStack: View {
                 .accessibilityLabel(live.text("定位與地圖方向"))
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
-            }
     }
 }
 
