@@ -820,13 +820,14 @@ private struct JourneyRouteChain: View {
                         Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
                     }
                     RouteBadge(name: option.rides[index].route.mode == .bus ? option.rides[index].route.localizedName : option.rides[index].route.lineCode, tintName: option.rides[index].route.name, compact: true)
+                        .fixedSize(horizontal:true,vertical:false)
                     Image(systemName: option.rides[index].route.mode == .bus ? "bus.fill" : "tram.fill")
                         .liveFont(.subheadline, weight: .semibold).foregroundStyle(.primary).accessibilityHidden(true)
                 }
-                }
+                }.fixedSize(horizontal:true,vertical:false)
                 }
             }
-        }.lineLimit(1).minimumScaleFactor(0.8)
+        }.lineLimit(1)
     }
 }
 
