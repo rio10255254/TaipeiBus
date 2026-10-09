@@ -120,7 +120,7 @@ class JourneyUsabilityTestBase: XCTestCase {
         }
     }
     func button(_ id: String) -> XCUIElement {
-        app.buttons.matching(NSPredicate(format:"identifier == %@",id)).firstMatch
+        app.buttons.matching(NSPredicate(format:"identifier == %@ OR label == %@",id,id)).firstMatch
     }
     func chooseNeihu() {
         let field = app.textFields["journey-search-field"]
