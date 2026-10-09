@@ -285,7 +285,7 @@ struct NativeBusMap: UIViewRepresentable {
             tripNames.predicate = NSPredicate(format: "waypoint == 0")
             tripNames.text = NSExpression(forKeyPath: "name")
             tripNames.textFontSize = NSExpression(forConstantValue: 12)
-            tripNames.textMaximumWidth = NSExpression(forConstantValue: 7)
+            tripNames.maximumTextWidth = NSExpression(forConstantValue: 7)
             tripNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
             tripNames.textColor = NSExpression(forConstantValue: UIColor.darkGray)
             tripNames.textHaloColor = NSExpression(forConstantValue: UIColor.white)

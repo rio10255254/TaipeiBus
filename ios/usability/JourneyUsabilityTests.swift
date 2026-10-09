@@ -119,7 +119,9 @@ class JourneyUsabilityTestBase: XCTestCase {
             tree.name = name + "-elements"; tree.lifetime = .keepAlways; add(tree)
         }
     }
-    func button(_ id: String) -> XCUIElement { app.buttons[id] }
+    func button(_ id: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format:"identifier == %@",id)).firstMatch
+    }
     func chooseNeihu() {
         let field = app.textFields["journey-search-field"]
         if !field.waitForExistence(timeout: 10), button("搜尋目的地").isHittable {
