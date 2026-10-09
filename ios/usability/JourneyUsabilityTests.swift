@@ -55,7 +55,7 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
     }
     func testRoutePreviewAndBackNeverStartNavigation() {
         launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-map-controls", "--test-journey-selection"])
-        XCTAssertTrue(app.buttons["journey-options"].waitForExistence(timeout:100))
+        XCTAssertTrue(app.buttons["journey-all-options"].waitForExistence(timeout:100))
         func started() -> Bool? {
             guard let data = app.staticTexts["journey-timing-state"].label.data(using:.utf8),
                   let state = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return nil }
@@ -63,35 +63,42 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         }
         XCTAssertEqual(started(),false)
         XCTAssertFalse(app.buttons["journey-board"].exists)
-        app.buttons["journey-options"].tap()
-        let row = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-option-")).firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout:10)); row.tap()
+        XCTAssertFalse(app.buttons["返回地圖"].exists)
+        XCTAssertFalse(app.buttons["journey-options"].exists,"A preview has one route menu")
+        let steps = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-steps-")).firstMatch
+        XCTAssertTrue(steps.isHittable)
+        waitCamera("The route fills the visible map without crossing the sheet") { state in
+            guard let frame = state["routeFraming"] as? [String:Any] else { return false }
+            return state["cameraMoving"] as? Bool == false && frame["inside"] as? Bool == true &&
+                max(frame["widthUsage"] as? Double ?? 0,frame["heightUsage"] as? Double ?? 0) > 0.72
+        }
+        capture("preview-01-single-route-menu")
+        steps.tap()
         XCTAssertTrue(app.buttons["journey-start-navigation"].waitForExistence(timeout:10))
         XCTAssertEqual(started(),false)
-        capture("preview-01-selected-route")
+        capture("preview-02-selected-steps")
         app.buttons["journey-back"].tap()
-        XCTAssertTrue(row.waitForExistence(timeout:10))
+        XCTAssertTrue(app.buttons["journey-all-options"].waitForExistence(timeout:10))
         XCTAssertEqual(started(),false)
-        app.buttons["journey-back"].tap()
-        XCTAssertTrue(app.buttons["journey-preview-start"].waitForExistence(timeout:10))
-        XCTAssertFalse(app.buttons["journey-board"].exists)
-        XCTAssertEqual(started(),false)
-        capture("preview-02-returned-map")
-        app.buttons["journey-preview-steps"].tap()
+        XCTAssertFalse(app.buttons["返回地圖"].exists)
+        steps.tap()
         XCTAssertTrue(app.buttons["journey-in-app-walk-0"].waitForExistence(timeout:10))
         app.buttons["journey-in-app-walk-0"].tap()
-        XCTAssertTrue(app.buttons["journey-preview-start"].waitForExistence(timeout:10))
-        XCTAssertEqual(started(),false,"Viewing a walking segment remains a preview")
-        XCTAssertFalse(app.buttons["journey-board"].exists)
-        capture("preview-03-walking-segment")
-        app.buttons["journey-options"].tap()
+        XCTAssertTrue(app.buttons["journey-all-options"].waitForExistence(timeout:10))
+        XCTAssertEqual(started(),false,"Viewing a walking segment stays in the same route menu")
+        capture("preview-03-walking-with-route-menu")
+        app.buttons["journey-all-options"].tap()
+        let row = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-option-")).firstMatch
         XCTAssertTrue(row.waitForExistence(timeout:10)); row.tap()
-        XCTAssertTrue(app.buttons["journey-start-navigation"].waitForExistence(timeout:10))
-        app.buttons["journey-start-navigation"].tap()
+        XCTAssertTrue(app.buttons["journey-all-options"].waitForExistence(timeout:10))
+        XCTAssertFalse(app.buttons["journey-start-navigation"].exists,"Choosing from the list returns to map preview")
+        let go = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-go-")).firstMatch
+        XCTAssertTrue(go.isHittable); go.tap()
         XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout:10))
         XCTAssertEqual(started(),true)
         capture("preview-04-explicitly-started")
     }
+
 }
 
 class JourneyUsabilityTestBase: XCTestCase {
@@ -112,7 +119,9 @@ class JourneyUsabilityTestBase: XCTestCase {
             tree.name = name + "-elements"; tree.lifetime = .keepAlways; add(tree)
         }
     }
-    func button(_ id: String) -> XCUIElement { app.buttons[id] }
+    func button(_ id: String) -> XCUIElement {
+        app.buttons.matching(NSPredicate(format:"identifier == %@ OR label == %@",id,id)).firstMatch
+    }
     func chooseNeihu() {
         let field = app.textFields["journey-search-field"]
         if !field.waitForExistence(timeout: 10), button("搜尋目的地").isHittable {
@@ -124,7 +133,10 @@ class JourneyUsabilityTestBase: XCTestCase {
         XCTAssertTrue(place.waitForExistence(timeout: 20)); capture("search-neihu-with-keyboard"); place.tap()
     }
     func selectOptionAndStart(_ option: XCUIElement) {
+        let id = String(option.identifier.dropFirst("journey-option-".count))
         option.tap()
+        let steps = button("journey-steps-" + id)
+        XCTAssertTrue(steps.waitForExistence(timeout:15)); steps.tap()
         let start = button("journey-start-navigation")
         XCTAssertTrue(start.waitForExistence(timeout: 15))
         start.tap()
@@ -345,14 +357,14 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-board").isHittable)
         // Wait for the initial bottom-dock insertion to finish before touching it.
         Thread.sleep(forTimeInterval: 1)
-        button("journey-board").tap()
+        button("journey-board").coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
         button("journey-alight").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 5))
         let secondRoute = app.staticTexts["boarding-route"].label
         XCTAssertNotEqual(firstRoute, secondRoute)
         capture("transfer-second-bus")
-        button("journey-board").tap()
+        button("journey-board").coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
         button("journey-alight").tap()
         XCTAssertTrue(button("journey-arrive").waitForExistence(timeout: 5))
@@ -1245,6 +1257,11 @@ final class NoLocationUsabilityTests: JourneyUsabilityTestBase {
 
 
 final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
+    func openSelectedSteps() {
+        let id = app.staticTexts["journey-selected-state"].label
+        let steps = button("journey-steps-" + id)
+        XCTAssertTrue(steps.waitForExistence(timeout:10)); steps.tap()
+    }
     func ready() -> [String: Any] {
         guard let data = app.staticTexts["journey-timing-state"].label.data(using: .utf8),
               let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
@@ -1259,8 +1276,8 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
     }
     func testRealRouteChoicesOpenStepsAndReturnBeforeStarting() {
         launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
-        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 90)); waitForChoices()
-        button("journey-options").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 90)); waitForChoices()
+        button("journey-all-options").tap()
         let choices = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
         XCTAssertTrue((1...3).contains(choices.count))
         let ids = (0..<choices.count).map { choices.element(boundBy: $0).identifier }
@@ -1271,15 +1288,16 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertFalse(row.label.contains("行程 47"))
         }
         capture("clear-real-route-choice-times")
-        firstOption.tap()
+        firstOption.tap(); openSelectedSteps()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["journey-destination-title"].exists)
         XCTAssertTrue(app.staticTexts["journey-walk-status-0"].label.contains("步行至"))
         XCTAssertTrue(app.staticTexts["journey-ride-time-0"].label.contains("站"))
         capture("clear-real-walk-bus-alight-steps")
-        button("更改").tap()
+        button("journey-back").tap(); button("journey-edit-destination").tap()
         XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 10))
         button("journey-back").tap()
+        openSelectedSteps()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["journey-destination-title"].exists, "Cancelling an edit returns to the same trip preview")
         button("journey-time-info").tap()
@@ -1309,7 +1327,7 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-all-options").tap()
         XCTAssertEqual((0..<choices.count).map { choices.element(boundBy: $0).identifier }, ids)
         XCTAssertFalse(button("journey-start-navigation").exists)
-        firstOption.tap(); button("journey-start-navigation").tap()
+        selectOptionAndStart(firstOption)
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 10))
         XCTAssertEqual(app.state, .runningForeground)
         capture("clear-real-start-walking-on-map")
@@ -1320,13 +1338,13 @@ final class ClearJourneyUsabilityTests: JourneyUsabilityTestBase {
     }
     func testEnglishChoicesAndStepsRetainChineseSignNames() {
         launch(["--test-language", "en", "--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
-        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 90)); waitForChoices()
-        button("journey-options").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 90)); waitForChoices()
+        button("journey-all-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 10)); XCTAssertTrue(firstOption.isHittable)
         XCTAssertTrue(firstOption.label.lowercased().contains("min"))
         XCTAssertTrue(firstOption.label.unicodeScalars.contains { (0x3400...0x9fff).contains($0.value) })
         capture("clear-english-route-choices")
-        firstOption.tap()
+        firstOption.tap(); openSelectedSteps()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["journey-walk-status-0"].label.contains("Walk"))
         XCTAssertTrue(app.staticTexts["內湖"].exists || app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "內湖")).firstMatch.exists)

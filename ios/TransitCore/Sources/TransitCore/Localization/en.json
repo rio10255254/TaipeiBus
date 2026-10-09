@@ -518,5 +518,8 @@
   "重新整理": "Refresh",
   "路線預覽": "Route preview",
   "關閉預覽": "Close preview",
-  "預覽步行至%@": "Preview walk to %@"
+  "預覽步行至%@": "Preview walk to %@",
+  "關閉路線": "Close routes",
+  "預覽此路線": "Preview this route",
+  "步驟": "Steps"
 }

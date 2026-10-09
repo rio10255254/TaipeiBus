@@ -626,7 +626,13 @@ final class TransitAppModel: ObservableObject {
         return max(60, onboardArrival.arrival.timeIntervalSince(date))
     }
 
-    func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+    func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
+#if DEBUG
+        let date = ProcessInfo.processInfo.arguments.contains("--preview-mixed-planning")
+            ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : suppliedDate
+#else
+        let date = suppliedDate
+#endif
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
             return planner.duration(option, at: date)
@@ -1067,6 +1073,11 @@ final class TransitAppModel: ObservableObject {
             Task { [weak self] in _ = await self?.prepareMetroFixture() }
             return
         }
+        if arguments.contains("--preview-mixed-planning") {
+            previewSelectionApplied = true
+            Task { [weak self] in await self?.prepareMixedPlanningFixture() }
+            return
+        }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
             previewNotice = "介面驗證用資料 · 非即時車輛"
@@ -1289,6 +1300,28 @@ final class TransitAppModel: ObservableObject {
         previewNotice = "介面驗證用資料 · 非即時列車"
         focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
         return true
+    }
+
+    private func prepareMixedPlanningFixture() async {
+        let source = metadata
+        guard let startStation = source.metro.stations.first(where:{ $0.code == "BR19" }),
+              let endStation = source.metro.stations.first(where:{ $0.code == "BL12" }) else {
+            previewSelectionApplied = false; return
+        }
+        let date = ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")!
+        let trips = await Task.detached(priority:.userInitiated) {
+            MultimodalPlanner(metadata:source).plan(from:startStation.coordinate,to:endStation.coordinate,maximumWalk:800,limit:36,at:date)
+        }.value
+        let mixed = trips.first { $0.rides.contains { $0.route.mode == .bus } && $0.rides.contains { $0.route.mode != .bus } }
+        let rail = trips.first { $0.rides.allSatisfy { $0.route.mode != .bus } }
+        let bus = trips.first { $0.rides.allSatisfy { $0.route.mode == .bus } }
+        debugActions.append("mixed-planner:\(trips.count):mixed\(mixed != nil):rail\(rail != nil):bus\(bus != nil)")
+        guard let mixed, let rail, let bus else { return }
+        previewNotice = "介面驗證用行程 · 非即時班次"
+        snapshot = TransitSnapshot(); planner.updateSnapshot(snapshot)
+        planner.prepareRouteChoicesPreview([mixed,rail,bus],
+            from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
+            to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {

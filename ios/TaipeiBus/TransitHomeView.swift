@@ -16,6 +16,7 @@ struct TransitHomeView: View {
     @State private var showJourney = false
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
+    @State private var journeyPanelHeight: CGFloat = 420
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
     @State private var stationWalkReturnSearch = false
@@ -36,6 +37,7 @@ struct TransitHomeView: View {
 
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
+    private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
         (planner.started || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
@@ -49,7 +51,7 @@ struct TransitHomeView: View {
 
     private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
         let panel: CGFloat
-        if showJourney && planner.selected != nil { panel = journeyDetent == .height(420) ? 420 : 560 }
+        if showJourney { panel = min(journeyPanelHeight, geometry.size.height) }
         else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
         else if showSearch { panel = 390 }
         else { panel = bottomControlsHeight }
@@ -72,6 +74,12 @@ struct TransitHomeView: View {
                     MapContextLabels(model: model, overlay: selectionOverlay, bottomClearance: bottomControlsHeight, topClearance: bannerOffset) { showDetails = true }
                 }
                 topChrome
+                if routeMapPreview, geometry.size.height - journeyPanelHeight > 220 {
+                    VStack {
+                        Spacer()
+                        HStack { Spacer(); MapLocationControl(model:model,location:location) }
+                    }.padding(.trailing,16).padding(.bottom,mapBottomInset(geometry) + 10)
+                }
 
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
@@ -82,6 +90,7 @@ struct TransitHomeView: View {
                             let timing = model.journeyDuration(option, at: timeline.date)
                             return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
                                 "transfers": max(0, option.rides.count - 1),
+                                "modes": option.rides.map { $0.route.mode == .bus ? "bus" : "metro" },
                                 "boarding_name": option.rides.first?.boarding.name ?? "", "ride_stop_count": option.rides.first?.stopCount ?? 0,
                                 "total": timing?.totalSeconds ?? -1, "travel": timing?.travelSeconds ?? -1,
                                 "walking": timing?.walkingSeconds ?? -1, "waiting": timing?.waitingSeconds ?? -1,
@@ -146,7 +155,8 @@ struct TransitHomeView: View {
                 }
             }
             Spacer(minLength: 0)
-            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive) {
+            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive,
+                            showsLocation: !routeMapPreview) {
                 showInformation = true
             }
         }
@@ -198,12 +208,6 @@ struct TransitHomeView: View {
             StationWalkingDock(model: model, navigation: stationWalk)
         } else if planner.started {
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
-        } else if planner.selected != nil {
-            JourneyPreviewDock(model: model, planner: planner, showChoices: {
-                model.clearWalkingMap(); showJourneyItinerary = false; journeyDetent = .large; showJourney = true
-            }, showItinerary: {
-                model.clearWalkingMap(); showJourneyItinerary = true; journeyDetent = .large; showJourney = true
-            })
         }
         }
         .smoothChanges(planner.currentStep)
@@ -295,6 +299,13 @@ struct TransitHomeView: View {
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
+                .interactiveDismissDisabled(!planner.started && planner.destination != nil)
+                .background {
+                    GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
+                }
+                .onPreferenceChange(JourneyPanelHeightKey.self) { height in
+                    if height > 0, abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height }
+                }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .sheet(isPresented: $model.showingArrivingVehicles) {
@@ -314,6 +325,9 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
+            if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
@@ -331,7 +345,7 @@ struct TransitHomeView: View {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
                     model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
-                } else if !sameVehicle && !sameTrain {
+                } else if (!planner.started && userChangedJourney) || (!sameVehicle && !sameTrain) {
                     model.clearWalkingMap()
                     model.clearSelection()
                     if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
@@ -347,7 +361,16 @@ struct TransitHomeView: View {
         }
         .onChange(of: model.walkingMapIndex) { _, index in
             model.updateWalkingLocation()
-            if index != nil { pendingJourneyDetail = false; showJourney = false; showDetails = false; showSearch = false }
+            if index != nil {
+                pendingJourneyDetail = false; showDetails = false; showSearch = false
+                if planner.started { showJourney = false }
+                else { showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true }
+            }
+        }
+        .onChange(of: showDetails) { _, visible in
+            if !visible, !pendingJourneyDetail, !showSearch, planner.selected != nil, !planner.started {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
         }
         .onChange(of: stationWalk.isActive) { _, active in
             if active {
@@ -434,6 +457,11 @@ private struct InstructionBannerHeightKey: PreferenceKey {
 private struct MapBottomControlsHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 210
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct JourneyPanelHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // Native Liquid Glass follows system appearance and accessibility preferences on iOS 26.
@@ -598,6 +626,7 @@ private struct HomeSearchRow: View {
             .buttonStyle(PhonePressStyle())
             .phoneGlass(in: Capsule())
             .accessibilityLabel(live.text("搜尋目的地"))
+            .accessibilityIdentifier("home-destination-search")
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.
             HStack(spacing: 0) {
@@ -651,6 +680,7 @@ private struct MapControlStack: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
     let showsCityFleet: Bool
+    var showsLocation = true
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     var body: some View {
@@ -674,6 +704,17 @@ private struct MapControlStack: View {
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
                 }
+                if showsLocation { MapLocationControl(model:model,location:location) }
+            }
+    }
+}
+
+private struct MapLocationControl: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var location: LocationService
+    private var accent: Color { Color(liveHex:live.appearance.accentColor) }
+    var body: some View {
                 Button {
                     model.cycleUserTracking()
                 } label: {
@@ -691,7 +732,6 @@ private struct MapControlStack: View {
                 .accessibilityLabel(live.text("定位與地圖方向"))
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
-            }
     }
 }
 
