@@ -357,14 +357,14 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-board").isHittable)
         // Wait for the initial bottom-dock insertion to finish before touching it.
         Thread.sleep(forTimeInterval: 1)
-        button("journey-board").tap()
+        button("journey-board").coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
         button("journey-alight").tap()
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 5))
         let secondRoute = app.staticTexts["boarding-route"].label
         XCTAssertNotEqual(firstRoute, secondRoute)
         capture("transfer-second-bus")
-        button("journey-board").tap()
+        button("journey-board").coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
         XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 10))
         button("journey-alight").tap()
         XCTAssertTrue(button("journey-arrive").waitForExistence(timeout: 5))

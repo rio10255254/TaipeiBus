@@ -626,6 +626,7 @@ private struct HomeSearchRow: View {
             .buttonStyle(PhonePressStyle())
             .phoneGlass(in: Capsule())
             .accessibilityLabel(live.text("搜尋目的地"))
+            .accessibilityIdentifier("home-destination-search")
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.
             HStack(spacing: 0) {

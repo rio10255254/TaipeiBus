@@ -62,7 +62,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertFalse(button("journey-start-navigation").exists)
         XCTAssertEqual(state()["started"] as? Bool,false)
         button("journey-close").tap()
-        XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout:10) || button("Search destination").exists)
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout:10))
         XCTAssertFalse(button("journey-go-"+mixedID).exists)
         XCTAssertFalse(button("journey-board").exists)
         capture("mixed-menu-closed")
