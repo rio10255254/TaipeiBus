@@ -16,6 +16,7 @@ struct TransitHomeView: View {
     @State private var showJourney = false
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
+    @State private var journeyPanelHeight: CGFloat = 420
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
     @State private var stationWalkReturnSearch = false
@@ -49,7 +50,7 @@ struct TransitHomeView: View {
 
     private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
         let panel: CGFloat
-        if showJourney && planner.selected != nil { panel = journeyDetent == .height(420) ? 420 : 560 }
+        if showJourney { panel = min(journeyPanelHeight, geometry.size.height) }
         else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
         else if showSearch { panel = 390 }
         else { panel = bottomControlsHeight }
@@ -198,12 +199,6 @@ struct TransitHomeView: View {
             StationWalkingDock(model: model, navigation: stationWalk)
         } else if planner.started {
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
-        } else if planner.selected != nil {
-            JourneyPreviewDock(model: model, planner: planner, showChoices: {
-                model.clearWalkingMap(); showJourneyItinerary = false; journeyDetent = .large; showJourney = true
-            }, showItinerary: {
-                model.clearWalkingMap(); showJourneyItinerary = true; journeyDetent = .large; showJourney = true
-            })
         }
         }
         .smoothChanges(planner.currentStep)
@@ -295,6 +290,13 @@ struct TransitHomeView: View {
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
+                .interactiveDismissDisabled(!planner.started && planner.destination != nil)
+                .background {
+                    GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
+                }
+                .onPreferenceChange(JourneyPanelHeightKey.self) { height in
+                    if height > 0, abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height }
+                }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
         .sheet(isPresented: $model.showingArrivingVehicles) {
@@ -314,6 +316,9 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
+            if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
@@ -331,7 +336,7 @@ struct TransitHomeView: View {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
                     model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
-                } else if !sameVehicle && !sameTrain {
+                } else if (!planner.started && userChangedJourney) || (!sameVehicle && !sameTrain) {
                     model.clearWalkingMap()
                     model.clearSelection()
                     if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
@@ -347,7 +352,16 @@ struct TransitHomeView: View {
         }
         .onChange(of: model.walkingMapIndex) { _, index in
             model.updateWalkingLocation()
-            if index != nil { pendingJourneyDetail = false; showJourney = false; showDetails = false; showSearch = false }
+            if index != nil {
+                pendingJourneyDetail = false; showDetails = false; showSearch = false
+                if planner.started { showJourney = false }
+                else { showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true }
+            }
+        }
+        .onChange(of: showDetails) { _, visible in
+            if !visible, !pendingJourneyDetail, !showSearch, planner.selected != nil, !planner.started {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
         }
         .onChange(of: stationWalk.isActive) { _, active in
             if active {
@@ -434,6 +448,11 @@ private struct InstructionBannerHeightKey: PreferenceKey {
 private struct MapBottomControlsHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 210
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct JourneyPanelHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // Native Liquid Glass follows system appearance and accessibility preferences on iOS 26.

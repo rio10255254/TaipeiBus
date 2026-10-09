@@ -276,7 +276,7 @@ struct NativeBusMap: UIViewRepresentable {
             // the street is close enough and only where they do not crowd each other or an endpoint.
             let waypointDots = MLNSymbolStyleLayer(identifier: "journey-waypoint-dots", source: tripStops)
             waypointDots.predicate = NSPredicate(format: "waypoint == 1")
-            waypointDots.minimumZoomLevel = 12.5
+            waypointDots.minimumZoomLevel = 10.8
             waypointDots.iconImageName = NSExpression(forKeyPath: "icon")
             waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: false)
             waypointDots.iconPadding = NSExpression(forConstantValue: 4)
@@ -293,10 +293,12 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(tripNames)
             let waypointNames = MLNSymbolStyleLayer(identifier: "journey-waypoint-names", source: tripStops)
             waypointNames.predicate = NSPredicate(format: "waypoint == 1")
-            waypointNames.minimumZoomLevel = 14.5
+            waypointNames.minimumZoomLevel = 11.5
             waypointNames.text = NSExpression(forKeyPath: "name")
             waypointNames.textFontSize = NSExpression(forConstantValue: 11)
             waypointNames.textFontNames = NSExpression(forConstantValue: ["Noto Sans Regular"])
+            waypointNames.textAllowsOverlap = NSExpression(forConstantValue: false)
+            waypointNames.textPadding = NSExpression(forConstantValue: 5)
             waypointNames.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -12)))
             // Boarding and alighting names take priority over intermediate labels.
             style.insertLayer(waypointNames, below: tripNames)
@@ -1042,6 +1044,18 @@ struct NativeBusMap: UIViewRepresentable {
                 state["cameraMoving"] = cameraMoving || pendingInset != nil
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
+                let open = mapView.bounds.inset(by: mapView.contentInset)
+                state["routeViewport"] = ["x":open.minX,"y":open.minY,"width":open.width,"height":open.height]
+                if model.planner.selected != nil, !model.planner.started {
+                    let points = model.planner.mapCoordinates.map { mapView.convert($0.locationCoordinate, toPointTo: mapView) }
+                    if !points.isEmpty {
+                        let xs = points.map(\.x), ys = points.map(\.y)
+                        let bounds = CGRect(x:xs.min()!,y:ys.min()!,width:xs.max()!-xs.min()!,height:ys.max()!-ys.min()!)
+                        state["routeFraming"] = ["minX":bounds.minX,"maxX":bounds.maxX,"minY":bounds.minY,"maxY":bounds.maxY,
+                            "widthUsage":bounds.width/max(1,open.width),"heightUsage":bounds.height/max(1,open.height),
+                            "inside":open.insetBy(dx:-2,dy:-2).contains(bounds)] as [String:Any]
+                    }
+                }
                 state["actions"] = Array(model.debugActions.suffix(12))
                 if ProcessInfo.processInfo.arguments.contains("--test-transitions") {
                     state["reduceMotion"] = reduceMotion
@@ -1256,7 +1270,8 @@ struct NativeBusMap: UIViewRepresentable {
         }
 
         private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
-            let pitch = requestedPitch ?? (model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
+            let routePreview = model.planner.selected != nil && !model.planner.started
+            let pitch = requestedPitch ?? (routePreview || model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
             guard let overview = RouteOverview(coordinates: coordinates,
                 viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
                 viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: pitch) else { return nil }
