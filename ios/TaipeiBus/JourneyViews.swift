@@ -136,6 +136,7 @@ struct JourneyPlanningView: View {
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
                             } label: { Image(systemName: "ellipsis").foregroundStyle(.primary).frame(width: 36, height: 36) }
                                 .accessibilityLabel(live.text("更多行程選項"))
+                                .accessibilityIdentifier("journey-plan-more")
                         }
                     }
                 }
