@@ -31,6 +31,7 @@ final class ProPurchases: ObservableObject {
     @Published private(set) var willAutoRenew: Bool?
     @Published var message: String?
     private var updates: Task<Void,Never>?
+    private var statusUpdates: Task<Void,Never>?
     private var expiryCheck: Task<Void,Never>?
     private var generation = 0
 
@@ -45,8 +46,18 @@ final class ProPurchases: ObservableObject {
                 await transaction.finish()
             }
         }
+        // Cancellation and billing-state changes may not create a transaction.
+        statusUpdates = Task { [weak self] in
+            for await status in Product.SubscriptionInfo.Status.updates {
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                guard case .verified(let transaction) = status.transaction,
+                      self.recognizes(transaction) else { continue }
+                await self.refreshAccess()
+            }
+        }
     }
-    deinit { updates?.cancel(); expiryCheck?.cancel() }
+    deinit { updates?.cancel(); statusUpdates?.cancel(); expiryCheck?.cancel() }
 
     private func recognizes(_ transaction: StoreKit.Transaction) -> Bool {
         transaction.productType == .autoRenewable && ProPlan.allCases.contains { $0.productID == transaction.productID }
