@@ -49,7 +49,12 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         button("home-destination-search").tap(); chooseNeihu()
         let more = button("journey-plan-more")
         XCTAssertTrue(more.waitForExistence(timeout:30)); more.tap()
-        button("journey-save-pro").tap()
+        let saveAction = button("journey-save-pro")
+        XCTAssertTrue(saveAction.waitForExistence(timeout:10))
+        // The system menu reports an invalid activation point while presented
+        // above a detented sheet. Use the visible row's actual centre.
+        saveAction.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
+        capture("pro-save-action-selected")
         let title = app.textFields["commute-title"]
         XCTAssertTrue(title.waitForExistence(timeout:10)); title.tap()
         if let text = title.value as? String { title.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:text.count)) }
