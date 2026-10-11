@@ -65,45 +65,41 @@ final class ProPurchases: ObservableObject {
     }
     func refreshAccess() async {
         generation += 1; let token = generation
-        var plans: Set<ProPlan> = []
         var current: StoreKit.Transaction?
+        var renewal: Product.SubscriptionInfo.RenewalInfo?
+        var grace = false
         for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let transaction) = result, recognizes(transaction),
-                  transaction.revocationDate == nil, !transaction.isUpgraded,
-                  let plan = ProPlan.allCases.first(where:{ $0.productID == transaction.productID }) else { continue }
-            // Local StoreKit and the App Store may briefly retain an entitlement at
-            // the expiry boundary. A verified grace state still grants access.
-            if let end = transaction.expirationDate, end <= Date(),
-               let info = products[plan.productID]?.subscription,
-               let statuses = try? await info.status {
-                let grace = statuses.contains { status in
-                    guard status.state == .inGracePeriod,
-                          case .verified(let value) = status.transaction,
-                          case .verified = status.renewalInfo else { return false }
-                    return value.productID == transaction.productID && value.revocationDate == nil
-                }
-                if !grace { continue }
-            }
-            plans.insert(plan)
+                  transaction.revocationDate == nil, !transaction.isUpgraded else { continue }
             if current == nil || transaction.purchaseDate > current!.purchaseDate { current = transaction }
         }
+        // Subscription state describes expiry, cancellation and billing grace.
+        // Use its verified current transaction rather than an older iterator
+        // snapshot. If Apple's status query is temporarily unavailable, retain
+        // the verified current entitlement (including offline/grace access).
+        if let info = products.values.first?.subscription, let statuses = try? await info.status {
+            current = nil
+            for status in statuses {
+                guard status.state == .subscribed || status.state == .inGracePeriod,
+                      case .verified(let value) = status.transaction,
+                      case .verified(let details) = status.renewalInfo,
+                      recognizes(value), value.revocationDate == nil, !value.isUpgraded else { continue }
+                if current == nil || value.purchaseDate > current!.purchaseDate {
+                    current = value; renewal = details; grace = status.state == .inGracePeriod
+                }
+            }
+        }
         guard token == generation, !Task.isCancelled else { return }
-        activePlan = plans.contains(.yearly) ? .yearly : plans.contains(.monthly) ? .monthly : nil
-        hasPro = !plans.isEmpty; checkingAccess = false
+        activePlan = current.flatMap { item in ProPlan.allCases.first { $0.productID == item.productID } }
+        hasPro = current != nil; checkingAccess = false
         if hasPro && awaitingApproval { awaitingApproval = false; message = nil }
         isInTrial = false
         if let current, current.offerType == .introductory {
             if #available(iOS 17.2, *) { isInTrial = current.price == .zero }
             else { isInTrial = products[current.productID]?.subscription?.introductoryOffer?.paymentMode == .freeTrial }
         }
-        periodEndsAt = current?.expirationDate; willAutoRenew = nil
-        if let plan = activePlan, let info = products[plan.productID]?.subscription,
-           let statuses = try? await info.status,
-           let status = statuses.first(where:{ $0.state == .subscribed || $0.state == .inGracePeriod }),
-           case .verified(let renewal) = status.renewalInfo, token == generation {
-            willAutoRenew = renewal.willAutoRenew
-        }
-        guard token == generation else { return }
+        periodEndsAt = grace ? nil : current?.expirationDate
+        willAutoRenew = renewal?.willAutoRenew
         await refreshTrialEligibility()
         guard token == generation else { return }
         expiryCheck?.cancel(); expiryCheck = nil
