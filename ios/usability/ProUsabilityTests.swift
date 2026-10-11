@@ -65,6 +65,8 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         let shortcut = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "commute-shortcut-")).firstMatch
         XCTAssertTrue(shortcut.waitForExistence(timeout:10)); shortcut.tap()
         XCTAssertTrue(button("journey-close").waitForExistence(timeout:10))
+        waitForConfirmedChoices()
+        XCTAssertTrue(firstOption.exists)
         XCTAssertFalse(button("journey-board").exists)
         capture("pro-shortcut-opens-preview")
     }
