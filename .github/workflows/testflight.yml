@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'billing-audit', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
+        options: ['check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
         default: 'check-only'
       metro_endpoints:
         description: 'Optional bounded metro metadata endpoint subset'
@@ -69,6 +69,7 @@ jobs:
       BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
+      BUS_PREPARE_BILLING: ${{ inputs.operation == 'billing-prepare' }}
     steps:
       - uses: actions/checkout@v4
       - name: Validate release source and Apple configuration
@@ -103,6 +104,16 @@ jobs:
           name: billing-audit
           path: ${{ runner.temp }}/billing-audit.json
           retention-days: 7
+      - name: Prepare approved subscription drafts
+        if: inputs.operation == 'billing-prepare'
+        run: ruby ios/release/billing-prepare.rb
+      - name: Preserve subscription setup receipt
+        if: inputs.operation == 'billing-prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-setup
+          path: ${{ runner.temp }}/billing-setup.json
+          retention-days: 30
       - name: Preserve redacted App Store readiness audit
         if: inputs.operation == 'store-audit'
         uses: actions/upload-artifact@v4

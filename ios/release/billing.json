@@ -1,0 +1,14 @@
+{
+  "app_id": "6818475740",
+  "bundle_id": "com.rio10255254.TaipeiBus",
+  "group_name": "TaipeiBus Pro",
+  "territory": "TWN",
+  "approved_prices": true,
+  "products": [
+    {"product_id":"com.rio10255254.TaipeiBus.pro.monthly","name":"Pro Monthly","period":"ONE_MONTH","price":"39"},
+    {"product_id":"com.rio10255254.TaipeiBus.pro.yearly","name":"Pro Annual","period":"ONE_YEAR","price":"290"}
+  ],
+  "trial": false,
+  "first_review_required": true,
+  "production_submission_authorized": false
+}
