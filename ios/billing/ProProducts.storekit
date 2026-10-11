@@ -13,25 +13,89 @@
   "subscriptionGroups": [
     {
       "id": "1CB294C9-F0B5-4BBC-924B-D818834E4D60",
-      "localizations": [{"description":"台北公車 Pro","displayName":"台北公車 Pro","locale":"zh_Hant"},{"description":"Taipei Bus Pro","displayName":"Taipei Bus Pro","locale":"en_US"}],
+      "localizations": [
+        {
+          "description": "台北公車 Pro",
+          "displayName": "台北公車 Pro",
+          "locale": "zh_Hant"
+        },
+        {
+          "description": "Taipei Bus Pro",
+          "displayName": "Taipei Bus Pro",
+          "locale": "en_US"
+        }
+      ],
       "name": "TaipeiBus Pro",
       "subscriptions": [
         {
-          "adHocOffers": [], "codeOffers": [], "displayPrice": "39", "familyShareable": false,
-          "groupNumber": 1, "internalID": "01001", "introductoryOffer": null,
-          "localizations": [{"description":"常用行程捷徑與個人路線偏好","displayName":"Pro 月費","locale":"zh_Hant"},{"description":"Saved commutes and personal route preferences","displayName":"Pro Monthly","locale":"en_US"}],
-          "productID": "com.rio10255254.TaipeiBus.pro.monthly", "recurringSubscriptionPeriod": "P1M",
-          "referenceName": "Pro Monthly", "subscriptionGroupID": "1CB294C9-F0B5-4BBC-924B-D818834E4D60", "type": "RecurringSubscription"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "39",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "01001",
+          "introductoryOffer": {
+            "displayPrice": "0",
+            "internalID": "02001",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
+            {
+              "description": "常用行程捷徑與個人路線偏好",
+              "displayName": "Pro 月費",
+              "locale": "zh_Hant"
+            },
+            {
+              "description": "Saved commutes and personal route preferences",
+              "displayName": "Pro Monthly",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.rio10255254.TaipeiBus.pro.monthly",
+          "recurringSubscriptionPeriod": "P1M",
+          "referenceName": "Pro Monthly",
+          "subscriptionGroupID": "1CB294C9-F0B5-4BBC-924B-D818834E4D60",
+          "type": "RecurringSubscription"
         },
         {
-          "adHocOffers": [], "codeOffers": [], "displayPrice": "290", "familyShareable": false,
-          "groupNumber": 1, "internalID": "01002", "introductoryOffer": null,
-          "localizations": [{"description":"常用行程捷徑與個人路線偏好","displayName":"Pro 年費","locale":"zh_Hant"},{"description":"Saved commutes and personal route preferences","displayName":"Pro Annual","locale":"en_US"}],
-          "productID": "com.rio10255254.TaipeiBus.pro.yearly", "recurringSubscriptionPeriod": "P1Y",
-          "referenceName": "Pro Annual", "subscriptionGroupID": "1CB294C9-F0B5-4BBC-924B-D818834E4D60", "type": "RecurringSubscription"
+          "adHocOffers": [],
+          "codeOffers": [],
+          "displayPrice": "290",
+          "familyShareable": false,
+          "groupNumber": 1,
+          "internalID": "01002",
+          "introductoryOffer": {
+            "displayPrice": "0",
+            "internalID": "02002",
+            "numberOfPeriods": 1,
+            "paymentMode": "free",
+            "subscriptionPeriod": "P1W"
+          },
+          "localizations": [
+            {
+              "description": "常用行程捷徑與個人路線偏好",
+              "displayName": "Pro 年費",
+              "locale": "zh_Hant"
+            },
+            {
+              "description": "Saved commutes and personal route preferences",
+              "displayName": "Pro Annual",
+              "locale": "en_US"
+            }
+          ],
+          "productID": "com.rio10255254.TaipeiBus.pro.yearly",
+          "recurringSubscriptionPeriod": "P1Y",
+          "referenceName": "Pro Annual",
+          "subscriptionGroupID": "1CB294C9-F0B5-4BBC-924B-D818834E4D60",
+          "type": "RecurringSubscription"
         }
       ]
     }
   ],
-  "version": {"major":3,"minor":0}
+  "version": {
+    "major": 3,
+    "minor": 0
+  }
 }

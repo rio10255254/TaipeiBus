@@ -25,6 +25,10 @@ final class ProPurchases: ObservableObject {
     @Published private(set) var loadingProducts = false
     @Published private(set) var busy = false
     @Published private(set) var activePlan: ProPlan?
+    @Published private(set) var eligibleTrialPlans: Set<ProPlan> = []
+    @Published private(set) var isInTrial = false
+    @Published private(set) var periodEndsAt: Date?
+    @Published private(set) var willAutoRenew: Bool?
     @Published var message: String?
     private var updates: Task<Void,Never>?
     private var generation = 0
@@ -49,6 +53,7 @@ final class ProPurchases: ObservableObject {
     func refreshAccess() async {
         generation += 1; let token = generation
         var plans: Set<ProPlan> = []
+        var current: StoreKit.Transaction?
         for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let transaction) = result, recognizes(transaction),
                   transaction.revocationDate == nil, !transaction.isUpgraded,
@@ -56,10 +61,37 @@ final class ProPurchases: ObservableObject {
             // currentEntitlements includes Apple's subscribed and grace-period states.
             // Checking expirationDate here would incorrectly remove billing grace access.
             plans.insert(plan)
+            if current == nil || transaction.purchaseDate > current!.purchaseDate { current = transaction }
         }
         guard token == generation, !Task.isCancelled else { return }
         activePlan = plans.contains(.yearly) ? .yearly : plans.contains(.monthly) ? .monthly : nil
         hasPro = !plans.isEmpty; checkingAccess = false
+        isInTrial = false
+        if let current, current.offerType == .introductory {
+            if #available(iOS 17.2, *) { isInTrial = current.price == .zero }
+            else { isInTrial = products[current.productID]?.subscription?.introductoryOffer?.paymentMode == .freeTrial }
+        }
+        periodEndsAt = current?.expirationDate; willAutoRenew = nil
+        if let plan = activePlan, let info = products[plan.productID]?.subscription,
+           let statuses = try? await info.status,
+           let status = statuses.first(where:{ $0.state == .subscribed || $0.state == .inGracePeriod }),
+           case .verified(let renewal) = status.renewalInfo, token == generation {
+            willAutoRenew = renewal.willAutoRenew
+        }
+        guard token == generation else { return }
+        await refreshTrialEligibility()
+    }
+    func offersSevenDayTrial(_ plan: ProPlan) -> Bool { eligibleTrialPlans.contains(plan) && !hasPro }
+    private func refreshTrialEligibility() async {
+        var eligible: Set<ProPlan> = []
+        for plan in ProPlan.allCases {
+            guard let info = products[plan.productID]?.subscription,
+                  let offer = info.introductoryOffer, offer.paymentMode == .freeTrial,
+                  offer.period.unit == .week, offer.period.value == 1,
+                  await info.isEligibleForIntroOffer else { continue }
+            eligible.insert(plan)
+        }
+        eligibleTrialPlans = eligible
     }
     func loadProducts() async {
         guard !loadingProducts else { return }
@@ -71,6 +103,7 @@ final class ProPurchases: ObservableObject {
             products = Dictionary(values.filter { product in
                 ProPlan.allCases.contains { $0.accepts(product) }
             }.map { ($0.id,$0) },uniquingKeysWith:{ first,_ in first })
+            await refreshTrialEligibility()
         } catch {
             // Keep an already-loaded offer during a temporary network failure.
             if products.isEmpty { message = AppText.text("購買選項尚未載入，請稍後再試。") }

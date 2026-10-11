@@ -565,5 +565,13 @@
   "這個 Apple 帳號目前沒有可恢復的 Pro 訂閱。": "This Apple account has no active Pro subscription to restore.",
   "暫時無法確認購買，請稍後再試。": "Purchases could not be checked. Please try again.",
   "請到 App Store 的訂閱項目管理 Pro。": "Manage Pro in your App Store subscriptions.",
-  "常用行程與個人路線偏好也保存在手機。Pro 購買由 Apple 處理；App 只確認訂閱權限，不讀取付款卡片資料。": "Saved journeys and route preferences stay on your phone. Apple handles Pro purchases; the app checks subscription access and does not read payment card details."
+  "常用行程與個人路線偏好也保存在手機。Pro 購買由 Apple 處理；App 只確認訂閱權限，不讀取付款卡片資料。": "Saved journeys and route preferences stay on your phone. Apple handles Pro purchases; the app checks subscription access and does not read payment card details.",
+  "正在免費試用 Pro": "Pro free trial is active",
+  "可使用至 %@": "Access until %@",
+  "試用至 %@": "Trial ends %@",
+  "續訂日期 %@": "Renews %@",
+  "先免費試用 7 天": "7 days free first",
+  "免費試用 7 天": "Try 7 days free",
+  "7 天免費，之後 %@ %@。試用結束前至少 24 小時取消，就不會收費。": "7 days free, then %@ %@. Cancel at least 24 hours before the trial ends to avoid a charge.",
+  "兩種方案提供相同功能。七天試用限符合 Apple 資格的帳號使用一次，之後依所選方案自動續訂。付款與取消由 Apple 處理，確認畫面會顯示價格和續訂日期。": "Both plans include the same features. Apple determines eligibility for one seven-day trial per subscription group. Your chosen plan renews automatically afterward. Apple handles payment and cancellation; the confirmation sheet shows the price and renewal date."
 }

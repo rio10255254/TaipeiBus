@@ -27,18 +27,28 @@ final class ProPurchaseTests: XCTestCase {
         XCTAssertTrue(ProPlan.monthly.accepts(monthly)); XCTAssertTrue(ProPlan.yearly.accepts(yearly))
         XCTAssertEqual(monthly.price,Decimal(39)); XCTAssertEqual(yearly.price,Decimal(290))
         XCTAssertEqual(monthly.subscription?.subscriptionGroupID,yearly.subscription?.subscriptionGroupID)
-        XCTAssertNil(monthly.subscription?.introductoryOffer); XCTAssertNil(yearly.subscription?.introductoryOffer)
+        for product in [monthly,yearly] {
+            let offer = try XCTUnwrap(product.subscription?.introductoryOffer)
+            XCTAssertEqual(offer.paymentMode,.freeTrial); XCTAssertEqual(offer.period.value,1); XCTAssertEqual(offer.period.unit,.week)
+        }
+        XCTAssertTrue(manager.offersSevenDayTrial(.monthly)); XCTAssertTrue(manager.offersSevenDayTrial(.yearly))
         await manager.refreshAccess(); XCTAssertFalse(manager.hasPro)
     }
     func testPurchaseAndRecreatedManagerRestoreFromAppleWithoutAPaidFlag() async throws {
         let manager = ProPurchases(); await manager.loadProducts(); await manager.refreshAccess()
         await manager.purchase(.monthly)
         XCTAssertTrue(manager.hasPro); XCTAssertEqual(manager.activePlan,.monthly); XCTAssertFalse(manager.busy)
+        XCTAssertTrue(manager.isInTrial); XCTAssertNotNil(manager.periodEndsAt)
         let recreated = ProPurchases(); await recreated.refreshAccess()
         XCTAssertTrue(recreated.hasPro,"A new app instance reads Apple's entitlement, not an app-owned paid flag")
         await recreated.restore(); XCTAssertTrue(recreated.hasPro)
     }
     func testRefundAndExpirationRevokeAccessWithoutDeletingSavedJourneys() async throws {
+        let suite = "ProRefundTests."+UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName:suite)); defer { defaults.removePersistentDomain(forName:suite) }
+        let library = CommuteLibrary(defaults:defaults)
+        XCTAssertTrue(library.store(title:"回家",symbol:"house.fill",origin:nil,
+            destination:TravelPlace(name:"內湖",address:"",coordinate:Coordinate(latitude:25.0837,longitude:121.5947)),preference:.lessWalking))
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.yearly)
         XCTAssertTrue(manager.hasPro)
         let transaction = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProPlan.yearly.productID })
@@ -48,6 +58,7 @@ final class ProPurchaseTests: XCTestCase {
         try session.expireSubscription(productIdentifier:ProPlan.monthly.productID)
         await manager.refreshAccess(); XCTAssertFalse(manager.hasPro)
         XCTAssertNil(manager.activePlan)
+        XCTAssertEqual(CommuteLibrary(defaults:defaults).journeys.count,1)
     }
     func testCancelledAndFailedPurchasesDoNotUnlockOrRemainBusy() async throws {
         let manager = ProPurchases(); await manager.loadProducts()
@@ -68,6 +79,8 @@ final class ProPurchaseTests: XCTestCase {
     }
     func testCancellingRenewalPreservesThePaidPeriodAndPlansDoNotStack() async throws {
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
+        // Move beyond the free offer so this case tests a paid billing period.
+        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
         let transaction = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProPlan.monthly.productID })
         try session.disableAutoRenewForTransaction(identifier:transaction.identifier)
         await manager.refreshAccess(); XCTAssertTrue(manager.hasPro)
@@ -76,6 +89,31 @@ final class ProPurchaseTests: XCTestCase {
         let info = try XCTUnwrap(manager.products[ProPlan.yearly.productID]?.subscription)
         let active = try await info.status
         XCTAssertLessThanOrEqual(active.filter { $0.state == .subscribed }.count,1)
+    }
+    func testTrialCancellationHasNoPaidRenewalAndCannotBeRepeatedOnAnnualPlan() async throws {
+        let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
+        XCTAssertTrue(manager.isInTrial)
+        let transaction = try XCTUnwrap(session.allTransactions().last { $0.productIdentifier == ProPlan.monthly.productID })
+        try session.disableAutoRenewForTransaction(identifier:transaction.identifier)
+        await manager.refreshAccess()
+        XCTAssertTrue(manager.hasPro); XCTAssertEqual(manager.willAutoRenew,false)
+        try session.expireSubscription(productIdentifier:ProPlan.monthly.productID)
+        await manager.refreshAccess(); XCTAssertFalse(manager.hasPro)
+        await manager.loadProducts()
+        XCTAssertFalse(manager.offersSevenDayTrial(.monthly)); XCTAssertFalse(manager.offersSevenDayTrial(.yearly))
+        await manager.purchase(.yearly); XCTAssertTrue(manager.hasPro); XCTAssertFalse(manager.isInTrial)
+    }
+    func testTrialRenewalUsesTheApprovedMonthlyPrice() async throws {
+        let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
+        XCTAssertTrue(manager.isInTrial)
+        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
+        await manager.refreshAccess()
+        XCTAssertTrue(manager.hasPro); XCTAssertFalse(manager.isInTrial)
+        var transaction: StoreKit.Transaction?
+        for await value in StoreKit.Transaction.currentEntitlements {
+            if case .verified(let item) = value, item.productID == ProPlan.monthly.productID { transaction = item }
+        }
+        if #available(iOS 17.2, *) { XCTAssertEqual(try XCTUnwrap(transaction).price,Decimal(39)) }
     }
     func testCommutePersistenceCurrentOriginAndPreferencesAreRealAndBounded() throws {
         let suite = "ProPurchaseTests."+UUID().uuidString

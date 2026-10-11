@@ -22,7 +22,12 @@ struct ProPurchaseView: View {
                     Text(AppText.text("基本導航、官方到站與 3D 追車仍可免費使用。"))
                         .font(.footnote).foregroundStyle(.secondary)
                     if purchases.hasPro {
-                        Label(AppText.text("Pro 已開通"),systemImage:"checkmark.circle.fill").foregroundStyle(.green).font(.headline)
+                        Label(AppText.text(purchases.isInTrial ? "正在免費試用 Pro" : "Pro 已開通"),systemImage:"checkmark.circle.fill").foregroundStyle(.green).font(.headline)
+                        if let date = purchases.periodEndsAt {
+                            Text(AppText.text(purchases.willAutoRenew == false ? "可使用至 %@" : purchases.isInTrial ? "試用至 %@" : "續訂日期 %@",
+                                date.formatted(date:.abbreviated,time:.omitted)))
+                                .font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("pro-period-end")
+                        }
                     }
                     VStack(spacing:10) {
                         ForEach(ProPlan.allCases) { plan in
@@ -36,6 +41,9 @@ struct ProPurchaseView: View {
                                         VStack(alignment:.trailing,spacing:3) {
                                             Text(product.displayPrice).font(.title3.bold())
                                             Text(plan.period).font(.caption).foregroundStyle(.secondary)
+                                            if purchases.offersSevenDayTrial(plan) {
+                                                Text(AppText.text("先免費試用 7 天")).font(.caption).foregroundStyle(.blue)
+                                            }
                                         }
                                     } else { Text(AppText.text("準備中")).foregroundStyle(.secondary) }
                                 }.padding(16).frame(maxWidth:.infinity,minHeight:70)
@@ -49,6 +57,7 @@ struct ProPurchaseView: View {
                         Group {
                             if purchases.busy { ProgressView().tint(.white) }
                             else if purchases.hasPro && purchases.activePlan == selected { Text(AppText.text("目前使用此方案")) }
+                            else if purchases.offersSevenDayTrial(selected) { Text(AppText.text("免費試用 7 天")) }
                             else if let product = purchases.products[selected.productID] {
                                 Text(AppText.text("訂閱 %@ · %@",selected.period,product.displayPrice))
                             } else { Text(AppText.text("購買選項準備中")) }
@@ -57,6 +66,10 @@ struct ProPurchaseView: View {
                         .disabled(purchases.busy || purchases.loadingProducts || purchases.products[selected.productID] == nil ||
                                   purchases.hasPro && purchases.activePlan == selected)
                         .accessibilityIdentifier("pro-purchase")
+                    if purchases.offersSevenDayTrial(selected), let product = purchases.products[selected.productID] {
+                        Text(AppText.text("7 天免費，之後 %@ %@。試用結束前至少 24 小時取消，就不會收費。",selected.period,product.displayPrice))
+                            .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("pro-trial-terms")
+                    }
                     if purchases.products.isEmpty && !purchases.loadingProducts {
                         Button(AppText.text("重新載入購買選項")) { Task { await purchases.loadProducts() } }
                             .frame(minHeight:44).accessibilityIdentifier("pro-reload-products")
@@ -68,7 +81,7 @@ struct ProPurchaseView: View {
                         Button(AppText.text("管理訂閱")) { Task { await purchases.manage() } }
                             .accessibilityIdentifier("pro-manage")
                     }.font(.subheadline).frame(minHeight:44).disabled(purchases.busy)
-                    Text(AppText.text("兩種方案提供相同功能。付款由 Apple 處理，訂閱會自動續訂，可在 App Store 隨時取消；取消後可使用至已付費期間結束。"))
+                    Text(AppText.text("兩種方案提供相同功能。七天試用限符合 Apple 資格的帳號使用一次，之後依所選方案自動續訂。付款與取消由 Apple 處理，確認畫面會顯示價格和續訂日期。"))
                         .font(.caption).foregroundStyle(.secondary)
                     HStack(spacing:20) {
                         Link(AppText.text("隱私政策"),destination:privacy)
