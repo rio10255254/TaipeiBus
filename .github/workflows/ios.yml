@@ -22,6 +22,10 @@ on:
         description: 'Audit routing on the exact bundled official static catalog, independent of live endpoint failures'
         type: boolean
         default: false
+      billing_tests:
+        description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -113,7 +117,34 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
+      - name: Verify real StoreKit transactions and commute persistence
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
+        timeout-minutes: 14
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/billing/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-billing com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/billing-tests.log"
+      - name: Preserve StoreKit verification
+        if: always() && inputs.billing_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-tests
+          path: |
+            ${{ runner.temp }}/billing-tests.log
+            ${{ runner.temp }}/billing.xcresult
+          retention-days: 14
       - name: Audit complete official route catalog
+        # Existing live-data audits remain separate from payment verification.
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.live_audit != false
         run: |
           set -euo pipefail

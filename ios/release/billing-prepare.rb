@@ -45,8 +45,7 @@ begin
     item = products.find { |row| row.dig('attributes','productId') == expected['product_id'] } ||
       create.call('/v1/subscriptions','subscriptions',
         {name:expected['name'],productId:expected['product_id'],subscriptionPeriod:expected['period'],groupLevel:1,
-         familySharable:false,availableInAllTerritories:false,
-         reviewNote:'Optional Pro subscription for saved commute shortcuts and personal route preferences. Basic journey planning, official arrivals and 3D tracking remain free. No account is required.'},
+         familySharable:false},
         {group:link.call('subscriptionGroups',group['id'])})
     raise TaipeiBusRelease::Error,'Existing product period differs.' unless item.dig('attributes','subscriptionPeriod') == expected['period']
     row = {product_id:expected['product_id'],id:item['id'],period:expected['period'],requested_price:expected['price'],state:item.dig('attributes','state')}

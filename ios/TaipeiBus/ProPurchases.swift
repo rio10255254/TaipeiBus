@@ -68,9 +68,9 @@ final class ProPurchases: ObservableObject {
         do {
             let values = try await Product.products(for:ProPlan.allCases.map(\.productID))
             guard !Task.isCancelled else { return }
-            products = Dictionary(uniqueKeysWithValues:values.filter { product in
+            products = Dictionary(values.filter { product in
                 ProPlan.allCases.contains { $0.accepts(product) }
-            }.map { ($0.id,$0) })
+            }.map { ($0.id,$0) },uniquingKeysWith:{ first,_ in first })
         } catch {
             // Keep an already-loaded offer during a temporary network failure.
             if products.isEmpty { message = AppText.text("購買選項尚未載入，請稍後再試。") }
@@ -97,6 +97,8 @@ final class ProPurchases: ObservableObject {
             @unknown default:
                 message = AppText.text("購買尚未完成，請稍後再試。")
             }
+        } catch let error as SKError where error.code == .paymentCancelled {
+            // Cancellation is a normal exit and never blocks the free app.
         } catch {
             message = AppText.text("購買尚未完成，請稍後再試。")
         }
