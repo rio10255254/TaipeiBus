@@ -53,6 +53,96 @@ private actor StationLookup {
 final class TransitAppModel: ObservableObject {
     let purchases = ProPurchases()
     let commutes = CommuteLibrary()
+
+    // MARK: Pro features and free daily trials
+    /// Free uses of Pro features today (three per Taipei day; the same bus again costs nothing).
+    @Published private(set) var allowance: DailyAllowance = {
+        guard let bytes = UserDefaults.standard.data(forKey: "proDailyAllowance.v1"),
+              let value = try? JSONDecoder().decode(DailyAllowance.self, from: bytes) else { return DailyAllowance() }
+        return value
+    }()
+    // MARK: Alighting reminder (Pro)
+    let alightReminder = AlightReminder()
+    @Published var alightReminderOn: Bool = UserDefaults.standard.object(forKey: "alightReminderOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(alightReminderOn, forKey: "alightReminderOn"); if !alightReminderOn { alightReminder.cancel() } }
+    }
+    var alightReminderActive: Bool { purchases.hasPro && alightReminderOn }
+    /// Seconds until the rider reaches the alighting stop of the ride they are on.
+    func onboardSecondsToAlight(_ ride: TransitRide, at date: Date) -> Double? {
+        if ride.route.mode != .bus { return metroRemaining(ride, at: date).seconds }
+        if let last = onboardArrival, last.rideID == ride.id { return max(0, last.arrival.timeIntervalSince(date)) }
+        guard let boardedAt else { return nil }
+        let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt).seconds
+        return max(0, planned - date.timeIntervalSince(boardedAt))
+    }
+    private func updateAlightReminder() {
+        guard alightReminderActive, boardedAt != nil, case .ride(let index) = planner.currentStep,
+              let rides = planner.selected?.rides, rides.indices.contains(index) else { return }
+        let ride = rides[index], now = Date()
+        guard let seconds = onboardSecondsToAlight(ride, at: now) else { return }
+        alightReminder.update(rideID: ride.id, stopName: ride.alighting.localizedName, secondsToAlight: seconds, now: now)
+    }
+    /// The bell on the riding card: Pro turns the reminder on or off; otherwise it shows Pro.
+    func toggleAlightReminder() {
+        guard purchases.hasPro else { showingProPlans = true; return }
+        if alightReminderOn { alightReminderOn = false; return }
+        Task { [weak self] in
+            guard let self else { return }
+            if await self.alightReminder.authorize() { self.alightReminderOn = true; self.updateAlightReminder() }
+            else { self.proNote = AppText.text("請在「設定」允許台北公車傳送通知，才能收到下車提醒") }
+        }
+    }
+
+    /// End of a free 15-minute look at live metro trains.
+    @Published private(set) var liveTrainsUntil: Date?
+    /// A short, dismissible note about Pro (a trial used, or none left today). Never blocks navigation.
+    @Published var proNote: String?
+    @Published var showingProPlans = false
+    static let liveTrainTrialMinutes = 15
+    private var unlimitedTrials: Bool {
+#if DEBUG
+        // Interface verification fixtures exercise every feature without spending trials,
+        // except the free-tier check, which verifies the trial path itself.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--free-tier-check") { return false }
+        return arguments.contains { $0.hasPrefix("--preview-") || $0.hasPrefix("--usability") || $0.hasPrefix("--test-") }
+#else
+        return false
+#endif
+    }
+    var hasProAccess: Bool { purchases.hasPro || unlimitedTrials }
+    /// Live metro trains on the map: Pro, or during a free 15-minute look.
+    var showsLiveTrains: Bool { hasProAccess || (liveTrainsUntil.map { $0 > Date() } ?? false) }
+    var freeTrialsLeft: Int { allowance.remaining(at: Date()) }
+    private func spendTrial(_ id: String, limitNote: String) -> Bool {
+        if hasProAccess { return true }
+        let before = allowance.remaining(at: Date())
+        let allowed = allowance.use(id, at: Date())
+        if let bytes = try? JSONEncoder().encode(allowance) { UserDefaults.standard.set(bytes, forKey: "proDailyAllowance.v1") }
+        let after = allowance.remaining(at: Date())
+        if !allowed { proNote = limitNote }
+        else if after < before { proNote = AppText.text("已使用免費試用，今日剩 %@ 次", after) }
+        return allowed
+    }
+    /// The follow camera on a bus. Pro, or one of today's free trials (the same bus again is free).
+    func beginFollowing(_ vehicleID: String) -> Bool {
+        spendTrial("bus:" + vehicleID, limitNote: AppText.text("今日免費跟隨已用完，Pro 可無限跟隨"))
+    }
+    /// A free 15-minute look at the live metro trains.
+    func startLiveTrainTrial() {
+        guard !showsLiveTrains else { return }
+        guard spendTrial("metro-trains:" + String(Int(Date().timeIntervalSince1970)),
+                         limitNote: AppText.text("今日免費試用已用完，Pro 可隨時查看即時列車")) else { return }
+        liveTrainsUntil = Date().addingTimeInterval(Double(Self.liveTrainTrialMinutes) * 60)
+        metroRevision += 1
+    }
+    /// A free look that ran out hides the trains and stops following them.
+    private func expireLiveTrainTrial() {
+        guard !hasProAccess, let until = liveTrainsUntil, until <= Date() else { return }
+        liveTrainsUntil = nil; followingTrain = false
+        if boardedAt == nil { selectedTrainID = nil }
+        metroRevision += 1
+    }
     @Published private(set) var tripPreference: RoutePreference?
     private var effectivePlanning = LiveSettings.Planning()
     func applyPersonalPreferences() {
@@ -363,6 +453,8 @@ final class TransitAppModel: ObservableObject {
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
                     applySnapshot(result)
                     updateEstimatedTrains(with: nil)
+                    expireLiveTrainTrial()
+                    updateAlightReminder()
 #if DEBUG
                     applyPreviewSelection()
 #endif
@@ -558,7 +650,8 @@ final class TransitAppModel: ObservableObject {
             routeOverviewReturn = (routeID, direction, allRouteVariants, routeBoardingStopID)
         }
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
-        selectedStationID = nil; direction = vehicle.direction; following = true; query = ""
+        // Looking at a bus is free; the follow camera starts only with Pro (or an explicit trial).
+        selectedStationID = nil; direction = vehicle.direction; following = hasProAccess; query = ""
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -737,13 +830,19 @@ final class TransitAppModel: ObservableObject {
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
         boardedAt = Date()
+        if alightReminderActive {
+            Task { [weak self] in
+                guard let self, await self.alightReminder.authorize() else { return }
+                self.updateAlightReminder()
+            }
+        }
         if ride.route.mode != .bus {
             let selected = metroTrain(selectedTrainID)
             if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
                 selectedTrainID = boardingTrain(for: ride, at: Date())?.id
             }
             // Riding a train the app has matched: the chase camera follows it, as it does a boarded bus.
-            if selectedTrainID != nil { metroRevisionForSelection() }
+            if selectedTrainID != nil { metroRevisionForSelection(userInitiated: false) }
         }
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
@@ -755,7 +854,7 @@ final class TransitAppModel: ObservableObject {
     func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
         guard metadata.canServe(ride, vehicle: bus) else { return }
         boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
-        trackApproachingVehicle(bus)
+        trackApproachingVehicle(bus, userInitiated: false)
     }
 
     func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
@@ -815,8 +914,12 @@ final class TransitAppModel: ObservableObject {
     func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {
         metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.remaining(at: date)
     }
-    func metroRevisionForSelection() {
+    /// Follow the selected train. A free user who taps it starts a trial look at live trains;
+    /// boarding never spends a trial on its own.
+    func metroRevisionForSelection(userInitiated: Bool = true) {
         metroRevision += 1
+        if !showsLiveTrains, userInitiated { startLiveTrainTrial() }
+        guard showsLiveTrains else { followingTrain = false; return }
         followingTrain = true
         guard let id = selectedTrainID, let report = metroTrain(id),
               MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) != nil else { return }
@@ -1013,21 +1116,23 @@ final class TransitAppModel: ObservableObject {
     }
 
     func returnToWaiting() {
+        alightReminder.reset()
         boardedVehicle = nil; planner.returnToWaiting()
         boardedAt = nil; anchorBoardedVehicle()
     }
-    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle() }
+    func alight() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
+    func finishJourney() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
-    func trackApproachingVehicle(_ vehicle: BusVehicle) {
+    func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {
         routeOverviewReturn = nil; routeBoardingStopID = nil
 #if DEBUG
         debugActions.append("track:" + vehicle.plate)
 #endif
         walkingMapIndex = nil
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
-        selectedStationID = nil; direction = vehicle.direction; following = true
+        selectedStationID = nil; direction = vehicle.direction
+        following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
         UISelectionFeedbackGenerator().selectionChanged()
     }

@@ -1,5 +1,6 @@
 import SwiftUI
 import StoreKit
+import UserNotifications
 import TransitCore
 
 enum ProPlan: String, CaseIterable, Identifiable, Hashable, Sendable {
@@ -184,5 +185,60 @@ final class ProPurchases: ObservableObject {
             .first(where:{ $0.activationState == .foregroundActive }) else { return }
         do { try await AppStore.showManageSubscriptions(in:scene); await refreshAccess() }
         catch { message = AppText.text("請到 App Store 的訂閱項目管理 Pro。") }
+    }
+}
+
+/// Pro alighting reminder: a local notification shortly before the rider's stop, rescheduled as
+/// the live prediction changes, so it still arrives with the phone locked or the app in the
+/// background. Nothing leaves the phone.
+@MainActor
+final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
+    static let leadSeconds: TimeInterval = 90
+    private static let identifier = "alight-reminder"
+    private var scheduled: (rideID: String, fireAt: Date)?
+    private var announced: Set<String> = []
+
+    override init() {
+        super.init()
+        UNUserNotificationCenter.current().delegate = self
+    }
+    /// Asks once; returns whether notifications may be shown.
+    func authorize() async -> Bool {
+        let center = UNUserNotificationCenter.current()
+        switch await center.notificationSettings().authorizationStatus {
+        case .authorized, .provisional, .ephemeral: return true
+        case .denied: return false
+        default: return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        }
+    }
+    /// The latest prediction for the current ride. Small changes do not reschedule.
+    func update(rideID: String, stopName: String, secondsToAlight: Double, now: Date) {
+        guard secondsToAlight.isFinite, !announced.contains(rideID) else { return }
+        let fireAt = now.addingTimeInterval(max(1, secondsToAlight - Self.leadSeconds))
+        if let current = scheduled, current.rideID == rideID, abs(current.fireAt.timeIntervalSince(fireAt)) < 20 { return }
+        let content = UNMutableNotificationContent()
+        content.title = AppText.text("下一站下車")
+        content.body = AppText.text("快到「%@」了，準備下車。", stopName)
+        content.sound = .default
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.add(UNNotificationRequest(identifier: Self.identifier, content: content,
+            trigger: UNTimeIntervalNotificationTrigger(timeInterval: max(1, fireAt.timeIntervalSince(now)), repeats: false)))
+        scheduled = (rideID, fireAt)
+        // Already inside the lead time: it fires now, once for this ride.
+        if secondsToAlight <= Self.leadSeconds { announced.insert(rideID) }
+    }
+    func cancel() {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+        center.removeDeliveredNotifications(withIdentifiers: [Self.identifier])
+        scheduled = nil
+    }
+    func reset() { cancel(); announced = [] }
+
+    // In the foreground the reminder still shows as a banner, with a firm haptic.
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
+        await MainActor.run { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+        return [.banner, .list, .sound]
     }
 }

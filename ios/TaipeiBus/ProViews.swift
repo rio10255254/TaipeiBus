@@ -23,13 +23,16 @@ struct ProPurchaseView: View {
             ScrollView {
                 VStack(alignment:.leading,spacing:22) {
                     VStack(alignment:.leading,spacing:8) {
-                        Image(systemName:"tram.fill").font(.system(size:34)).foregroundStyle(.blue)
+                        Image(systemName:"sparkles").font(.system(size:34)).foregroundStyle(.blue)
                         Text(AppText.text("台北公車 Pro")).font(.largeTitle.bold())
                         Text(AppText.text("讓每天的通勤更順手。")) .foregroundStyle(.secondary)
                     }
+                    benefit("tram.fill",title:"即時捷運列車",detail:"全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。")
+                    benefit("scope",title:"跟隨鏡頭",detail:"鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。")
+                    benefit("bell.badge.fill",title:"下車提醒",detail:"快到下車站前通知並震動，手機放口袋也不會坐過站。")
                     benefit("house.fill",title:"常用行程捷徑",detail:"把回家、上班與常去的地方存好，一點就能預覽路線。")
                     benefit("slider.horizontal.3",title:"個人路線偏好",detail:"選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。")
-                    Text(AppText.text("基本導航、官方到站與 3D 追車仍可免費使用。"))
+                    Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。"))
                         .font(.footnote).foregroundStyle(.secondary)
                     if purchases.hasPro {
                         Label(AppText.text(purchases.isInTrial ? "正在免費試用 Pro" : "Pro 已開通"),systemImage:"checkmark.circle.fill").foregroundStyle(.green).font(.headline)
@@ -142,7 +145,7 @@ struct ProSettingsView: View {
                 if purchases.hasPro {
                     Button(AppText.text("管理訂閱")) { Task { await purchases.manage() } }
                 }
-            } footer: { Text(AppText.text("基本導航、官方到站與 3D 追車仍可免費使用。")) }
+            } footer: { Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。")) }
             Section(AppText.text("通勤")) {
                 NavigationLink(AppText.text("常用行程")) { SavedJourneysView(model:model) }
                     .accessibilityIdentifier("pro-saved-journeys")
@@ -248,6 +251,56 @@ struct TripPreferenceView: View {
                 }.accessibilityIdentifier("trip-preference-"+choice.rawValue)
             }.navigationTitle(AppText.text("路線偏好")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement:.cancellationAction) { Button(AppText.text("取消")) { dismiss() } } }
+        }
+    }
+}
+
+/// Live metro trains for a free user: a 15-minute look from today's trials, or the way to Pro.
+struct LiveTrainsChip: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { timeline in
+            let minutesLeft = model.liveTrainsUntil.map { Int(ceil(max(0, $0.timeIntervalSince(timeline.date)) / 60)) } ?? 0
+            let active = minutesLeft > 0
+            let trials = model.freeTrialsLeft
+            Button {
+                if !active && trials > 0 { model.startLiveTrainTrial() } else if !active { model.showingProPlans = true }
+            } label: {
+                Label(active ? AppText.text("即時列車 · 剩 %@ 分", minutesLeft)
+                             : trials > 0 ? AppText.text("顯示即時列車 · 今日剩 %@ 次", trials) : AppText.text("即時列車 · Pro"),
+                      systemImage: "tram.fill")
+                    .liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                    .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
+                    .phoneGlass(in: Capsule())
+            }.buttonStyle(PhonePressStyle()).foregroundStyle(active ? Color.secondary : Color.primary)
+                .disabled(active)
+                .accessibilityIdentifier("live-trains-trial")
+        }
+    }
+}
+
+/// A brief note after a trial is used or when today's trials are gone. It disappears on its own.
+struct ProNoteBanner: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    var body: some View {
+        if let note = model.proNote {
+            HStack(spacing: 10) {
+                Image(systemName: "sparkles").foregroundStyle(.blue)
+                Text(note).liveFont(.subheadline).lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 4)
+                Button(AppText.text("了解 Pro")) { model.proNote = nil; model.showingProPlans = true }
+                    .liveFont(.subheadline, weight: .semibold).accessibilityIdentifier("pro-note-open")
+            }
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .phoneGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .transition(.move(edge: .top).combined(with: .opacity))
+            .task(id: note) {
+                try? await Task.sleep(for: .seconds(5))
+                if model.proNote == note { withAnimation(.smooth) { model.proNote = nil } }
+            }
+            .accessibilityElement(children: .contain).accessibilityIdentifier("pro-note")
         }
     }
 }

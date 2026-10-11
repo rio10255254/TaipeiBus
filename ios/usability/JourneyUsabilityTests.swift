@@ -15,6 +15,19 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
     func ready() {
         XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout:100))
     }
+    func testFreeTierShowsLiveTrainsAsADailyTrial() {
+        launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls", "--free-tier-check"]); ready()
+        let chip = app.buttons["live-trains-trial"]
+        XCTAssertTrue(chip.waitForExistence(timeout: 20), "A free rider sees how to look at live trains")
+        XCTAssertTrue(chip.label.contains("今日剩"))
+        XCTAssertFalse(app.descendants(matching: .any).matching(identifier: "map-metro-train-label").firstMatch.exists,
+                       "Live train positions are not shown before the trial starts")
+        capture("pro-free-live-trains-locked")
+        chip.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "map-metro-train-label").firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.buttons["live-trains-trial"].label.contains("分"))
+        capture("pro-free-live-trains-trial")
+    }
     func testMetroUsesExistingBoardingOnboardAndExitFlow() {
         launch(["--preview-metro-fixture", "--usability-fixture", "--test-map-controls"]); ready()
         waitCamera("Official metro geometry must be installed") { ($0["metroStations"] as? Int ?? 0) == 148 }

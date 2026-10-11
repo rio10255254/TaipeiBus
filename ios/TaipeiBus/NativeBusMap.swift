@@ -530,6 +530,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             trains?.darkAppearance = darkMode; trains?.reduceMotion = reduceMotion
             trains?.selectedID = model.selectedTrainID
+            let liveTrains = model.showsLiveTrains
             // While waiting for a metro ride, the train due at the platform is picked out on the map.
             var due: Set<String> = []
             if let index = model.planner.boardingRideIndex, let rides = model.planner.selected?.rides, rides.indices.contains(index),
@@ -538,12 +539,13 @@ struct NativeBusMap: UIViewRepresentable {
                    boardingStationID: rides[index].boarding.stationID, alightingStationID: rides[index].alighting.stationID, at: Date()) {
                 due = [next.train.id]
             }
-            trains?.emphasizedIDs = due
-            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? ""):\(focusKey):\(focusKey == "dim" ? model.selectedTrainID ?? "" : "")"
+            trains?.emphasizedIDs = liveTrains ? due : []
+            let trainKey = "\(network.generatedAt):\(model.metroRevision):\(model.selectedRouteID ?? ""):\(focusKey):\(focusKey == "dim" ? model.selectedTrainID ?? "" : ""):\(liveTrains)"
             guard trainKey != lastMetroTrainKey else { return }; lastMetroTrainKey = trainKey
             // Trains step back with the rest of the metro while a bus is in focus, and only trains
             // on the focused lines stay while a trip or a train is being followed.
-            var reports = focusKey == "dim" ? model.metroTrains.filter { $0.id == model.selectedTrainID } : model.metroTrains
+            // Live train positions are a Pro feature (or a free 15-minute look); waits stay free.
+            var reports = !liveTrains ? [] : focusKey == "dim" ? model.metroTrains.filter { $0.id == model.selectedTrainID } : model.metroTrains
             if !focusLines.isEmpty {
                 reports = reports.filter { report in
                     report.id == model.selectedTrainID ||

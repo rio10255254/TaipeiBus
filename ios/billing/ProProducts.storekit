@@ -43,7 +43,7 @@
           },
           "localizations": [
             {
-              "description": "常用行程捷徑與個人路線偏好",
+              "description": "即時捷運列車、跟隨鏡頭、下車提醒與常用行程",
               "displayName": "Pro 月費",
               "locale": "zh_Hant"
             },
@@ -75,7 +75,7 @@
           },
           "localizations": [
             {
-              "description": "常用行程捷徑與個人路線偏好",
+              "description": "即時捷運列車、跟隨鏡頭、下車提醒與常用行程",
               "displayName": "Pro 年費",
               "locale": "zh_Hant"
             },

@@ -195,7 +195,7 @@ private struct MapContextLabelContent: View, Equatable {
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).readableMapSurface().fixedSize()
-        } else if let id = model.selectedTrainID, let report = model.metroTrain(id) {
+        } else if model.showsLiveTrains, let id = model.selectedTrainID, let report = model.metroTrain(id) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 let metro = model.metadata.metro
                 if let state = report.state(network: metro, at: timeline.date),

@@ -1,8 +1,11 @@
 # TaipeiBus Pro
 
-Built on TestFlight 1.3.8 (85.1.0). Public navigation, official arrivals, live
-vehicle tracking and 3D rendering stay free. Both subscriptions unlock only new
-saved commute shortcuts (up to 50) and personal route preferences.
+Since 1.5.0, Pro unlocks live metro train positions, the follow camera (bus and
+train), the alighting reminder (local notification), saved commute shortcuts (up to
+50) and personal route preferences. Route planning, navigation, official arrivals and
+3D vehicles stay free. Free riders get three tries a day (Taipei calendar day) of live
+trains (15 minutes each) or the follow camera; following the same bus again that day is
+free. Merely selecting a bus, or boarding, never spends a try. The counter is local.
 
 | Product | Taiwan renewal price | Introductory offer |
 | --- | --- | --- |

@@ -39,6 +39,11 @@ struct TransitHomeView: View {
     }
 
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
+    /// The metro is part of what is on screen: a trip that rides it, a metro station or a metro line.
+    private var metroInView: Bool {
+        planner.selected?.rides.contains { $0.route.mode != .bus } == true || model.selectedStation?.mode == .metro ||
+            model.selectedRoute.map { $0.mode != .bus } == true
+    }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
     private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
@@ -150,6 +155,11 @@ struct TransitHomeView: View {
                     if model.loadError != nil { model.retry() }
                     else { Task { await model.refresh() } }
                 }
+                // Live train positions are Pro; where the metro matters, a free user can take a look.
+                if !model.hasProAccess, metroInView, !stationWalk.isActive {
+                    LiveTrainsChip(model: model)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
+                }
                 if model.cityFleetMode, planner.selected == nil, !stationWalk.isActive {
                     Label(AppText.text("全城 %@", model.cityVehicles.count), systemImage: "globe.asia.australia.fill")
                         .liveFont(.subheadline, weight: .semibold).monospacedDigit()
@@ -165,8 +175,12 @@ struct TransitHomeView: View {
             }
         }
         }
+        .overlay(alignment: .bottom) {
+            ProNoteBanner(model: model).padding(.top, 8).offset(y: 64).padding(.horizontal, 2)
+        }
         .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: model.cityFleetMode)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.proNote)
         .animation(reduceMotion ? nil : .spring(response: 0.44, dampingFraction: 0.88), value: showsBanner)
     }
 
@@ -298,6 +312,7 @@ struct TransitHomeView: View {
         .onChange(of: commutes.preference) { _,_ in model.applyPersonalPreferences() }
         .sheet(isPresented: $showSearch, onDismiss: { model.stationBrowsing = false; restoreJourneyMap() }) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(hasTransitSelection ? [.height(330), .height(520), .large] : model.mode == .stops ? [.height(390), .large] : [.large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(390)))
                 .presentationDragIndicator(.visible)
@@ -305,6 +320,7 @@ struct TransitHomeView: View {
         }
         .sheet(isPresented: $showDetails, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents([.height(330), .height(520), .large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(520)))
                 .presentationDragIndicator(.visible)
@@ -318,6 +334,7 @@ struct TransitHomeView: View {
                                 compact: journeyDetent == .height(420),
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(420) } })
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
@@ -330,6 +347,7 @@ struct TransitHomeView: View {
                 }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
             guard requested else { return }
             model.showSavedJourneyRequested = false
@@ -375,7 +393,7 @@ struct TransitHomeView: View {
                    planner.selected?.walks.indices.contains(index) == true {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
-                    model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
+                    model.clearWalkingMap(); model.following = model.beginFollowing(bus.id); model.focusMap(.vehicle(bus.id))
                 } else if (!planner.started && userChangedJourney) || (!sameVehicle && !sameTrain) {
                     model.clearWalkingMap()
                     model.clearSelection()
@@ -454,7 +472,7 @@ struct TransitHomeView: View {
         guard !stationWalk.isActive, planner.selected != nil else { return }
         if planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
            let bus = model.onboardVehicle(for: ride), model.selectedVehicleID != bus.id {
-            model.trackApproachingVehicle(bus); return
+            model.trackApproachingVehicle(bus, userInitiated: false); return
         }
         if let index = model.walkingMapIndex {
             let relevantBus = model.selectedVehicle.map { bus in
@@ -1353,7 +1371,7 @@ private struct VehicleDetails: View {
             Toggle(AppText.text("淡化建築、凸顯這輛車"), isOn: $model.highlightVehicle).liveFont(.subheadline)
             HStack(spacing: 10) {
                 Button {
-                    model.following = true; model.focusMap(.vehicle(vehicle.id))
+                    model.following = model.beginFollowing(vehicle.id); model.focusMap(.vehicle(vehicle.id))
                 } label: { Label(live.text("跟隨公車"), systemImage: "scope").frame(maxWidth: .infinity, minHeight: 36) }
                     .buttonStyle(.borderedProminent)
                 Button {

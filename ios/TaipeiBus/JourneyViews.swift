@@ -1208,6 +1208,13 @@ struct JourneyGuideCard: View {
                             }
                             }
                             Spacer(minLength: 0)
+                            // Alighting reminder (Pro): a filled bell while it will notify before the stop.
+                            Button { model.toggleAlightReminder() } label: {
+                                Image(systemName: model.alightReminderActive ? "bell.badge.fill" : model.purchases.hasPro ? "bell.slash" : "bell")
+                                    .liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                            }.buttonStyle(MapActionStyle())
+                                .accessibilityLabel(model.alightReminderActive ? AppText.text("關閉下車提醒") : AppText.text("下車提醒"))
+                                .accessibilityIdentifier("journey-alight-reminder")
                             Button { showRideStops = true } label: {
                                 Label(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"), systemImage: "list.bullet").liveFont(.subheadline, weight: .semibold)
                                     .lineLimit(1).padding(.horizontal, 14).frame(minHeight: 40)
