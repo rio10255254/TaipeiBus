@@ -27,6 +27,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
     func testTrialPricesAndExitKeepTheFreeAppAvailable() {
         openPlans()
         XCTAssertTrue(app.staticTexts["先免費試用 7 天"].firstMatch.waitForExistence(timeout:20))
+        button("pro-plan-monthly").tap()
         capture("pro-monthly-seven-day-trial")
         button("pro-plan-yearly").tap()
         XCTAssertTrue(button("pro-purchase").label.contains("7")); XCTAssertTrue(app.staticTexts["pro-trial-terms"].label.contains("290"))

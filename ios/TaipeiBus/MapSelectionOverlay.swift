@@ -226,7 +226,7 @@ private struct MapContextLabelContent: View, Equatable {
                         }
                         if let station {
                             HStack {
-                                Text((state.holding ? "" : state.atPlatform ? AppText.text("停靠 · ") : AppText.text("下一站 · ")) + (AppLanguage.current == .english ? station.englishName : station.name))
+                                Text((state.holding ? AppText.text("約在 · ") : state.atPlatform ? AppText.text("停靠 · ") : AppText.text("下一站 · ")) + (AppLanguage.current == .english ? station.englishName : station.name))
                                     .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                                 Spacer(minLength:4)
                                 if !state.atPlatform && !state.holding {
@@ -236,7 +236,8 @@ private struct MapContextLabelContent: View, Equatable {
                             }
                             if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
                         }
-                        Text(report.isEstimated ? AppText.text("依進站紀錄推估位置") : AppText.text("官方列車訊號 · 位置為估計"))
+                        // A held train has missed its expected sighting: say so rather than implying it is tracked.
+                        Text(report.isEstimated ? (state.holding ? AppText.text("等待下一筆進站紀錄") : AppText.text("依進站紀錄推估位置")) : AppText.text("官方列車訊號 · 位置為估計"))
                             .font(.caption2).foregroundStyle(.secondary)
                     }.mapLabelSurface().animation(.smooth(duration: 0.3), value: stationIndex)
                     .accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")

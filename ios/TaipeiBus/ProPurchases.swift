@@ -8,6 +8,7 @@ enum ProPlan: String, CaseIterable, Identifiable, Hashable, Sendable {
     var productID: String { "com.rio10255254.TaipeiBus.pro." + rawValue }
     var title: String { AppText.text(self == .monthly ? "月費方案" : "年費方案") }
     var period: String { AppText.text(self == .monthly ? "每月" : "每年") }
+    var unit: String { AppText.text(self == .monthly ? "月" : "年") }
     func accepts(_ product: Product) -> Bool {
         guard product.id == productID, product.type == .autoRenewable,
               let period = product.subscription?.subscriptionPeriod, period.value == 1 else { return false }

@@ -66,10 +66,11 @@ final class TransitAppModel: ObservableObject {
         guard purchases.hasPro else { return }
         tripPreference = value; applyPersonalPreferences()
     }
+    /// Opening a saved trip stays free after Pro ends; its saved route preference only applies with Pro.
     func previewSavedJourney(_ saved: SavedJourney) {
-        guard purchases.hasPro, saved.valid else { return }
+        guard saved.valid else { return }
         planner.finish(); clearWalkingMap(); clearSelection()
-        tripPreference = saved.preference; applyPersonalPreferences()
+        tripPreference = purchases.hasPro ? saved.preference : nil; applyPersonalPreferences()
         if let origin = saved.origin { planner.setOrigin(origin,metadata:metadata) }
         else { planner.useLocation(location.usableCoordinate,metadata:metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(saved.destination,metadata:metadata,currentLocation:location.usableCoordinate)
@@ -167,6 +168,8 @@ final class TransitAppModel: ObservableObject {
     /// The arriving-bus list is presented from the root view, so rebuilding the
     /// waiting card while it settles cannot drop the request.
     @Published var showingArrivingVehicles = false
+    /// Set by the saved-trip list inside Settings: close Settings and show the trip's routes.
+    @Published var showSavedJourneyRequested = false
     @Published var focus: MapFocus?
     @Published var tappedPlace: MapPlaceSelection?
     @Published var focusRevision = 0

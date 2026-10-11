@@ -884,6 +884,13 @@ struct JourneyOptionsView: View {
                         Button(action: expand) {
                             Text(AppText.text("全部路線")).liveFont(.subheadline).frame(minHeight: 44)
                         }.accessibilityIdentifier("journey-all-options")
+                        // Live times reordered the options: offer the new order without moving rows under a finger.
+                        if planner.comparisonChanged, !planner.checkingWalks {
+                            Button { planner.refreshRecommendations() } label: {
+                                Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
+                            }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
+                                .transition(.opacity)
+                        }
                         Spacer(minLength: 4)
                         if let option = planner.selected {
                             Button { go(option) } label: {

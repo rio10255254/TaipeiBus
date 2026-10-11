@@ -537,7 +537,6 @@
   "查看 Pro 方案": "View Pro plans",
   "準備中": "Getting ready",
   "目前使用此方案": "Your current plan",
-  "訂閱 %@ · %@": "Subscribe %@ · %@",
   "購買選項準備中": "Purchase options are getting ready",
   "重新載入購買選項": "Reload purchase options",
   "恢復購買": "Restore purchases",
@@ -572,7 +571,16 @@
   "續訂日期 %@": "Renews %@",
   "先免費試用 7 天": "7 days free first",
   "免費試用 7 天": "Try 7 days free",
-  "7 天免費，之後 %@ %@。試用結束前至少 24 小時取消，就不會收費。": "7 days free, then %@ %@. Cancel at least 24 hours before the trial ends to avoid a charge.",
   "兩種方案提供相同功能。七天試用限符合 Apple 資格的帳號使用一次，之後依所選方案自動續訂。付款與取消由 Apple 處理，確認畫面會顯示價格和續訂日期。": "Both plans include the same features. Apple determines eligibility for one seven-day trial per subscription group. Your chosen plan renews automatically afterward. Apple handles payment and cancellation; the confirmation sheet shows the price and renewal date.",
-  "本期至 %@": "Current period ends %@"
+  "本期至 %@": "Current period ends %@",
+  "7 天免費，之後%@ %@。試用結束前至少 24 小時取消，就不會收費。": "7 days free, then %@ %@. Cancel at least 24 hours before the trial ends to avoid a charge.",
+  "訂閱 · %@／%@": "Subscribe · %@/%@",
+  "月": "month",
+  "年": "year",
+  "省 %@%": "Save %@%",
+  "約 %@／月": "≈ %@/month",
+  "約在 · ": "Near · ",
+  "後續班次尚未回報位置": "Next bus has not reported a position yet",
+  "路線資料暫時無法取得，請稍後再試": "Route data is temporarily unavailable. Please try again later.",
+  "已儲存的行程會保留在手機，訂閱到期後仍可一點開啟；新增行程與路線偏好需要 Pro。": "Saved trips stay on this phone and still open with a tap after Pro ends. Saving new trips and route preferences need Pro."
 }

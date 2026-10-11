@@ -21,10 +21,12 @@ public struct BoardingGuide: Sendable {
             // The official feed can already time the next bus while it has not yet appeared on
             // the route (still at the terminal or not reporting). Say that, instead of implying
             // there is nothing coming.
-            emptyPositionLabel = (estimateSeconds ?? -1) >= 0 ? "下一班" : "後續班次"
+            emptyPositionLabel = (estimateSeconds ?? -1) >= 0 ? "下一班" : "後續班次尚未回報位置"
         }
         else if estimateSeconds != nil { emptyPositionLabel = "依官方到站預估" }
-        else { emptyPositionLabel = "班次資訊更新中" }
+        // With a healthy feed and nothing reporting, there really is no bus right now (late night,
+        // or service ended); "updating" is only true while the position feed itself is failing.
+        else { emptyPositionLabel = snapshot.vehicleError == nil ? "此方向暫無車輛回報" : "車輛定位更新中" }
     }
 
     /// The official feed times a next bus that has no live position to list yet.

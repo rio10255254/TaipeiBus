@@ -15,7 +15,9 @@ The paywall states the post-trial price and that cancellation at least 24 hours
 before the trial ends avoids charging. Purchased rights come from verified
 current entitlements; grace access is retained when Apple reports it.
 
-Saved destinations remain local and are retained after expiry/refund.
+Saved destinations remain local and are retained after expiry/refund; already saved
+shortcuts still open a route preview without Pro. Saving or editing trips and applying
+personal route preferences require an active subscription.
 No developer account service, card handling, app-owned paid flag or server
 credentials are added. Navigation previews remain previews after tapping a
 commute shortcut; starting a journey still requires the existing Start action.

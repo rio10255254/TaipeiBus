@@ -5,7 +5,17 @@ import TransitCore
 struct ProPurchaseView: View {
     @ObservedObject var purchases: ProPurchases
     @Environment(\.dismiss) private var dismiss
-    @State private var selected: ProPlan = .monthly
+    /// The annual plan is the better value, so it is shown selected unless another plan is active.
+    @State private var selected: ProPlan = .yearly
+    /// Whole-percent saving of the annual plan over twelve monthly payments, from Apple's prices.
+    private var yearlySaving: Int? {
+        guard let month = purchases.products[ProPlan.monthly.productID]?.price,
+              let year = purchases.products[ProPlan.yearly.productID]?.price else { return nil }
+        let full = NSDecimalNumber(decimal: month * 12).doubleValue, annual = NSDecimalNumber(decimal: year).doubleValue
+        guard full > 0, annual < full else { return nil }
+        let percent = Int(((1 - annual / full) * 100).rounded(.down))
+        return percent >= 5 ? percent : nil
+    }
     private let privacy = URL(string:"https://rio10255254.github.io/TaipeiBus/privacy.html")!
     private let terms = URL(string:"https://www.apple.com/legal/internet-services/itunes/dev/stdeula/")!
     var body: some View {
@@ -36,11 +46,19 @@ struct ProPurchaseView: View {
                                     Image(systemName:selected == plan ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(selected == plan ? Color.blue : Color.secondary)
                                     Text(plan.title).fontWeight(.semibold)
+                                    if plan == .yearly, let saving = yearlySaving {
+                                        Text(AppText.text("省 %@%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
+                                            .padding(.horizontal, 7).padding(.vertical, 3).background(Color.green, in: Capsule())
+                                            .accessibilityIdentifier("pro-yearly-saving")
+                                    }
                                     Spacer()
                                     if let product = purchases.products[plan.productID] {
                                         VStack(alignment:.trailing,spacing:3) {
                                             Text(product.displayPrice).font(.title3.bold())
-                                            Text(plan.period).font(.caption).foregroundStyle(.secondary)
+                                            if plan == .yearly {
+                                                Text(plan.period + " · " + AppText.text("約 %@／月", (product.price / 12).formatted(product.priceFormatStyle)))
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                            } else { Text(plan.period).font(.caption).foregroundStyle(.secondary) }
                                             if purchases.offersSevenDayTrial(plan) {
                                                 Text(AppText.text("先免費試用 7 天")).font(.caption).foregroundStyle(.blue)
                                             }
@@ -59,7 +77,7 @@ struct ProPurchaseView: View {
                             else if purchases.hasPro && purchases.activePlan == selected { Text(AppText.text("目前使用此方案")) }
                             else if purchases.offersSevenDayTrial(selected) { Text(AppText.text("免費試用 7 天")) }
                             else if let product = purchases.products[selected.productID] {
-                                Text(AppText.text("訂閱 %@ · %@",selected.period,product.displayPrice))
+                                Text(AppText.text("訂閱 · %@／%@",product.displayPrice,selected.unit))
                             } else { Text(AppText.text("購買選項準備中")) }
                         }.font(.headline).frame(maxWidth:.infinity,minHeight:54)
                     }.buttonStyle(MapActionStyle(prominent:true))
@@ -67,7 +85,7 @@ struct ProPurchaseView: View {
                                   purchases.hasPro && purchases.activePlan == selected)
                         .accessibilityIdentifier("pro-purchase")
                     if purchases.offersSevenDayTrial(selected), let product = purchases.products[selected.productID] {
-                        Text(AppText.text("7 天免費，之後 %@ %@。試用結束前至少 24 小時取消，就不會收費。",selected.period,product.displayPrice))
+                        Text(AppText.text("7 天免費，之後%@ %@。試用結束前至少 24 小時取消，就不會收費。",selected.period,product.displayPrice))
                             .font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("pro-trial-terms")
                     }
                     if purchases.products.isEmpty && !purchases.loadingProducts {
@@ -93,7 +111,10 @@ struct ProPurchaseView: View {
                 .toolbar { ToolbarItem(placement:.confirmationAction) {
                     Button(AppText.text("完成")) { dismiss() }.accessibilityIdentifier("pro-close")
                 } }
-        }.task { await purchases.refreshAccess(); await purchases.loadProducts() }
+        }.task {
+            await purchases.refreshAccess(); await purchases.loadProducts()
+            if let active = purchases.activePlan { selected = active }
+        }
     }
     private func benefit(_ symbol: String,title: String,detail: String) -> some View {
         HStack(alignment:.top,spacing:14) {
@@ -156,17 +177,20 @@ struct SavedJourneysView: View {
                 Text(AppText.text("規劃路線後，在選單選擇「儲存行程」。")) .foregroundStyle(.secondary)
             }
             ForEach(library.journeys) { saved in
-                VStack(alignment:.leading,spacing:5) {
-                    Label(saved.title,systemImage:saved.symbol).font(.headline)
-                    Text((saved.origin?.localizedName ?? AppText.text("目前位置"))+" → "+saved.destination.localizedName)
-                        .font(.subheadline).foregroundStyle(.secondary)
-                    Text(saved.preference.title).font(.caption).foregroundStyle(.secondary)
-                }.padding(.vertical,4)
+                // Tapping a saved trip previews its route, with or without an active subscription.
+                Button { model.previewSavedJourney(saved); model.showSavedJourneyRequested = true } label: {
+                    VStack(alignment:.leading,spacing:5) {
+                        Label(saved.title,systemImage:saved.symbol).font(.headline)
+                        Text((saved.origin?.localizedName ?? AppText.text("目前位置"))+" → "+saved.destination.localizedName)
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        if purchases.hasPro { Text(saved.preference.title).font(.caption).foregroundStyle(.secondary) }
+                    }.padding(.vertical,4).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityIdentifier("saved-journey-"+saved.id.uuidString)
             }.onDelete { indices in library.remove(Set(indices.map { library.journeys[$0].id })) }
                 .onMove { library.move(from:$0,to:$1) }
             if !purchases.hasPro {
                 Button(AppText.text("查看 Pro 方案")) { showingPurchase = true }
-                Text(AppText.text("儲存的行程會保留在手機；訂閱到期不會刪除。")) .font(.footnote).foregroundStyle(.secondary)
+                Text(AppText.text("已儲存的行程會保留在手機，訂閱到期後仍可一點開啟；新增行程與路線偏好需要 Pro。")) .font(.footnote).foregroundStyle(.secondary)
             }
         }.navigationTitle(AppText.text("常用行程"))
             .toolbar { EditButton() }

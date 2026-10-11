@@ -125,7 +125,8 @@ struct TransitHomeView: View {
                     bottomChrome
                 }
                 if model.metadata.routes.isEmpty, model.loadError != nil {
-                    Text(live.text("更新中")).liveFont(.caption).padding(12)
+                    // Without any route data the app cannot plan; say it plainly instead of "updating".
+                    Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
@@ -246,7 +247,8 @@ struct TransitHomeView: View {
             }.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         if planner.selected == nil && !stationWalk.isActive {
-            if !hasSelection, purchases.hasPro, !commutes.journeys.isEmpty {
+            // Saved shortcuts stay usable after Pro ends; only saving new ones and preferences need Pro.
+            if !hasSelection, !commutes.journeys.isEmpty {
                 ScrollView(.horizontal,showsIndicators:false) {
                     HStack(spacing:8) {
                         ForEach(commutes.journeys) { saved in
@@ -328,6 +330,15 @@ struct TransitHomeView: View {
                 }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .onChange(of: model.showSavedJourneyRequested) { _, requested in
+            guard requested else { return }
+            model.showSavedJourneyRequested = false
+            showInformation = false
+            // Present the route panel once the Settings sheet has finished dismissing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
+        }
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
@@ -555,8 +566,13 @@ private struct SourceStatusView: View {
                 Button(action: refresh) {
                     HStack(spacing: 7) {
                         // A static dot: a spinner would animate for as long as data is unavailable.
-                        Circle().fill(Color.secondary).frame(width: 7, height: 7)
-                        Text(AppText.text("更新中")).liveFont(.subheadline, weight: .semibold)
+                        // Loading stays quiet; data that is actually late says so, with its age, and
+                        // a tap retries. An old position is never presented as merely "updating".
+                        Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
+                        Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
+                        if !waiting, let age, age >= 120 {
+                            Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
+                        }
                     }
                     .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
                     .phoneGlass(in: Capsule())
