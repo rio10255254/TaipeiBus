@@ -30,7 +30,7 @@ struct ProPurchaseView: View {
                     benefit("tram.fill",title:"即時捷運列車",detail:"全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。")
                     benefit("scope",title:"跟隨鏡頭",detail:"鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。")
                     benefit("bell.badge.fill",title:"下車提醒",detail:"快到下車站前通知並震動，手機放口袋也不會坐過站。")
-                    benefit("platter.filled.top.iphone",title:"動態島與鎖定畫面",detail:"不用打開 App，就能看到等車倒數與還有幾站下車。")
+                    benefit("timer",title:"動態島與鎖定畫面",detail:"不用打開 App，就能看到等車倒數與還有幾站下車。")
                     benefit("square.grid.2x2.fill",title:"桌面小工具",detail:"常用行程的下一班車與建議出門時間，直接顯示在主畫面。")
                     benefit("house.fill",title:"常用行程捷徑",detail:"把回家、上班與常去的地方存好，一點就能預覽路線。")
                     benefit("slider.horizontal.3",title:"個人路線偏好",detail:"選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。")
