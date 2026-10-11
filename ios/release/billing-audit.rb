@@ -23,11 +23,18 @@ queries.each do |name,(path,query)|
   end
 end
 if report[:subscription_groups].is_a?(Array)
+  report[:subscription_groups].each do |group|
+    group[:versions] = client.all("/v1/subscriptionGroups/#{group.fetch(:id)}/versions").map do |version|
+      {id:version['id'],attributes:version['attributes'],localizations:client.all("/v1/subscriptionGroupVersions/#{version['id']}/localizations").map { |value| value['attributes'] }}
+    end
+    group[:legacy_localizations] = client.all("/v1/subscriptionGroups/#{group.fetch(:id)}/subscriptionGroupLocalizations").map { |value| value['attributes'] }
+  end
   report[:subscriptions] = report[:subscription_groups].flat_map do |group|
     begin
       client.all("/v1/subscriptionGroups/#{group.fetch(:id)}/subscriptions").map do |row|
         item = {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel].include?(field) }}
         begin
+          item[:legacy_localizations] = client.all("/v1/subscriptions/#{row['id']}/subscriptionLocalizations").map { |value| value['attributes'] }
           item[:prices] = client.all("/v1/subscriptions/#{row['id']}/prices",'filter[territory]'=>'TWN','filter[planType]'=>'UPFRONT','include'=>'subscriptionPricePoint').map do |price|
             point_id = price.dig('relationships','subscriptionPricePoint','data','id')
             point = client.request(:get,"/v1/subscriptionPricePoints/#{point_id}").fetch('data')
