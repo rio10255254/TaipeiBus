@@ -25,7 +25,7 @@ struct ProPurchaseView: View {
                         Label(AppText.text(purchases.isInTrial ? "正在免費試用 Pro" : "Pro 已開通"),systemImage:"checkmark.circle.fill").foregroundStyle(.green).font(.headline)
                         if let date = purchases.periodEndsAt {
                             Text(AppText.text(purchases.willAutoRenew == false ? "可使用至 %@" : purchases.isInTrial ? "試用至 %@" : purchases.willAutoRenew == true ? "續訂日期 %@" : "本期至 %@",
-                                date.formatted(date:.abbreviated,time:.omitted)))
+                                date.formatted(.dateTime.year().month(.abbreviated).day().locale(AppLanguage.current.locale))))
                                 .font(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("pro-period-end")
                         }
                     }

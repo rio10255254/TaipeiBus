@@ -19,6 +19,13 @@ final class ProPurchaseTests: XCTestCase {
         for _ in 0..<80 { if condition() { return }; try await Task.sleep(for:.milliseconds(100)) }
         XCTFail("Apple transaction state did not settle")
     }
+    private func waitForApple(_ condition: @escaping () async throws -> Bool) async throws {
+        for _ in 0..<80 {
+            if try await condition() { return }
+            try await Task.sleep(for:.milliseconds(250))
+        }
+        XCTFail("Verified Apple state did not settle after the test-session change")
+    }
     func testActualProductsHaveTwoEqualAccessPeriodsAndApprovedPrices() async throws {
         let manager = ProPurchases(); await manager.loadProducts()
         XCTAssertEqual(manager.products.count,2)
@@ -56,7 +63,8 @@ final class ProPurchaseTests: XCTestCase {
         try await waitUntil { !manager.hasPro }
         await manager.purchase(.monthly); XCTAssertTrue(manager.hasPro)
         try session.expireSubscription(productIdentifier:ProPlan.monthly.productID)
-        await manager.refreshAccess(); XCTAssertFalse(manager.hasPro)
+        try await waitForApple { await manager.refreshAccess(); return !manager.hasPro }
+        XCTAssertFalse(manager.hasPro)
         XCTAssertNil(manager.activePlan)
         XCTAssertEqual(CommuteLibrary(defaults:defaults).journeys.count,1)
     }
@@ -96,10 +104,11 @@ final class ProPurchaseTests: XCTestCase {
         XCTAssertTrue(manager.isInTrial)
         let transaction = try XCTUnwrap(session.allTransactions().last { $0.productIdentifier == ProPlan.monthly.productID })
         try session.disableAutoRenewForTransaction(identifier:transaction.identifier)
-        await manager.refreshAccess()
+        try await waitForApple { await manager.refreshAccess(); return manager.willAutoRenew == false }
         XCTAssertTrue(manager.hasPro); XCTAssertEqual(manager.willAutoRenew,false)
         try session.expireSubscription(productIdentifier:ProPlan.monthly.productID)
-        await manager.refreshAccess(); XCTAssertFalse(manager.hasPro)
+        try await waitForApple { await manager.refreshAccess(); return !manager.hasPro }
+        XCTAssertFalse(manager.hasPro)
         await manager.loadProducts()
         XCTAssertFalse(manager.offersSevenDayTrial(.monthly)); XCTAssertFalse(manager.offersSevenDayTrial(.yearly))
         await manager.purchase(.yearly); XCTAssertTrue(manager.hasPro); XCTAssertFalse(manager.isInTrial)
@@ -108,7 +117,7 @@ final class ProPurchaseTests: XCTestCase {
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
         XCTAssertTrue(manager.isInTrial)
         try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
-        await manager.refreshAccess()
+        try await waitForApple { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
         XCTAssertTrue(manager.hasPro); XCTAssertFalse(manager.isInTrial)
         var transaction: StoreKit.Transaction?
         for await value in StoreKit.Transaction.currentEntitlements {
