@@ -8,7 +8,13 @@ require 'timeout'
 require 'uri'
 
 module TaipeiBusRelease
-  class Error < StandardError; end
+  class Error < StandardError
+    attr_reader :diagnostics
+    def initialize(message, diagnostics: [])
+      @diagnostics = diagnostics
+      super(message)
+    end
+  end
 
   class Client
     ORIGIN = 'https://api.appstoreconnect.apple.com'.freeze
@@ -56,7 +62,9 @@ module TaipeiBusRelease
         end
         unless response.is_a?(Net::HTTPSuccess)
           # Do not echo server error details that may contain request data.
-          raise Error, "App Store Connect HTTP #{response.code}. Check key role, app access and Apple agreements."
+          parsed = JSON.parse(response.body) rescue {}
+          safe = Array(parsed['errors']).first(3).map { |item| {code:item['code'],title:item['title'],pointer:item.dig('source','pointer')} }
+          raise Error.new("App Store Connect HTTP #{response.code}. Check key role, app access and Apple agreements.",diagnostics:safe)
         end
         return response.body.to_s.empty? ? {} : JSON.parse(response.body)
       end

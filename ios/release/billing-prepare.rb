@@ -85,7 +85,7 @@ begin
   end
   report[:status] = report[:products].all? { |row| row[:status] == 'draft_configured' } ? 'draft_catalog_configured' : 'needs_price_review'
 rescue TaipeiBusRelease::Error => error
-  report[:status] = 'apple_setup_blocked'; report[:error] = error.message
+  report[:status] = 'apple_setup_blocked'; report[:error] = error.message; report[:diagnostics] = error.diagnostics
 ensure
   save.call
 end
