@@ -118,6 +118,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: Verify real StoreKit transactions and commute persistence
+        id: billing_transactions
         if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
         timeout-minutes: 14
         run: |
@@ -144,7 +145,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
-        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
+        if: always() && !cancelled() && inputs.billing_tests && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
         timeout-minutes: 12
         run: |
           set -euo pipefail
