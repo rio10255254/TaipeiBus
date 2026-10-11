@@ -124,7 +124,7 @@ final class ProPurchases: ObservableObject {
             products = Dictionary(values.filter { product in
                 ProPlan.allCases.contains { $0.accepts(product) }
             }.map { ($0.id,$0) },uniquingKeysWith:{ first,_ in first })
-            await refreshTrialEligibility()
+            await refreshAccess()
         } catch {
             // Keep an already-loaded offer during a temporary network failure.
             if products.isEmpty { message = AppText.text("購買選項尚未載入，請稍後再試。") }
