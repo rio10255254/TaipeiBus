@@ -126,8 +126,12 @@ final class ProPurchaseTests: XCTestCase {
         try await waitForApple { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
         XCTAssertTrue(manager.hasPro); XCTAssertFalse(manager.isInTrial)
         var transaction: StoreKit.Transaction?
-        for await value in StoreKit.Transaction.currentEntitlements {
-            if case .verified(let item) = value, item.productID == ProPlan.monthly.productID { transaction = item }
+        try await waitForApple {
+            for await value in StoreKit.Transaction.currentEntitlements {
+                if case .verified(let item) = value, item.productID == ProPlan.monthly.productID { transaction = item }
+            }
+            if #available(iOS 17.2, *) { return transaction?.price == Decimal(39) }
+            return transaction?.offerType == nil
         }
         if #available(iOS 17.2, *) { XCTAssertEqual(try XCTUnwrap(transaction).price,Decimal(39)) }
     }
