@@ -173,6 +173,12 @@ jobs:
       - name: Install App Store distribution signing
         if: inputs.operation == 'upload'
         run: python3 ios/release/signing.py install
+      - name: Create and install the widget extension profile
+        if: inputs.operation == 'upload'
+        run: |
+          set -euo pipefail
+          ruby ios/apple-connect.rb widget-profile
+          python3 ios/release/signing.py install-extension
       - name: Test transit algorithms and compile signed iPhone archive
         if: inputs.operation == 'upload'
         run: |
@@ -185,10 +191,10 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" BUS_APP_BUNDLE_ID="$BUS_BUNDLE_ID" \
             MARKETING_VERSION="$BUS_VERSION" CURRENT_PROJECT_VERSION="$BUS_BUILD_NUMBER" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$BUS_SIGNING_CERTIFICATE_SHA1" \
-            BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
+            BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" BUS_WIDGET_PROFILE_UUID="$BUS_WIDGET_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
           ditto -c -k --sequesterRsrc --keepParent \
@@ -205,7 +211,8 @@ jobs:
               plistlib.dump({'method': 'app-store-connect', 'destination': 'upload',
                             'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'manual',
                             'signingCertificate': os.environ['BUS_SIGNING_CERTIFICATE_SHA1'],
-                            'provisioningProfiles': {os.environ['BUS_BUNDLE_ID']: os.environ['BUS_PROFILE_UUID']},
+                            'provisioningProfiles': {os.environ['BUS_BUNDLE_ID']: os.environ['BUS_PROFILE_UUID'],
+                                                     os.environ['BUS_BUNDLE_ID'] + '.Widgets': os.environ['BUS_WIDGET_PROFILE_UUID']},
                             'manageAppVersionAndBuildNumber': False}, output)
           PY
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \

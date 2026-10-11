@@ -293,6 +293,22 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
+    /// The ride a saved trip would start with now, for the Home Screen widget. Walks are the
+    /// planning estimates; nothing here touches the trip on screen.
+    func firstRide(metadata: TransitMetadata, from: Coordinate, to: Coordinate,
+                   preferences: LiveSettings.Planning) async -> (ride: TransitRide, walkSeconds: Double)? {
+        let estimates = latestSnapshot.estimates, forecast = self.forecast
+        let trips = await network.options(metadata: metadata, from: from, to: to, preferences: preferences, estimates: estimates)
+        let date = Date()
+        let riding = Dictionary(uniqueKeysWithValues: trips.map { trip in
+            (trip.id, forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: estimates,
+                walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
+        })
+        guard let best = TripRanking.recommended(trips, estimates: estimates, at: date, preferences: preferences,
+                                                 limit: 1, ridingDurations: riding).first,
+              let ride = best.rides.first else { return nil }
+        return (ride, best.planningWalkSeconds.first ?? 0)
+    }
     var arrived: Bool { started && stepIndex >= steps.count }
     var mapCoordinates: [Coordinate] {
         guard let option = selected else { return [] }

@@ -82,6 +82,13 @@ def install(directory):
     identities = command(["/usr/bin/security", "find-identity", "-v", "-p", "codesigning", str(keychain)]).decode()
     if certificate not in identities.upper():
         raise ValueError("The installed signing key does not match the profile's distribution certificate.")
+    install_profile(profile_path, uuid, metadata, metadata_path)
+    with open(os.environ["GITHUB_ENV"], "a") as output:
+        output.write(f"BUS_PROFILE_UUID={uuid}\nBUS_SIGNING_CERTIFICATE_SHA1={certificate}\n")
+    print("App Store distribution signing is ready; no registered test devices are required.")
+
+
+def install_profile(profile_path, uuid, metadata, metadata_path):
     # Support both provisioning-profile locations used by recent Xcode versions.
     for root in (Path.home() / "Library/MobileDevice/Provisioning Profiles",
                  Path.home() / "Library/Developer/Xcode/UserData/Provisioning Profiles"):
@@ -95,9 +102,23 @@ def install(directory):
         metadata_path.write_text(json.dumps(metadata))
         shutil.copyfile(profile_path, destination)
         destination.chmod(0o600)
+
+
+def install_extension(directory):
+    """Install the widget extension's profile, made by apple-connect.rb widget-profile."""
+    profile_path = directory / "widgets.mobileprovision"
+    metadata_path = directory / "signing-installation.json"
+    if not profile_path.is_file() or not metadata_path.is_file():
+        raise ValueError("Install the app's signing identity and create the widget profile first.")
+    profile = plistlib.loads(command(["/usr/bin/security", "cms", "-D", "-i", str(profile_path)]))
+    uuid, certificate = validate_profile(profile, os.environ["APPLE_TEAM_ID"], os.environ["BUS_BUNDLE_ID"] + ".Widgets")
+    if certificate != os.environ.get("BUS_SIGNING_CERTIFICATE_SHA1", "").upper():
+        raise ValueError("The widget profile uses a different distribution certificate than the app.")
+    metadata = json.loads(metadata_path.read_text())
+    install_profile(profile_path, uuid, metadata, metadata_path)
     with open(os.environ["GITHUB_ENV"], "a") as output:
-        output.write(f"BUS_PROFILE_UUID={uuid}\nBUS_SIGNING_CERTIFICATE_SHA1={certificate}\n")
-    print("App Store distribution signing is ready; no registered test devices are required.")
+        output.write(f"BUS_WIDGET_PROFILE_UUID={uuid}\n")
+    print("Widget extension signing is ready.")
 
 
 def cleanup(directory):
@@ -123,7 +144,7 @@ def cleanup(directory):
             command(["/usr/bin/security", "delete-keychain", str(keychain)])
         except ValueError:
             failures.append("Could not remove the temporary distribution keychain.")
-    for name in ("AuthKey.p8", "distribution.p12", "app-store.mobileprovision", "AppleWWDRCAG3.cer", "signing-installation.json"):
+    for name in ("AuthKey.p8", "distribution.p12", "app-store.mobileprovision", "widgets.mobileprovision", "AppleWWDRCAG3.cer", "signing-installation.json"):
         (directory / name).unlink(missing_ok=True)
     if failures:
         raise ValueError(" ".join(failures))
@@ -135,9 +156,11 @@ if __name__ == "__main__":
         directory = Path(os.environ["RUNNER_TEMP"]) / "bus-signing"
         if sys.argv[1:] == ["install"]:
             install(directory)
+        elif sys.argv[1:] == ["install-extension"]:
+            install_extension(directory)
         elif sys.argv[1:] == ["cleanup"]:
             cleanup(directory)
         else:
-            raise ValueError("Usage: signing.py install|cleanup")
+            raise ValueError("Usage: signing.py install|install-extension|cleanup")
     except (ValueError, KeyError, OSError) as error:
         raise SystemExit(f"Distribution signing failed: {error}")

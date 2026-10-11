@@ -73,6 +73,17 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertFalse(button("journey-board").exists)
         capture("pro-shortcut-opens-preview")
     }
+    func testWidgetAndLiveActivityLayouts() {
+        for english in [false, true] {
+            launch(["--preview-widgets"] + (english ? ["--test-language","en"] : []))
+            for id in ["widget-preview-small","widget-preview-locked","widget-preview-medium","widget-preview-lock",
+                       "live-activity-preview-waiting","live-activity-preview-riding","live-activity-preview-island"] {
+                XCTAssertTrue(app.descendants(matching:.any).matching(identifier:id).firstMatch.waitForExistence(timeout:15), id)
+            }
+            XCTAssertTrue(app.staticTexts[english ? "Leave in 7 min" : "7 分後出門"].exists)
+            capture(english ? "pro-widgets-english" : "pro-widgets")
+        }
+    }
     func testEnglishTrialAndRenewalTermsAreClear() {
         openPlans(english:true)
         XCTAssertTrue(app.staticTexts["7 days free first"].firstMatch.waitForExistence(timeout:20))

@@ -76,6 +76,33 @@ class AppleReleaseTest < Minitest::Test
     assert_empty @client.writes
   end
 
+  def test_widget_profile_reuses_a_valid_profile_for_the_installed_certificate
+    der = 'certificate-bytes'
+    sha1 = OpenSSL::Digest::SHA1.hexdigest(der).upcase
+    widget = "#{@config['bundle_id']}.Widgets"
+    profile = { 'id' => 'p1', 'attributes' => { 'name' => "TaipeiBus Widgets #{sha1[0, 8]} 202610110000", 'profileType' => 'IOS_APP_STORE',
+      'profileState' => 'ACTIVE', 'expirationDate' => (Time.now + 300 * 86_400).utc.iso8601, 'profileContent' => Base64.strict_encode64('profile') } }
+    rows = @rows.merge('/v1/bundleIds' => [{ 'id' => 'widget-id', 'attributes' => { 'identifier' => widget } }],
+      '/v1/certificates' => [{ 'id' => 'other', 'attributes' => { 'certificateContent' => Base64.strict_encode64('other') } },
+                             { 'id' => 'cert', 'attributes' => { 'certificateContent' => Base64.strict_encode64(der) } }],
+      '/v1/bundleIds/widget-id/profiles' => [profile])
+    Dir.mktmpdir do |dir|
+      Dir.mkdir(File.join(dir, 'bus-signing'))
+      env = @env.merge('BUS_SIGNING_CERTIFICATE_SHA1' => sha1, 'RUNNER_TEMP' => dir)
+      path = release(rows, env).widget_profile
+      assert_equal 'profile', File.binread(path)
+      assert_empty @client.writes
+      expired = profile.merge('attributes' => profile['attributes'].merge('expirationDate' => (Time.now + 86_400).utc.iso8601))
+      run = release(rows.merge('/v1/bundleIds/widget-id/profiles' => [expired]), env)
+      assert_raises(TaipeiBusRelease::Error) { run.widget_profile }
+      method, path, body = @client.writes.first
+      assert_equal [:post, '/v1/profiles'], [method, path]
+      assert_equal 'cert', body[:data][:relationships][:certificates][:data][0][:id]
+      assert_equal 'widget-id', body[:data][:relationships][:bundleId][:data][:id]
+    end
+    assert_raises(TaipeiBusRelease::Error) { release(@rows, @env.merge('BUS_PUBLISH_TESTFLIGHT' => 'false')).widget_profile }
+  end
+
   def test_group_assignment_requires_processed_unexpired_build
     run = release
     assert_raises(TaipeiBusRelease::Error) { run.attach_internal(@build.merge('attributes' => @build['attributes'].merge('processingState' => 'PROCESSING')), @details) }

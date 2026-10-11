@@ -88,6 +88,19 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
         require(not any(key in catalog for key in ("client_id", "client_secret", "access_token", "password")),
                 "Authentication fields are not allowed in the public travel-time data.")
         print(f"Bundled official travel profiles: {len(catalog['routes'])}")
+    if tuple(map(int, version.split("."))) >= (1, 6, 0):
+        widgets = app / "PlugIns" / "TaipeiBusWidgets.appex"
+        require((widgets / "Info.plist").is_file(), "The widget and Live Activity extension is missing from the archive.")
+        extension = plistlib.loads((widgets / "Info.plist").read_bytes())
+        require(extension["CFBundleIdentifier"] == bundle_id + ".Widgets", "Widget extension Bundle ID mismatch.")
+        require(extension["CFBundleShortVersionString"] == version and extension["CFBundleVersion"] == build_number,
+                "Widget extension version must match the app.")
+        require(extension.get("NSExtension", {}).get("NSExtensionPointIdentifier") == "com.apple.widgetkit-extension",
+                "Widget extension point missing.")
+        require(info.get("NSSupportsLiveActivities") is True, "Live Activities are not enabled for the app.")
+        group = info.get("BusSharedKeychainGroup", "")
+        require(group.endswith("." + bundle_id + ".shared") and group == extension.get("BusSharedKeychainGroup"),
+                "The app and widget must share one keychain group.")
     executable = (app / info["CFBundleExecutable"]).read_bytes()
     require(b"--preview-capture" not in executable, "Debug preview flags leaked into the Release binary.")
     require(b"--preview-metro-fixture" not in executable and b"--preview-mixed-planning" not in executable and b"QA-TRAIN-01" not in executable,

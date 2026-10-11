@@ -93,6 +93,101 @@ final class TransitAppModel: ObservableObject {
         }
     }
 
+    // MARK: Live Activity and Home Screen widget (Pro)
+    let rideActivity = RideActivityController()
+    let commuteWidget = CommuteWidgetBridge()
+    /// The saved trip whose plan is on screen; its first ride is what the widget will watch.
+    private var activeSavedJourneyID: UUID?
+    private var widgetPlanning = false
+    func updateLiveSurfaces() {
+        // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
+        guard !purchases.checkingAccess else { return }
+        let now = Date()
+        rideActivity.update(rideActivityState(at: now), destination: planner.destination?.localizedName ?? "",
+                            language: language, enabled: purchases.hasPro)
+        recordSavedJourneyRide()
+        let proUntil = purchases.hasPro ? purchases.periodEndsAt ?? now.addingTimeInterval(3 * 86_400) : nil
+        commuteWidget.publish(commuteWidget.payload(commutes.journeys, proUntil: proUntil, language: language, now: now))
+        planSavedJourneyForWidget()
+    }
+    private func widgetRide(_ ride: TransitRide, walkSeconds: Double) -> CommuteWidgetPayload.Ride {
+        let headway = ride.route.mode == .bus ? nil : metroHeadway(ride, at: Date()).map { ($0.lowerSeconds + $0.upperSeconds) / 2 }
+        return CommuteWidgetBridge.ride(ride, walkSeconds: walkSeconds, headwaySeconds: headway)
+    }
+    private func recordSavedJourneyRide() {
+        guard let id = activeSavedJourneyID else { return }
+        guard let saved = commutes.journeys.first(where: { $0.id == id }),
+              planner.destination?.coordinate == saved.destination.coordinate else { activeSavedJourneyID = nil; return }
+        guard let option = planner.selected, let ride = option.rides.first else { return }
+        commuteWidget.record(id, ride: widgetRide(ride, walkSeconds: option.walks.first?.duration ?? option.trip?.planningWalkSeconds.first ?? 0))
+    }
+    /// One saved trip at a time, in the background, so the widget knows each trip's bus without
+    /// the rider opening every trip first.
+    private func planSavedJourneyForWidget() {
+        guard purchases.hasPro, !widgetPlanning, !planner.planning, !metadata.routes.isEmpty,
+              let journey = commuteWidget.needsPlanning(commutes.journeys, now: Date()) else { return }
+        commuteWidget.markPlanned(journey.id)
+        guard let from = journey.origin?.coordinate ?? location.usableCoordinate else { return }
+        widgetPlanning = true
+        let metadata = self.metadata, preferences = journey.preference.applying(to: liveSettings.planning)
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.planner.firstRide(metadata: metadata, from: from, to: journey.destination.coordinate, preferences: preferences)
+            self.widgetPlanning = false
+            if let result { self.commuteWidget.record(journey.id, ride: self.widgetRide(result.ride, walkSeconds: result.walkSeconds)) }
+        }
+    }
+    private func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
+        guard planner.started, !planner.arrived, let option = planner.selected, let step = planner.currentStep else { return nil }
+        switch step {
+        case .walk(let index) where option.rides.indices.contains(index):
+            let ride = option.rides[index]
+            var target: Date?, status: String?
+            if ride.route.mode == .bus {
+                let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: now)
+                if let seconds = guide.estimateSeconds, seconds >= 0 {
+                    target = now.addingTimeInterval(Double(seconds))
+                    status = AppText.text("官方下一班")
+                } else { status = guide.arrivalShortLabel }
+            } else if let seconds = metroArrival(ride, at: now) {
+                target = now.addingTimeInterval(Double(seconds)); status = AppText.text("官方下班列車")
+            } else if let estimate = metroPlatformEstimate(ride, at: now) {
+                if estimate.entering { status = AppText.text("進站中") }
+                else { target = now.addingTimeInterval(estimate.seconds); status = AppText.text("依列車進站紀錄推估") }
+            } else if let headway = metroHeadway(ride, at: now) {
+                target = now.addingTimeInterval(MetroNetwork.expectedWait(headway).typical); status = AppText.text("班距推估")
+            } else { status = AppText.text("營運時間外") }
+            return .init(phase: .waiting, sign: RouteSign(ride.route),
+                         headline: AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction)),
+                         detail: ride.boarding.localizedName, target: target, status: status,
+                         stopsLeft: nil, totalStops: nil, updatedAt: now)
+        case .ride(let index) where option.rides.indices.contains(index):
+            let ride = option.rides[index]
+            let left = ride.route.mode == .bus ? onboardStops(for: ride, at: now).count : metroRemaining(ride, at: now).stops.count
+            let seconds = onboardSecondsToAlight(ride, at: now)
+            return .init(phase: .riding, sign: RouteSign(ride.route), headline: ride.alighting.localizedName,
+                         detail: AppText.remainingStops(left), target: seconds.map { now.addingTimeInterval($0) },
+                         status: nil, stopsLeft: left, totalStops: ride.stopCount, updatedAt: now)
+        default:
+            let walk = journeyDuration(option, at: now)?.totalSeconds
+            return .init(phase: .walking, sign: .walking, headline: planner.destination?.localizedName ?? "",
+                         detail: AppText.text("步行前往目的地"), target: walk.map { now.addingTimeInterval($0) },
+                         status: nil, stopsLeft: nil, totalStops: nil, updatedAt: now)
+        }
+    }
+    /// Links from the widget and the Live Activity.
+    func open(_ url: URL) {
+        guard url.scheme == "taipeibus" else { return }
+        switch url.host {
+        case "pro": if !purchases.hasPro { showingProPlans = true }
+        case "commute":
+            guard !planner.started, let id = UUID(uuidString: url.lastPathComponent),
+                  let saved = commutes.journeys.first(where: { $0.id == id }) else { return }
+            previewSavedJourney(saved); showSavedJourneyRequested = true
+        default: break
+        }
+    }
+
     /// End of a free 15-minute look at live metro trains.
     @Published private(set) var liveTrainsUntil: Date?
     /// A short, dismissible note about Pro (a trial used, or none left today). Never blocks navigation.
@@ -160,6 +255,7 @@ final class TransitAppModel: ObservableObject {
     func previewSavedJourney(_ saved: SavedJourney) {
         guard saved.valid else { return }
         planner.finish(); clearWalkingMap(); clearSelection()
+        activeSavedJourneyID = saved.id
         tripPreference = purchases.hasPro ? saved.preference : nil; applyPersonalPreferences()
         if let origin = saved.origin { planner.setOrigin(origin,metadata:metadata) }
         else { planner.useLocation(location.usableCoordinate,metadata:metadata); if location.usableCoordinate == nil { location.request() } }
@@ -410,6 +506,8 @@ final class TransitAppModel: ObservableObject {
         if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
         if !active {
+            // The last state before suspension stays on the Lock Screen, counting down by itself.
+            updateLiveSurfaces()
             updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
             platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
             return
@@ -455,6 +553,7 @@ final class TransitAppModel: ObservableObject {
                     updateEstimatedTrains(with: nil)
                     expireLiveTrainTrial()
                     updateAlightReminder()
+                    updateLiveSurfaces()
 #if DEBUG
                     applyPreviewSelection()
 #endif
@@ -1121,7 +1220,7 @@ final class TransitAppModel: ObservableObject {
         boardedAt = nil; anchorBoardedVehicle()
     }
     func alight() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle() }
+    func finishJourney() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {

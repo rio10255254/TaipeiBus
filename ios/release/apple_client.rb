@@ -112,6 +112,46 @@ module TaipeiBusRelease
       result
     end
 
+    def widget_bundle
+      "#{bundle}.Widgets"
+    end
+
+    # The widget extension has its own App ID and App Store profile. Both are created here
+    # with the existing distribution certificate; no capability or App Group is needed.
+    def widget_profile(now = Time.now)
+      write_allowed!
+      sha1 = @env['BUS_SIGNING_CERTIFICATE_SHA1'].to_s.upcase
+      raise Error, 'Install the distribution certificate before creating the widget profile.' unless sha1.match?(/\A[0-9A-F]{40}\z/)
+      identifier = @client.all('/v1/bundleIds', 'filter[identifier]' => widget_bundle).find { |row| row.dig('attributes', 'identifier') == widget_bundle }
+      identifier ||= @client.request(:post, '/v1/bundleIds', {}, data: {
+        type: 'bundleIds', attributes: { identifier: widget_bundle, name: 'TaipeiBus Widgets', platform: 'IOS' }
+      }).fetch('data')
+      certificate = @client.all('/v1/certificates', 'limit' => '200').find do |row|
+        content = row.dig('attributes', 'certificateContent').to_s
+        !content.empty? && OpenSSL::Digest::SHA1.hexdigest(Base64.decode64(content)).upcase == sha1
+      end
+      raise Error, 'The installed distribution certificate is not in this Apple team.' unless certificate
+      prefix = "TaipeiBus Widgets #{sha1[0, 8]}"
+      profile = @client.all("/v1/bundleIds/#{identifier.fetch('id')}/profiles").find do |row|
+        values = row['attributes'] || {}
+        expires = Time.parse(values['expirationDate'].to_s) rescue now
+        values['name'].to_s.start_with?(prefix) && values['profileType'] == 'IOS_APP_STORE' &&
+          values['profileState'] == 'ACTIVE' && expires > now + 7 * 86_400 && !values['profileContent'].to_s.empty?
+      end
+      profile ||= @client.request(:post, '/v1/profiles', {}, data: {
+        type: 'profiles', attributes: { name: "#{prefix} #{now.utc.strftime('%Y%m%d%H%M')}", profileType: 'IOS_APP_STORE' },
+        relationships: { bundleId: { data: { type: 'bundleIds', id: identifier.fetch('id') } },
+                         certificates: { data: [{ type: 'certificates', id: certificate.fetch('id') }] } }
+      }).fetch('data')
+      content = profile.dig('attributes', 'profileContent').to_s
+      raise Error, 'Apple did not return the widget extension profile.' if content.empty?
+      path = File.join(@env.fetch('RUNNER_TEMP'), 'bus-signing', 'widgets.mobileprovision')
+      File.binwrite(path, Base64.decode64(content))
+      File.chmod(0o600, path)
+      summary("Widget extension profile ready for #{widget_bundle}.")
+      path
+    end
+
     def app
       @app ||= @client.all('/v1/apps', 'filter[bundleId]' => bundle, 'fields[apps]' => 'name,bundleId').find { |row| row.dig('attributes', 'bundleId') == bundle }
       raise Error, "No app record for #{bundle}. Create it in App Store Connect > My Apps > New App." unless @app
@@ -268,7 +308,8 @@ module TaipeiBusRelease
     when 'preflight' then release.preflight
     when 'register-app-id' then release.register_identifier
     when 'processing' then release.processing(env.fetch('BUS_BUILD_NUMBER'))
-    else raise Error, 'Choose preflight, register-app-id or processing.'
+    when 'widget-profile' then release.widget_profile
+    else raise Error, 'Choose preflight, register-app-id, widget-profile or processing.'
     end
   end
 end

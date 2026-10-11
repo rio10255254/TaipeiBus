@@ -11,8 +11,8 @@ for key, value in catalog.items():
     assert key.count("%@") == value.count("%@"), f"Placeholder mismatch: {key}"
     assert not re.search(r"[\u3400-\u9fff]", value), f"Chinese generic UI in English translation: {key}"
 missing = []
-for folder in [root / "TaipeiBus", root / "TransitCore/Sources/TransitCore"]:
-    for path in folder.glob("*.swift"):
+for folder in [root / "TaipeiBus", root / "TaipeiBusWidgets", root / "TransitCore/Sources/TransitCore"]:
+    for path in folder.rglob("*.swift"):
         for match in re.finditer(r'(?:AppText\.text|live\.text|settings\.text)\(\s*"((?:[^"\\]|\\.)*)"', path.read_text(encoding="utf-8")):
             key = json.loads('"' + match.group(1) + '"')
             if re.search(r"[\u3400-\u9fff]", key) and key not in catalog:
