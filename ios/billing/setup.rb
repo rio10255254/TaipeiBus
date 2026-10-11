@@ -20,4 +20,6 @@ project.save
 scheme = Xcodeproj::XCScheme.new
 scheme.configure_with_targets(app,tests,launch_target:true)
 scheme.test_action.build_configuration = 'Debug'
+reference = scheme.launch_action.xml_element.add_element('StoreKitConfigurationFileReference')
+reference.add_attribute('identifier','../../billing/ProProducts.storekit')
 scheme.save_as(path,'TaipeiBusBilling')

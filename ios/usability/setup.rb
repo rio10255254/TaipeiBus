@@ -33,4 +33,8 @@ end
 scheme = Xcodeproj::XCScheme.new
 scheme.configure_with_targets(app, tests, launch_target: true)
 scheme.test_action.build_configuration = 'Debug'
+if ENV['BUS_VERIFY_PRO_UI'] == 'true'
+  reference = scheme.launch_action.xml_element.add_element('StoreKitConfigurationFileReference')
+  reference.add_attribute('identifier','../../billing/ProProducts.storekit')
+end
 scheme.save_as(path, 'TaipeiBusUsability')
