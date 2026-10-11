@@ -24,6 +24,11 @@ final class ProPurchaseTests: XCTestCase {
             if try await condition() { return }
             try await Task.sleep(for:.milliseconds(250))
         }
+        for plan in ProPlan.allCases {
+            if let result = await StoreKit.Transaction.latest(for:plan.productID), case .verified(let item) = result {
+                print("Unsettled Apple transaction: \(plan.rawValue), \(item.id), expiry=\(String(describing:item.expirationDate)), revoked=\(String(describing:item.revocationDate))")
+            }
+        }
         XCTFail("Verified Apple state did not settle after the test-session change")
     }
     func testActualProductsHaveTwoEqualAccessPeriodsAndApprovedPrices() async throws {
@@ -126,18 +131,21 @@ final class ProPurchaseTests: XCTestCase {
         if #available(iOS 17.2, *) { XCTAssertEqual(try XCTUnwrap(transaction).price,Decimal(39)) }
     }
     func testVerifiedBillingGraceKeepsAccessAndRecoversWithoutAnotherPurchase() async throws {
+        // Accelerated time applies when the transaction is created; changing it
+        // after purchase would leave the existing real-time expiry untouched.
+        session.timeRate = .oneRenewalEveryTenSeconds
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
-        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
+        try await waitForApple { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
         session.billingGracePeriodIsEnabled = true; session.shouldEnterBillingRetryOnRenewal = true
-        session.timeRate = .oneRenewalEveryThirtySeconds
         let info = try XCTUnwrap(manager.products[ProPlan.monthly.productID]?.subscription)
         var sawGrace = false
-        for _ in 0..<110 {
+        for _ in 0..<80 {
             let statuses = try await info.status
             if statuses.contains(where:{ $0.state == .inGracePeriod }) { sawGrace = true; break }
             try await Task.sleep(for:.milliseconds(500))
         }
         XCTAssertTrue(sawGrace,"Apple's test environment must actually enter billing grace")
+        guard sawGrace else { return }
         await manager.refreshAccess(); XCTAssertTrue(manager.hasPro)
         session.shouldEnterBillingRetryOnRenewal = false
         let transaction = try XCTUnwrap(session.allTransactions().max(by:{ $0.identifier < $1.identifier }))
