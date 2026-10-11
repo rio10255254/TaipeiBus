@@ -19,8 +19,8 @@ final class ProPurchaseTests: XCTestCase {
         for _ in 0..<80 { if condition() { return }; try await Task.sleep(for:.milliseconds(100)) }
         XCTFail("Apple transaction state did not settle")
     }
-    private func waitForApple(_ condition: @escaping () async throws -> Bool) async throws {
-        for _ in 0..<80 {
+    private func waitForApple(attempts: Int = 80, _ condition: @escaping () async throws -> Bool) async throws {
+        for _ in 0..<attempts {
             if try await condition() { return }
             try await Task.sleep(for:.milliseconds(250))
         }
@@ -144,7 +144,8 @@ final class ProPurchaseTests: XCTestCase {
         try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
         let original = try XCTUnwrap(session.allTransactions().last)
         try session.enableAutoRenewForTransaction(identifier:original.identifier)
-        try await waitForApple { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
+        // A forced renewal with accelerated time can take most of a 30-second period on a busy runner.
+        try await waitForApple(attempts: 240) { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
         session.shouldEnterBillingRetryOnRenewal = true
         try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
         let info = try XCTUnwrap(manager.products[ProPlan.monthly.productID]?.subscription)
