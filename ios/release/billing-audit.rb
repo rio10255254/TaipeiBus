@@ -35,6 +35,7 @@ if report[:subscription_groups].is_a?(Array)
         item = {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel].include?(field) }}
         begin
           item[:legacy_localizations] = client.all("/v1/subscriptions/#{row['id']}/subscriptionLocalizations").map { |value| value['attributes'] }
+          item[:legacy_availability] = client.request(:get,"/v1/subscriptions/#{row['id']}/subscriptionAvailability",'include'=>'availableTerritories')['data']
           item[:prices] = client.all("/v1/subscriptions/#{row['id']}/prices",'filter[territory]'=>'TWN','filter[planType]'=>'UPFRONT','include'=>'subscriptionPricePoint').map do |price|
             point_id = price.dig('relationships','subscriptionPricePoint','data','id')
             point = client.request(:get,"/v1/subscriptionPricePoints/#{point_id}").fetch('data')
