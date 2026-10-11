@@ -26,7 +26,28 @@ if report[:subscription_groups].is_a?(Array)
   report[:subscriptions] = report[:subscription_groups].flat_map do |group|
     begin
       client.all("/v1/subscriptionGroups/#{group.fetch(:id)}/subscriptions").map do |row|
-        {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel].include?(field) }}
+        item = {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel].include?(field) }}
+        begin
+          item[:prices] = client.all("/v1/subscriptions/#{row['id']}/prices",'filter[territory]'=>'TWN','filter[planType]'=>'UPFRONT','include'=>'subscriptionPricePoint').map do |price|
+            point_id = price.dig('relationships','subscriptionPricePoint','data','id')
+            point = client.request(:get,"/v1/subscriptionPricePoints/#{point_id}").fetch('data')
+            {id:price['id'],customer_price:point.dig('attributes','customerPrice'),attributes:price['attributes']}
+          end
+          item[:trials] = client.all("/v1/subscriptions/#{row['id']}/introductoryOffers",'include'=>'territory').map do |offer|
+            {id:offer['id'],attributes:offer['attributes'],territory:offer.dig('relationships','territory','data','id')}
+          end
+          item[:availability] = client.all("/v1/subscriptions/#{row['id']}/planAvailabilities").map do |availability|
+            {id:availability['id'],attributes:availability['attributes'],territories:client.all("/v1/subscriptionPlanAvailabilities/#{availability['id']}/availableTerritories").map { |territory| territory['id'] }}
+          end
+          item[:versions] = client.all("/v1/subscriptions/#{row['id']}/versions").map do |version|
+            {id:version['id'],attributes:version['attributes'],
+             localizations:client.all("/v1/subscriptionVersions/#{version['id']}/localizations").map { |value| value['attributes'] },
+             images:client.all("/v1/subscriptionVersions/#{version['id']}/images").map { |image| {id:image['id'],attributes:image['attributes'].slice('fileName','assetDeliveryState','sourceFileChecksum')} }}
+          end
+        rescue TaipeiBusRelease::Error => error
+          item[:verification_error] = error.message; item[:diagnostics] = error.diagnostics
+        end
+        item
       end
     rescue TaipeiBusRelease::Error => error
       [{group_id:group[:id],error:error.message}]

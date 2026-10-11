@@ -52,6 +52,8 @@ begin
     report[:products] << row; save.call
     version = version_for.call('subscriptions',item['id'],'subscriptionVersions',:subscription)
     row[:version_id] = version['id']; save.call
+    client.request(:patch,"/v1/subscriptions/#{item['id']}",{},data:{type:'subscriptions',id:item['id'],attributes:{
+      reviewNote:'Open Information and settings > Taipei Bus Pro > View Pro plans. Both plans unlock saved commute shortcuts and personal route preferences. Eligible accounts receive one seven-day free trial per subscription group, then renew at the displayed Apple price. Core navigation, official arrivals and 3D tracking remain free. No app login is required.'}})
     [['zh-Hant',expected['period'] == 'ONE_MONTH' ? 'Pro 月費' : 'Pro 年費','常用行程捷徑與個人路線偏好'],
      ['en-US',expected['name'],'Saved trips and personal route preferences']].each do |locale,name,description|
       localize.call('subscriptionLocalizations','subscriptionVersions',version['id'],{locale:locale,name:name,description:description})
