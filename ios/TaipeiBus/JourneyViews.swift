@@ -26,6 +26,9 @@ struct JourneyPlanningView: View {
     @State private var stationResultQuery = ""
     @State private var showingRankingInfo = false
     @State private var searchReturnToItinerary = false
+    @State private var showingPro = false
+    @State private var showingSaveJourney = false
+    @State private var showingTripPreference = false
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
@@ -124,6 +127,12 @@ struct JourneyPlanningView: View {
                                 Button(live.text("查看行程")) { showingItinerary = true; expand() }
                                 Button(AppText.text("重新比較路線")) { planner.refreshRecommendations() }
                                 Button(AppText.text("推薦順序說明")) { showingRankingInfo = true }
+                                Button(AppText.text("儲存行程")) {
+                                    if model.purchases.hasPro { showingSaveJourney = true } else { showingPro = true }
+                                }.accessibilityIdentifier("journey-save-pro")
+                                Button(AppText.text("個人路線偏好")) {
+                                    if model.purchases.hasPro { showingTripPreference = true } else { showingPro = true }
+                                }.accessibilityIdentifier("journey-preference-pro")
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
                             } label: { Image(systemName: "ellipsis").foregroundStyle(.primary).frame(width: 36, height: 36) }
                                 .accessibilityLabel(live.text("更多行程選項"))
@@ -137,6 +146,9 @@ struct JourneyPlanningView: View {
         } message: {
             Text(AppText.text("先確認實際步行，再比較可趕上的班次、候車與搭車時間。推薦兼顧時間、少走路與少轉乘；較快方案會另外保留。班距推估會標示範圍，班次不足則標示待確認。抵達時間包含走路、候車與搭車。"))
         }
+        .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
+        .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
+        .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(searchContext)
