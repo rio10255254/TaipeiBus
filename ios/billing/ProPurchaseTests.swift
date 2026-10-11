@@ -138,13 +138,15 @@ final class ProPurchaseTests: XCTestCase {
     func testVerifiedBillingGraceKeepsAccessAndRecoversWithoutAnotherPurchase() async throws {
         // Accelerated time applies when the transaction is created; changing it
         // after purchase would leave the existing real-time expiry untouched.
-        session.timeRate = .oneSecondIsOneDay
+        session.timeRate = .oneRenewalEveryThirtySeconds
         session.billingGracePeriodIsEnabled = true
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
+        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
         let original = try XCTUnwrap(session.allTransactions().last)
         try session.enableAutoRenewForTransaction(identifier:original.identifier)
         try await waitForApple { await manager.refreshAccess(); return manager.hasPro && !manager.isInTrial }
         session.shouldEnterBillingRetryOnRenewal = true
+        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
         let info = try XCTUnwrap(manager.products[ProPlan.monthly.productID]?.subscription)
         var sawGrace = false
         for _ in 0..<80 {
