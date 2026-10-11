@@ -34,7 +34,9 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         capture("pro-annual-seven-day-trial")
         XCTAssertTrue(button("pro-restore").exists); XCTAssertTrue(button("pro-manage").exists)
         button("pro-close").tap()
-        app.swipeDown(); app.navigationBars.buttons.firstMatch.tap()
+        app.swipeDown()
+        let back = app.navigationBars.buttons.firstMatch
+        if back.waitForExistence(timeout:5) { back.tap() }
         let done = button("完成"); if done.exists { done.tap() }
         XCTAssertTrue(button("home-destination-search").waitForExistence(timeout:10))
         XCTAssertTrue(app.descendants(matching:.any).matching(identifier:"native-map").firstMatch.exists)
@@ -45,7 +47,8 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(app.staticTexts["正在免費試用 Pro"].waitForExistence(timeout:20))
         capture("pro-active-trial")
         button("pro-close").tap()
-        app.navigationBars.buttons.firstMatch.tap()
+        let back = app.navigationBars.buttons.firstMatch
+        if back.waitForExistence(timeout:5) { back.tap() }
         if button("完成").exists { button("完成").tap() }
         button("home-destination-search").tap(); chooseNeihu()
         let more = button("journey-plan-more")

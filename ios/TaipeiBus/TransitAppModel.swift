@@ -99,9 +99,17 @@ final class TransitAppModel: ObservableObject {
     /// The saved trip whose plan is on screen; its first ride is what the widget will watch.
     private var activeSavedJourneyID: UUID?
     private var widgetPlanning = false
+    /// While a Pro trip is in progress the app keeps refreshing behind the Lock Screen, through
+    /// iOS background navigation location, so the Live Activity's stops and countdown and the
+    /// alighting reminder follow the real bus or train.
+    var journeyInBackground: Bool {
+        purchases.hasPro && planner.started && !planner.arrived && !location.permissionDenied
+    }
+    private var runsLiveWork: Bool { isActive || journeyInBackground }
     func updateLiveSurfaces() {
         // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
         guard !purchases.checkingAccess else { return }
+        location.setBackgroundNavigation(journeyInBackground)
         let now = Date()
         rideActivity.update(rideActivityState(at: now), destination: planner.destination?.localizedName ?? "",
                             language: language, enabled: purchases.hasPro)
@@ -288,13 +296,13 @@ final class TransitAppModel: ObservableObject {
     private var platformTask: Task<Void, Never>?
     private var platformGeneration = UUID()
     private func pollPlatformInBackground() {
-        guard isActive, platformTask == nil else { return }
+        guard runsLiveWork, platformTask == nil else { return }
         let token = UUID(); platformGeneration = token
         let network = metadata.metro
         platformTask = Task { [weak self] in
             guard let self else { return }
             let sightings = await self.service.metroPlatformEvents(network: network)
-            if !Task.isCancelled, self.isActive, self.platformGeneration == token, let sightings, !sightings.isEmpty {
+            if !Task.isCancelled, self.runsLiveWork, self.platformGeneration == token, let sightings, !sightings.isEmpty {
                 let merged = MetroPlatformFeed.merge(self.metroPlatformEvents, sightings, at: Date())
                 if merged != self.metroPlatformEvents { self.metroPlatformEvents = merged }
                 self.updateEstimatedTrains(with: sightings)
@@ -506,8 +514,10 @@ final class TransitAppModel: ObservableObject {
         if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
         if !active {
-            // The last state before suspension stays on the Lock Screen, counting down by itself.
             updateLiveSurfaces()
+            settingsTask?.cancel(); settingsTask = nil
+            // A trip in progress keeps its refresh loop; it stops itself when the trip ends.
+            if journeyInBackground { return }
             updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
             platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
             return
@@ -524,6 +534,8 @@ final class TransitAppModel: ObservableObject {
                 do { try await Task.sleep(for: .seconds(interval)) } catch { return }
             }
         }
+        // Returning from the Lock Screen during a trip: the loop never stopped.
+        guard updateTask == nil else { return }
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -554,10 +566,18 @@ final class TransitAppModel: ObservableObject {
                     expireLiveTrainTrial()
                     updateAlightReminder()
                     updateLiveSurfaces()
+                    if !isActive, !journeyInBackground {
+                        // The trip ended behind the Lock Screen: stop like a normal suspension.
+                        location.setBackgroundNavigation(false)
+                        platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+                        updateTask = nil; return
+                    }
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    let interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
+                    var interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
+                    // Behind the Lock Screen a slower pace still moves the countdown and stops on time.
+                    if !isActive { interval = max(interval, 15) }
                     let elapsed = ProcessInfo.processInfo.systemUptime - requestStartedAt
                     try await Task.sleep(for: .seconds(max(0.25, interval - elapsed)))
                     // prepare() returns immediately while its daily metadata cache is fresh.
@@ -593,7 +613,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     private func receivePartialSnapshot(_ result: TransitSnapshot) {
-        guard isActive else { return }
+        guard runsLiveWork else { return }
         applySnapshot(result)
     }
 

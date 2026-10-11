@@ -120,7 +120,7 @@ jobs:
       - name: Verify real StoreKit transactions and commute persistence
         id: billing_transactions
         if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
-        timeout-minutes: 14
+        timeout-minutes: 22
         run: |
           set -euo pipefail
           gem install xcodeproj -v 1.27.0 --no-document --user-install

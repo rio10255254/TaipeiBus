@@ -25,6 +25,17 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private var walkingNavigation = false
     var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
     private var ridingNavigation = false
+    /// A trip in progress keeps receiving fixes behind the Lock Screen (blue status indicator).
+    private var backgroundNavigation = false
+    func setBackgroundNavigation(_ enabled: Bool) {
+        guard backgroundNavigation != enabled else { return }
+        backgroundNavigation = enabled
+        manager.allowsBackgroundLocationUpdates = enabled
+        manager.showsBackgroundLocationIndicator = enabled
+        manager.pausesLocationUpdatesAutomatically = !(enabled || precise)
+        if enabled, authorized, !updating { manager.startUpdatingLocation(); updating = true }
+        if !enabled, !active { manager.stopUpdatingLocation(); updating = false }
+    }
     /// Walking and riding both want continuous, navigation-grade fixes; otherwise save power.
     private var precise: Bool { walkingNavigation || ridingNavigation }
     func setWalkingNavigation(_ enabled: Bool) {
@@ -42,7 +53,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         manager.desiredAccuracy = precise ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
         manager.distanceFilter = walkingNavigation ? 3 : ridingNavigation ? 5 : 20
         manager.activityType = walkingNavigation ? .fitness : ridingNavigation ? .automotiveNavigation : .otherNavigation
-        manager.pausesLocationUpdatesAutomatically = !precise
+        manager.pausesLocationUpdatesAutomatically = !(precise || backgroundNavigation)
         if precise, active, authorized { manager.startUpdatingLocation(); updating = true }
     }
 #if DEBUG
@@ -96,7 +107,10 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     func setActive(_ active: Bool) {
         self.active = active
         if active { requestIfAuthorized(); updateHeadingActivity() }
-        else {
+        else if backgroundNavigation {
+            timeoutTask?.cancel(); timeoutTask = nil; requesting = false
+            manager.stopUpdatingHeading()
+        } else {
             timeoutTask?.cancel(); timeoutTask = nil
             manager.stopUpdatingLocation(); updating = false; requesting = false
             manager.stopUpdatingHeading()
