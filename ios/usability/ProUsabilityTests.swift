@@ -67,7 +67,9 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(shortcut.waitForExistence(timeout:10)); shortcut.tap()
         XCTAssertTrue(button("journey-close").waitForExistence(timeout:10))
         XCTAssertTrue(firstOption.waitForExistence(timeout:150),"The saved trip must produce a visible route result")
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@", "journey-go-")).firstMatch.exists)
+        // The result can appear as the map preview (one start button) or as the option list.
+        let start = app.buttons.matching(NSPredicate(format:"identifier BEGINSWITH %@ OR identifier == %@", "journey-go-", "journey-start-navigation")).firstMatch
+        XCTAssertTrue(start.waitForExistence(timeout:15))
         XCTAssertFalse(button("journey-board").exists)
         capture("pro-shortcut-opens-preview")
     }
