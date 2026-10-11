@@ -116,6 +116,25 @@ final class ProPurchaseTests: XCTestCase {
         }
         if #available(iOS 17.2, *) { XCTAssertEqual(try XCTUnwrap(transaction).price,Decimal(39)) }
     }
+    func testVerifiedBillingGraceKeepsAccessAndRecoversWithoutAnotherPurchase() async throws {
+        let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)
+        try session.forceRenewalOfSubscription(productIdentifier:ProPlan.monthly.productID)
+        session.billingGracePeriodIsEnabled = true; session.shouldEnterBillingRetryOnRenewal = true
+        session.timeRate = .oneRenewalEveryThirtySeconds
+        let info = try XCTUnwrap(manager.products[ProPlan.monthly.productID]?.subscription)
+        var sawGrace = false
+        for _ in 0..<110 {
+            let statuses = try await info.status
+            if statuses.contains(where:{ $0.state == .inGracePeriod }) { sawGrace = true; break }
+            try await Task.sleep(for:.milliseconds(500))
+        }
+        XCTAssertTrue(sawGrace,"Apple's test environment must actually enter billing grace")
+        await manager.refreshAccess(); XCTAssertTrue(manager.hasPro)
+        session.shouldEnterBillingRetryOnRenewal = false
+        let transaction = try XCTUnwrap(session.allTransactions().max(by:{ $0.identifier < $1.identifier }))
+        try session.resolveIssueForTransaction(identifier:transaction.identifier)
+        await manager.refreshAccess(); XCTAssertTrue(manager.hasPro)
+    }
     func testCommutePersistenceCurrentOriginAndPreferencesAreRealAndBounded() throws {
         let suite = "ProPurchaseTests."+UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName:suite))

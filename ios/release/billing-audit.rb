@@ -44,6 +44,8 @@ if report[:subscription_groups].is_a?(Array)
              localizations:client.all("/v1/subscriptionVersions/#{version['id']}/localizations").map { |value| value['attributes'] },
              images:client.all("/v1/subscriptionVersions/#{version['id']}/images").map { |image| {id:image['id'],attributes:image['attributes'].slice('fileName','assetDeliveryState','sourceFileChecksum')} }}
           end
+          image = client.request(:get,"/v1/subscriptions/#{row['id']}/appStoreReviewScreenshot")['data']
+          item[:review_screenshot] = image && {id:image['id'],attributes:image['attributes'].slice('fileName','assetDeliveryState','sourceFileChecksum')}
         rescue TaipeiBusRelease::Error => error
           item[:verification_error] = error.message; item[:diagnostics] = error.diagnostics
         end

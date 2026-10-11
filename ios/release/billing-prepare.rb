@@ -1,6 +1,7 @@
 require_relative 'apple_client'
 require 'bigdecimal'
 require 'date'
+require 'digest'
 
 # Creates only the user-approved draft catalog. No review submission or contract acceptance.
 config = JSON.parse(File.read(File.join(__dir__,'billing.json')))
@@ -27,6 +28,31 @@ localize = ->(type,version_type,version,attributes) {
     next existing
   end
   create.call("/v2/#{type}",type,attributes,{version:link.call(version_type,version)})
+}
+review_screenshot = ->(subscription,plan) {
+  file = File.join(__dir__,'billing-screenshots',"pro-#{plan}.png")
+  next nil unless File.file?(file)
+  bytes = File.binread(file)
+  raise TaipeiBusRelease::Error,'Review screenshot must be a real native PNG.' unless bytes[0,8] == "\x89PNG\r\n\x1A\n".b && bytes[16,8].unpack('NN').then { |width,height| width >= 750 && height >= 1334 }
+  existing = client.request(:get,"/v1/subscriptions/#{subscription}/appStoreReviewScreenshot")['data']
+  checksum = Digest::MD5.hexdigest(bytes)
+  if existing
+    raise TaipeiBusRelease::Error,'Existing review screenshot needs review before replacement.' unless existing.dig('attributes','sourceFileChecksum') == checksum
+    next existing['id']
+  end
+  shot = create.call('/v1/subscriptionAppStoreReviewScreenshots','subscriptionAppStoreReviewScreenshots',
+    {fileName:File.basename(file),fileSize:bytes.bytesize},{subscription:link.call('subscriptions',subscription)})
+  shot.fetch('attributes').fetch('uploadOperations').each do |operation|
+    uri = URI(operation.fetch('url'))
+    raise TaipeiBusRelease::Error,'Unexpected Apple asset endpoint.' unless uri.scheme == 'https' && uri.host.end_with?('.apple.com') && !uri.userinfo && operation['method'] == 'PUT'
+    request = Net::HTTP::Put.new(uri)
+    operation.fetch('requestHeaders',[]).each { |header| request[header.fetch('name')] = header.fetch('value') }
+    request.body = bytes.byteslice(operation.fetch('offset'),operation.fetch('length'))
+    response = Net::HTTP.start(uri.host,uri.port,use_ssl:true,open_timeout:20,read_timeout:120) { |http| http.request(request) }
+    raise TaipeiBusRelease::Error,'Apple review image upload failed.' unless response.is_a?(Net::HTTPSuccess)
+  end
+  client.request(:patch,"/v1/subscriptionAppStoreReviewScreenshots/#{shot['id']}",{},data:{type:'subscriptionAppStoreReviewScreenshots',id:shot['id'],attributes:{uploaded:true,sourceFileChecksum:checksum}})
+  shot['id']
 }
 begin
   app = client.all('/v1/apps','filter[bundleId]'=>config.fetch('bundle_id')).first
@@ -95,6 +121,7 @@ begin
         {subscription:link.call('subscriptions',item['id']),territory:link.call('territories',trial['territory'])})
       row[:trial_days] = 7; row[:introductory_offer_id] = offer['id']
     end
+    row[:review_screenshot_id] = review_screenshot.call(item['id'],expected['period'] == 'ONE_MONTH' ? 'monthly' : 'yearly')
     row[:status] = 'draft_configured'; save.call
   end
   report[:status] = report[:products].all? { |row| row[:status] == 'draft_configured' } ? 'draft_catalog_configured' : 'needs_price_review'
