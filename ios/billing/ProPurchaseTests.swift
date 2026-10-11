@@ -90,6 +90,7 @@ final class ProPurchaseTests: XCTestCase {
         let transaction = try XCTUnwrap(session.allTransactions().first { $0.productIdentifier == ProPlan.monthly.productID })
         try session.approveAskToBuyTransaction(identifier:transaction.identifier)
         try await waitUntil { manager.hasPro }
+        XCTAssertNil(manager.message,"Approved purchases must clear the pending message")
     }
     func testCancellingRenewalPreservesThePaidPeriodAndPlansDoNotStack() async throws {
         let manager = ProPurchases(); await manager.loadProducts(); await manager.purchase(.monthly)

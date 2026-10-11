@@ -34,6 +34,7 @@ final class ProPurchases: ObservableObject {
     private var statusUpdates: Task<Void,Never>?
     private var expiryCheck: Task<Void,Never>?
     private var generation = 0
+    private var awaitingApproval = false
 
     init() {
         updates = Task { [weak self] in
@@ -89,6 +90,7 @@ final class ProPurchases: ObservableObject {
         guard token == generation, !Task.isCancelled else { return }
         activePlan = plans.contains(.yearly) ? .yearly : plans.contains(.monthly) ? .monthly : nil
         hasPro = !plans.isEmpty; checkingAccess = false
+        if hasPro && awaitingApproval { awaitingApproval = false; message = nil }
         isInTrial = false
         if let current, current.offerType == .introductory {
             if #available(iOS 17.2, *) { isInTrial = current.price == .zero }
@@ -143,7 +145,7 @@ final class ProPurchases: ObservableObject {
     }
     func purchase(_ plan: ProPlan) async {
         guard !busy, let product = products[plan.productID], plan.accepts(product) else { return }
-        busy = true; message = nil
+        busy = true; message = nil; awaitingApproval = false
         defer { busy = false }
         do {
             switch try await product.purchase() {
@@ -156,6 +158,7 @@ final class ProPurchases: ObservableObject {
                 await refreshAccess()
                 await transaction.finish()
             case .pending:
+                awaitingApproval = true
                 message = AppText.text("正在等待 Apple 確認購買。")
             case .userCancelled:
                 break
