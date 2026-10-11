@@ -31,6 +31,7 @@ final class ProPurchases: ObservableObject {
     @Published private(set) var willAutoRenew: Bool?
     @Published var message: String?
     private var updates: Task<Void,Never>?
+    private var expiryCheck: Task<Void,Never>?
     private var generation = 0
 
     init() {
@@ -45,7 +46,7 @@ final class ProPurchases: ObservableObject {
             }
         }
     }
-    deinit { updates?.cancel() }
+    deinit { updates?.cancel(); expiryCheck?.cancel() }
 
     private func recognizes(_ transaction: StoreKit.Transaction) -> Bool {
         transaction.productType == .autoRenewable && ProPlan.allCases.contains { $0.productID == transaction.productID }
@@ -58,8 +59,19 @@ final class ProPurchases: ObservableObject {
             guard case .verified(let transaction) = result, recognizes(transaction),
                   transaction.revocationDate == nil, !transaction.isUpgraded,
                   let plan = ProPlan.allCases.first(where:{ $0.productID == transaction.productID }) else { continue }
-            // currentEntitlements includes Apple's subscribed and grace-period states.
-            // Checking expirationDate here would incorrectly remove billing grace access.
+            // Local StoreKit and the App Store may briefly retain an entitlement at
+            // the expiry boundary. A verified grace state still grants access.
+            if let end = transaction.expirationDate, end <= Date(),
+               let info = products[plan.productID]?.subscription,
+               let statuses = try? await info.status {
+                let grace = statuses.contains { status in
+                    guard status.state == .inGracePeriod,
+                          case .verified(let value) = status.transaction,
+                          case .verified = status.renewalInfo else { return false }
+                    return value.productID == transaction.productID && value.revocationDate == nil
+                }
+                if !grace { continue }
+            }
             plans.insert(plan)
             if current == nil || transaction.purchaseDate > current!.purchaseDate { current = transaction }
         }
@@ -80,6 +92,15 @@ final class ProPurchases: ObservableObject {
         }
         guard token == generation else { return }
         await refreshTrialEligibility()
+        guard token == generation else { return }
+        expiryCheck?.cancel(); expiryCheck = nil
+        if let end = periodEndsAt, end > Date() {
+            let delay = end.timeIntervalSinceNow + 2
+            expiryCheck = Task { [weak self] in
+                do { try await Task.sleep(for:.seconds(delay)) } catch { return }
+                await self?.refreshAccess()
+            }
+        }
     }
     func offersSevenDayTrial(_ plan: ProPlan) -> Bool { eligibleTrialPlans.contains(plan) && !hasPro }
     private func refreshTrialEligibility() async {
@@ -132,6 +153,7 @@ final class ProPurchases: ObservableObject {
             }
         } catch let error as SKError where error.code == .paymentCancelled {
             // Cancellation is a normal exit and never blocks the free app.
+        } catch StoreKitError.userCancelled {
         } catch {
             message = AppText.text("購買尚未完成，請稍後再試。")
         }

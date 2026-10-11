@@ -62,12 +62,13 @@ final class ProPurchaseTests: XCTestCase {
     }
     func testCancelledAndFailedPurchasesDoNotUnlockOrRemainBusy() async throws {
         let manager = ProPurchases(); await manager.loadProducts()
-        session.failTransactionsEnabled = true; session.failureError = .paymentCancelled
+        try await session.setSimulatedError(.generic(.userCancelled),forAPI:.purchase)
         await manager.purchase(.monthly)
         XCTAssertFalse(manager.hasPro); XCTAssertFalse(manager.busy); XCTAssertNil(manager.message)
-        session.failureError = .paymentNotAllowed
+        try await session.setSimulatedError(.generic(.notAvailableInStorefront),forAPI:.purchase)
         await manager.purchase(.monthly)
         XCTAssertFalse(manager.hasPro); XCTAssertFalse(manager.busy); XCTAssertNotNil(manager.message)
+        try await session.setSimulatedError(nil,forAPI:.purchase)
     }
     func testAskToBuyWaitsForApprovalAndReceivesTransactionUpdate() async throws {
         let manager = ProPurchases(); await manager.loadProducts(); session.askToBuyEnabled = true
