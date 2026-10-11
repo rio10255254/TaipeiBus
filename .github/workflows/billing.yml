@@ -1,0 +1,28 @@
+name: Billing setup
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Read-only Apple billing audit'
+        type: choice
+        options: ['audit']
+        default: audit
+permissions:
+  contents: read
+jobs:
+  apple:
+    runs-on: macos-15
+    timeout-minutes: 8
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: ruby ios/release/billing-audit.rb
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: billing-audit
+          path: ${{ runner.temp }}/billing-audit.json
+          retention-days: 7
