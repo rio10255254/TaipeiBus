@@ -22,6 +22,10 @@ on:
         description: 'Audit routing on the exact bundled official static catalog, independent of live endpoint failures'
         type: boolean
         default: false
+      billing_tests:
+        description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -113,7 +117,76 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
+      - name: Verify real StoreKit transactions and commute persistence
+        id: billing_transactions
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
+        timeout-minutes: 14
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/billing/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-billing com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/billing-tests.log"
+      - name: Preserve StoreKit verification
+        if: always() && inputs.billing_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-tests
+          path: |
+            ${{ runner.temp }}/billing-tests.log
+            ${{ runner.temp }}/billing.xcresult
+          retention-days: 14
+      - name: Tap through Pro trial and commute features in both appearances
+        if: always() && !cancelled() && inputs.billing_tests && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
+          xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_fixture_pid=$!
+          trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
+          xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/pro-ui.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/ProUsabilityTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/pro-ui.log"
+          xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/pro-ui-dark.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/ProUsabilityTests/testEnglishTrialAndRenewalTermsAreClear \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/pro-ui-dark.log"
+      - name: Preserve native Pro screenshots and verification
+        if: always() && inputs.billing_tests
+        run: |
+          for mode in pro-ui pro-ui-dark; do
+            if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$mode.xcresult" --output-path "$RUNNER_TEMP/$mode-screenshots"
+            fi
+          done
+      - name: Save native Pro walkthrough
+        if: always() && inputs.billing_tests
+        uses: actions/upload-artifact@v4
+        with:
+          name: pro-walkthrough
+          path: |
+            ${{ runner.temp }}/pro-ui*.log
+            ${{ runner.temp }}/pro-ui*-screenshots
+          retention-days: 14
       - name: Audit complete official route catalog
+        # Existing live-data audits remain separate from payment verification.
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.live_audit != false
         run: |
           set -euo pipefail

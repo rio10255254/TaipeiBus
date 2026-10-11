@@ -7,6 +7,8 @@ struct TransitHomeView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var location: LocationService
     @ObservedObject private var planner: JourneyPlannerModel
+    @ObservedObject private var purchases: ProPurchases
+    @ObservedObject private var commutes: CommuteLibrary
     @ObservedObject private var stationWalk: StationWalkingNavigation
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
@@ -32,6 +34,7 @@ struct TransitHomeView: View {
         self.model = model
         location = model.location
         planner = model.planner
+        purchases = model.purchases; commutes = model.commutes
         stationWalk = model.stationWalk
     }
 
@@ -243,6 +246,21 @@ struct TransitHomeView: View {
             }.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         if planner.selected == nil && !stationWalk.isActive {
+            if !hasSelection, purchases.hasPro, !commutes.journeys.isEmpty {
+                ScrollView(.horizontal,showsIndicators:false) {
+                    HStack(spacing:8) {
+                        ForEach(commutes.journeys) { saved in
+                            Button {
+                                model.previewSavedJourney(saved); showJourneyItinerary = false
+                                journeyDetent = .height(420); showJourney = true
+                            } label: {
+                                Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
+                                    .padding(.horizontal,14).frame(minHeight:44)
+                            }.buttonStyle(MapActionStyle()).accessibilityIdentifier("commute-shortcut-"+saved.id.uuidString)
+                        }
+                    }
+                }.accessibilityIdentifier("commute-shortcuts")
+            }
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse)
@@ -274,6 +292,8 @@ struct TransitHomeView: View {
         .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .onPreferenceChange(InstructionBannerHeightKey.self) { height in if abs(height - bannerHeight) > 0.5 { bannerHeight = height } }
+        .onChange(of: purchases.hasPro) { _,_ in model.applyPersonalPreferences() }
+        .onChange(of: commutes.preference) { _,_ in model.applyPersonalPreferences() }
         .sheet(isPresented: $showSearch, onDismiss: { model.stationBrowsing = false; restoreJourneyMap() }) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
                 .presentationDetents(hasTransitSelection ? [.height(330), .height(520), .large] : model.mode == .stops ? [.height(390), .large] : [.large], selection: $model.sheetDetent)
@@ -1414,6 +1434,11 @@ private struct AppInformationView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink { ProSettingsView(model:model) } label: {
+                        Label(AppText.text("台北公車 Pro"),systemImage:"star.circle")
+                    }.accessibilityIdentifier("settings-pro")
+                }
                 Section(live.text("語言")) {
                     Toggle("English", isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) }))
                         .accessibilityIdentifier("app-language-toggle")
@@ -1474,6 +1499,7 @@ private struct PrivacyExplanationView: View {
             }
             Section(AppText.text("保存在手機")) {
                 Text(AppText.text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。"))
+                Text(AppText.text("常用行程與個人路線偏好也保存在手機。Pro 購買由 Apple 處理；App 只確認訂閱權限，不讀取付款卡片資料。"))
             }
             Section(AppText.text("網路服務")) {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))

@@ -51,6 +51,29 @@ private actor StationLookup {
 
 @MainActor
 final class TransitAppModel: ObservableObject {
+    let purchases = ProPurchases()
+    let commutes = CommuteLibrary()
+    @Published private(set) var tripPreference: RoutePreference?
+    private var effectivePlanning = LiveSettings.Planning()
+    func applyPersonalPreferences() {
+        var settings = liveSettings
+        if purchases.hasPro { settings.planning = (tripPreference ?? commutes.preference).applying(to:settings.planning) }
+        guard settings.planning != effectivePlanning else { return }
+        effectivePlanning = settings.planning; planner.updateSettings(settings)
+        if !planner.started, planner.destination != nil, !metadata.routes.isEmpty { planner.plan(metadata:metadata) }
+    }
+    func setTripPreference(_ value: RoutePreference) {
+        guard purchases.hasPro else { return }
+        tripPreference = value; applyPersonalPreferences()
+    }
+    func previewSavedJourney(_ saved: SavedJourney) {
+        guard purchases.hasPro, saved.valid else { return }
+        planner.finish(); clearWalkingMap(); clearSelection()
+        tripPreference = saved.preference; applyPersonalPreferences()
+        if let origin = saved.origin { planner.setOrigin(origin,metadata:metadata) }
+        else { planner.useLocation(location.usableCoordinate,metadata:metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(saved.destination,metadata:metadata,currentLocation:location.usableCoordinate)
+    }
     @Published private(set) var metadata = TransitMetadata()
     @Published private(set) var snapshot = TransitSnapshot()
     @Published private(set) var metroRealtime: MetroRealtime?
@@ -291,6 +314,7 @@ final class TransitAppModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
+        if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
         if !active {
             updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
@@ -358,7 +382,7 @@ final class TransitAppModel: ObservableObject {
         vocabulary = packet.vocabulary
         liveSettings = packet.settings
         location.updateSettings(packet.settings)
-        planner.updateSettings(packet.settings)
+        applyPersonalPreferences()
         await service.updateSettings(packet.settings)
 #if DEBUG
         markLiveSettingsPreview()
@@ -990,7 +1014,7 @@ final class TransitAppModel: ObservableObject {
         boardedAt = nil; anchorBoardedVehicle()
     }
     func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); clearSelection(); anchorBoardedVehicle() }
+    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle) {

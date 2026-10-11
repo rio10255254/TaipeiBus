@@ -71,6 +71,7 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
     require("iPhoneOS" in info["CFBundleSupportedPlatforms"], "Cannot upload a simulator build.")
     require(int(info["DTPlatformVersion"].split(".")[0]) >= minimum_sdk, "Upload SDK is too old.")
     require((app / "PrivacyInfo.xcprivacy").is_file(), "Privacy manifest missing from the actual archive.")
+    require(not list(app.rglob("*.storekit")), "Local payment test products must not enter the distributed app.")
     require(info.get("CFBundleIcons", {}).get("CFBundlePrimaryIcon", {}).get("CFBundleIconName") == "AppIcon", "Compiled app icon missing.")
     if tuple(map(int, version.split("."))) >= (1,3,0):
         require((app / "MetroNetwork.json").is_file(), "Metro metadata missing from signed archive")

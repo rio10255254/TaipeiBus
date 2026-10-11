@@ -146,7 +146,8 @@ class JourneyUsabilityTestBase: XCTestCase {
     }
     func waitForConfirmedChoices() {
         let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard let bytes = self.app.staticTexts["journey-timing-state"].label.data(using: .utf8),
+            let stateLabel = self.app.staticTexts["journey-timing-state"]
+            guard stateLabel.exists, let bytes = stateLabel.label.data(using: .utf8),
                   let state = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return false }
             return state["checking"] as? Bool == false && self.firstOption.exists
         }, object: nil)

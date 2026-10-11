@@ -25,7 +25,16 @@ Dir.glob(File.join(__dir__, '*.swift')).sort.each do |source|
   tests.source_build_phase.add_file_reference(group.new_file(name)) unless existing.include?(name)
 end
 project.save
+if ENV['BUS_VERIFY_PRO_UI'] == 'true'
+  resources = tests.resources_build_phase.files.map { |item| item.file_ref&.path }
+  tests.resources_build_phase.add_file_reference(group.new_file('../billing/ProProducts.storekit')) unless resources.include?('../billing/ProProducts.storekit')
+  project.save
+end
 scheme = Xcodeproj::XCScheme.new
 scheme.configure_with_targets(app, tests, launch_target: true)
 scheme.test_action.build_configuration = 'Debug'
+if ENV['BUS_VERIFY_PRO_UI'] == 'true'
+  reference = scheme.launch_action.xml_element.add_element('StoreKitConfigurationFileReference')
+  reference.add_attribute('identifier','../../billing/ProProducts.storekit')
+end
 scheme.save_as(path, 'TaipeiBusUsability')

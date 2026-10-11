@@ -1,0 +1,28 @@
+[
+  {
+    "file": "pro-monthly.png",
+    "sha256": "e8a8671d5c532db061c3455abc46ee6705c1f8c5f2d6e8c7a2669da2e18b08ca",
+    "source_artifact": 11690548807,
+    "source_run": 38109682481,
+    "source_commit": "c46925a",
+    "device": "iPhone 17",
+    "native_dimensions": [
+      1206,
+      2622
+    ],
+    "edited": false
+  },
+  {
+    "file": "pro-yearly.png",
+    "sha256": "d324274393754aee80dd110048d07127f27b00edcc0ddf47739431c56774f09b",
+    "source_artifact": 11690548807,
+    "source_run": 38109682481,
+    "source_commit": "c46925a",
+    "device": "iPhone 17",
+    "native_dimensions": [
+      1206,
+      2622
+    ],
+    "edited": false
+  }
+]
