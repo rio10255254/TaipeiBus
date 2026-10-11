@@ -148,7 +148,7 @@ struct CommuteWidgetView: View {
         VStack(spacing: 8) {
             ForEach(Array(entry.commutes.prefix(2).enumerated()), id: \.element.id) { index, commute in
                 if index > 0 { Divider() }
-                Link(destination: URL(string: "taipeibus://commute/\(commute.id)")!) { row(commute) }
+                Link(destination: URL(string: "taipeibus://commute/\(commute.id)")!) { row(commute) }.foregroundStyle(Color.primary)
             }
             if entry.commutes.count == 1 { Spacer(minLength: 0) }
         }

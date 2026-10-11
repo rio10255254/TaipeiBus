@@ -22,6 +22,8 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(settings.waitForExistence(timeout:25))
         settings.tap(); XCTAssertTrue(button("settings-pro").waitForExistence(timeout:10)); button("settings-pro").tap()
         XCTAssertTrue(button("pro-open-plans").waitForExistence(timeout:10)); button("pro-open-plans").tap()
+        // A tap during the settings push transition can be dropped; try once more.
+        if !button("pro-plan-monthly").waitForExistence(timeout:8), button("pro-open-plans").isHittable { button("pro-open-plans").tap() }
         XCTAssertTrue(button("pro-plan-monthly").waitForExistence(timeout:15))
     }
     func testTrialPricesAndExitKeepTheFreeAppAvailable() {
