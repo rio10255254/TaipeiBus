@@ -50,8 +50,12 @@ struct CommuteProvider: TimelineProvider {
             let entries = await Self.entries(at: now)
             // Bus times move; ask the feed again in ten minutes. Metro intervals and locked or
             // empty widgets only need an occasional refresh.
-            let live = entries.first.map { !$0.locked && $0.commutes.contains { $0.ride?.metro == false } } ?? false
-            completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(live ? 600 : 3600))))
+            let first = entries.first
+            let live = first.map { !$0.locked && $0.commutes.contains { $0.ride?.metro == false } } ?? false
+            // Ask again soon after the next bus is due, since the feed only times that one bus.
+            let due = first?.timings.values.compactMap(\.arrival).filter { $0 > now }.min().map { $0.addingTimeInterval(60) }
+            let next = live ? min(now.addingTimeInterval(600), due ?? .distantFuture) : now.addingTimeInterval(3600)
+            completion(Timeline(entries: entries, policy: .after(max(next, now.addingTimeInterval(120)))))
         }
     }
 
@@ -63,9 +67,12 @@ struct CommuteProvider: TimelineProvider {
             return [CommuteEntry(date: now, language: language, locked: true, commutes: commutes, timings: [:])]
         }
         let result = await EstimateLookup.timings(for: commutes, now: now)
-        return (0..<15).map { minute in
+        // One entry a minute; the last one stays on screen if the system refreshes late, and it
+        // is past the stale limit, so it asks for a tap instead of showing an old countdown.
+        let minutes = Int(CommuteEntry.staleAfter / 60)
+        return (0...minutes).map { minute in
             CommuteEntry(date: now.addingTimeInterval(Double(minute) * 60), language: language, locked: false,
-                         commutes: commutes, timings: result.timings, feedFailed: result.failed)
+                         commutes: commutes, timings: result.timings, feedFailed: result.failed, fetchedAt: now)
         }
     }
 
@@ -105,10 +112,10 @@ enum EstimateLookup {
         request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
         guard let (raw, response) = try? await URLSession.shared.data(for: request),
               (response as? HTTPURLResponse)?.statusCode == 200, let data = inflate(raw),
-              let updated = updateTime(data), now.timeIntervalSince(updated) < 600 else { return ([:], true) }
+              let updated = EstimateScan.updateTime(data), now.timeIntervalSince(updated) < 600 else { return ([:], true) }
         var timings: [String: CommuteTiming] = [:]
         for (id, ride) in wanted {
-            guard let value = estimate(in: data, route: ride.routeKey, stop: ride.stopID) else { continue }
+            guard let value = EstimateScan.estimate(in: data, route: ride.routeKey, stop: ride.stopID) else { continue }
             timings[id] = value >= 0 ? CommuteTiming(arrival: updated.addingTimeInterval(Double(value))) : CommuteTiming(status: value)
         }
         return (timings, false)
@@ -126,37 +133,6 @@ enum EstimateLookup {
         return Data(bytes: output, count: length)
     }
 
-    static func updateTime(_ data: Data) -> Date? {
-        guard let start = data.range(of: Data("\"UpdateTime\":\"".utf8)),
-              let end = data[start.upperBound..<min(data.endIndex, start.upperBound + 40)].firstIndex(of: UInt8(ascii: "\"")),
-              let text = String(data: data[start.upperBound..<end], encoding: .utf8) else { return nil }
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(identifier: "Asia/Taipei")
-        formatter.dateFormat = "yyyy/MM/dd HH:mm:ss"
-        return formatter.date(from: text)
-    }
-
-    /// Finds each `"StopID":<stop>` and decodes just its enclosing record.
-    static func estimate(in data: Data, route: String, stop: String) -> Int? {
-        let open = UInt8(ascii: "{"), close = UInt8(ascii: "}")
-        for needle in ["\"StopID\":" + stop, "\"StopID\":\"" + stop + "\""] {
-            var cursor = data.startIndex
-            let pattern = Data(needle.utf8)
-            while let match = data.range(of: pattern, in: cursor..<data.endIndex) {
-                cursor = match.upperBound
-                if match.upperBound < data.endIndex, (UInt8(ascii: "0")...UInt8(ascii: "9")).contains(data[match.upperBound]) { continue }
-                let lower = max(data.startIndex, match.lowerBound - 160), upper = min(data.endIndex, match.upperBound + 160)
-                guard let begin = data[lower..<match.lowerBound].lastIndex(of: open),
-                      let finish = data[match.upperBound..<upper].firstIndex(of: close),
-                      let row = try? JSONSerialization.jsonObject(with: data[begin...finish]) as? [String: Any],
-                      "\(row["RouteID"] ?? "")" == route else { continue }
-                let value = row["EstimateTime"]
-                if let number = value as? NSNumber { return number.intValue }
-                if let text = value as? String, let number = Int(text) { return number }
-            }
-        }
-        return nil
-    }
 }
 
 // MARK: The trip on the Lock Screen and in the Dynamic Island
@@ -164,7 +140,7 @@ enum EstimateLookup {
 struct RideLiveActivity: Widget {
     var body: some WidgetConfiguration {
         ActivityConfiguration(for: RideActivityAttributes.self) { context in
-            RideActivityLockView(state: context.state, attributes: context.attributes)
+            RideActivityLockView(state: context.state, attributes: context.attributes, stale: context.isStale)
                 .widgetURL(URL(string: "taipeibus://journey"))
         } dynamicIsland: { context in
             let state = context.state
@@ -174,7 +150,7 @@ struct RideLiveActivity: Widget {
                     RouteSignView(sign: state.sign, size: 16).padding(.leading, 4).padding(.top, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    RideCountdown(state: state, language: language, size: 24).padding(.trailing, 4)
+                    RideCountdown(state: state, language: language, size: 24, stale: context.isStale).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(state.headline).font(.headline).lineLimit(1)
@@ -198,7 +174,7 @@ struct RideLiveActivity: Widget {
             } compactTrailing: {
                 if state.phase == .riding, let left = state.stopsLeft {
                     Text(AppText.stops(left, language: language)).font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
-                } else if let target = state.target, target > state.updatedAt {
+                } else if !context.isStale, let target = state.target, target > state.updatedAt {
                     Text(timerInterval: state.updatedAt...target, countsDown: true)
                         .font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
                         .frame(maxWidth: 52)

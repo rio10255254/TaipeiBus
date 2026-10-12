@@ -78,6 +78,34 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertFalse(button("journey-board").exists)
         capture("pro-shortcut-opens-preview")
     }
+    /// End to end on the simulator: a Pro trip must actually create a system Live Activity, and it
+    /// must still be there (Dynamic Island) once the app is in the background.
+    func testProTripStartsARealLiveActivity() {
+        openPlans(); tapVisible("pro-purchase")
+        XCTAssertTrue(app.staticTexts["正在免費試用 Pro"].waitForExistence(timeout:20))
+        button("pro-close").tap()
+        let back = app.navigationBars.buttons.firstMatch
+        if back.waitForExistence(timeout:5) { back.tap() }
+        if button("完成").exists { button("完成").tap() }
+        button("home-destination-search").tap(); chooseNeihu()
+        XCTAssertTrue(firstOption.waitForExistence(timeout:150))
+        selectOptionAndStart(firstOption)
+        let state = app.staticTexts["debug-live-activity"]
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            state.exists && (state.label.hasPrefix("started") || state.label.hasPrefix("updated"))
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 60), .completed, "Live Activity state: \(state.exists ? state.label : "missing")")
+        capture("live-activity-trip-started")
+        XCUIDevice.shared.press(.home)
+        sleep(3)
+        capture("live-activity-dynamic-island")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let tree = XCTAttachment(string: springboard.debugDescription)
+        tree.name = "live-activity-springboard-elements"; tree.lifetime = .keepAlways; add(tree)
+        app.activate()
+        XCTAssertTrue(state.waitForExistence(timeout:10))
+        XCTAssertFalse(state.label == "ended", "Returning to the app must keep the trip's Live Activity")
+    }
     func testWidgetAndLiveActivityLayouts() {
         for english in [false, true] {
             launch(["--preview-widgets"] + (english ? ["--test-language","en"] : []))

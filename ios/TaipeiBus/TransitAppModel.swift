@@ -103,8 +103,19 @@ final class TransitAppModel: ObservableObject {
     /// iOS background navigation location, so the Live Activity's stops and countdown and the
     /// alighting reminder follow the real bus or train.
     var journeyInBackground: Bool {
-        purchases.hasPro && planner.started && !planner.arrived && !location.permissionDenied
+        purchases.hasPro && planner.started && !planner.arrived && !location.permissionDenied &&
+            (rideActivityOn || alightReminderOn)
     }
+    /// Pro setting: show the trip on the Lock Screen and in the Dynamic Island.
+    @Published var rideActivityOn: Bool = UserDefaults.standard.object(forKey: "rideActivityOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(rideActivityOn, forKey: "rideActivityOn"); if !rideActivityOn { rideActivity.endAll() } }
+    }
+#if DEBUG
+    /// Interface verification reads whether the system accepted the Live Activity.
+    @Published private(set) var rideActivityDebug = "none"
+#endif
+    /// A widget link that arrived before routes were loaded; opened once they are.
+    private var pendingSavedJourneyID: UUID?
     private var runsLiveWork: Bool { isActive || journeyInBackground }
     func updateLiveSurfaces() {
         // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
@@ -112,7 +123,11 @@ final class TransitAppModel: ObservableObject {
         location.setBackgroundNavigation(journeyInBackground)
         let now = Date()
         rideActivity.update(rideActivityState(at: now), destination: planner.destination?.localizedName ?? "",
-                            language: language, enabled: purchases.hasPro)
+                            language: language, enabled: purchases.hasPro && rideActivityOn)
+#if DEBUG
+        if rideActivityDebug != rideActivity.debugState { rideActivityDebug = rideActivity.debugState }
+#endif
+        openPendingSavedJourney()
         recordSavedJourneyRide()
         let proUntil = purchases.hasPro ? purchases.periodEndsAt ?? now.addingTimeInterval(3 * 86_400) : nil
         commuteWidget.publish(commuteWidget.payload(commutes.journeys, proUntil: proUntil, language: language, now: now))
@@ -126,14 +141,16 @@ final class TransitAppModel: ObservableObject {
         guard let id = activeSavedJourneyID else { return }
         guard let saved = commutes.journeys.first(where: { $0.id == id }),
               planner.destination?.coordinate == saved.destination.coordinate else { activeSavedJourneyID = nil; return }
-        guard let option = planner.selected, let ride = option.rides.first else { return }
-        commuteWidget.record(id, ride: widgetRide(ride, walkSeconds: option.walks.first?.duration ?? option.trip?.planningWalkSeconds.first ?? 0))
+        guard let option = planner.selected else { return }
+        let from = saved.origin?.coordinate ?? planner.origin?.coordinate
+        guard let ride = option.rides.first else { commuteWidget.record(id, ride: nil, from: from); return }
+        commuteWidget.record(id, ride: widgetRide(ride, walkSeconds: option.walks.first?.duration ?? option.trip?.planningWalkSeconds.first ?? 0), from: from)
     }
     /// One saved trip at a time, in the background, so the widget knows each trip's bus without
     /// the rider opening every trip first.
     private func planSavedJourneyForWidget() {
         guard purchases.hasPro, !widgetPlanning, !planner.planning, !metadata.routes.isEmpty,
-              let journey = commuteWidget.needsPlanning(commutes.journeys, now: Date()) else { return }
+              let journey = commuteWidget.needsPlanning(commutes.journeys, location: location.usableCoordinate, now: Date()) else { return }
         commuteWidget.markPlanned(journey.id)
         guard let from = journey.origin?.coordinate ?? location.usableCoordinate else { return }
         widgetPlanning = true
@@ -142,7 +159,11 @@ final class TransitAppModel: ObservableObject {
             guard let self else { return }
             let result = await self.planner.firstRide(metadata: metadata, from: from, to: journey.destination.coordinate, preferences: preferences)
             self.widgetPlanning = false
-            if let result { self.commuteWidget.record(journey.id, ride: self.widgetRide(result.ride, walkSeconds: result.walkSeconds)) }
+            switch result {
+            case .ride(let ride, let walk)?: self.commuteWidget.record(journey.id, ride: self.widgetRide(ride, walkSeconds: walk), from: from)
+            case .walk?: self.commuteWidget.record(journey.id, ride: nil, from: from)
+            case nil: break
+            }
         }
     }
     private func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
@@ -183,6 +204,12 @@ final class TransitAppModel: ObservableObject {
                          status: nil, stopsLeft: nil, totalStops: nil, updatedAt: now)
         }
     }
+    private func openPendingSavedJourney() {
+        guard let id = pendingSavedJourneyID, !metadata.routes.isEmpty else { return }
+        pendingSavedJourneyID = nil
+        guard !planner.started, let saved = commutes.journeys.first(where: { $0.id == id }) else { return }
+        previewSavedJourney(saved); showSavedJourneyRequested = true
+    }
     /// Links from the widget and the Live Activity.
     func open(_ url: URL) {
         guard url.scheme == "taipeibus" else { return }
@@ -190,8 +217,8 @@ final class TransitAppModel: ObservableObject {
         case "pro": if !purchases.hasPro { showingProPlans = true }
         case "commute":
             guard !planner.started, let id = UUID(uuidString: url.lastPathComponent),
-                  let saved = commutes.journeys.first(where: { $0.id == id }) else { return }
-            previewSavedJourney(saved); showSavedJourneyRequested = true
+                  commutes.journeys.contains(where: { $0.id == id }) else { return }
+            pendingSavedJourneyID = id; openPendingSavedJourney()
         default: break
         }
     }
@@ -551,6 +578,7 @@ final class TransitAppModel: ObservableObject {
                     applySnapshot(current)
                 }
                 metadata = try await prepared
+                openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
                 while !Task.isCancelled {

@@ -67,15 +67,22 @@ final class RideActivityController {
 /// widget asks the official feed for that stop's next arrival on its own schedule.
 @MainActor
 final class CommuteWidgetBridge {
+    /// What the widget watches for one saved trip, and where that plan started.
+    private struct Plan: Codable {
+        var ride: CommuteWidgetPayload.Ride?
+        var walkOnly: Bool
+        var from: Coordinate?
+    }
     private let defaults: UserDefaults
-    private let key = "widgetCommuteRides.v1"
-    private var rides: [String: CommuteWidgetPayload.Ride]
+    private let key = "widgetCommutePlans.v2"
+    private var plans: [String: Plan]
     private var planned: [String: Date] = [:]
     private var written: Data?
+    private var reloadedAt = Date.distantPast
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        rides = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([String: CommuteWidgetPayload.Ride].self, from: $0) } ?? [:]
+        plans = defaults.data(forKey: key).flatMap { try? JSONDecoder().decode([String: Plan].self, from: $0) } ?? [:]
     }
 
     static func ride(_ ride: TransitRide, walkSeconds: Double, headwaySeconds: Double?) -> CommuteWidgetPayload.Ride {
@@ -85,16 +92,29 @@ final class CommuteWidgetBridge {
             toward: AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction)),
             walkSeconds: max(0, walkSeconds), headwaySeconds: headwaySeconds)
     }
-    func record(_ id: UUID, ride: CommuteWidgetPayload.Ride) {
+    /// A planned trip: its first ride, or nil when walking is the whole trip.
+    func record(_ id: UUID, ride: CommuteWidgetPayload.Ride?, from: Coordinate?) {
         planned[id.uuidString] = Date()
-        guard rides[id.uuidString] != ride else { return }
-        rides[id.uuidString] = ride
-        if let bytes = try? JSONEncoder().encode(rides) { defaults.set(bytes, forKey: key) }
+        let plan = Plan(ride: ride, walkOnly: ride == nil, from: from)
+        if let old = plans[id.uuidString], old.ride == plan.ride, old.walkOnly == plan.walkOnly {
+            switch (old.from, from) {
+            case (nil, nil): return
+            case let (a?, b?) where a.distance(to: b) < 50: return
+            default: break
+            }
+        }
+        plans[id.uuidString] = plan
+        if let bytes = try? JSONEncoder().encode(plans) { defaults.set(bytes, forKey: key) }
     }
-    /// Saved trips the widget shows that have not been planned in this session for a while.
-    func needsPlanning(_ journeys: [SavedJourney], now: Date) -> SavedJourney? {
+    /// The next saved trip the widget shows whose plan is missing, old, or — for a trip from the
+    /// current location — was made somewhere else: "回家" from work starts at a different stop.
+    func needsPlanning(_ journeys: [SavedJourney], location: Coordinate?, now: Date) -> SavedJourney? {
         journeys.prefix(CommuteWidgetPayload.maximumCommutes).first { journey in
-            planned[journey.id.uuidString].map { now.timeIntervalSince($0) > 6 * 3600 } ?? true
+            let id = journey.id.uuidString
+            guard let last = planned[id] else { return true }
+            if now.timeIntervalSince(last) > 6 * 3600 { return true }
+            guard journey.origin == nil, now.timeIntervalSince(last) > 120, let location else { return false }
+            return plans[id]?.from.map { $0.distance(to: location) > 400 } ?? true
         }
     }
     func markPlanned(_ id: UUID) { planned[id.uuidString] = Date() }
@@ -102,18 +122,27 @@ final class CommuteWidgetBridge {
     func payload(_ journeys: [SavedJourney], proUntil: Date?, language: AppLanguage, now: Date) -> CommuteWidgetPayload {
         CommuteWidgetPayload(language: language.rawValue, proUntil: proUntil, updatedAt: now,
             commutes: journeys.prefix(CommuteWidgetPayload.maximumCommutes).map { journey in
-                CommuteWidgetPayload.Commute(id: journey.id.uuidString, title: journey.title, symbol: journey.symbol,
-                    destination: journey.destination.localizedName, ride: rides[journey.id.uuidString])
+                let plan = plans[journey.id.uuidString]
+                return CommuteWidgetPayload.Commute(id: journey.id.uuidString, title: journey.title, symbol: journey.symbol,
+                    destination: journey.destination.localizedName, ride: plan?.ride, walkOnly: plan?.walkOnly)
             })
     }
     func publish(_ payload: CommuteWidgetPayload) {
         var comparable = payload; comparable.updatedAt = .distantPast
         // Pro's end is rounded to the hour so a moving grace window does not rewrite the item.
         comparable.proUntil = payload.proUntil.map { Date(timeIntervalSinceReferenceDate: ($0.timeIntervalSinceReferenceDate / 3600).rounded(.down) * 3600) }
-        guard let signature = try? JSONEncoder().encode(comparable), signature != written,
-              let bytes = try? JSONEncoder().encode(payload) else { return }
-        written = signature
-        if SharedStore.write(bytes, account: SharedStore.commutesAccount) { WidgetCenter.shared.reloadAllTimelines() }
+        guard let signature = try? JSONEncoder().encode(comparable) else { return }
+        if signature != written, let bytes = try? JSONEncoder().encode(payload),
+           SharedStore.write(bytes, account: SharedStore.commutesAccount) {
+            written = signature; reload(); return
+        }
+        // While the app is open its reloads do not use the widget's daily refresh budget, so keep
+        // the Home Screen times fresh every few minutes.
+        if Date().timeIntervalSince(reloadedAt) > 300, payload.proUntil != nil { reload() }
+    }
+    private func reload() {
+        reloadedAt = Date()
+        WidgetCenter.shared.reloadTimelines(ofKind: "CommuteWidget")
     }
 }
 

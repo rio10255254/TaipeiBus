@@ -22,20 +22,22 @@ struct ProPurchaseView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment:.leading,spacing:22) {
-                    VStack(alignment:.leading,spacing:8) {
-                        Image(systemName:"sparkles").font(.system(size:34)).foregroundStyle(.blue)
-                        Text(AppText.text("台北公車 Pro")).font(.largeTitle.bold())
-                        Text(AppText.text("讓每天的通勤更順手。")) .foregroundStyle(.secondary)
+                    HStack(alignment:.center,spacing:12) {
+                        Image(systemName:"sparkles").font(.system(size:30)).foregroundStyle(.blue)
+                        VStack(alignment:.leading,spacing:2) {
+                            Text(AppText.text("台北公車 Pro")).font(.title.bold())
+                            Text(AppText.text("讓每天的通勤更順手。")).font(.subheadline).foregroundStyle(.secondary)
+                        }
                     }
-                    benefit("tram.fill",title:"即時捷運列車",detail:"全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。")
-                    benefit("scope",title:"跟隨鏡頭",detail:"鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。")
-                    benefit("bell.badge.fill",title:"下車提醒",detail:"快到下車站前通知並震動，手機放口袋也不會坐過站。")
-                    benefit("timer",title:"動態島與鎖定畫面",detail:"不用打開 App，就能看到等車倒數與還有幾站下車。")
-                    benefit("square.grid.2x2.fill",title:"桌面小工具",detail:"常用行程的下一班車與建議出門時間，直接顯示在主畫面。")
-                    benefit("house.fill",title:"常用行程捷徑",detail:"把回家、上班與常去的地方存好，一點就能預覽路線。")
-                    benefit("slider.horizontal.3",title:"個人路線偏好",detail:"選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。")
-                    Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。"))
-                        .font(.footnote).foregroundStyle(.secondary)
+                    // Everything Pro adds at a glance; the details follow below the purchase button.
+                    LazyVGrid(columns:[GridItem(.flexible(),spacing:8),GridItem(.flexible(),spacing:8)],alignment:.leading,spacing:8) {
+                        ForEach(Self.benefits,id:\.title) { item in
+                            Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8) }
+                                icon: { Image(systemName:item.symbol).foregroundStyle(.blue) }
+                                .frame(maxWidth:.infinity,minHeight:40,alignment:.leading).padding(.horizontal,12)
+                                .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:12))
+                        }
+                    }.accessibilityIdentifier("pro-benefit-grid")
                     if purchases.hasPro {
                         Label(AppText.text(purchases.isInTrial ? "正在免費試用 Pro" : "Pro 已開通"),systemImage:"checkmark.circle.fill").foregroundStyle(.green).font(.headline)
                         if let date = purchases.periodEndsAt {
@@ -52,7 +54,7 @@ struct ProPurchaseView: View {
                                         .foregroundStyle(selected == plan ? Color.blue : Color.secondary)
                                     Text(plan.title).fontWeight(.semibold)
                                     if plan == .yearly, let saving = yearlySaving {
-                                        Text(AppText.text("省 %@%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
+                                        Text(AppText.text("省 %@%%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
                                             .padding(.horizontal, 7).padding(.vertical, 3).background(Color.green, in: Capsule())
                                             .accessibilityIdentifier("pro-yearly-saving")
                                     }
@@ -98,6 +100,11 @@ struct ProPurchaseView: View {
                             .frame(minHeight:44).accessibilityIdentifier("pro-reload-products")
                     }
                     if let message = purchases.message { Text(message).font(.footnote).foregroundStyle(.secondary).accessibilityIdentifier("pro-purchase-message") }
+                    Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。"))
+                        .font(.footnote).foregroundStyle(.secondary)
+                    VStack(alignment:.leading,spacing:16) {
+                        ForEach(Self.benefits,id:\.title) { item in benefit(item.symbol,title:item.title,detail:item.detail) }
+                    }.padding(.top,4)
                     HStack(spacing:20) {
                         Button(AppText.text("恢復購買")) { Task { await purchases.restore() } }
                             .accessibilityIdentifier("pro-restore")
@@ -121,6 +128,15 @@ struct ProPurchaseView: View {
             if let active = purchases.activePlan { selected = active }
         }
     }
+    private static let benefits: [(symbol: String, title: String, detail: String)] = [
+        ("tram.fill","即時捷運列車","全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。"),
+        ("scope","跟隨鏡頭","鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。"),
+        ("bell.badge.fill","下車提醒","快到下車站前通知並震動，手機放口袋也不會坐過站。"),
+        ("timer","動態島與鎖定畫面","不用打開 App，就能看到等車倒數與還有幾站下車。"),
+        ("square.grid.2x2.fill","桌面小工具","常用行程的下一班車與建議出門時間，直接顯示在主畫面。"),
+        ("house.fill","常用行程捷徑","把回家、上班與常去的地方存好，一點就能預覽路線。"),
+        ("slider.horizontal.3","個人路線偏好","選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。"),
+    ]
     private func benefit(_ symbol: String,title: String,detail: String) -> some View {
         HStack(alignment:.top,spacing:14) {
             Image(systemName:symbol).font(.title2).foregroundStyle(.blue).frame(width:32)
@@ -160,6 +176,14 @@ struct ProSettingsView: View {
                 }
             }
             if model.planner.started { Text(AppText.text("新偏好會用於下一次規劃。")) .font(.footnote).foregroundStyle(.secondary) }
+            if purchases.hasPro {
+                Section {
+                    Toggle(AppText.text("動態島與鎖定畫面"), isOn: $model.rideActivityOn).accessibilityIdentifier("pro-ride-activity")
+                    Toggle(AppText.text("下車提醒"), isOn: $model.alightReminderOn).accessibilityIdentifier("pro-alight-reminder")
+                } header: { Text(AppText.text("導航")) } footer: {
+                    Text(AppText.text("導航進行中，App 會在背景持續定位與更新到站時間，讓鎖定畫面與下車提醒跟著車輛即時更新；行程結束即停止。桌面小工具：長按主畫面空白處，點「＋」，搜尋「台北公車」。"))
+                }
+            }
             Section {
                 Button(AppText.text("恢復購買")) { Task { await purchases.restore() } }
                 if let message = purchases.message { Text(message).font(.footnote).foregroundStyle(.secondary) }

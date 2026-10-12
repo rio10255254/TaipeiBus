@@ -90,6 +90,8 @@ struct TransitHomeView: View {
                 }
 
 #if DEBUG
+                Text(model.rideActivityDebug).font(.system(size: 1)).foregroundStyle(.clear)
+                    .frame(width: 1, height: 1).accessibilityIdentifier("debug-live-activity").allowsHitTesting(false)
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
                     Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)

@@ -1215,11 +1215,12 @@ struct JourneyGuideCard: View {
                             }.buttonStyle(MapActionStyle())
                                 .accessibilityLabel(model.alightReminderActive ? AppText.text("關閉下車提醒") : AppText.text("下車提醒"))
                                 .accessibilityIdentifier("journey-alight-reminder")
+                            // Icon-sized like the bell beside it, so the plate never has to shrink.
                             Button { showRideStops = true } label: {
-                                Label(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"), systemImage: "list.bullet").liveFont(.subheadline, weight: .semibold)
-                                    .lineLimit(1).padding(.horizontal, 14).frame(minHeight: 40)
+                                Image(systemName: "list.bullet").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
                             }
                             .buttonStyle(MapActionStyle(tint: Color.primary))
+                            .accessibilityLabel(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"))
                             .accessibilityIdentifier("journey-ride-stops")
                         }
                         if option.rides.indices.contains(index + 1) {

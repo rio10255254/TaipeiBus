@@ -59,6 +59,8 @@ struct CommuteWidgetPayload: Codable, Sendable {
         var symbol: String
         var destination: String
         var ride: Ride?
+        /// Planned, and walking is the whole trip: there is no bus to wait for.
+        var walkOnly: Bool?
     }
     var language: String
     var proUntil: Date?

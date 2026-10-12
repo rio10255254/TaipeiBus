@@ -577,7 +577,6 @@
   "訂閱 · %@／%@": "Subscribe · %@/%@",
   "月": "month",
   "年": "year",
-  "省 %@%": "Save %@%",
   "約 %@／月": "≈ %@/month",
   "約在 · ": "Near · ",
   "後續班次尚未回報位置": "Next bus has not reported a position yet",
@@ -622,5 +621,11 @@
   "動態島與鎖定畫面": "Dynamic Island and Lock Screen",
   "不用打開 App，就能看到等車倒數與還有幾站下車。": "See the countdown to your bus and how many stops are left without opening the app.",
   "桌面小工具": "Home Screen widget",
-  "常用行程的下一班車與建議出門時間，直接顯示在主畫面。": "The next bus for your saved trips and when to leave, right on your Home Screen."
+  "常用行程的下一班車與建議出門時間，直接顯示在主畫面。": "The next bus for your saved trips and when to leave, right on your Home Screen.",
+  "省 %@%%": "Save %@%%",
+  "點一下更新到站時間": "Tap to update arrival times",
+  "下一班時間更新中": "Updating the next bus",
+  "打開 App 更新": "Open the app to update",
+  "導航進行中，App 會在背景持續定位與更新到站時間，讓鎖定畫面與下車提醒跟著車輛即時更新；行程結束即停止。桌面小工具：長按主畫面空白處，點「＋」，搜尋「台北公車」。": "During a trip the app keeps using your location and arrival times in the background, so the Lock Screen and alighting reminder follow the vehicle; it stops when the trip ends. Widget: touch and hold an empty area of the Home Screen, tap +, and search for Taipei Bus.",
+  "導航": "Navigation"
 }

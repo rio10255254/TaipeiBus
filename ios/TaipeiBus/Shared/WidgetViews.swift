@@ -19,6 +19,11 @@ struct CommuteEntry: TimelineEntry {
     var commutes: [CommuteWidgetPayload.Commute]
     var timings: [String: CommuteTiming]
     var feedFailed = false
+    /// When the official times were read. An entry past `staleAfter` shows no countdown, because
+    /// the system may not refresh the widget again for a while and an old minute count misleads.
+    var fetchedAt: Date? = nil
+    static let staleAfter: TimeInterval = 14 * 60
+    var stale: Bool { fetchedAt.map { date.timeIntervalSince($0) >= Self.staleAfter } ?? false }
 }
 
 struct RouteSignView: View {
@@ -40,15 +45,21 @@ struct CommuteLine {
     let advice: String?
     let urgent: Bool
 
-    init(_ commute: CommuteWidgetPayload.Commute, timing: CommuteTiming?, at date: Date, language: AppLanguage, feedFailed: Bool) {
+    init(_ commute: CommuteWidgetPayload.Commute, timing: CommuteTiming?, at date: Date, language: AppLanguage,
+         feedFailed: Bool, stale: Bool = false) {
         guard let ride = commute.ride else {
-            main = "—"; advice = AppText.text("開啟 App 規劃一次此行程", language: language); urgent = false; return
+            if commute.walkOnly == true { main = AppText.text("步行即可", language: language); advice = nil }
+            else { main = "—"; advice = AppText.text("開啟 App 規劃一次此行程", language: language) }
+            urgent = false; return
         }
         if ride.metro {
             let minutes = ride.headwaySeconds.map { max(1, Int(($0 / 60).rounded())) }
             main = minutes.map { AppText.text("每 %@ 分一班", $0, language: language) } ?? AppText.text("捷運", language: language)
             advice = AppText.text("步行 %@ 分", max(1, Int(ceil(ride.walkSeconds / 60))), language: language)
             urgent = false; return
+        }
+        if stale {
+            main = "—"; advice = AppText.text("點一下更新到站時間", language: language); urgent = false; return
         }
         if let status = timing?.status, status < 0 {
             main = AppText.format(Self.statusKey(status), values: [], language: language)
@@ -60,6 +71,10 @@ struct CommuteLine {
             urgent = false; return
         }
         let seconds = arrival.timeIntervalSince(date)
+        // The feed only times the next bus. Once it is due, say so instead of a frozen "arriving".
+        if seconds < -90 {
+            main = "—"; advice = AppText.text("下一班時間更新中", language: language); urgent = false; return
+        }
         main = seconds <= 60 ? AppText.text("即將進站", language: language) : AppText.text("%@ 分", Int(ceil(seconds / 60)), language: language)
         let leave = seconds - ride.walkSeconds
         if leave >= 60 { advice = AppText.text("%@ 分後出門", Int(leave / 60), language: language); urgent = false }
@@ -90,7 +105,8 @@ struct CommuteWidgetView: View {
 
     private var language: AppLanguage { entry.language }
     private func line(_ commute: CommuteWidgetPayload.Commute) -> CommuteLine {
-        CommuteLine(commute, timing: entry.timings[commute.id], at: entry.date, language: language, feedFailed: entry.feedFailed)
+        CommuteLine(commute, timing: entry.timings[commute.id], at: entry.date, language: language,
+                    feedFailed: entry.feedFailed, stale: entry.stale)
     }
 
     private var locked: some View {
@@ -204,8 +220,12 @@ struct RideCountdown: View {
     let state: RideActivityAttributes.ContentState
     let language: AppLanguage
     var size: CGFloat = 28
+    var stale = false
     var body: some View {
-        if let target = state.target, target > state.updatedAt {
+        if stale {
+            Text(AppText.text("打開 App 更新", language: language))
+                .font(.system(size: size * 0.5, weight: .semibold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.6)
+        } else if let target = state.target, target > state.updatedAt {
             Text(timerInterval: state.updatedAt...target, countsDown: true)
                 .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
                 .multilineTextAlignment(.trailing)
@@ -219,6 +239,8 @@ struct RideCountdown: View {
 struct RideActivityLockView: View {
     let state: RideActivityAttributes.ContentState
     let attributes: RideActivityAttributes
+    /// The app stopped updating (for example it was closed); times would no longer be true.
+    var stale = false
     private var language: AppLanguage { AppLanguage(rawValue: attributes.language) ?? .traditionalChinese }
 
     var body: some View {
@@ -230,7 +252,7 @@ struct RideActivityLockView: View {
                     Text(state.headline).font(.headline).lineLimit(1)
                 }
                 Spacer(minLength: 6)
-                RideCountdown(state: state, language: language).frame(maxWidth: 120, alignment: .trailing)
+                RideCountdown(state: state, language: language, stale: stale).frame(maxWidth: 120, alignment: .trailing)
             }
             if let left = state.stopsLeft, let total = state.totalStops, total > 0 {
                 ProgressView(value: Double(max(0, total - left)), total: Double(total)).tint(Color(signHex: state.sign.color))
