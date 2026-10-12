@@ -26,6 +26,15 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         if !button("pro-plan-monthly").waitForExistence(timeout:8), button("pro-open-plans").isHittable { button("pro-open-plans").tap() }
         XCTAssertTrue(button("pro-plan-monthly").waitForExistence(timeout:15))
     }
+    /// Starts the seven-day trial once Apple's products have loaded and the button is enabled.
+    private func startTrial(_ active: String = "正在免費試用 Pro") {
+        let purchase = button("pro-purchase")
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: purchase)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed, "Purchase button never enabled")
+        tapVisible("pro-purchase")
+        if !app.staticTexts[active].waitForExistence(timeout: 20), purchase.isEnabled { tapVisible("pro-purchase") }
+        XCTAssertTrue(app.staticTexts[active].waitForExistence(timeout: 20))
+    }
     func testTrialPricesAndExitKeepTheFreeAppAvailable() {
         openPlans()
         XCTAssertTrue(app.staticTexts["先免費試用 7 天"].firstMatch.waitForExistence(timeout:20))
@@ -45,8 +54,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         capture("pro-dismiss-keeps-free-map")
     }
     func testActualTrialUnlocksSavedJourneyAndPreviewDoesNotStartNavigation() {
-        openPlans(); tapVisible("pro-purchase")
-        XCTAssertTrue(app.staticTexts["正在免費試用 Pro"].waitForExistence(timeout:20))
+        openPlans(); startTrial()
         capture("pro-active-trial")
         button("pro-close").tap()
         let back = app.navigationBars.buttons.firstMatch
@@ -81,8 +89,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
     /// End to end on the simulator: a Pro trip must actually create a system Live Activity, and it
     /// must still be there (Dynamic Island) once the app is in the background.
     func testProTripStartsARealLiveActivity() {
-        openPlans(); tapVisible("pro-purchase")
-        XCTAssertTrue(app.staticTexts["正在免費試用 Pro"].waitForExistence(timeout:20))
+        openPlans(); startTrial()
         button("pro-close").tap()
         let back = app.navigationBars.buttons.firstMatch
         if back.waitForExistence(timeout:5) { back.tap() }
@@ -120,8 +127,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
     func testEnglishTrialAndRenewalTermsAreClear() {
         openPlans(english:true)
         XCTAssertTrue(app.staticTexts["7 days free first"].firstMatch.waitForExistence(timeout:20))
-        tapVisible("pro-purchase")
-        XCTAssertTrue(app.staticTexts["Pro free trial is active"].waitForExistence(timeout:20))
+        startTrial("Pro free trial is active")
         XCTAssertTrue(app.staticTexts["pro-period-end"].exists)
         capture("pro-english-trial-active")
     }

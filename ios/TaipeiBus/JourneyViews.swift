@@ -1217,7 +1217,8 @@ struct JourneyGuideCard: View {
                                 .accessibilityIdentifier("journey-alight-reminder")
                             // Icon-sized like the bell beside it, so the plate never has to shrink.
                             Button { showRideStops = true } label: {
-                                Image(systemName: "list.bullet").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                                // Stops joined by a line, distinct from the itinerary list in the header.
+                                Image(systemName: "point.3.filled.connected.trianglepath.dotted").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
                             }
                             .buttonStyle(MapActionStyle(tint: Color.primary))
                             .accessibilityLabel(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"))

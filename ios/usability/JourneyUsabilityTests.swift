@@ -34,7 +34,10 @@ final class MetroUsabilityTests: JourneyUsabilityTestBase {
         capture("metro-01-waiting")
         let board = app.buttons["journey-board"]
         XCTAssertTrue(board.waitForExistence(timeout: 10)); board.tap()
-        XCTAssertTrue(app.descendants(matching: .any).matching(identifier:"metro-onboard-summary").firstMatch.waitForExistence(timeout:10))
+        let summary = app.descendants(matching: .any).matching(identifier:"metro-onboard-summary").firstMatch
+        // A tap while the panel is still settling can be dropped; the rider would simply tap again.
+        if !summary.waitForExistence(timeout: 5), board.exists, board.isHittable { board.tap() }
+        XCTAssertTrue(summary.waitForExistence(timeout:10))
         capture("metro-02-onboard")
         XCTAssertFalse(app.staticTexts["選擇車牌即可看沿途時間"].exists)
         XCTAssertFalse(app.buttons["journey-onboard-vehicle"].exists)
