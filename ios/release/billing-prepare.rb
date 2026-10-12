@@ -25,6 +25,11 @@ localize = ->(type,version_type,version,attributes) {
   values = client.all("/v1/#{version_type}/#{version}/localizations")
   existing = values.find { |row| row.dig('attributes','locale') == attributes.fetch(:locale) }
   if existing
+    # Keep the approved wording current; names and descriptions only, never the locale.
+    changes = attributes.reject { |field,value| field == :locale || existing.dig('attributes',field.to_s) == value }
+    unless changes.empty?
+      client.request(:patch,"/v2/#{type}/#{existing['id']}",{},data:{type:type,id:existing['id'],attributes:changes})
+    end
     next existing
   end
   create.call("/v2/#{type}",type,attributes,{version:link.call(version_type,version)})
@@ -79,7 +84,7 @@ begin
     version = version_for.call('subscriptions',item['id'],'subscriptionVersions',:subscription)
     row[:version_id] = version['id']; save.call
     client.request(:patch,"/v1/subscriptions/#{item['id']}",{},data:{type:'subscriptions',id:item['id'],attributes:{
-      reviewNote:'Open Information and settings > Taipei Bus Pro > View Pro plans. Both plans unlock saved commute shortcuts and personal route preferences. Eligible accounts receive one seven-day free trial per subscription group, then renew at the displayed Apple price. Core navigation, official arrivals and 3D tracking remain free. No app login is required.'}})
+      reviewNote:'Open Information and settings > Taipei Bus Pro > View Pro plans. Both plans unlock the same features: live metro trains, follow camera, alighting reminder, Lock Screen and Dynamic Island Live Activity, saved-trip widget, saved trips and route preferences. Eligible accounts receive one seven-day free trial per subscription group, then renew at the displayed Apple price. Route planning, navigation, official arrivals and the 3D bus map remain free. No app login is required.'}})
     [['zh-Hant',expected['period'] == 'ONE_MONTH' ? 'Pro 月費' : 'Pro 年費','即時捷運列車、跟隨鏡頭、下車提醒與常用行程'],
      ['en-US',expected['name'],'Live trains, follow camera, stop alerts, saved trips']].each do |locale,name,description|
       localize.call('subscriptionLocalizations','subscriptionVersions',version['id'],{locale:locale,name:name,description:description})
