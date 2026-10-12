@@ -23,7 +23,9 @@ final class RideActivityController {
 
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool) {
         guard enabled, let state else { endAll(); return }
-        if activity == nil { activity = Activity<RideActivityAttributes>.activities.first { $0.activityState == .active } }
+        if activity == nil, mayHaveActivities {
+            activity = Activity<RideActivityAttributes>.activities.first { $0.activityState == .active }
+        }
         if let current = activity, current.attributes.destination != destination || current.activityState != .active {
             endAll()
         }
@@ -32,7 +34,7 @@ final class RideActivityController {
             do {
                 activity = try Activity.request(attributes: RideActivityAttributes(destination: destination, language: language.rawValue),
                                                 content: ActivityContent(state: state, staleDate: Self.staleDate(state)), pushType: nil)
-                pushed = state; debugState = "started:" + state.phase.rawValue
+                pushed = state; mayHaveActivities = true; debugState = "started:" + state.phase.rawValue
             } catch { debugState = "unavailable" }
             return
         }
@@ -43,7 +45,12 @@ final class RideActivityController {
         }
     }
 
+    /// Whether an activity may exist (from this launch or a previous one), so the refresh loop
+    /// does not ask the system on every tick when there is nothing to end.
+    private var mayHaveActivities = true
     func endAll() {
+        guard mayHaveActivities || activity != nil else { return }
+        mayHaveActivities = false
         let running = Activity<RideActivityAttributes>.activities
         activity = nil; pushed = nil
         guard !running.isEmpty else { return }
@@ -132,9 +139,15 @@ final class CommuteWidgetBridge {
         // Pro's end is rounded to the hour so a moving grace window does not rewrite the item.
         comparable.proUntil = payload.proUntil.map { Date(timeIntervalSinceReferenceDate: ($0.timeIntervalSinceReferenceDate / 3600).rounded(.down) * 3600) }
         guard let signature = try? JSONEncoder().encode(comparable) else { return }
-        if signature != written, let bytes = try? JSONEncoder().encode(payload),
-           SharedStore.write(bytes, account: SharedStore.commutesAccount) {
-            written = signature; reload(); return
+        if signature != written, let bytes = try? JSONEncoder().encode(payload) {
+            // Keychain calls are synchronous; keep them off the main thread, and try each new
+            // payload once rather than on every refresh if the shared group is unavailable.
+            written = signature
+            Task.detached(priority: .utility) {
+                guard SharedStore.write(bytes, account: SharedStore.commutesAccount) else { return }
+                await MainActor.run { [weak self] in self?.reload() }
+            }
+            return
         }
         // While the app is open its reloads do not use the widget's daily refresh budget, so keep
         // the Home Screen times fresh every few minutes.

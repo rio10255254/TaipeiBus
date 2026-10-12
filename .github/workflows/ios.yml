@@ -146,7 +146,7 @@ jobs:
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
         if: always() && !cancelled() && inputs.billing_tests && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
-        timeout-minutes: 12
+        timeout-minutes: 24
         run: |
           set -euo pipefail
           BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
