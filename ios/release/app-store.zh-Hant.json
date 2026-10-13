@@ -1,7 +1,7 @@
 {
   "name": "台北公車動態",
   "subtitle": "公車在哪、多久到，打開就知道",
-  "description": "去站牌前，先看看公車到哪裡了。\n\n台北公車動態把附近站牌、官方到站時間與公車位置放在同一張地圖。選好方向，看看往這一站開來的車；點一個車牌，就能在 3D 地圖上看到那輛公車。\n\n想去某個地方，輸入地點或站名，就能比較公車與捷運的直達、轉乘方案。總時間包含步行、候車與搭車，並列出預計抵達時刻。車程參考各路線、各時段的官方站間資料，資料不足時會標示估計。\n\n導航把眼前要做的事放在地圖上方：走去哪個站牌、搭哪一班、還有多久到，或準備在哪一站下車。上車後確認實際車牌，就能查看下一站、沿途站牌、剩餘站數和下車時間預估。捷運高架與地下路段依實際結構分層顯示。\n\n【免費使用】\n路線規劃、導航、官方到站時間、站牌收藏與 3D 公車地圖都可免費使用，無需登入。\n\n【台北公車 Pro（選用訂閱）】\n• 即時捷運列車：全路網列車在地圖上移動，高架與地下分層顯示\n• 跟隨鏡頭：鏡頭跟在公車或列車後方\n• 下車提醒：快到下車站前通知並震動\n• 動態島與鎖定畫面：不用打開 App 就能看到等車倒數與還有幾站下車\n• 桌面小工具：常用行程的下一班車與建議出門時間\n• 常用行程捷徑與個人路線偏好\n免費版每天可試用 3 次即時列車或跟隨鏡頭。\n\n訂閱方案：月費 NT$39、年費 NT$390，兩者功能相同。符合資格的帳號可先免費試用 7 天，試用結束後依所選方案自動續訂。付款會在確認購買時向 Apple 帳號收取；除非在本期結束前至少 24 小時關閉自動續訂，否則會自動續訂並在本期結束前 24 小時內收取下一期費用。可隨時在 App Store 帳號設定中管理或取消訂閱。\n使用條款（EULA）：https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\n隱私政策：https://rio10255254.github.io/TaipeiBus/privacy.html\n\n導航進行中，App 會在背景持續使用定位以更新鎖定畫面與下車提醒；行程結束即停止。定位為選用權限，也能手動選擇出發地、站牌與路線。支援系統深色模式與 English，英文站名同時保留中文。\n\n公車資料來自臺北市公開資料服務及交通部運輸資料流通服務平臺（TDX），捷運資料來自臺北捷運公開資料；服務範圍依收錄路線而定。本 App 為獨立開發，並非政府、公車業者或臺北捷運官方 App。地圖為 MapLibre／OpenFreeMap（OpenStreetMap 資料），地點搜尋與步行路線由 Apple 地圖提供。",
+  "description": "去站牌前，先看看公車到哪裡了。\n\n台北公車動態把附近站牌、官方到站時間與公車位置放在同一張地圖。選好方向，看看往這一站開來的車；點一個車牌，就能在 3D 地圖上看到那輛公車。\n\n想去某個地方，輸入地點或站名，就能比較公車與捷運的直達、轉乘方案。總時間包含步行、候車與搭車，並列出預計抵達時刻。車程參考各路線、各時段的官方站間資料，資料不足時會標示估計。\n\n導航把眼前要做的事放在地圖上方：走去哪個站牌、搭哪一班、還有多久到，或準備在哪一站下車。上車後確認實際車牌，就能查看下一站、沿途站牌、剩餘站數和下車時間預估。捷運高架與地下路段依實際結構分層顯示。\n\n【免費使用】\n路線規劃、導航、官方到站時間、站牌收藏與 3D 公車地圖都可免費使用，無需登入。\n\n【台北公車 Pro（選用訂閱）】\n• 捷運列車動態：依官方進站資料推估位置，高架與地下分層顯示\n• 跟隨鏡頭：鏡頭跟在公車或列車後方\n• 下車提醒：快到下車站前通知並震動\n• 動態島與鎖定畫面：不用打開 App 就能看到等車倒數與還有幾站下車\n• 桌面小工具：常用行程的下一班車與建議出門時間\n• 常用行程捷徑與個人路線偏好\n免費版每天可試用 3 次即時列車或跟隨鏡頭。\n\n訂閱方案：月費 NT$39、年費 NT$390，兩者功能相同。符合資格的帳號可先免費試用 7 天，試用結束後依所選方案自動續訂。付款會在確認購買時向 Apple 帳號收取；除非在本期結束前至少 24 小時關閉自動續訂，否則會自動續訂並在本期結束前 24 小時內收取下一期費用。可隨時在 App Store 帳號設定中管理或取消訂閱。\n使用條款（EULA）：https://www.apple.com/legal/internet-services/itunes/dev/stdeula/\n隱私政策：https://rio10255254.github.io/TaipeiBus/privacy.html\n\n導航進行中，App 會在背景持續使用定位以更新鎖定畫面與下車提醒；行程結束即停止。定位為選用權限，也能手動選擇出發地、站牌與路線。支援系統深色模式與 English，英文站名同時保留中文。\n\n公車資料來自臺北市公開資料服務及交通部運輸資料流通服務平臺（TDX），捷運資料來自臺北捷運公開資料；服務範圍依收錄路線而定。本 App 為獨立開發，並非政府、公車業者或臺北捷運官方 App。地圖為 MapLibre／OpenFreeMap（OpenStreetMap 資料），地點搜尋與步行路線由 Apple 地圖提供。",
   "keywords": "3D,公車,台北,臺北,站牌,到站,倒數,路線,搭車,轉乘,通勤,捷運,地圖,追蹤,內湖,目的地",
   "promotionalText": "公車與捷運在哪、多久到，一張地圖接著看。Pro 新增動態島倒數、下車提醒與桌面小工具，免費版仍可規劃路線與導航。",
   "supportUrl": "https://rio10255254.github.io/TaipeiBus/support.html",
@@ -9,11 +9,15 @@
   "privacyPolicyUrl": "https://rio10255254.github.io/TaipeiBus/privacy.html",
   "copyright": "2026 Rio",
   "screenshotOrder": [
-    "01-live-bus.png",
-    "03-walking.png",
-    "04-onboard.png",
-    "05-plan.png",
-    "06-search.png"
+    "01-3d-bus.png",
+    "02-3d-metro.png",
+    "03-live-activity.png",
+    "04-route-planning.png",
+    "05-official-arrivals.png",
+    "06-walking.png",
+    "07-nearby-stops.png",
+    "08-route-search.png",
+    "09-city-map.png"
   ],
   "reviewNotes": "No account or login is required. Location permission is optional: departure can be chosen manually. The app serves Taipei public bus and metro routes. For review outside Taipei: open destination search, choose 捷運市政府站 as departure and 臺北車站 as destination, then tap 出發 to start navigation.\n\nAUTO-RENEWABLE SUBSCRIPTION (new in this version): \"Taipei Bus Pro\", group \"TaipeiBus Pro\", products com.rio10255254.TaipeiBus.pro.monthly (NT$39) and com.rio10255254.TaipeiBus.pro.yearly (NT$390), both with a 7-day free trial for eligible accounts and identical features. To view: tap the information button (資料來源與地圖設定) > 台北公車 Pro > 查看 Pro 方案. The paywall shows price, period, trial terms, Restore Purchases, Manage Subscription, Privacy Policy and Terms of Use (Apple standard EULA). Access comes only from StoreKit verified entitlements; there is no account or server.\n\nPro features: live metro trains and follow camera (free users get 3 tries per day), alighting reminder (local notification), Live Activity on the Lock Screen and Dynamic Island, a Home Screen widget for saved trips, saved trips and route preferences. Route planning, navigation, official arrivals and the 3D bus map stay free.\n\nBACKGROUND LOCATION (UIBackgroundModes: location): used only while a Pro user is navigating an active trip with the Live Activity or alighting reminder turned on. It keeps the stops-left count, countdown and alighting reminder updated while the phone is locked, shows the blue location indicator, and stops when the trip ends. Users can turn both features off in 台北公車 Pro settings. Location never leaves the device.\n\nThe widget reads saved trips from a shared keychain item and downloads Taipei's public arrival file directly. Live Activities are updated locally by the app; no push server is used.\n\nLive buses and official arrival estimates come from Taipei's public transport feeds; metro positions are estimated from Taipei Metro's open platform-arrival data and are labelled as estimates. The app uses MapLibre with OpenFreeMap/OpenStreetMap attribution; Apple MapKit provides place search and walking directions. Remote JSON content only updates existing strings and bounded settings; no executable code is downloaded. No advertising or tracking.",
   "whatsNew": "新增選用的「台北公車 Pro」訂閱（月費 NT$39、年費 NT$390，符合資格者可免費試用 7 天）：\n\n• 動態島與鎖定畫面：等車倒數、下車站與還有幾站，不用打開 App 也看得到。\n• 桌面小工具：常用行程的下一班車與建議出門時間。\n• 下車提醒：快到下車站前通知並震動。\n• 即時捷運列車與跟隨鏡頭（免費版每天可試用 3 次）。\n• 常用行程捷徑與個人路線偏好。\n\n所有人都能使用的改進：\n• 捷運加入路線規劃，高架與地下路段依實際結構分層顯示。\n• 出口建議、合併班距與更清楚的到站資料狀態。\n• 導航、搜尋與深色模式細節調整。"
