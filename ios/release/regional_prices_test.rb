@@ -54,4 +54,10 @@ class RegionalPricesTest < Minitest::Test
     assert_raises(TaipeiBusRelease::Error) { TaipeiBusRelease::RegionalPrices.new(@client).complete('month',@anchor,'39') }
     assert_empty @client.writes
   end
+  def test_explicit_repricing_updates_equalizations_but_never_taiwan_or_sales
+    result=TaipeiBusRelease::RegionalPrices.new(@client).complete('month',@anchor,'39',replace_equalizations:true)
+    assert_equal 150,result[:added_prices]
+    assert_equal ['TWN'],@client.sales
+    refute @client.writes.any? { |body| body.dig(:data,:relationships,:territory,:data,:id)=='TWN' }
+  end
 end

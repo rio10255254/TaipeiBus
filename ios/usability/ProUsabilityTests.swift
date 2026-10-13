@@ -41,7 +41,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         button("pro-plan-monthly").tap()
         capture("pro-monthly-seven-day-trial")
         button("pro-plan-yearly").tap()
-        XCTAssertTrue(button("pro-purchase").label.contains("7")); XCTAssertTrue(app.staticTexts["pro-trial-terms"].label.contains("290"))
+        XCTAssertTrue(button("pro-purchase").label.contains("7")); XCTAssertTrue(app.staticTexts["pro-trial-terms"].label.contains("390"))
         capture("pro-annual-seven-day-trial")
         XCTAssertTrue(button("pro-restore").exists); XCTAssertTrue(button("pro-manage").exists)
         button("pro-close").tap()

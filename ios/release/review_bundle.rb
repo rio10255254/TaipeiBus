@@ -23,7 +23,7 @@ module TaipeiBusRelease
         raise Error, 'Expected subscription or period is missing.' unless item && item.dig('attributes','subscriptionPeriod') == expected.fetch('period')
         prices = @client.all("/v1/subscriptions/#{item.fetch('id')}/prices", 'filter[territory]' => 'TWN', 'filter[planType]' => 'UPFRONT', 'include' => 'subscriptionPricePoint')
         today = Time.now.utc.strftime('%Y-%m-%d')
-        live_prices = prices.select { |row| row.dig('attributes','endDate').nil? && (row.dig('attributes','startDate').nil? || row.dig('attributes','startDate') <= today) }
+        live_prices = prices.select { |row| row.dig('attributes','endDate').nil? && row.dig('attributes','preserved') != true && (row.dig('attributes','startDate').nil? || row.dig('attributes','startDate') <= today) }
         raise Error, 'Expected active Taiwan price is missing.' if live_prices.empty?
         live_prices.each do |price|
           point_id = price.dig('relationships','subscriptionPricePoint','data','id')

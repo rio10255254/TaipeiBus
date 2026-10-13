@@ -31,6 +31,16 @@ unless version
 end
 abort 'The matching editable App Store version is missing.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
 write_metadata = version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+if version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
+  # READY_FOR_REVIEW is still an unsent draft. Verify that fact before changing
+  # its wording for the user-approved annual-price adjustment.
+  drafts = client.all("/v1/apps/#{app_id}/reviewSubmissions")
+  write_metadata = drafts.any? do |draft|
+    next false unless draft.dig('attributes','state') == 'READY_FOR_REVIEW' && draft.dig('attributes','submittedDate').nil?
+    client.all("/v1/reviewSubmissions/#{draft.fetch('id')}/items",'include'=>'appStoreVersion').any? { |item| item.dig('relationships','appStoreVersion','data','id') == version.fetch('id') }
+  end
+  abort 'The editable app version is not part of an unsent draft.' unless write_metadata
+end
 version_id = version.fetch('id')
 infos = client.all("/v1/apps/#{app_id}/appInfos")
 info = infos.find { |row| row.dig('attributes', 'state') == 'PREPARE_FOR_SUBMISSION' || row.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION' }

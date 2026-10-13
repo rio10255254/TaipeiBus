@@ -111,7 +111,16 @@ begin
     existing_prices = client.all("/v1/subscriptions/#{item['id']}/prices",'filter[territory]'=>config['territory'],'filter[planType]'=>'UPFRONT','include'=>'subscriptionPricePoint')
     exact = existing_prices.any? { |value| value.dig('relationships','subscriptionPricePoint','data','id') == price['id'] }
     if !exact && !existing_prices.empty?
-      row[:status] = 'existing_price_requires_review'; save.call; next
+      previous = expected['approved_previous_draft_price']
+      # Only change an unsubmitted draft, from the exact former price approved by the user.
+      editable = %w[MISSING_METADATA READY_TO_SUBMIT].include?(item.dig('attributes','state'))
+      permitted = previous && editable && existing_prices.all? do |value|
+        old_point = client.request(:get,"/v1/subscriptionPricePoints/#{value.dig('relationships','subscriptionPricePoint','data','id')}").fetch('data')
+        BigDecimal(old_point.dig('attributes','customerPrice')) == BigDecimal(previous)
+      end
+      unless permitted
+        row[:status] = 'existing_price_requires_review'; save.call; next
+      end
     end
     unless exact
       create.call('/v1/subscriptionPrices','subscriptionPrices',{startDate:nil,planType:'UPFRONT',preserveCurrentPrice:true},
@@ -119,7 +128,7 @@ begin
     end
     row[:price_point_id] = price['id']; row[:configured_price] = price.dig('attributes','customerPrice')
     if config['production_submission_authorized'] == true
-      row[:regional_price_table] = TaipeiBusRelease::RegionalPrices.new(client).complete(item['id'],price,expected['price'])
+      row[:regional_price_table] = TaipeiBusRelease::RegionalPrices.new(client).complete(item['id'],price,expected['price'],replace_equalizations:!expected['approved_previous_draft_price'].nil?)
       save.call
     end
     trial = config.fetch('trial')
