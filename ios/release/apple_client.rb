@@ -64,6 +64,31 @@ module TaipeiBusRelease
           # Do not echo server error details that may contain request data.
           parsed = JSON.parse(response.body) rescue {}
           safe = Array(parsed['errors']).first(3).map { |item| {code:item['code'],title:item['title'],pointer:item.dig('source','pointer')} }
+          # Only public catalog/draft validation paths may preserve field-level diagnostics.
+          # Never retain authentication, review-contact or account-finance response details.
+          if value.path.match?(%r{\A/v[12]/(?:reviewSubmissionItems|subscriptionVersions|subscriptionGroupVersions|subscriptionLocalizations|subscriptionGroupLocalizations|subscriptionPrices|appScreenshots|appScreenshotSets|territoryAvailabilities)(?:/|\z)})
+            safe.each_with_index do |item,index|
+              original = Array(parsed['errors'])[index]
+              detail = original['detail'].to_s
+              item[:detail] = detail[0,1500] unless detail.match?(/password|private.?key|bearer|contactEmail|contactPhone/i)
+              associated = original.dig('meta','associatedErrors')
+              item[:meta_keys] = original['meta'].keys if original['meta'].is_a?(Hash)
+              if associated
+                # Apple's field-validation report is nested under associatedErrors.
+                clean = lambda do |value, depth|
+                  next nil if depth > 5
+                  case value
+                  when Array then value.first(12).map { |entry| clean.call(entry,depth+1) }
+                  when Hash then value.first(20).to_h.transform_values { |entry| clean.call(entry,depth+1) }
+                  when String
+                    value.match?(/password|private.?key|bearer|contactEmail|contactPhone/i) ? '[withheld]' : value[0,1200]
+                  else value
+                  end
+                end
+                item[:associated_errors] = clean.call(associated,0)
+              end
+            end
+          end
           raise Error.new("App Store Connect HTTP #{response.code}. Check key role, app access and Apple agreements.",diagnostics:safe)
         end
         return response.body.to_s.empty? ? {} : JSON.parse(response.body)

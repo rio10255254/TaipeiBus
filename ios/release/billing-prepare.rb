@@ -2,6 +2,7 @@ require_relative 'apple_client'
 require 'bigdecimal'
 require 'date'
 require 'digest'
+require_relative 'regional_prices'
 
 # Creates only the user-approved draft catalog. No review submission or contract acceptance.
 config = JSON.parse(File.read(File.join(__dir__,'billing.json')))
@@ -22,6 +23,10 @@ version_for = ->(parent_type,parent,version_type,relationship) {
     values.first || create.call("/v1/#{version_type}",version_type,{}, {relationship=>link.call(parent_type,parent)})
 }
 localize = ->(type,version_type,version,attributes) {
+  if type == 'subscriptionLocalizations'
+    raise TaipeiBusRelease::Error,'Subscription name must contain 2 to 30 characters.' unless attributes.fetch(:name).length.between?(2,30)
+    raise TaipeiBusRelease::Error,'Subscription description exceeds Apple limit of 45 characters.' unless attributes.fetch(:description).length.between?(1,45)
+  end
   values = client.all("/v1/#{version_type}/#{version}/localizations")
   existing = values.find { |row| row.dig('attributes','locale') == attributes.fetch(:locale) }
   if existing
@@ -42,8 +47,11 @@ review_screenshot = ->(subscription,plan) {
   existing = client.request(:get,"/v1/subscriptions/#{subscription}/appStoreReviewScreenshot")['data']
   checksum = Digest::MD5.hexdigest(bytes)
   if existing
-    raise TaipeiBusRelease::Error,'Existing review screenshot needs review before replacement.' unless existing.dig('attributes','sourceFileChecksum') == checksum
-    next existing['id']
+    next existing['id'] if existing.dig('attributes','sourceFileChecksum') == checksum
+    state = client.request(:get,"/v1/subscriptions/#{subscription}").dig('data','attributes','state')
+    raise TaipeiBusRelease::Error,'Review screenshot replacement was not authorized for this draft.' unless config['review_screenshots_replace_authorized'] == true && %w[MISSING_METADATA READY_TO_SUBMIT].include?(state)
+    # Only a reviewed local native capture may replace the unsubmitted draft image.
+    client.request(:delete,"/v1/subscriptionAppStoreReviewScreenshots/#{existing['id']}")
   end
   shot = create.call('/v1/subscriptionAppStoreReviewScreenshots','subscriptionAppStoreReviewScreenshots',
     {fileName:File.basename(file),fileSize:bytes.bytesize},{subscription:link.call('subscriptions',subscription)})
@@ -57,6 +65,14 @@ review_screenshot = ->(subscription,plan) {
     raise TaipeiBusRelease::Error,'Apple review image upload failed.' unless response.is_a?(Net::HTTPSuccess)
   end
   client.request(:patch,"/v1/subscriptionAppStoreReviewScreenshots/#{shot['id']}",{},data:{type:'subscriptionAppStoreReviewScreenshots',id:shot['id'],attributes:{uploaded:true,sourceFileChecksum:checksum}})
+  deadline = Time.now + 300
+  loop do
+    saved = client.request(:get,"/v1/subscriptionAppStoreReviewScreenshots/#{shot['id']}").fetch('data')
+    break if saved.dig('attributes','assetDeliveryState','state') == 'COMPLETE'
+    raise TaipeiBusRelease::Error,'Apple review screenshot failed processing.' if saved.dig('attributes','assetDeliveryState','state') == 'FAILED'
+    raise TaipeiBusRelease::Error,'Apple review screenshot processing is still pending.' if Time.now > deadline
+    sleep 10
+  end
   shot['id']
 }
 begin
@@ -86,7 +102,7 @@ begin
     client.request(:patch,"/v1/subscriptions/#{item['id']}",{},data:{type:'subscriptions',id:item['id'],attributes:{
       reviewNote:'Open Information and settings > Taipei Bus Pro > View Pro plans. Both plans unlock the same features: live metro trains, follow camera, alighting reminder, Lock Screen and Dynamic Island Live Activity, saved-trip widget, saved trips and route preferences. Eligible accounts receive one seven-day free trial per subscription group, then renew at the displayed Apple price. Route planning, navigation, official arrivals and the 3D bus map remain free. No app login is required.'}})
     [['zh-Hant',expected['period'] == 'ONE_MONTH' ? 'Pro 月費' : 'Pro 年費','即時捷運列車、跟隨鏡頭、下車提醒與常用行程'],
-     ['en-US',expected['name'],'Live trains, follow camera, stop alerts, saved trips']].each do |locale,name,description|
+     ['en-US',expected['name'],'Live trains, trip widgets and stop alerts']].each do |locale,name,description|
       localize.call('subscriptionLocalizations','subscriptionVersions',version['id'],{locale:locale,name:name,description:description})
     end
     points = client.all("/v1/subscriptions/#{item['id']}/pricePoints",'filter[territory]'=>config['territory'],'limit'=>'200')
@@ -106,13 +122,26 @@ begin
     existing_prices = client.all("/v1/subscriptions/#{item['id']}/prices",'filter[territory]'=>config['territory'],'filter[planType]'=>'UPFRONT','include'=>'subscriptionPricePoint')
     exact = existing_prices.any? { |value| value.dig('relationships','subscriptionPricePoint','data','id') == price['id'] }
     if !exact && !existing_prices.empty?
-      row[:status] = 'existing_price_requires_review'; save.call; next
+      previous = expected['approved_previous_draft_price']
+      # Only change an unsubmitted draft, from the exact former price approved by the user.
+      editable = %w[MISSING_METADATA READY_TO_SUBMIT].include?(item.dig('attributes','state'))
+      permitted = previous && editable && existing_prices.all? do |value|
+        old_point = client.request(:get,"/v1/subscriptionPricePoints/#{value.dig('relationships','subscriptionPricePoint','data','id')}").fetch('data')
+        BigDecimal(old_point.dig('attributes','customerPrice')) == BigDecimal(previous)
+      end
+      unless permitted
+        row[:status] = 'existing_price_requires_review'; save.call; next
+      end
     end
     unless exact
       create.call('/v1/subscriptionPrices','subscriptionPrices',{startDate:nil,planType:'UPFRONT',preserveCurrentPrice:true},
         {subscription:link.call('subscriptions',item['id']),subscriptionPricePoint:link.call('subscriptionPricePoints',price['id']),territory:link.call('territories',config['territory'])})
     end
     row[:price_point_id] = price['id']; row[:configured_price] = price.dig('attributes','customerPrice')
+    if config['production_submission_authorized'] == true
+      row[:regional_price_table] = TaipeiBusRelease::RegionalPrices.new(client).complete(item['id'],price,expected['price'],replace_equalizations:!expected['approved_previous_draft_price'].nil?)
+      save.call
+    end
     trial = config.fetch('trial')
     if trial['approved'] && trial['days'] == 7 && trial['mode'] == 'FREE_TRIAL'
       offers = client.all("/v1/subscriptions/#{item['id']}/introductoryOffers",'include'=>'territory')

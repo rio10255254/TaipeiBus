@@ -41,7 +41,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         button("pro-plan-monthly").tap()
         capture("pro-monthly-seven-day-trial")
         button("pro-plan-yearly").tap()
-        XCTAssertTrue(button("pro-purchase").label.contains("7")); XCTAssertTrue(app.staticTexts["pro-trial-terms"].label.contains("290"))
+        XCTAssertTrue(button("pro-purchase").label.contains("7")); XCTAssertTrue(app.staticTexts["pro-trial-terms"].label.contains("390"))
         capture("pro-annual-seven-day-trial")
         XCTAssertTrue(button("pro-restore").exists); XCTAssertTrue(button("pro-manage").exists)
         button("pro-close").tap()
@@ -61,15 +61,24 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         if back.waitForExistence(timeout:5) { back.tap() }
         if button("完成").exists { button("完成").tap() }
         button("home-destination-search").tap(); chooseNeihu()
+        XCTAssertTrue(firstOption.waitForExistence(timeout:150), "Wait for the route sheet to settle before opening its menu")
         let more = button("journey-plan-more")
         XCTAssertTrue(more.waitForExistence(timeout:30)); more.tap()
         let saveAction = button("journey-save-pro")
         XCTAssertTrue(saveAction.waitForExistence(timeout:10))
-        // The system menu reports an invalid activation point while presented
-        // above a detented sheet. Use the visible row's actual centre.
-        saveAction.coordinate(withNormalizedOffset:CGVector(dx:0.5,dy:0.5)).tap()
-        capture("pro-save-action-selected")
         let title = app.textFields["commute-title"]
+        // A system menu above a detented sheet can move while the sheet settles.
+        // Tap its current on-screen bounds, then retry only if the menu is still
+        // visible (the previous tap did not select anything).
+        for _ in 0..<2 {
+            let frame = saveAction.frame
+            XCTAssertTrue(app.frame.contains(CGPoint(x:frame.midX,y:frame.midY)))
+            app.coordinate(withNormalizedOffset:.zero)
+                .withOffset(CGVector(dx:frame.midX,dy:frame.midY)).tap()
+            if title.waitForExistence(timeout:10) { break }
+            guard saveAction.exists && saveAction.isHittable else { break }
+        }
+        capture("pro-save-action-selected")
         XCTAssertTrue(title.waitForExistence(timeout:10)); title.tap()
         if let text = title.value as? String { title.typeText(String(repeating:XCUIKeyboardKey.delete.rawValue,count:text.count)) }
         title.typeText("回家")

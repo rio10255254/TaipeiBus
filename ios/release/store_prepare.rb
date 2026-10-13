@@ -1,4 +1,10 @@
 require_relative 'apple_client'
+require_relative 'review_bundle'
+
+at_exit do
+  error = $!
+  warn JSON.generate(error.diagnostics) if error.is_a?(TaipeiBusRelease::Error)
+end
 
 # Uses only Apple's documented public API. Review contact values stay in the
 # repository secret and the Apple review record, never in logs or artifacts.
@@ -28,19 +34,47 @@ unless version
     relationships: { app: { data: { type: 'apps', id: app_id } } }
   }).fetch('data')
 end
-abort 'The matching editable App Store version is missing.' unless version && version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
+abort 'The matching editable App Store version is missing.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
+write_metadata = version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+if version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
+  # READY_FOR_REVIEW is still an unsent draft. Verify that fact before changing
+  # its wording for the user-approved annual-price adjustment.
+  drafts = client.all("/v1/apps/#{app_id}/reviewSubmissions")
+  write_metadata = drafts.any? do |draft|
+    next false unless draft.dig('attributes','state') == 'READY_FOR_REVIEW' && draft.dig('attributes','submittedDate').nil?
+    client.all("/v1/reviewSubmissions/#{draft.fetch('id')}/items",'include'=>'appStoreVersion').any? { |item| item.dig('relationships','appStoreVersion','data','id') == version.fetch('id') }
+  end
+  abort 'The editable app version is not part of an unsent draft.' unless write_metadata
+end
 version_id = version.fetch('id')
+# Restore the explicitly approved Taiwan storefront if Apple currently has no
+# storefront enabled. Never silently disable an existing foreign storefront.
+availability = client.request(:get,"/v1/apps/#{app_id}/appAvailabilityV2").fetch('data')
+territories_path = "/v2/appAvailabilities/#{availability.fetch('id')}/territoryAvailabilities"
+territories = client.all(territories_path, include:'territory',limit:'200')
+enabled = territories.select { |row| row.dig('attributes','available') }.map { |row| row.dig('relationships','territory','data','id') }
+abort 'Unexpected existing storefronts require review.' unless (enabled - ['TWN']).empty? && availability.dig('attributes','availableInNewTerritories') == false
+taiwan = territories.find { |row| row.dig('relationships','territory','data','id') == 'TWN' }
+abort 'Taiwan storefront record is missing.' unless taiwan
+unless taiwan.dig('attributes','available')
+  client.request(:patch,"/v1/territoryAvailabilities/#{taiwan.fetch('id')}",{},data:{
+    type:'territoryAvailabilities',id:taiwan.fetch('id'),attributes:{available:true}})
+end
+saved_territories = client.all(territories_path, include:'territory',limit:'200')
+abort 'Apple did not confirm Taiwan-only availability.' unless saved_territories.select { |row| row.dig('attributes','available') }.map { |row| row.dig('relationships','territory','data','id') } == ['TWN']
 infos = client.all("/v1/apps/#{app_id}/appInfos")
 info = infos.find { |row| row.dig('attributes', 'state') == 'PREPARE_FOR_SUBMISSION' || row.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION' }
 local_info = info && client.all("/v1/appInfos/#{info.fetch('id')}/appInfoLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
 local_version = client.all("/v1/appStoreVersions/#{version_id}/appStoreVersionLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
 unless local_version
+  abort 'A prepared review draft must already have its localization.' unless write_metadata
   local_version = client.request(:post, '/v1/appStoreVersionLocalizations', {}, data: {
     type: 'appStoreVersionLocalizations', attributes: { locale: config.fetch('locale') },
     relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: version_id } } }
   }).fetch('data')
 end
 
+if write_metadata
 client.request(:patch, "/v1/apps/#{app_id}", {}, data: {
   type: 'apps', id: app_id, attributes: { contentRightsDeclaration: 'USES_THIRD_PARTY_CONTENT' }
 })
@@ -76,6 +110,7 @@ client.request(:patch, "/v1/appStoreVersions/#{version_id}", {}, data: {
   attributes: { copyright: copy.fetch('copyright'), releaseType: 'AFTER_APPROVAL' },
   relationships: { build: { data: { type: 'builds', id: build.fetch('id') } } }
 })
+end
 
 saved_app = client.request(:get, "/v1/apps/#{app_id}").fetch('data')
 privacy_info = local_info || infos.flat_map { |item| client.all("/v1/appInfos/#{item.fetch('id')}/appInfoLocalizations") }.find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
@@ -96,4 +131,14 @@ receipt = { app_id: app_id, version: release.version, version_id: version_id,
   privacy_policy_url: copy.fetch('privacyPolicyUrl'), localization_id: local_version.fetch('id'),
   description_verified: true, whats_new_verified: true, subtitle_updated: !local_info.nil?, captured_at: Time.now.utc.iso8601 }
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-receipt.json'), JSON.pretty_generate(receipt) + "\n")
+begin
+  billing = JSON.parse(File.read(File.join(__dir__,'billing.json')))
+  receipt.merge!(TaipeiBusRelease::ReviewBundle.new(client,billing).prepare(version_id))
+  receipt[:status] = 'metadata_build_and_review_bundle_prepared'
+rescue TaipeiBusRelease::Error => error
+  receipt.merge!(status:'review_bundle_requires_metadata',error:error.message,diagnostics:error.diagnostics)
+  raise
+ensure
+  File.write(File.join(ENV.fetch('RUNNER_TEMP'),'app-store-receipt.json'),JSON.pretty_generate(receipt)+"\n")
+end
 puts "Verified App Store metadata and exact build #{release.version} (#{build_number}); contact values withheld."

@@ -37,7 +37,7 @@ final class ProPurchaseTests: XCTestCase {
         let monthly = try XCTUnwrap(manager.products[ProPlan.monthly.productID])
         let yearly = try XCTUnwrap(manager.products[ProPlan.yearly.productID])
         XCTAssertTrue(ProPlan.monthly.accepts(monthly)); XCTAssertTrue(ProPlan.yearly.accepts(yearly))
-        XCTAssertEqual(monthly.price,Decimal(39)); XCTAssertEqual(yearly.price,Decimal(290))
+        XCTAssertEqual(monthly.price,Decimal(39)); XCTAssertEqual(yearly.price,Decimal(390))
         XCTAssertEqual(monthly.subscription?.subscriptionGroupID,yearly.subscription?.subscriptionGroupID)
         for product in [monthly,yearly] {
             let offer = try XCTUnwrap(product.subscription?.introductoryOffer)

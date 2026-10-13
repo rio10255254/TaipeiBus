@@ -1,5 +1,11 @@
 require_relative 'apple_client'
+require_relative 'review_bundle'
 require 'digest'
+
+at_exit do
+  error = $!
+  warn JSON.generate(error.diagnostics) if error.is_a?(TaipeiBusRelease::Error)
+end
 
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
 copy = JSON.parse(File.read(File.join(__dir__, 'app-store.zh-Hant.json')))
@@ -9,7 +15,7 @@ client = TaipeiBusRelease::Client.new(key_id: ENV.fetch('ASC_KEY_ID'), issuer_id
 release = TaipeiBusRelease::Release.new(client, config)
 app_id = release.app.fetch('id')
 version = client.all("/v1/apps/#{app_id}/appStoreVersions").find { |v| v.dig('attributes', 'versionString') == release.version && v.dig('attributes', 'platform') == 'IOS' }
-abort 'Only the matching editable update can receive screenshots.' unless version && version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
+abort 'Only the matching editable update can receive screenshots.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
 locale = client.all("/v1/appStoreVersions/#{version.fetch('id')}/appStoreVersionLocalizations").find { |v| v.dig('attributes', 'locale') == config.fetch('locale') }
 abort 'Update localization is missing.' unless locale
 files = copy.fetch('screenshotOrder').map { |name| File.join(__dir__, 'screenshots', name) }
@@ -18,6 +24,9 @@ files.each do |path|
   bytes = File.binread(path)
   abort 'Screenshot must be a 1320 x 2868 PNG.' unless bytes[0, 8] == "\x89PNG\r\n\x1A\n".b && bytes[16, 8].unpack('NN') == [1320, 2868]
 end
+billing = JSON.parse(File.read(File.join(__dir__, 'billing.json')))
+bundle = TaipeiBusRelease::ReviewBundle.new(client, billing)
+draft_id = bundle.reopen_app_for_assets(version.fetch('id'))
 sets = client.all("/v1/appStoreVersionLocalizations/#{locale.fetch('id')}/appScreenshotSets")
 set = sets.find { |s| s.dig('attributes', 'screenshotDisplayType') == 'APP_IPHONE_67' }
 set ||= client.request(:post, '/v1/appScreenshotSets', {}, data: {
@@ -65,4 +74,5 @@ loop do
 end
 ordered = files.map { |file| shots.find { |s| s.dig('attributes', 'fileName') == File.basename(file) }.fetch('id') }
 client.request(:patch, "#{path.sub('/appScreenshots', '')}/relationships/appScreenshots", {}, data: ordered.map { |id| { type: 'appScreenshots', id: id } })
+bundle.restore_app_after_assets(version.fetch('id'), draft_id)
 puts "Verified #{ordered.length} processed screenshots on update #{release.version}."

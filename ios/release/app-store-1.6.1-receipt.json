@@ -1,0 +1,124 @@
+{
+  "app_id": "6818475740",
+  "version": "1.6.1",
+  "version_id": "f927f07b-a7e1-48aa-bb8f-3aa2bfd7ec39",
+  "enabled_territories": [
+    "TWN"
+  ],
+  "price": 0,
+  "currency": "TWD",
+  "automatic_release": true,
+  "screenshot_set_id": "9637619c-dacf-4882-9d50-03f4694bc061",
+  "screenshots": [
+    {
+      "id": "20400019-669a-8edc-802d-0bbd28993c75",
+      "file_name": "01-3d-bus.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "206e1622ad01235eb61e3029bfa653a1"
+    },
+    {
+      "id": "e3400019-669a-8edc-8026-ca51dd380285",
+      "file_name": "02-3d-metro.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "21f2f97f9e9cacb5b96a7e8e8bf85508"
+    },
+    {
+      "id": "0e400019-669a-8edc-8007-1603cb929c27",
+      "file_name": "03-live-activity.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "bdd793e397e2ea9bbbbc9728c99302c0"
+    },
+    {
+      "id": "96800019-669a-8edc-8027-5cac104b356a",
+      "file_name": "04-route-planning.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "0479ea23331c88d6c3a1639537e26d08"
+    },
+    {
+      "id": "d0000019-669a-8edc-8032-d7331f5083e3",
+      "file_name": "05-official-arrivals.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "61e968e779968db2747a308413d97478"
+    },
+    {
+      "id": "00800019-669a-8edc-8024-cca8eaf64f6b",
+      "file_name": "06-walking.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "682e127b052d9756511d6f026cd1e82f"
+    },
+    {
+      "id": "d2c00019-669a-8edc-800c-9ab897e2fa16",
+      "file_name": "07-nearby-stops.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "4a574c398d325af29ecaa332d5594397"
+    },
+    {
+      "id": "a0c00019-669a-8edc-8035-45d275bd6d58",
+      "file_name": "08-route-search.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "8d295f5ee81cd9165ec953c9bf6af20b"
+    },
+    {
+      "id": "4c000019-669a-8edc-802d-2d794ad4d9bd",
+      "file_name": "09-city-map.png",
+      "state": "COMPLETE",
+      "width": 1320,
+      "height": 2868,
+      "checksum": "0a580daa989ba47fb518197bb7310d72"
+    }
+  ],
+  "metadata_verified": true,
+  "checked_at": "2026-10-13T08:22:23Z",
+  "submission_id": "80221239-b886-418b-8585-57736cf3ef6f",
+  "targets": [
+    {
+      "relationship": "appStoreVersion",
+      "type": "appStoreVersions",
+      "id": "f927f07b-a7e1-48aa-bb8f-3aa2bfd7ec39"
+    },
+    {
+      "relationship": "subscriptionVersion",
+      "type": "subscriptionVersions",
+      "id": "6f6ccb17-264b-40e3-9f63-874065088eb8",
+      "product_id": "com.rio10255254.TaipeiBus.pro.monthly",
+      "product_state": "READY_TO_SUBMIT"
+    },
+    {
+      "relationship": "subscriptionVersion",
+      "type": "subscriptionVersions",
+      "id": "92a062d3-d8a0-4c48-9975-b1d8e6887bdf",
+      "product_id": "com.rio10255254.TaipeiBus.pro.yearly",
+      "product_state": "READY_TO_SUBMIT"
+    },
+    {
+      "relationship": "subscriptionGroupVersion",
+      "type": "subscriptionGroupVersions",
+      "id": "ae7d0774-a63b-4624-89a5-71956ef93122"
+    }
+  ],
+  "items_verified": true,
+  "status": "submitted_for_app_review",
+  "submission_state": "WAITING_FOR_REVIEW",
+  "build_id": "75d864ea-39d0-4323-b4c9-cdedb0b3f6ce",
+  "submitted_at": "2026-10-13T08:22:40Z",
+  "state_before_submission": "READY_FOR_REVIEW",
+  "build_number": "98.1.0",
+  "source_commit": "1215147e4283f18a9b0d02f7228d218dc290fc2d",
+  "release_run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38368775583"
+}
