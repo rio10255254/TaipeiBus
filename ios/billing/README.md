@@ -10,7 +10,7 @@ free. Merely selecting a bus, or boarding, never spends a try. The counter is lo
 | Product | Taiwan renewal price | Introductory offer |
 | --- | --- | --- |
 | `com.rio10255254.TaipeiBus.pro.monthly` | NT$39 / month | 7 days free |
-| `com.rio10255254.TaipeiBus.pro.yearly` | NT$290 / year | 7 days free |
+| `com.rio10255254.TaipeiBus.pro.yearly` | NT$390 / year | 7 days free |
 
 Apple determines eligibility once per subscription group. Product prices and
 offers shown in the app come from StoreKit, never from a hardcoded price label.

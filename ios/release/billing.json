@@ -10,5 +10,6 @@
   ],
   "trial": {"days":7,"duration":"ONE_WEEK","mode":"FREE_TRIAL","territory":"TWN","approved":true},
   "first_review_required": true,
+  "review_screenshots_replace_authorized": true,
   "production_submission_authorized": true
 }

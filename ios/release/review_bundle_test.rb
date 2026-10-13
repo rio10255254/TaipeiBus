@@ -36,7 +36,7 @@ class ReviewBundleTest < Minitest::Test
     end
     def request(method,path,query={},body=nil)
       if method == :get
-        return {'data'=>row(path.end_with?('mp') ? 'mp' : 'yp',customerPrice:path.end_with?('mp') ? @price : '290')} if path.start_with?('/v1/subscriptionPricePoints/')
+        return {'data'=>row(path.end_with?('mp') ? 'mp' : 'yp',customerPrice:path.end_with?('mp') ? @price : '390')} if path.start_with?('/v1/subscriptionPricePoints/')
         return {'data'=>row('shot',assetDeliveryState:{'state'=>@screenshot_state})} if path.end_with?('/appStoreReviewScreenshot')
         raise "Unexpected GET #{path}"
       end
@@ -58,7 +58,7 @@ class ReviewBundleTest < Minitest::Test
     @client = CatalogClient.new
     @config = {'app_id'=>'app','group_name'=>'Pro','production_submission_authorized'=>true,'products'=>[
       {'product_id'=>'pro.monthly','period'=>'ONE_MONTH','price'=>'39'},
-      {'product_id'=>'pro.yearly','period'=>'ONE_YEAR','price'=>'290'}]}
+      {'product_id'=>'pro.yearly','period'=>'ONE_YEAR','price'=>'390'}]}
   end
   def bundle = TaipeiBusRelease::ReviewBundle.new(@client,@config)
   def test_complete_draft_contains_app_group_and_both_plans_but_is_not_submitted

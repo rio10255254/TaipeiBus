@@ -47,8 +47,11 @@ review_screenshot = ->(subscription,plan) {
   existing = client.request(:get,"/v1/subscriptions/#{subscription}/appStoreReviewScreenshot")['data']
   checksum = Digest::MD5.hexdigest(bytes)
   if existing
-    raise TaipeiBusRelease::Error,'Existing review screenshot needs review before replacement.' unless existing.dig('attributes','sourceFileChecksum') == checksum
-    next existing['id']
+    next existing['id'] if existing.dig('attributes','sourceFileChecksum') == checksum
+    state = client.request(:get,"/v1/subscriptions/#{subscription}").dig('data','attributes','state')
+    raise TaipeiBusRelease::Error,'Review screenshot replacement was not authorized for this draft.' unless config['review_screenshots_replace_authorized'] == true && %w[MISSING_METADATA READY_TO_SUBMIT].include?(state)
+    # Only a reviewed local native capture may replace the unsubmitted draft image.
+    client.request(:delete,"/v1/subscriptionAppStoreReviewScreenshots/#{existing['id']}")
   end
   shot = create.call('/v1/subscriptionAppStoreReviewScreenshots','subscriptionAppStoreReviewScreenshots',
     {fileName:File.basename(file),fileSize:bytes.bytesize},{subscription:link.call('subscriptions',subscription)})
@@ -62,6 +65,14 @@ review_screenshot = ->(subscription,plan) {
     raise TaipeiBusRelease::Error,'Apple review image upload failed.' unless response.is_a?(Net::HTTPSuccess)
   end
   client.request(:patch,"/v1/subscriptionAppStoreReviewScreenshots/#{shot['id']}",{},data:{type:'subscriptionAppStoreReviewScreenshots',id:shot['id'],attributes:{uploaded:true,sourceFileChecksum:checksum}})
+  deadline = Time.now + 300
+  loop do
+    saved = client.request(:get,"/v1/subscriptionAppStoreReviewScreenshots/#{shot['id']}").fetch('data')
+    break if saved.dig('attributes','assetDeliveryState','state') == 'COMPLETE'
+    raise TaipeiBusRelease::Error,'Apple review screenshot failed processing.' if saved.dig('attributes','assetDeliveryState','state') == 'FAILED'
+    raise TaipeiBusRelease::Error,'Apple review screenshot processing is still pending.' if Time.now > deadline
+    sleep 10
+  end
   shot['id']
 }
 begin
