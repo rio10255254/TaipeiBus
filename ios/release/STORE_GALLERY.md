@@ -1,4 +1,28 @@
-# App Store gallery for 1.2.0
+# App Store gallery for 1.6.1
+
+The approved nine-image gallery accompanies 1.6.1 (98.1.0). Its exact order is
+in `app-store.zh-Hant.json`; the source and rendered SHA-256 values, dimensions,
+capture runs and crop descriptions are in `screenshots/manifest.json`.
+
+The first three images feature the 3D bus, estimated metro position and actual
+Dynamic Island. All six user-provided app screenshots are retained. Two native
+captures add route comparison and walking; the Dynamic Island image also shows
+the actual Pro paywall with monthly NT$39, annual NT$390 and seven-day trial.
+Only the user's Dynamic Island region is included from their Home Screen.
+Unrelated app icons and notifications are excluded. Metro positions are labelled
+as estimates; haptic reminders depend on iPhone notification and haptic settings.
+
+The six physical-device originals are 588 × 1280 compressed images, approved by
+the user for publication. Their fine-text resolution is limited by those originals.
+All final assets are RGB 1320 × 2868 PNGs. No app controls, arrival values or
+vehicle positions were fabricated or redrawn. The route-comparison image omits
+only the simulator status bar so its UTC clock does not conflict with Taipei ETA.
+
+The older renderer and `screenshot-sources` below belong to the 1.2.0 gallery;
+do not use them to replace the approved 1.6.1 images. The release uploader reads
+only the nine names in `screenshotOrder`, regardless of retained historical files.
+
+## Historical 1.2.0 capture workflow
 
 Five reviewed images accompany the exact 1.2.0 (52.1.0) submission. Capture
 provenance is recorded in `screenshots/manifest.json`; Apple confirmation is

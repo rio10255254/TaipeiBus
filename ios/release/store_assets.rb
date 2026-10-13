@@ -1,6 +1,11 @@
 require_relative 'apple_client'
 require 'digest'
 
+at_exit do
+  error = $!
+  warn JSON.generate(error.diagnostics) if error.is_a?(TaipeiBusRelease::Error)
+end
+
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
 copy = JSON.parse(File.read(File.join(__dir__, 'app-store.zh-Hant.json')))
 abort 'Public release is not enabled.' if config['distribution'] == 'testflight-only'
