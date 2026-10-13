@@ -1,4 +1,5 @@
 require_relative 'apple_client'
+require_relative 'review_bundle'
 require 'digest'
 
 at_exit do
@@ -23,6 +24,9 @@ files.each do |path|
   bytes = File.binread(path)
   abort 'Screenshot must be a 1320 x 2868 PNG.' unless bytes[0, 8] == "\x89PNG\r\n\x1A\n".b && bytes[16, 8].unpack('NN') == [1320, 2868]
 end
+billing = JSON.parse(File.read(File.join(__dir__, 'billing.json')))
+bundle = TaipeiBusRelease::ReviewBundle.new(client, billing)
+draft_id = bundle.reopen_app_for_assets(version.fetch('id'))
 sets = client.all("/v1/appStoreVersionLocalizations/#{locale.fetch('id')}/appScreenshotSets")
 set = sets.find { |s| s.dig('attributes', 'screenshotDisplayType') == 'APP_IPHONE_67' }
 set ||= client.request(:post, '/v1/appScreenshotSets', {}, data: {
@@ -70,4 +74,5 @@ loop do
 end
 ordered = files.map { |file| shots.find { |s| s.dig('attributes', 'fileName') == File.basename(file) }.fetch('id') }
 client.request(:patch, "#{path.sub('/appScreenshots', '')}/relationships/appScreenshots", {}, data: ordered.map { |id| { type: 'appScreenshots', id: id } })
+bundle.restore_app_after_assets(version.fetch('id'), draft_id)
 puts "Verified #{ordered.length} processed screenshots on update #{release.version}."

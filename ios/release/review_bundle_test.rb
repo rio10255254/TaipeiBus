@@ -4,10 +4,11 @@ require_relative 'review_bundle'
 class ReviewBundleTest < Minitest::Test
   class CatalogClient
     attr_reader :writes
-    attr_accessor :price, :screenshot_state, :drop_item, :state
+    attr_accessor :price, :screenshot_state, :drop_item, :state, :submitted_date
     def initialize
       @writes, @items, @created = [], [], false
       @price = '39'; @screenshot_state = 'COMPLETE'; @state = 'READY_FOR_REVIEW'
+      @app_state, @counter = 'READY_FOR_REVIEW', 0
     end
     def all(path, query = {})
       case path
@@ -27,7 +28,7 @@ class ReviewBundleTest < Minitest::Test
       when %r{/v1/subscriptions/(month|year)/versions}
         [row(path.include?('month') ? 'mv' : 'yv',version:1,state:'PREPARE_FOR_SUBMISSION')]
       when %r{/v1/subscriptionVersions/(mv|yv)/localizations} then localizations
-      when '/v1/apps/app/reviewSubmissions' then @created ? [row('draft',state:@state,platform:'IOS')] : []
+      when '/v1/apps/app/reviewSubmissions' then @created ? [row('draft',state:@state,platform:'IOS',submittedDate:@submitted_date)] : []
       when '/v1/reviewSubmissions/draft/items'
         raise 'Review items must request their version linkages' unless query['include'] == 'appStoreVersion,subscriptionVersion,subscriptionGroupVersion'
         @items
@@ -36,18 +37,27 @@ class ReviewBundleTest < Minitest::Test
     end
     def request(method,path,query={},body=nil)
       if method == :get
+        return {'data'=>row('app-version',appStoreState:@app_state)} if path == '/v1/appStoreVersions/app-version'
+        return {'data'=>row('draft',state:@state,submittedDate:@submitted_date)} if path == '/v1/reviewSubmissions/draft'
         return {'data'=>row(path.end_with?('mp') ? 'mp' : 'yp',customerPrice:path.end_with?('mp') ? @price : '390')} if path.start_with?('/v1/subscriptionPricePoints/')
         return {'data'=>row('shot',assetDeliveryState:{'state'=>@screenshot_state})} if path.end_with?('/appStoreReviewScreenshot')
         raise "Unexpected GET #{path}"
       end
       @writes << [method,path,body]
+      if method == :delete && path.start_with?('/v1/reviewSubmissionItems/')
+        @items.reject! { |item| item['id'] == path.split('/').last }
+        @app_state = 'PREPARE_FOR_SUBMISSION'
+        return {}
+      end
       if path == '/v1/reviewSubmissions'
         @created = true
         return {'data'=>row('draft',state:@state,platform:'IOS')}
       end
       raise 'Only draft item creation is allowed' unless method == :post && path == '/v1/reviewSubmissionItems'
       relationships = JSON.parse(JSON.generate(body.fetch(:data).fetch(:relationships)))
-      @items << {'id'=>"item-#{@items.length}",'relationships'=>relationships} unless @drop_item
+      @counter += 1
+      @items << {'id'=>"item-#{@counter}",'relationships'=>relationships} unless @drop_item
+      @app_state = 'READY_FOR_REVIEW' if relationships['appStoreVersion']
       {'data'=>@items.last || {}}
     end
     def row(id, **attributes) = {'id'=>id,'attributes'=>attributes.transform_keys(&:to_s)}
@@ -90,5 +100,29 @@ class ReviewBundleTest < Minitest::Test
   def test_production_requires_the_human_authorization_flag
     assert_raises(TaipeiBusRelease::Error) { TaipeiBusRelease::ReviewBundle.new(@client,@config.merge('production_submission_authorized'=>false)) }
     assert_empty @client.writes
+  end
+  def test_screenshot_edit_detaches_only_the_app_and_restores_the_same_draft
+    bundle.prepare('app-version'); @client.writes.clear
+    draft = bundle.reopen_app_for_assets('app-version')
+    assert_equal 'draft', draft
+    assert_equal 1, @client.writes.length
+    assert_equal :delete, @client.writes.first[0]
+    bundle.restore_app_after_assets('app-version', draft)
+    @client.writes.clear
+    assert bundle.prepare('app-version')[:items_verified]
+    assert_empty @client.writes
+  end
+  def test_screenshot_edit_never_withdraws_a_sent_submission
+    bundle.prepare('app-version'); @client.writes.clear
+    @client.submitted_date = '2026-10-13T08:00:00Z'
+    assert_raises(TaipeiBusRelease::Error) { bundle.reopen_app_for_assets('app-version') }
+    assert_empty @client.writes
+  end
+  def test_interrupted_screenshot_edit_rejoins_the_existing_subscription_bundle
+    bundle.prepare('app-version')
+    bundle.reopen_app_for_assets('app-version'); @client.writes.clear
+    assert_equal 'draft', bundle.prepare('app-version')[:submission_id]
+    assert_equal 1, @client.writes.length
+    assert_equal '/v1/reviewSubmissionItems', @client.writes.first[1]
   end
 end

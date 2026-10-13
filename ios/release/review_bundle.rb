@@ -57,6 +57,13 @@ module TaipeiBusRelease
         items_by_id[row.fetch('id')] = review_items(row.fetch('id'))
         items_by_id[row.fetch('id')].any? { |item| item.dig('relationships','appStoreVersion','data','id') == app_version_id }
       end
+      # A screenshot edit temporarily detaches only the app item. Resume the same
+      # unsent bundle if an interrupted upload left its subscriptions in place.
+      submission ||= submissions.find do |row|
+        next false unless row.dig('attributes','state') == 'READY_FOR_REVIEW' && row.dig('attributes','submittedDate').nil?
+        existing = items_by_id[row.fetch('id')] ||= review_items(row.fetch('id'))
+        !existing.empty? && existing.all? { |item| targets.any? { |target| item.dig('relationships',target.fetch(:relationship).to_s,'data','id') == target.fetch(:id) } }
+      end
       submission ||= submissions.find { |row| row.dig('attributes','state') == 'READY_FOR_REVIEW' && row.dig('attributes','platform') == 'IOS' && (items_by_id[row.fetch('id')] ||= review_items(row.fetch('id'))).empty? }
       submission ||= @client.request(:post,'/v1/reviewSubmissions',{},data:{type:'reviewSubmissions',attributes:{platform:'IOS'},relationships:{app:{data:{type:'apps',id:@config.fetch('app_id')}}}}).fetch('data')
       items = items_by_id[submission.fetch('id')] || []
@@ -74,6 +81,40 @@ module TaipeiBusRelease
       saved = review_items(submission.fetch('id'))
       raise Error, 'Review draft does not contain the complete authorized bundle.' unless targets.all? { |target| saved.any? { |item| item.dig('relationships',target.fetch(:relationship).to_s,'data','id') == target.fetch(:id) } }
       {submission_id:submission.fetch('id'),targets:targets,items_verified:true}
+    end
+
+    def reopen_app_for_assets(app_version_id)
+      version = @client.request(:get,"/v1/appStoreVersions/#{app_version_id}").fetch('data')
+      return nil if version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+      raise Error, 'Screenshots may only change on an unsent version.' unless version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
+      owner = nil
+      @client.all("/v1/apps/#{@config.fetch('app_id')}/reviewSubmissions").each do |submission|
+        next unless submission.dig('attributes','state') == 'READY_FOR_REVIEW' && submission.dig('attributes','submittedDate').nil?
+        item = review_items(submission.fetch('id')).find { |row| row.dig('relationships','appStoreVersion','data','id') == app_version_id }
+        next unless item
+        raise Error, 'More than one draft owns the app version.' if owner
+        owner = [submission.fetch('id'), item.fetch('id')]
+      end
+      raise Error, 'No unsent review draft owns the editable app version.' unless owner
+      @client.request(:delete,"/v1/reviewSubmissionItems/#{owner.last}")
+      20.times do
+        saved = @client.request(:get,"/v1/appStoreVersions/#{app_version_id}").fetch('data')
+        return owner.first if saved.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+        sleep 2
+      end
+      raise Error, 'Apple has not reopened the version for screenshot editing.'
+    end
+
+    def restore_app_after_assets(app_version_id, submission_id)
+      return unless submission_id
+      submission = @client.request(:get,"/v1/reviewSubmissions/#{submission_id}").fetch('data')
+      raise Error, 'Cannot restore an app item into a sent submission.' unless submission.dig('attributes','state') == 'READY_FOR_REVIEW' && submission.dig('attributes','submittedDate').nil?
+      unless review_items(submission_id).any? { |item| item.dig('relationships','appStoreVersion','data','id') == app_version_id }
+        @client.request(:post,'/v1/reviewSubmissionItems',{},data:{type:'reviewSubmissionItems',relationships:{
+          reviewSubmission:{data:{type:'reviewSubmissions',id:submission_id}},
+          appStoreVersion:{data:{type:'appStoreVersions',id:app_version_id}}}})
+      end
+      raise Error, 'App item was not restored after screenshot editing.' unless review_items(submission_id).any? { |item| item.dig('relationships','appStoreVersion','data','id') == app_version_id }
     end
 
     private
