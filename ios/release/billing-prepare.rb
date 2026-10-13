@@ -22,6 +22,10 @@ version_for = ->(parent_type,parent,version_type,relationship) {
     values.first || create.call("/v1/#{version_type}",version_type,{}, {relationship=>link.call(parent_type,parent)})
 }
 localize = ->(type,version_type,version,attributes) {
+  if type == 'subscriptionLocalizations'
+    raise TaipeiBusRelease::Error,'Subscription name must contain 2 to 30 characters.' unless attributes.fetch(:name).length.between?(2,30)
+    raise TaipeiBusRelease::Error,'Subscription description exceeds Apple limit of 45 characters.' unless attributes.fetch(:description).length.between?(1,45)
+  end
   values = client.all("/v1/#{version_type}/#{version}/localizations")
   existing = values.find { |row| row.dig('attributes','locale') == attributes.fetch(:locale) }
   if existing
@@ -86,7 +90,7 @@ begin
     client.request(:patch,"/v1/subscriptions/#{item['id']}",{},data:{type:'subscriptions',id:item['id'],attributes:{
       reviewNote:'Open Information and settings > Taipei Bus Pro > View Pro plans. Both plans unlock the same features: live metro trains, follow camera, alighting reminder, Lock Screen and Dynamic Island Live Activity, saved-trip widget, saved trips and route preferences. Eligible accounts receive one seven-day free trial per subscription group, then renew at the displayed Apple price. Route planning, navigation, official arrivals and the 3D bus map remain free. No app login is required.'}})
     [['zh-Hant',expected['period'] == 'ONE_MONTH' ? 'Pro 月費' : 'Pro 年費','即時捷運列車、跟隨鏡頭、下車提醒與常用行程'],
-     ['en-US',expected['name'],'Live trains, follow camera, stop alerts, saved trips']].each do |locale,name,description|
+     ['en-US',expected['name'],'Live trains, trip widgets and stop alerts']].each do |locale,name,description|
       localize.call('subscriptionLocalizations','subscriptionVersions',version['id'],{locale:locale,name:name,description:description})
     end
     points = client.all("/v1/subscriptions/#{item['id']}/pricePoints",'filter[territory]'=>config['territory'],'limit'=>'200')
