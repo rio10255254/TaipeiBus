@@ -2,6 +2,7 @@ require_relative 'apple_client'
 require 'bigdecimal'
 require 'date'
 require 'digest'
+require_relative 'regional_prices'
 
 # Creates only the user-approved draft catalog. No review submission or contract acceptance.
 config = JSON.parse(File.read(File.join(__dir__,'billing.json')))
@@ -117,6 +118,10 @@ begin
         {subscription:link.call('subscriptions',item['id']),subscriptionPricePoint:link.call('subscriptionPricePoints',price['id']),territory:link.call('territories',config['territory'])})
     end
     row[:price_point_id] = price['id']; row[:configured_price] = price.dig('attributes','customerPrice')
+    if config['production_submission_authorized'] == true
+      row[:regional_price_table] = TaipeiBusRelease::RegionalPrices.new(client).complete(item['id'],price,expected['price'])
+      save.call
+    end
     trial = config.fetch('trial')
     if trial['approved'] && trial['days'] == 7 && trial['mode'] == 'FREE_TRIAL'
       offers = client.all("/v1/subscriptions/#{item['id']}/introductoryOffers",'include'=>'territory')
