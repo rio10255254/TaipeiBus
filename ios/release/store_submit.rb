@@ -1,4 +1,5 @@
 require_relative 'apple_client'
+require_relative 'review_bundle'
 
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
 abort 'Public release is not enabled.' if config['distribution'] == 'testflight-only'
@@ -12,26 +13,9 @@ build_id = version.dig('relationships', 'build', 'data', 'id')
 abort 'Expected build is missing.' unless build_id
 build = client.request(:get, "/v1/builds/#{build_id}").fetch('data')
 abort 'The selected build differs from the authorized exact build.' unless build.dig('attributes', 'version') == ENV.fetch('BUS_BUILD_NUMBER') && build.dig('attributes', 'processingState') == 'VALID' && build.dig('attributes', 'expired') == false
-submissions = client.all("/v1/apps/#{verification.fetch('app_id')}/reviewSubmissions")
-items_by_submission = {}
-submission = submissions.find do |s|
-  %w[READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW].include?(s.dig('attributes', 'state')) &&
-    (items_by_submission[s.fetch('id')] = client.all("/v1/reviewSubmissions/#{s.fetch('id')}/items", include: 'appStoreVersion'))
-      .any? { |i| i.dig('relationships', 'appStoreVersion', 'data', 'id') == version_id }
-end
-unless submission
-  abort 'Update is not editable for submission.' unless version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
-  submission = submissions.find { |s| s.dig('attributes', 'platform') == 'IOS' && s.dig('attributes', 'state') == 'READY_FOR_REVIEW' && items_by_submission[s.fetch('id')] == [] }
-  submission ||= client.request(:post, '/v1/reviewSubmissions', {}, data: {
-    type: 'reviewSubmissions', attributes: { platform: 'IOS' }, relationships: { app: { data: { type: 'apps', id: verification.fetch('app_id') } } }
-  }).fetch('data')
-  client.request(:post, '/v1/reviewSubmissionItems', {}, data: {
-    type: 'reviewSubmissionItems', relationships: {
-      reviewSubmission: { data: { type: 'reviewSubmissions', id: submission.fetch('id') } },
-      appStoreVersion: { data: { type: 'appStoreVersions', id: version_id } }
-    }
-  })
-end
+billing = JSON.parse(File.read(File.join(__dir__,'billing.json')))
+bundle = TaipeiBusRelease::ReviewBundle.new(client,billing).prepare(version_id)
+submission = client.request(:get,"/v1/reviewSubmissions/#{bundle.fetch(:submission_id)}").fetch('data')
 if submission.dig('attributes', 'state') == 'READY_FOR_REVIEW'
   client.request(:patch, "/v1/reviewSubmissions/#{submission.fetch('id')}", {}, data: {
     type: 'reviewSubmissions', id: submission.fetch('id'), attributes: { submitted: true }
@@ -39,6 +23,6 @@ if submission.dig('attributes', 'state') == 'READY_FOR_REVIEW'
 end
 saved = client.request(:get, "/v1/reviewSubmissions/#{submission.fetch('id')}").fetch('data')
 abort 'Apple did not confirm the review submission.' unless %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE].include?(saved.dig('attributes', 'state'))
-receipt = verification.merge(status: 'submitted_for_app_review', submission_id: saved.fetch('id'), submission_state: saved.dig('attributes', 'state'), build_id: build_id, submitted_at: Time.now.utc.iso8601)
+receipt = verification.merge(bundle).merge(status: 'submitted_for_app_review', submission_id: saved.fetch('id'), submission_state: saved.dig('attributes', 'state'), build_id: build_id, submitted_at: Time.now.utc.iso8601)
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-submitted.json'), JSON.pretty_generate(receipt) + "\n")
 puts "Apple confirmed update #{verification.fetch('version')} submitted for review: #{saved.dig('attributes', 'state')}."

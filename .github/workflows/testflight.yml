@@ -77,6 +77,10 @@ jobs:
           set -euo pipefail
           python3 ios/release-check.py
           ruby ios/release/apple_client_test.rb
+          ruby ios/release/review_bundle_test.rb
+          ruby -c ios/release/store_prepare.rb
+          ruby -c ios/release/store_submit.rb
+          ruby -c ios/release/billing-prepare.rb
           python3 ios/release/signing_test.py
           python3 - <<'PY'
           import os

@@ -1,4 +1,5 @@
 require_relative 'apple_client'
+require_relative 'review_bundle'
 
 # Uses only Apple's documented public API. Review contact values stay in the
 # repository secret and the Apple review record, never in logs or artifacts.
@@ -96,4 +97,14 @@ receipt = { app_id: app_id, version: release.version, version_id: version_id,
   privacy_policy_url: copy.fetch('privacyPolicyUrl'), localization_id: local_version.fetch('id'),
   description_verified: true, whats_new_verified: true, subtitle_updated: !local_info.nil?, captured_at: Time.now.utc.iso8601 }
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-receipt.json'), JSON.pretty_generate(receipt) + "\n")
+begin
+  billing = JSON.parse(File.read(File.join(__dir__,'billing.json')))
+  receipt.merge!(TaipeiBusRelease::ReviewBundle.new(client,billing).prepare(version_id))
+  receipt[:status] = 'metadata_build_and_review_bundle_prepared'
+rescue TaipeiBusRelease::Error => error
+  receipt.merge!(status:'review_bundle_requires_metadata',error:error.message,diagnostics:error.diagnostics)
+  raise
+ensure
+  File.write(File.join(ENV.fetch('RUNNER_TEMP'),'app-store-receipt.json'),JSON.pretty_generate(receipt)+"\n")
+end
 puts "Verified App Store metadata and exact build #{release.version} (#{build_number}); contact values withheld."
