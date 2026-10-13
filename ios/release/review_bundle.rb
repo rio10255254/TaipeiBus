@@ -21,12 +21,14 @@ module TaipeiBusRelease
       @config.fetch('products').each do |expected|
         item = products.find { |row| row.dig('attributes','productId') == expected.fetch('product_id') }
         raise Error, 'Expected subscription or period is missing.' unless item && item.dig('attributes','subscriptionPeriod') == expected.fetch('period')
-        prices = @client.all("/v1/subscriptions/#{item.fetch('id')}/prices", 'filter[territory]' => 'TWN', 'filter[planType]' => 'UPFRONT')
+        prices = @client.all("/v1/subscriptions/#{item.fetch('id')}/prices", 'filter[territory]' => 'TWN', 'filter[planType]' => 'UPFRONT', 'include' => 'subscriptionPricePoint')
         today = Time.now.utc.strftime('%Y-%m-%d')
         live_prices = prices.select { |row| row.dig('attributes','endDate').nil? && (row.dig('attributes','startDate').nil? || row.dig('attributes','startDate') <= today) }
         raise Error, 'Expected active Taiwan price is missing.' if live_prices.empty?
         live_prices.each do |price|
-          point = @client.request(:get,"/v1/subscriptionPricePoints/#{price.dig('relationships','subscriptionPricePoint','data','id')}").fetch('data')
+          point_id = price.dig('relationships','subscriptionPricePoint','data','id')
+          raise Error, 'Apple did not return the referenced subscription price point.' if point_id.to_s.empty?
+          point = @client.request(:get,"/v1/subscriptionPricePoints/#{point_id}").fetch('data')
           raise Error, 'Taiwan subscription price differs from approval.' unless BigDecimal(point.dig('attributes','customerPrice')) == BigDecimal(expected.fetch('price'))
         end
         plans = @client.all("/v1/subscriptions/#{item.fetch('id')}/planAvailabilities")
