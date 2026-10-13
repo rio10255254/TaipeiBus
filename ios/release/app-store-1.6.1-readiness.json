@@ -1,9 +1,9 @@
 {
   "version": "1.6.1",
   "build": "98.1.0",
-  "status": "submitted_for_app_review",
+  "status": "publication_paused_by_user",
   "app_source_unchanged_from_uploaded_build": true,
-  "submission_state": "WAITING_FOR_REVIEW",
+  "submission_state": "COMPLETE",
   "native_verification": {
     "run": 38365539450,
     "source": "595a56dea01bfa87f8d49710421954c0e834a44c",
@@ -32,7 +32,7 @@
     "uploaded_order_and_checksums_verified": true,
     "verify_run": 38367412583,
     "app_download_price_twd": 0,
-    "automatic_release": true
+    "automatic_release": false
   },
   "submission": {
     "run": 38368775583,
@@ -44,5 +44,12 @@
       "annual_subscription",
       "subscription_group"
     ]
+  },
+  "version_state": "DEVELOPER_REJECTED",
+  "pause": {
+    "confirmed_at": "2026-10-13T09:02:16Z",
+    "release_type": "MANUAL",
+    "receipt": "app-store-1.6.1-paused.json",
+    "reason": "User reported official travel-time freshness/refresh risk; Claude is handling the repair. Resume publication only after renewed user authorization."
   }
 }
