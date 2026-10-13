@@ -476,6 +476,9 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         let route = ProcessInfo.processInfo.environment["BUS_STORE_VEHICLE_ROUTE"] ?? "307"
         launch(["--preview-vehicle-route", route, "--test-map-controls"])
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
+        // Freeze the camera, while live bus positions continue updating, before framing
+        // a store image. A continuously following camera never has a settled frame.
+        button("停止跟車").tap()
         waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false && ($0["fleetVisible"] as? Int ?? 0) > 0 }
         let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
         map.rotate(.pi / 4, withVelocity: 1)
@@ -519,15 +522,11 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
     }
     func testStoreRealDestinationAndItinerary() {
         launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
-        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 90))
-        button("journey-options").tap()
+        let choices = app.buttons.matching(NSPredicate(format:"identifier == %@ OR identifier == %@","journey-all-options","journey-options")).firstMatch
+        XCTAssertTrue(choices.waitForExistence(timeout:90))
+        choices.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
-        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard let data = self.app.staticTexts["journey-timing-state"].label.data(using: .utf8),
-                  let state = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
-            return (state["checking"] as? Bool) == false
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 150), .completed)
+        waitForConfirmedChoices()
         capture("store-02-trip-choices")
         let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
         selectOptionAndStart(button("journey-option-" + selectedID))
