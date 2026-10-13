@@ -17,10 +17,12 @@ class ReviewBundleTest < Minitest::Test
       when '/v1/subscriptionGroups/group/subscriptions'
         [row('month',productId:'pro.monthly',subscriptionPeriod:'ONE_MONTH'),row('year',productId:'pro.yearly',subscriptionPeriod:'ONE_YEAR')]
       when %r{/v1/subscriptions/(month|year)/prices}
+        raise 'Price validation must request the price point linkage' unless query['include'] == 'subscriptionPricePoint'
         [{'attributes'=>{},'relationships'=>{'subscriptionPricePoint'=>{'data'=>{'id'=>path.include?('month') ? 'mp' : 'yp'}}}}]
       when %r{/v1/subscriptions/(month|year)/planAvailabilities} then [row('avail',planType:'UPFRONT',availableInNewTerritories:false)]
       when '/v1/subscriptionPlanAvailabilities/avail/availableTerritories' then [{'id'=>'TWN'}]
       when %r{/v1/subscriptions/(month|year)/introductoryOffers}
+        raise 'Trial validation must request the territory linkage' unless query['include'] == 'territory'
         [{'attributes'=>{'duration'=>'ONE_WEEK','offerMode'=>'FREE_TRIAL','numberOfPeriods'=>1},'relationships'=>{'territory'=>{'data'=>{'id'=>'TWN'}}}}]
       when %r{/v1/subscriptions/(month|year)/versions}
         [row(path.include?('month') ? 'mv' : 'yv',version:1,state:'PREPARE_FOR_SUBMISSION')]

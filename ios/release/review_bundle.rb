@@ -35,7 +35,7 @@ module TaipeiBusRelease
         upfront = plans.find { |row| row.dig('attributes','planType') == 'UPFRONT' }
         territories = upfront && @client.all("/v1/subscriptionPlanAvailabilities/#{upfront.fetch('id')}/availableTerritories").map { |row| row.fetch('id') }
         raise Error, 'Subscription availability differs from Taiwan-only approval.' unless upfront && upfront.dig('attributes','availableInNewTerritories') == false && territories == ['TWN']
-        offers = @client.all("/v1/subscriptions/#{item.fetch('id')}/introductoryOffers")
+        offers = @client.all("/v1/subscriptions/#{item.fetch('id')}/introductoryOffers", 'include' => 'territory')
         raise Error, 'Seven-day Taiwan introductory offer is missing.' unless offers.any? { |row| row.dig('relationships','territory','data','id') == 'TWN' && row.dig('attributes','offerMode') == 'FREE_TRIAL' && row.dig('attributes','duration') == 'ONE_WEEK' && row.dig('attributes','numberOfPeriods') == 1 && (row.dig('attributes','startDate').nil? || row.dig('attributes','startDate') <= today) && (row.dig('attributes','endDate').nil? || row.dig('attributes','endDate') >= today) }
         shot = @client.request(:get,"/v1/subscriptions/#{item.fetch('id')}/appStoreReviewScreenshot")['data']
         raise Error, 'Subscription review screenshot is not processed.' unless shot && shot.dig('attributes','assetDeliveryState','state') == 'COMPLETE'
