@@ -1,5 +1,14 @@
 name: Official route travel times
+# Phones keep a TDX station-to-station profile for 45 days after its UpdateTime
+# (OfficialTravelTimes.swift) and download this release daily. A weekly refresh keeps
+# every installed version on official times; the daily check raises an issue well
+# before phones would fall back to the generic speed estimate.
 on:
+  schedule:
+    # Wednesday 05:23 Taipei, after TDX's overnight profile rebuild.
+    - cron: '23 21 * * 2'
+    # Daily 09:41 Taipei.
+    - cron: '41 1 * * *'
   workflow_dispatch:
     inputs:
       routes:
@@ -7,39 +16,112 @@ on:
         type: string
         default: ''
       publish:
-        description: 'Publish validated public data for the beta app'
+        description: 'Publish validated public data for the app'
+        type: boolean
+        default: false
+      allow_smaller:
+        description: 'Accept fewer usable profiles than phones have now (only after TDX restructures routes)'
         type: boolean
         default: false
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: official-route-times
   cancel-in-progress: false
+env:
+  # The address compiled into the app (TransitService.swift).
+  PHONE_CATALOG_URL: https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json
 jobs:
   collect:
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 21 * * 2'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 150
+    permissions:
+      contents: write
     env:
       TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
       TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
       GH_TOKEN: ${{ github.token }}
+      PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
+      ALLOW_SMALLER: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_smaller }}
     steps:
       - uses: actions/checkout@v4
-      - name: Verify the existing shared data release before using account quota
-        if: inputs.publish
-        run: gh release view travel-time-data --repo "$GITHUB_REPOSITORY" >/dev/null
+      - name: Test collection and publication rules before using account quota
+        run: python3 ios/release/official_times_test.py
+      - name: Read the published catalog for comparison (GitHub only, no TDX quota)
+        run: gh release download travel-time-data --pattern official-times.json --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
       - name: Collect bounded shared public time profiles
         env:
           REQUESTED_ROUTES: ${{ inputs.routes }}
         run: python3 ios/release/collect-route-times.py --routes "$REQUESTED_ROUTES" --out "$RUNNER_TEMP/route-times/official-times.json"
+      - name: Keep unanswered routes and check what phones would receive
+        run: |
+          set -euo pipefail
+          flags=()
+          if [ "$ALLOW_SMALLER" = true ]; then flags+=(--allow-smaller); fi
+          if [ "$PUBLISH" != true ]; then flags+=(--report-only); fi
+          python3 ios/release/official_times_gate.py prepare \
+            --candidate "$RUNNER_TEMP/route-times/official-times.json" \
+            --coverage "$RUNNER_TEMP/route-times/coverage.json" \
+            --published "$RUNNER_TEMP/published/official-times.json" \
+            --out "$RUNNER_TEMP/route-times/publish" "${flags[@]}"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: official-route-times-${{ github.run_id }}
           path: ${{ runner.temp }}/route-times/
           retention-days: 30
+          if-no-files-found: ignore
       - name: Publish only validated source data
-        if: inputs.publish
-        env:
-          RELEASE_TITLE: Shared official station travel times
+        if: env.PUBLISH == 'true'
         run: |
-          gh release upload travel-time-data "$RUNNER_TEMP/route-times/official-times.json" "$RUNNER_TEMP/route-times/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload travel-time-data "$RUNNER_TEMP/route-times/publish/official-times.json" "$RUNNER_TEMP/route-times/publish/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
+      - name: Confirm phones download the new catalog
+        if: env.PUBLISH == 'true'
+        run: |
+          set -euo pipefail
+          expected=$(sha256sum < "$RUNNER_TEMP/route-times/publish/official-times.json")
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/downloaded.json" "$PHONE_CATALOG_URL" &&
+               [ "$(sha256sum < "$RUNNER_TEMP/downloaded.json")" = "$expected" ]; then break; fi
+            if [ "$attempt" = 6 ]; then echo 'The public address still serves a different catalog.'; exit 1; fi
+            sleep 20
+          done
+          python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/downloaded.json" --minimum-days 21
+
+  watchdog:
+    if: github.event.schedule == '41 1 * * *'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the catalog phones download
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/official-times.json" "$PHONE_CATALOG_URL"
+          python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/official-times.json" --minimum-days 21
+
+  report:
+    needs: [collect, watchdog]
+    if: always() && github.event_name == 'schedule' && (needs.collect.result == 'failure' || needs.watchdog.result == 'failure')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      issues: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      FAILED_JOB: ${{ needs.collect.result == 'failure' && '每週收集' || '每日到期檢查' }}
+    steps:
+      - name: Open or update the travel-time issue
+        run: |
+          set -euo pipefail
+          title='官方站間車程資料需要處理'
+          body=$(printf '%s失敗：%s\n\nApp 只使用 TDX 更新時間 45 天內的站間車程；超過後改用一般車速估計。請查看執行紀錄與摘要，修正後可手動執行「Official route travel times」並勾選 publish。' "$FAILED_JOB" "$RUN_URL")
+          number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "in:title $title" --json number,title \
+            --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body "$body"
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+          fi
