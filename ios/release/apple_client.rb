@@ -64,6 +64,14 @@ module TaipeiBusRelease
           # Do not echo server error details that may contain request data.
           parsed = JSON.parse(response.body) rescue {}
           safe = Array(parsed['errors']).first(3).map { |item| {code:item['code'],title:item['title'],pointer:item.dig('source','pointer')} }
+          # Only public catalog/draft validation paths may preserve field-level diagnostics.
+          # Never retain authentication, review-contact or account-finance response details.
+          if value.path.match?(%r{\A/v[12]/(?:reviewSubmissionItems|subscriptionVersions|subscriptionGroupVersions|subscriptionLocalizations|subscriptionGroupLocalizations)(?:/|\z)})
+            safe.each_with_index do |item,index|
+              detail = Array(parsed['errors'])[index]['detail'].to_s
+              item[:detail] = detail[0,1500] unless detail.match?(/password|private.?key|bearer|contactEmail|contactPhone/i)
+            end
+          end
           raise Error.new("App Store Connect HTTP #{response.code}. Check key role, app access and Apple agreements.",diagnostics:safe)
         end
         return response.body.to_s.empty? ? {} : JSON.parse(response.body)

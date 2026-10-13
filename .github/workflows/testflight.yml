@@ -107,8 +107,18 @@ jobs:
       - name: Prepare approved subscription drafts
         if: inputs.operation == 'billing-prepare'
         run: ruby ios/release/billing-prepare.rb
+      - name: Read back prepared subscription metadata
+        if: always() && inputs.operation == 'billing-prepare'
+        run: ruby ios/release/billing-audit.rb
+      - name: Preserve subscription metadata readback
+        if: always() && inputs.operation == 'billing-prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-audit
+          path: ${{ runner.temp }}/billing-audit.json
+          retention-days: 7
       - name: Preserve subscription setup receipt
-        if: inputs.operation == 'billing-prepare'
+        if: always() && inputs.operation == 'billing-prepare'
         uses: actions/upload-artifact@v4
         with:
           name: billing-setup
@@ -146,7 +156,7 @@ jobs:
           path: ${{ runner.temp }}/app-store-submitted.json
           retention-days: 30
       - name: Preserve public release preparation receipt
-        if: inputs.operation == 'store-prepare'
+        if: always() && inputs.operation == 'store-prepare'
         uses: actions/upload-artifact@v4
         with:
           name: AppStore-prepared-${{ github.run_id }}
