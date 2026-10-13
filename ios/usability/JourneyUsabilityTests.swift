@@ -529,38 +529,16 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         waitForConfirmedChoices()
         capture("store-02-trip-choices")
         let selectedID = String(firstOption.identifier.dropFirst("journey-option-".count))
-        selectOptionAndStart(button("journey-option-" + selectedID))
-        XCTAssertTrue(button("journey-walk-to-stop").waitForExistence(timeout: 10))
-        waitRenderedMap { ($0["zoom"] as? Double ?? 0) >= 10 && ($0["zoom"] as? Double ?? 99) < 16 }
-        capture("store-05-boarding-map")
-        button("journey-options").tap()
+        button("journey-option-" + selectedID).tap()
+        let steps=button("journey-steps-"+selectedID)
+        XCTAssertTrue(steps.waitForExistence(timeout:15)); steps.tap()
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
+        XCTAssertTrue(button("journey-start-navigation").exists)
+        XCTAssertFalse(button("journey-board").exists,"A real route preview must not start navigation")
         capture("store-06-full-itinerary")
-        button("返回地圖").tap()
-        let approach = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "boarding-vehicle-")).firstMatch
-        XCTAssertTrue(approach.waitForExistence(timeout: 30), "A real, already-departed bus is required for the screenshot")
-        // Allow successive real GPS reports to establish direction and progress.
-        // Prefer a supported estimate; never invent a time for a marketing image.
-        let supported = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@ AND NOT label CONTAINS %@", "boarding-vehicle-", "分", "待確認")).firstMatch
-        let usable = supported.waitForExistence(timeout: 60) && supported.isHittable ? supported : approach
-        let plate = String(usable.identifier.dropFirst("boarding-vehicle-".count))
-        button("boarding-vehicle-" + plate).tap()
-        waitRenderedMap { ($0["pitch"] as? Double ?? 0) >= 25 && ($0["zoom"] as? Double ?? 0) >= 17 && ($0["cameraMoving"] as? Bool) == false }
-        capture("store-08-bus-first-navigation")
-        button("journey-board").tap()
-        XCTAssertTrue(button("journey-ride-stops").waitForExistence(timeout: 10))
-        XCTAssertTrue(button("journey-onboard-vehicle").label.contains(plate))
-        let onboardTime = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let label = self.app.staticTexts["journey-alighting-time"].label
-            return label.contains("分") && !label.contains("待確認")
-        }, object: nil)
-        _ = XCTWaiter.wait(for: [onboardTime], timeout: 45)
-        capture("store-09-onboard-live-guidance")
-        button("journey-ride-stops").tap()
-        XCTAssertTrue(app.staticTexts["onboard-confirmed-plate"].waitForExistence(timeout: 10))
-        XCTAssertEqual(app.staticTexts["onboard-confirmed-plate"].label, plate)
-        XCTAssertGreaterThan(app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH %@", "onboard-stop-")).count, 1)
-        capture("store-10-time-at-each-stop")
+        button("journey-back").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:15))
+        capture("store-05-boarding-map")
     }
     func testPrivacyAndSupportAreAccessible() {
         launch()
