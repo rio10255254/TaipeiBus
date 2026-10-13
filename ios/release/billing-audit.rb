@@ -32,7 +32,18 @@ if report[:subscription_groups].is_a?(Array)
   report[:subscriptions] = report[:subscription_groups].flat_map do |group|
     begin
       client.all("/v1/subscriptionGroups/#{group.fetch(:id)}/subscriptions").map do |row|
-        item = {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel].include?(field) }}
+        item = {id:row['id'],attributes:row.fetch('attributes',{}).select { |field,_| %w[name productId state subscriptionPeriod groupLevel reviewNote marketSettings multiSeatStatus].include?(field) }}
+        # Additional public catalog relationships help distinguish a missing sales field
+        # from optional promotion images. GET only; never edits or submits a product.
+        item[:catalog_relationships] = {}
+        ['subscriptionLocalizations','appStoreReviewScreenshot','group','subscriptionAvailability','planAvailabilities','versions','promotedPurchase'].each do |relationship|
+          begin
+            item[:catalog_relationships][relationship] = client.request(:get,"/v1/subscriptions/#{row['id']}/relationships/#{relationship}")['data']
+          rescue TaipeiBusRelease::Error => error
+            item[:catalog_relationships][relationship] = {error:error.message,diagnostics:error.diagnostics}
+          end
+        end
+        item[:raw_catalog] = client.request(:get,"/v1/subscriptions/#{row['id']}")['data']
         begin
           item[:legacy_localizations] = client.all("/v1/subscriptions/#{row['id']}/subscriptionLocalizations").map { |value| value['attributes'] }
           item[:legacy_availability] = client.request(:get,"/v1/subscriptions/#{row['id']}/subscriptionAvailability",'include'=>'availableTerritories')['data']
