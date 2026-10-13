@@ -54,10 +54,10 @@ module TaipeiBusRelease
       items_by_id = {}
       submission = submissions.find do |row|
         next false unless %w[READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW].include?(row.dig('attributes','state'))
-        items_by_id[row.fetch('id')] = @client.all("/v1/reviewSubmissions/#{row.fetch('id')}/items")
+        items_by_id[row.fetch('id')] = review_items(row.fetch('id'))
         items_by_id[row.fetch('id')].any? { |item| item.dig('relationships','appStoreVersion','data','id') == app_version_id }
       end
-      submission ||= submissions.find { |row| row.dig('attributes','state') == 'READY_FOR_REVIEW' && row.dig('attributes','platform') == 'IOS' && (items_by_id[row.fetch('id')] ||= @client.all("/v1/reviewSubmissions/#{row.fetch('id')}/items")).empty? }
+      submission ||= submissions.find { |row| row.dig('attributes','state') == 'READY_FOR_REVIEW' && row.dig('attributes','platform') == 'IOS' && (items_by_id[row.fetch('id')] ||= review_items(row.fetch('id'))).empty? }
       submission ||= @client.request(:post,'/v1/reviewSubmissions',{},data:{type:'reviewSubmissions',attributes:{platform:'IOS'},relationships:{app:{data:{type:'apps',id:@config.fetch('app_id')}}}}).fetch('data')
       items = items_by_id[submission.fetch('id')] || []
       targets.each do |target|
@@ -71,12 +71,15 @@ module TaipeiBusRelease
           raise Error.new("Draft validation failed for #{target.fetch(:type)} #{target.fetch(:id)}: #{error.message}",diagnostics:error.diagnostics)
         end
       end
-      saved = @client.all("/v1/reviewSubmissions/#{submission.fetch('id')}/items")
+      saved = review_items(submission.fetch('id'))
       raise Error, 'Review draft does not contain the complete authorized bundle.' unless targets.all? { |target| saved.any? { |item| item.dig('relationships',target.fetch(:relationship).to_s,'data','id') == target.fetch(:id) } }
       {submission_id:submission.fetch('id'),targets:targets,items_verified:true}
     end
 
     private
+    def review_items(id)
+      @client.all("/v1/reviewSubmissions/#{id}/items",'include'=>'appStoreVersion,subscriptionVersion,subscriptionGroupVersion')
+    end
     def editable_version(type, id)
       versions = @client.all("/v1/#{type}/#{id}/versions")
       versions.sort_by { |row| -(row.dig('attributes','version') || 0) }.find { |row| %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW APPROVED].include?(row.dig('attributes','state')) } || raise(Error, 'Subscription metadata version is missing.')

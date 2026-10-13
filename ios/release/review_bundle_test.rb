@@ -28,7 +28,9 @@ class ReviewBundleTest < Minitest::Test
         [row(path.include?('month') ? 'mv' : 'yv',version:1,state:'PREPARE_FOR_SUBMISSION')]
       when %r{/v1/subscriptionVersions/(mv|yv)/localizations} then localizations
       when '/v1/apps/app/reviewSubmissions' then @created ? [row('draft',state:@state,platform:'IOS')] : []
-      when '/v1/reviewSubmissions/draft/items' then @items
+      when '/v1/reviewSubmissions/draft/items'
+        raise 'Review items must request their version linkages' unless query['include'] == 'appStoreVersion,subscriptionVersion,subscriptionGroupVersion'
+        @items
       else raise "Unexpected GET #{path}"
       end
     end
