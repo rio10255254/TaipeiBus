@@ -1,0 +1,19 @@
+{
+  "app_id": "6818475740",
+  "version": "1.6.1",
+  "build_number": "98.1.0",
+  "version_id": "f927f07b-a7e1-48aa-bb8f-3aa2bfd7ec39",
+  "submission_id": "80221239-b886-418b-8585-57736cf3ef6f",
+  "status": "publication_paused",
+  "requested_at": "2026-10-13T09:02:01Z",
+  "errors": [],
+  "initial_version_state": "WAITING_FOR_REVIEW",
+  "initial_submission_state": "WAITING_FOR_REVIEW",
+  "review_item_count": 4,
+  "withdrawal_requested": true,
+  "version_state": "DEVELOPER_REJECTED",
+  "submission_state": "COMPLETE",
+  "release_type": "MANUAL",
+  "confirmed_at": "2026-10-13T09:02:16Z",
+  "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38373394921"
+}
