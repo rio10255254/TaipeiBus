@@ -68,8 +68,25 @@ module TaipeiBusRelease
           # Never retain authentication, review-contact or account-finance response details.
           if value.path.match?(%r{\A/v[12]/(?:reviewSubmissionItems|subscriptionVersions|subscriptionGroupVersions|subscriptionLocalizations|subscriptionGroupLocalizations)(?:/|\z)})
             safe.each_with_index do |item,index|
-              detail = Array(parsed['errors'])[index]['detail'].to_s
+              original = Array(parsed['errors'])[index]
+              detail = original['detail'].to_s
               item[:detail] = detail[0,1500] unless detail.match?(/password|private.?key|bearer|contactEmail|contactPhone/i)
+              associated = original.dig('meta','associatedErrors')
+              item[:meta_keys] = original['meta'].keys if original['meta'].is_a?(Hash)
+              if associated
+                # Apple's field-validation report is nested under associatedErrors.
+                clean = lambda do |value, depth|
+                  next nil if depth > 5
+                  case value
+                  when Array then value.first(12).map { |entry| clean.call(entry,depth+1) }
+                  when Hash then value.first(20).to_h.transform_values { |entry| clean.call(entry,depth+1) }
+                  when String
+                    value.match?(/password|private.?key|bearer|contactEmail|contactPhone/i) ? '[withheld]' : value[0,1200]
+                  else value
+                  end
+                end
+                item[:associated_errors] = clean.call(associated,0)
+              end
             end
           end
           raise Error.new("App Store Connect HTTP #{response.code}. Check key role, app access and Apple agreements.",diagnostics:safe)
