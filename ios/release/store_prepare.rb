@@ -1,6 +1,11 @@
 require_relative 'apple_client'
 require_relative 'review_bundle'
 
+at_exit do
+  error = $!
+  warn JSON.generate(error.diagnostics) if error.is_a?(TaipeiBusRelease::Error)
+end
+
 # Uses only Apple's documented public API. Review contact values stay in the
 # repository secret and the Apple review record, never in logs or artifacts.
 abort 'Choose store-prepare explicitly.' unless ENV['BUS_PUBLISH_TESTFLIGHT'] == 'true'
@@ -42,6 +47,21 @@ if version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
   abort 'The editable app version is not part of an unsent draft.' unless write_metadata
 end
 version_id = version.fetch('id')
+# Restore the explicitly approved Taiwan storefront if Apple currently has no
+# storefront enabled. Never silently disable an existing foreign storefront.
+availability = client.request(:get,"/v1/apps/#{app_id}/appAvailabilityV2").fetch('data')
+territories_path = "/v2/appAvailabilities/#{availability.fetch('id')}/territoryAvailabilities"
+territories = client.all(territories_path, include:'territory',limit:'200')
+enabled = territories.select { |row| row.dig('attributes','available') }.map { |row| row.dig('relationships','territory','data','id') }
+abort 'Unexpected existing storefronts require review.' unless (enabled - ['TWN']).empty? && availability.dig('attributes','availableInNewTerritories') == false
+taiwan = territories.find { |row| row.dig('relationships','territory','data','id') == 'TWN' }
+abort 'Taiwan storefront record is missing.' unless taiwan
+unless taiwan.dig('attributes','available')
+  client.request(:patch,"/v1/territoryAvailabilities/#{taiwan.fetch('id')}",{},data:{
+    type:'territoryAvailabilities',id:taiwan.fetch('id'),attributes:{available:true}})
+end
+saved_territories = client.all(territories_path, include:'territory',limit:'200')
+abort 'Apple did not confirm Taiwan-only availability.' unless saved_territories.select { |row| row.dig('attributes','available') }.map { |row| row.dig('relationships','territory','data','id') } == ['TWN']
 infos = client.all("/v1/apps/#{app_id}/appInfos")
 info = infos.find { |row| row.dig('attributes', 'state') == 'PREPARE_FOR_SUBMISSION' || row.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION' }
 local_info = info && client.all("/v1/appInfos/#{info.fetch('id')}/appInfoLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }

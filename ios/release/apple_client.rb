@@ -66,7 +66,7 @@ module TaipeiBusRelease
           safe = Array(parsed['errors']).first(3).map { |item| {code:item['code'],title:item['title'],pointer:item.dig('source','pointer')} }
           # Only public catalog/draft validation paths may preserve field-level diagnostics.
           # Never retain authentication, review-contact or account-finance response details.
-          if value.path.match?(%r{\A/v[12]/(?:reviewSubmissionItems|subscriptionVersions|subscriptionGroupVersions|subscriptionLocalizations|subscriptionGroupLocalizations|subscriptionPrices|appScreenshots|appScreenshotSets)(?:/|\z)})
+          if value.path.match?(%r{\A/v[12]/(?:reviewSubmissionItems|subscriptionVersions|subscriptionGroupVersions|subscriptionLocalizations|subscriptionGroupLocalizations|subscriptionPrices|appScreenshots|appScreenshotSets|territoryAvailabilities)(?:/|\z)})
             safe.each_with_index do |item,index|
               original = Array(parsed['errors'])[index]
               detail = original['detail'].to_s
