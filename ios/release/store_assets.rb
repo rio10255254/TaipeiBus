@@ -9,7 +9,7 @@ client = TaipeiBusRelease::Client.new(key_id: ENV.fetch('ASC_KEY_ID'), issuer_id
 release = TaipeiBusRelease::Release.new(client, config)
 app_id = release.app.fetch('id')
 version = client.all("/v1/apps/#{app_id}/appStoreVersions").find { |v| v.dig('attributes', 'versionString') == release.version && v.dig('attributes', 'platform') == 'IOS' }
-abort 'Only the matching editable update can receive screenshots.' unless version && version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
+abort 'Only the matching editable update can receive screenshots.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
 locale = client.all("/v1/appStoreVersions/#{version.fetch('id')}/appStoreVersionLocalizations").find { |v| v.dig('attributes', 'locale') == config.fetch('locale') }
 abort 'Update localization is missing.' unless locale
 files = copy.fetch('screenshotOrder').map { |name| File.join(__dir__, 'screenshots', name) }

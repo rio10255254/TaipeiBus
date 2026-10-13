@@ -29,19 +29,22 @@ unless version
     relationships: { app: { data: { type: 'apps', id: app_id } } }
   }).fetch('data')
 end
-abort 'The matching editable App Store version is missing.' unless version && version.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION'
+abort 'The matching editable App Store version is missing.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
+write_metadata = version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
 version_id = version.fetch('id')
 infos = client.all("/v1/apps/#{app_id}/appInfos")
 info = infos.find { |row| row.dig('attributes', 'state') == 'PREPARE_FOR_SUBMISSION' || row.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION' }
 local_info = info && client.all("/v1/appInfos/#{info.fetch('id')}/appInfoLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
 local_version = client.all("/v1/appStoreVersions/#{version_id}/appStoreVersionLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
 unless local_version
+  abort 'A prepared review draft must already have its localization.' unless write_metadata
   local_version = client.request(:post, '/v1/appStoreVersionLocalizations', {}, data: {
     type: 'appStoreVersionLocalizations', attributes: { locale: config.fetch('locale') },
     relationships: { appStoreVersion: { data: { type: 'appStoreVersions', id: version_id } } }
   }).fetch('data')
 end
 
+if write_metadata
 client.request(:patch, "/v1/apps/#{app_id}", {}, data: {
   type: 'apps', id: app_id, attributes: { contentRightsDeclaration: 'USES_THIRD_PARTY_CONTENT' }
 })
@@ -77,6 +80,7 @@ client.request(:patch, "/v1/appStoreVersions/#{version_id}", {}, data: {
   attributes: { copyright: copy.fetch('copyright'), releaseType: 'AFTER_APPROVAL' },
   relationships: { build: { data: { type: 'builds', id: build.fetch('id') } } }
 })
+end
 
 saved_app = client.request(:get, "/v1/apps/#{app_id}").fetch('data')
 privacy_info = local_info || infos.flat_map { |item| client.all("/v1/appInfos/#{item.fetch('id')}/appInfoLocalizations") }.find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
