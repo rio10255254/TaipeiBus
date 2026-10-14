@@ -46,6 +46,21 @@ final class ConditionalFeedTransportTests: XCTestCase {
             do { _ = try await transport.data("GetBusData"); XCTFail("An empty response is not a new GPS fix") } catch {}
         }
     }
+    func testRejectedProviderErrorPageCannotPoisonTheConditionalCache() async throws {
+        let invalid = Data("<!doctype html><title>HTTP Status 500</title>".utf8)
+        let valid = Data("{\"EssentialInfo\":{\"UpdateTime\":\"2026/10/08 13:00:00\"},\"BusInfo\":[{\"id\":\"one\"}]}".utf8)
+        FeedProtocol.set([.init(status:200,data:invalid,headers:["ETag":"bad"]),
+            .init(status:200,data:valid,headers:["ETag":"good"]),.init(status:304)])
+        let transport = client(), rejected = try await transport.data("GetStop")
+        XCTAssertThrowsError(try FeedDecoder.validateMetadataFeed(rejected))
+        await transport.invalidate("GetStop")
+        let recovered = try await transport.data("GetStop")
+        XCTAssertEqual(recovered,valid)
+        XCTAssertNil(FeedProtocol.requests[1].value(forHTTPHeaderField:"If-None-Match"))
+        let repeated = try await transport.data("GetStop")
+        XCTAssertEqual(repeated,valid)
+        XCTAssertEqual(FeedProtocol.requests[2].value(forHTTPHeaderField:"If-None-Match"),"good")
+    }
 }
 
 private final class FeedProtocol: URLProtocol, @unchecked Sendable {

@@ -31,6 +31,38 @@ final class RidingTrafficTests: XCTestCase {
         }
         return forecast
     }
+    private func withOfficialProfile(_ metadata: TransitMetadata, seconds: Int) throws -> TransitMetadata {
+        // `now` is Friday 2027-01-15 16:00 in Taipei.
+        var m = metadata
+        let periods: [[String: Any]] = [16, 17].map { ["weekday": 5, "startHour": $0, "endHour": $0 + 1, "seconds": [seconds, seconds, seconds, seconds]] }
+        m.officialTravelTimes = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: ["schema": 1, "routes": [
+            ["route": "family", "subroute": "observed", "direction": "0", "updated": "2027-01-12T05:00:00+08:00",
+             "edges": (0..<4).map { ["s\($0)", "s\($0 + 1)"] }, "periods": periods]]]))
+        return m
+    }
+    private func lastReport(start: Double, rate: Double, metadata: TransitMetadata) -> BusVehicle {
+        let line = metadata.line("observed", direction: "0")!, point = line.sample(fraction: (start + rate * 90) / line.length).0
+        let raw = BusVehicle(id: "physical-0", plate: "physical-0", routeID: "observed", parentRouteID: "family", routeName: "630", direction: "0", destination: "終點", coordinate: point, rawCoordinate: point, heading: 90, speed: rate * 3.6, observedAt: now, status: "0", lowFloor: true, provider: nil)
+        return VehicleTracker.accept(raw, previous: nil, metadata: metadata, now: now)
+    }
+    func testOfficialProfileGivesALoneBusAUsableArrivalTime() throws {
+        let m = try withOfficialProfile(source().0, seconds: 200)
+        let forecast = replay(starts: [250], rates: [5], metadata: m), bus = lastReport(start: 250, rate: 5, metadata: m)
+        let journey = try XCTUnwrap(m.journey(routeID: "observed", direction: "0"))
+        let span = journey.anchors[1].match.along - journey.anchors[0].match.along
+        let prediction = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
+        XCTAssertEqual(prediction.evidence, .officialProfile)
+        XCTAssertEqual(prediction.seconds, 400 + 200 * (span - 700) / span, accuracy: 5)
+        XCTAssertTrue(prediction.hasUsableTime)
+        // Without the profile the same lone bus only has its own short movement sample.
+        let plain = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: source().0, at: now))
+        XCTAssertEqual(plain.evidence, .limited)
+    }
+    func testOfficialProfileIsNotAppliedToABusWaitingAtItsFirstStop() throws {
+        let m = try withOfficialProfile(source().0, seconds: 200)
+        let forecast = replay(starts: [0], rates: [0], metadata: m), bus = lastReport(start: 0, rate: 0, metadata: m)
+        XCTAssertNil(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
+    }
     func testColdRideKeepsTheBaselineAndIdentifiesItsSource() {
         let (m, ride) = source(); let estimate = VehicleArrivalForecast().ridingEstimate(ride, metadata: m, at: now)
         XCTAssertEqual(estimate.evidence, .typical)

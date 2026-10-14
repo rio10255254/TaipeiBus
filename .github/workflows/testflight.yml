@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data']
+        options: ['check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-pause', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
         default: 'check-only'
       metro_endpoints:
         description: 'Optional bounded metro metadata endpoint subset'
@@ -50,7 +50,7 @@ env:
 
 jobs:
   release:
-    if: inputs.operation != 'collect-route-times' && inputs.operation != 'collect-metro-data'
+    if: inputs.operation != 'collect-route-times' && inputs.operation != 'collect-metro-data' && inputs.operation != 'collect-metro-levels'
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -66,16 +66,33 @@ jobs:
       BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
       BUS_FEEDBACK_EMAIL: ${{ vars.BUS_FEEDBACK_EMAIL }}
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
-      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
+      BUS_PREPARE_BILLING: ${{ inputs.operation == 'billing-prepare' }}
+      BUS_PAUSE_STORE: ${{ inputs.operation == 'store-pause' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Withdraw the exact user-paused App Store submission
+        if: inputs.operation == 'store-pause'
+        run: ruby ios/release/store_pause.rb
+      - name: Preserve the Apple pause confirmation
+        if: always() && inputs.operation == 'store-pause'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AppStore-paused-${{ github.run_id }}
+          path: ${{ runner.temp }}/app-store-paused.json
+          retention-days: 30
       - name: Validate release source and Apple configuration
         run: |
           set -euo pipefail
           python3 ios/release-check.py
           ruby ios/release/apple_client_test.rb
+          ruby ios/release/review_bundle_test.rb
+          ruby ios/release/regional_prices_test.rb
+          ruby -c ios/release/store_prepare.rb
+          ruby -c ios/release/store_submit.rb
+          ruby -c ios/release/billing-prepare.rb
           python3 ios/release/signing_test.py
           python3 - <<'PY'
           import os
@@ -93,6 +110,36 @@ jobs:
       - name: Read-only App Store readiness audit
         if: inputs.operation == 'store-audit'
         run: ruby ios/release/store_audit.rb
+      - name: Read-only billing catalog audit
+        if: inputs.operation == 'billing-audit'
+        run: ruby ios/release/billing-audit.rb
+      - name: Preserve billing catalog audit
+        if: inputs.operation == 'billing-audit'
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-audit
+          path: ${{ runner.temp }}/billing-audit.json
+          retention-days: 7
+      - name: Prepare approved subscription drafts
+        if: inputs.operation == 'billing-prepare'
+        run: ruby ios/release/billing-prepare.rb
+      - name: Read back prepared subscription metadata
+        if: always() && inputs.operation == 'billing-prepare'
+        run: ruby ios/release/billing-audit.rb
+      - name: Preserve subscription metadata readback
+        if: always() && inputs.operation == 'billing-prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-audit
+          path: ${{ runner.temp }}/billing-audit.json
+          retention-days: 7
+      - name: Preserve subscription setup receipt
+        if: always() && inputs.operation == 'billing-prepare'
+        uses: actions/upload-artifact@v4
+        with:
+          name: billing-setup
+          path: ${{ runner.temp }}/billing-setup.json
+          retention-days: 30
       - name: Preserve redacted App Store readiness audit
         if: inputs.operation == 'store-audit'
         uses: actions/upload-artifact@v4
@@ -125,7 +172,7 @@ jobs:
           path: ${{ runner.temp }}/app-store-submitted.json
           retention-days: 30
       - name: Preserve public release preparation receipt
-        if: inputs.operation == 'store-prepare'
+        if: always() && inputs.operation == 'store-prepare'
         uses: actions/upload-artifact@v4
         with:
           name: AppStore-prepared-${{ github.run_id }}
@@ -152,6 +199,12 @@ jobs:
       - name: Install App Store distribution signing
         if: inputs.operation == 'upload'
         run: python3 ios/release/signing.py install
+      - name: Create and install the widget extension profile
+        if: inputs.operation == 'upload'
+        run: |
+          set -euo pipefail
+          ruby ios/apple-connect.rb widget-profile
+          python3 ios/release/signing.py install-extension
       - name: Test transit algorithms and compile signed iPhone archive
         if: inputs.operation == 'upload'
         run: |
@@ -164,10 +217,10 @@ jobs:
             -allowProvisioningUpdates \
             -authenticationKeyPath "$RUNNER_TEMP/bus-signing/AuthKey.p8" \
             -authenticationKeyID "$ASC_KEY_ID" -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" PRODUCT_BUNDLE_IDENTIFIER="$BUS_BUNDLE_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" BUS_APP_BUNDLE_ID="$BUS_BUNDLE_ID" \
             MARKETING_VERSION="$BUS_VERSION" CURRENT_PROJECT_VERSION="$BUS_BUILD_NUMBER" \
             CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="$BUS_SIGNING_CERTIFICATE_SHA1" \
-            BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
+            BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" BUS_WIDGET_PROFILE_UUID="$BUS_WIDGET_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
           ditto -c -k --sequesterRsrc --keepParent \
@@ -184,7 +237,8 @@ jobs:
               plistlib.dump({'method': 'app-store-connect', 'destination': 'upload',
                             'teamID': os.environ['APPLE_TEAM_ID'], 'signingStyle': 'manual',
                             'signingCertificate': os.environ['BUS_SIGNING_CERTIFICATE_SHA1'],
-                            'provisioningProfiles': {os.environ['BUS_BUNDLE_ID']: os.environ['BUS_PROFILE_UUID']},
+                            'provisioningProfiles': {os.environ['BUS_BUNDLE_ID']: os.environ['BUS_PROFILE_UUID'],
+                                                     os.environ['BUS_BUNDLE_ID'] + '.Widgets': os.environ['BUS_WIDGET_PROFILE_UUID']},
                             'manageAppVersionAndBuildNumber': False}, output)
           PY
           xcodebuild -exportArchive -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
@@ -287,5 +341,21 @@ jobs:
         with:
           name: official-metro-metadata
           path: ${{ runner.temp }}/metro
+          if-no-files-found: ignore
+          retention-days: 30
+
+  metro-levels:
+    if: inputs.operation == 'collect-metro-levels'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect OpenStreetMap metro track structure (no credentials)
+        run: python3 ios/release/collect-metro-levels.py --out "$RUNNER_TEMP/metro-levels"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: osm-metro-levels
+          path: ${{ runner.temp }}/metro-levels
           if-no-files-found: ignore
           retention-days: 30

@@ -1,0 +1,124 @@
+{
+  "auditedVersion": "1.3.6",
+  "auditedBuild": "83.1.0",
+  "publishedBinaryCommit": "ce1e7c32ad69fec52853d7bcc80b5d26e385afc1",
+  "auditBase": "a2e20fb",
+  "status": "verified_ready_for_review",
+  "publishedVersionChanged": false,
+  "followupTestFlightRelease": {
+    "version": "1.3.7",
+    "build": "84.1.0",
+    "status": "internal_group_assigned",
+    "run": 37834681860,
+    "receipt": "ios/release/testflight-1.3.7-receipt.json",
+    "publicAppStoreChanged": false
+  },
+  "findings": [
+    {
+      "id": "held-arrival",
+      "severity": "high",
+      "cause": "A held inferred position continued to return zero or positive arrival seconds, so waiting and automatic boarding could use lost observations.",
+      "fix": "No arrival predictions or automatic boarding/reacquisition from holding states. Forward-only visual position correction preserves the lost-observation confidence flag and last drawn position, without displaying a zero-second arrival from the held state."
+    },
+    {
+      "id": "duplicate-observations",
+      "severity": "medium",
+      "cause": "Duplicate rows within a single packet were all selected before the processed set was updated.",
+      "fix": "Recheck each observation identity before ingesting it."
+    },
+    {
+      "id": "network-jitter-identity",
+      "severity": "medium",
+      "cause": "The same provider timestamp was assigned a different local timestamp when transport delay changed, refreshing the same sighting.",
+      "fix": "Retain the provider timestamp as the stable observation identity."
+    },
+    {
+      "id": "old-upstream-projection",
+      "severity": "high",
+      "cause": "A minutes-old observation many stations upstream could be extrapolated into a near arrival after track confidence expired.",
+      "fix": "Limit raw sighting projection to the tracker confidence horizon; only direct platform observations confirm an overdue arrival."
+    },
+    {
+      "id": "background-request",
+      "severity": "medium",
+      "cause": "Platform requests were not cancelled on background entry and could publish late results or clear a newer request.",
+      "fix": "Cancel requests on background entry and reject results from superseded requests."
+    },
+    {
+      "id": "partial-catalog",
+      "severity": "high",
+      "cause": "A complete catalog could be replaced with route and stop data that lacked the path feed, invoking guessed parent stop ordering.",
+      "fix": "Require all essential planning feeds and a nonempty path catalog before replacement."
+    },
+    {
+      "id": "rejected-cache-body",
+      "severity": "medium",
+      "cause": "An HTTP 200 provider error page was cached before its content was validated and could later be reused by 304 responses.",
+      "fix": "Invalidate rejected compressed or decoded feed bodies before further conditional requests."
+    },
+    {
+      "id": "preview-navigation-boundary",
+      "severity": "medium",
+      "cause": "Closing route selection displayed boarding controls and an instruction banner before navigation had started. Inspecting a walking segment also implicitly began the trip.",
+      "fix": "Use a route preview dock while the trip is not started. Preview and back actions never start navigation; only explicit Go/Start actions enter guidance. Previewing a walking segment does not activate live walking guidance. Returning to waiting during an active trip retains navigation instead of reverting to preview."
+    }
+  ],
+  "upstreamSourceIncident": {
+    "files": [
+      "GetStop",
+      "GetPathDetail"
+    ],
+    "transportStatus": "HTTP request returned successfully",
+    "content": "HTML error page titled HTTP Status 500 – Internal Server Error",
+    "evidence": "work/audit-1.3.6/live-bus/audit.json"
+  },
+  "validation": {
+    "reproductionRuns": [
+      37811331332,
+      37812619099
+    ],
+    "correctedCoreCompileRun": 37814450063,
+    "earlierBundledRoutingAndNativeRun": 37819617679,
+    "earlierBundledRoutingAndNativeConclusion": "success",
+    "firstNativePreviewAndNavigationRun": 37822407002,
+    "firstNativePreviewAndNavigationConclusion": "failure",
+    "firstPreviewFailures": ["Container identifier propagated to every preview button", "Active return-to-waiting reverted to unstarted state", "Synthetic boarding origin was rerouted using unrelated simulator GPS and prevented the appearance check reaching its baseline"],
+    "nativePreviewAndNavigationRun": 37825774800,
+    "nativePreviewAndNavigationConclusion": "one transfer boarding tap did not enter the riding state; preview/back regression, five other light journeys, two dark journeys and the appearance switch passed",
+    "focusedPreviewAndTransferVerificationRun": 37829270034,
+    "focusedPreviewAndTransferVerificationConclusion": "success",
+    "focusedPreviewAndTransferVerificationCommit": "7bc467b",
+    "confirmedNativeBehavior": [
+      "Selecting a route, returning to choices/map and previewing walking never starts navigation",
+      "Explicit Start enters boarding guidance",
+      "Returning to waiting after boarding retains the active journey",
+      "Two-bus transfer completes in the focused rerun without a second boarding tap",
+      "Metro 3D follow and zoom, boarding/onboard/exit, English bilingual naming, dark journeys and same-process appearance switching passed in run 37825774800"
+    ],
+    "finalBundledRoutingRun": 37820774552,
+    "finalBundledRoutingConclusion": "success",
+    "finalCoreAndCompileRun": 37826760952,
+    "finalCoreAndCompileConclusion": "success",
+    "catalogSource": "Exact bundled official metadata, not a substitute for live train data",
+    "firstVerifiedNativeRun": 37813388128,
+    "coreTests": 207,
+    "executedCoreTests": 198,
+    "intentionalLiveSourceSkips": 9,
+    "releaseSearchSeconds": {
+      "NeihuZhongxiaoFuxing": 1.3016729354858398,
+      "XinbeitouXiaobitan": 0.8933520317077637,
+      "SanyingNeihu": 0.3509939908981323,
+      "LuzhouHuilong": 0.7882159948348999
+    }
+  },
+  "limits": [
+    "Public Taipei Metro platform feed contains station, destination and update time, not train identity or GPS. Matched train identities and automatic on-board association are inferred.",
+    "Route recommendation is a bounded heuristic search; bus-only trips allow one transfer, mixed trips allow up to three transfers and exclude consecutive bus feeder legs. It does not prove global optimality.",
+    "The platform-arrival feed covers Taipei Metro five lines. Circular and Sanying lines have static planning and map data but lack this live feed.",
+    "Tunnel depth and structure heights are map models based on OSM tags, not survey measurements.",
+    "Physical iPhone frame rate and long-duration battery behavior have not been verified in this audit."
+  ],
+  "testPreparation": "Debug-only boarding scenario search now runs off the UI thread. Intermediate native run 37815109713 exposed fixture initialization blocking; run 37816126206 separately hit a delayed camera-state query during follow zoom. Run 37819617679 subsequently passed five light journeys, two dark journeys and the active-bus appearance switch. Final verification after the preview-state change is recorded above; intermediate failures are not relabelled as passes.",
+  "experiencePolicy": "Keep the established UI and continuity. Preserve cached data, recover quietly, use explicitly estimated waits where needed, and show no passenger-facing internal error, stale-data age alert or request for error handling.",
+  "reviewUrl": "https://github.com/rio10255254/TaipeiBus/pull/13"
+}

@@ -19,6 +19,32 @@ actor TransitService {
             let packet = try MetroRealtime(data: bytes, network: network, at: Date()); metroPacket = packet; return packet
         } catch { return metroPacket }
     }
+    private var platformFetchedAt = Date.distantPast
+    private var platformTag: String?
+    /// Taipei Metro's free open-data "train entering station" feed. The file is rewritten about
+    /// every 16 s; a conditional request costs no body when nothing changed. It has no countdown
+    /// or train identity, so the app estimates waits and places trains from it.
+    func metroPlatformEvents(network: MetroNetwork) async -> [MetroPlatformEvent]? {
+        guard Date().timeIntervalSince(platformFetchedAt) >= 14, !network.stations.isEmpty else { return nil }
+        platformFetchedAt = Date()
+        var request = URLRequest(url: MetroPlatformFeed.url)
+        request.timeoutInterval = 8; request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let platformTag { request.setValue(platformTag, forHTTPHeaderField: "If-None-Match") }
+        do {
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return nil }
+            if http.statusCode == 304 { return [] }
+            guard http.statusCode == 200 else { return nil }
+            let tag = http.value(forHTTPHeaderField: "ETag")
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.timeZone = TimeZone(identifier: "GMT")
+            formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+            let server = (http.value(forHTTPHeaderField: "Date")).flatMap(formatter.date(from:))
+            let events = try MetroPlatformFeed.parse(bytes, network: network, serverDate: server, receivedAt: Date())
+            platformTag = tag
+            return events
+        } catch { return nil }
+    }
     private let transport: ConditionalFeedTransport
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()
@@ -103,7 +129,15 @@ actor TransitService {
         }
         try Task.checkCancellation()
         let decodedBus: TransitMetadata
-        do { decodedBus = try FeedDecoder.metadata(feeds: feeds) }
+        do {
+            // A missing path feed cannot replace a complete catalog with guessed parent stop order.
+            guard ["GetRoute","GetStop","GetPathDetail"].allSatisfy({ feeds[$0] != nil }) else {
+                throw FeedError.invalid("Incomplete bus planning metadata")
+            }
+            let candidate = try FeedDecoder.metadata(feeds:feeds)
+            guard !candidate.paths.isEmpty else { throw FeedError.invalid("Missing bus stop order") }
+            decodedBus = candidate
+        }
         catch {
             if metadata.routes.isEmpty, let offline = offlineMetroMetadata() { metadata = offline }
             guard !metadata.routes.isEmpty else { throw error }
@@ -123,7 +157,12 @@ actor TransitService {
 
     private func installMetro(in metadata: inout TransitMetadata) {
         guard let url = Bundle.main.url(forResource: "MetroNetwork", withExtension: "json"),
-              let data = try? Data(contentsOf: url), let metro = try? MetroNetwork(data: data) else { return }
+              let data = try? Data(contentsOf: url), var metro = try? MetroNetwork(data: data) else { return }
+        // Underground / at-grade / viaduct heights; without them trains stay on the street plane.
+        if let url = Bundle.main.url(forResource: "MetroLevels", withExtension: "json"),
+           let bytes = try? Data(contentsOf: url), let levels = try? MetroLevels(data: bytes) {
+            metro = metro.withLevels(levels)
+        }
         metro.attach(to: &metadata)
     }
 
@@ -175,7 +214,8 @@ actor TransitService {
         }
         do {
             let bytes = try await fetch(name)
-            try FeedDecoder.validateMetadataFeed(bytes)
+            do { try FeedDecoder.validateMetadataFeed(bytes) }
+            catch { await transport.invalidate(name); throw error }
             try bytes.write(to: url, options: .atomic)
             return (name, bytes, nil)
         } catch {
@@ -199,12 +239,19 @@ actor TransitService {
     }
 
     private enum LiveResult: Sendable { case vehicles(Data?), estimates(Data?) }
+    /// All stops' estimates are about 150 KB and change every few seconds, while the app shows
+    /// whole minutes counted down from the source time. Fetch them at most this often.
+    private let estimateInterval: TimeInterval = 20
+    private var estimatesRequestedAt = Date.distantPast
 
     private func performRefresh(onPartial: @escaping @Sendable (TransitSnapshot) async -> Void) async -> TransitSnapshot {
         // Publish each independent feed immediately; ETA must not wait for GPS and road matching.
         await withTaskGroup(of: LiveResult.self) { group in
             group.addTask { .vehicles(try? await self.fetch("GetBusData")) }
-            group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
+            if Date().timeIntervalSince(estimatesRequestedAt) >= estimateInterval {
+                estimatesRequestedAt = Date()
+                group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
+            }
             for await result in group {
                 guard !Task.isCancelled else { group.cancelAll(); break }
                 switch result {
@@ -216,7 +263,10 @@ actor TransitService {
                             snapshot.vehicles = value.vehicles; snapshot.sourceUpdatedAt = date
                             snapshot.receivedAt = Date(); snapshot.vehicleError = nil
                         } else { snapshot.vehicleError = AppText.text("定位來源回報較舊，保留最後資料") }
-                    } catch { snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報") }
+                    } catch {
+                        if bytes != nil { await transport.invalidate("GetBusData") }
+                        snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報")
+                    }
                 case .estimates(let bytes):
                     do {
                         guard let bytes else { throw FeedError.invalid(AppText.text("到站預估")) }
@@ -224,7 +274,10 @@ actor TransitService {
                         if let date = value.updatedAt, snapshot.estimates.updatedAt.map({ date >= $0 }) ?? true {
                             snapshot.estimates = value
                         } else { snapshot.estimates.error = AppText.text("到站預估來源回報較舊") }
-                    } catch { snapshot.estimates.error = AppText.text("到站預估來源連線中斷") }
+                    } catch {
+                        if bytes != nil { await transport.invalidate("GetEstimateTime") }
+                        snapshot.estimates.error = AppText.text("到站預估來源連線中斷")
+                    }
                 }
                 snapshot.revision += 1
                 await onPartial(snapshot)
@@ -235,7 +288,8 @@ actor TransitService {
 
     private func fetch(_ name: String) async throws -> Data {
         let data = try await transport.data(name)
-        return try inflate(data)
+        do { return try inflate(data) }
+        catch { await transport.invalidate(name); throw error }
     }
     private func inflate(_ data: Data) throws -> Data {
         guard data.starts(with: [0x1f, 0x8b]) else { return data }

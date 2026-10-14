@@ -1,77 +1,206 @@
-[
-  {
-    "file": "01-live-bus.png",
-    "title": "公車現在到哪了",
-    "caption": "點車牌，跟著這一輛看。",
-    "source": "store-07-live-bus-with-details.png",
-    "source_sha256": "37ad01e6ba302613647f132c61457ab0b7a58fdfe8917a931de5c5e09b6552f8",
-    "width": 1320,
-    "height": 2868,
-    "capture_run": 37469439911,
-    "capture_source": "124a246",
-    "app_version": "1.2.0",
-    "exact_build": "52.1.0",
-    "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
-    "source_equivalence": "App and TransitCore source unchanged from the uploaded binary; captures use debug diagnostics and simulated passenger location with live public bus GPS and ETAs."
-  },
-  {
-    "file": "03-walking.png",
-    "title": "走到站牌，不用換 App",
-    "caption": "路線、指引和剩餘時間，都在這裡。",
-    "source": "store-12-in-app-walking.png",
-    "source_sha256": "4e411d792f61bdefba796315e65ebaae48d4fbc945b4b55dc415a81223db3605",
-    "width": 1320,
-    "height": 2868,
-    "capture_run": 37469439911,
-    "capture_source": "124a246",
-    "app_version": "1.2.0",
-    "exact_build": "52.1.0",
-    "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
-    "source_equivalence": "App and TransitCore source unchanged from the uploaded binary; captures use debug diagnostics and simulated passenger location with live public bus GPS and ETAs."
-  },
-  {
-    "file": "04-onboard.png",
-    "title": "哪站下車，沿途接著看",
-    "caption": "確認車牌，查看下一站與下車時間。",
-    "source": "store-09-onboard-live-guidance.png",
-    "source_sha256": "01d24e3e151e28f179df1c14279fae57a553d7058174da05407f53405018833b",
-    "width": 1320,
-    "height": 2868,
-    "capture_run": 37469439911,
-    "capture_source": "124a246",
-    "app_version": "1.2.0",
-    "exact_build": "52.1.0",
-    "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
-    "source_equivalence": "App and TransitCore source unchanged from the uploaded binary; captures use debug diagnostics and simulated passenger location with live public bus GPS and ETAs."
-  },
-  {
-    "file": "05-plan.png",
-    "title": "要去哪裡，先看怎麼搭",
-    "caption": "比較走路、候車和搭車的時間。",
-    "source": "store-02-trip-choices.png",
-    "source_sha256": "b3ed38a620f2640f5252354a9c98dfe75c62a50556786a4c2f8d245ed492c54e",
-    "width": 1320,
-    "height": 2868,
-    "capture_run": 37469439911,
-    "capture_source": "124a246",
-    "app_version": "1.2.0",
-    "exact_build": "52.1.0",
-    "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
-    "source_equivalence": "App and TransitCore source unchanged from the uploaded binary; captures use debug diagnostics and simulated passenger location with live public bus GPS and ETAs."
-  },
-  {
-    "file": "06-search.png",
-    "title": "常用路線，幾下就找到",
-    "caption": "用公車專用鍵盤找路線，也能搜站名。",
-    "source": "store-03-route-keypad.png",
-    "source_sha256": "8c45a7b5b9c64552099a5e5390ca2fa8c50a89914cca64768554a875f34af96f",
-    "width": 1320,
-    "height": 2868,
-    "capture_run": 37472675590,
-    "capture_source": "62bfc41",
-    "app_version": "1.2.0",
-    "exact_build": "52.1.0",
-    "binary_source": "bb7bc0ae1a3d622190060700191afa25a419dc24",
-    "source_equivalence": "App and TransitCore source unchanged from the uploaded binary; captures use debug diagnostics and simulated passenger location with live public bus GPS and ETAs."
-  }
-]
+{
+  "app_version": "1.6.1",
+  "release_build": "98.1.0",
+  "status": "authorized_for_app_store_submission",
+  "slides": [
+    {
+      "source": "user-06.jpg",
+      "file": "01-3d-bus.png",
+      "title": "3D 公車動態",
+      "caption": "車輛位置與官方到站，一起看。",
+      "pro": false,
+      "attachment_number": 6,
+      "source_kind": "user_capture",
+      "source_sha256": "5c841c7cd18daf0071d9a27055132ce3fb648170e2be8d7f6980546841796e68",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "cb29f080f3af925ca53b3fac6391403da2bcd39afb9a4aab4a762fb06ddf613e"
+    },
+    {
+      "source": "user-01.jpg",
+      "file": "02-3d-metro.png",
+      "title": "3D 捷運列車",
+      "caption": "沿著路線，看列車推估位置。",
+      "pro": true,
+      "attachment_number": 1,
+      "source_kind": "user_capture",
+      "source_sha256": "aad026c155c68df5584858a10ca470bed1a236c322211652db57f8437b473cd5",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "da3d54f6673afa2196e1f4846a0e4d9f76716380f12594f1f77f75ff44f7cd54"
+    },
+    {
+      "source": "user-07-dynamic-island.jpg",
+      "file": "03-live-activity.png",
+      "title": "動態島，搭車資訊接著看",
+      "caption": "切換 App，也知道還有幾站。",
+      "pro": true,
+      "attachment_number": 7,
+      "source_kind": "user_capture",
+      "source_sha256": "abcf9b75a290850158045c99f6fa3a5b351c6af7a3b5e2888db3aa9b429a4436",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "layout": "live-activity-polished",
+      "crop": [
+        141,
+        21,
+        307,
+        53
+      ],
+      "secondary_source": "native-pro-390.png",
+      "secondary_source_sha256": "74d10d1d7734c06f4b43e5da760d72f66cecc86002586bb8b1b549e5f14f79e7",
+      "secondary_source_dimensions": [
+        1206,
+        2622
+      ],
+      "benefit_title": "快到站，提醒你準備",
+      "benefit_caption": "支援通知與震動提醒。",
+      "benefit_note": "提醒方式依 iPhone 通知與震動設定。",
+      "secondary_capture_run": 38346105431,
+      "secondary_crop_top": 144,
+      "secondary_label": "Pro 功能與方案",
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "1ecdfa1c277d22be0f2c1998e8d215654d845554a88be0ac10914c38fd72c9df"
+    },
+    {
+      "source": "native-route-choices.png",
+      "file": "04-route-planning.png",
+      "title": "先比較路線，再出發",
+      "caption": "步行、候車與抵達時間，一次比較。",
+      "pro": false,
+      "attachment_number": null,
+      "source_kind": "native_simulator_capture",
+      "source_sha256": "95b13abab12fbb02307f43582668ce7e0295ce055b150a2e93f466d45c0a8daa",
+      "source_dimensions": [
+        1320,
+        2868
+      ],
+      "capture_run": 38346575772,
+      "source_crop_top": 144,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "b790dad70c0145f92e4acfb9f88a8539765edbdd30046752a765cb5f1ecbf07c"
+    },
+    {
+      "source": "user-02.jpg",
+      "file": "05-official-arrivals.png",
+      "title": "下一班，還有多久",
+      "caption": "同一站的路線與官方到站時間。",
+      "pro": false,
+      "attachment_number": 2,
+      "source_kind": "user_capture",
+      "source_sha256": "40747da38d70cff11d669a781dd1b9da89e725ceed3641e962936029eba9208c",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "715caddc0a476e49f4772309a71cbdbce7afa04d03f07c3f071a121dfc06e161"
+    },
+    {
+      "source": "native-walking.png",
+      "file": "06-walking.png",
+      "title": "走到站牌，不用換 App",
+      "caption": "路線、距離與轉彎指引，就在地圖裡。",
+      "pro": false,
+      "attachment_number": null,
+      "source_kind": "native_simulator_capture",
+      "source_sha256": "853d70e9f9552881ca6071d6f1a06b0e10e04acfbce488f69ba2b2484a2e228f",
+      "source_dimensions": [
+        1320,
+        2868
+      ],
+      "capture_run": 38346575772,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "35f4f654ce0a18d63b5d475c1ec9f60942b90ad615843d914382a6571940564f"
+    },
+    {
+      "source": "user-05.jpg",
+      "file": "07-nearby-stops.png",
+      "title": "附近站牌，就在地圖上",
+      "caption": "對照位置與方向，找到上車站。",
+      "pro": false,
+      "attachment_number": 5,
+      "source_kind": "user_capture",
+      "source_sha256": "4009e0f698c1af3e72280bac34f177349dc24f6dc290bccfb6e7e63034758be0",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "ffecc8dee18578765dfd9b1238702d060b0477c84b50d11e74b88be51d746ebf"
+    },
+    {
+      "source": "user-04.jpg",
+      "file": "08-route-search.png",
+      "title": "找路線，幾下就好",
+      "caption": "專用鍵盤，快速找到常搭的路線。",
+      "pro": false,
+      "attachment_number": 4,
+      "source_kind": "user_capture",
+      "source_sha256": "69f4eeef5a5f0df8222ae943d79f9edc91dd60684cf918f1409c701785f079fd",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "c65bd930db58098fe4bab1ed621eb85d6a50dcf0b88eb2e150eb103d6960635d"
+    },
+    {
+      "source": "user-03.jpg",
+      "file": "09-city-map.png",
+      "title": "全城公車，一張地圖",
+      "caption": "拉遠地圖，查看車輛與路線分布。",
+      "pro": false,
+      "attachment_number": 3,
+      "source_kind": "user_capture",
+      "source_sha256": "50e21deb45eff8e43b9cf39ec02d10f2a2f92f0d857c34274d555aa3e1ecb2f3",
+      "source_dimensions": [
+        588,
+        1280
+      ],
+      "capture_run": null,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "c7cac4a11e975a2f23c74239ed2f483220b4ca9ecf0f6dacffa29e9d59787447"
+    }
+  ],
+  "exports_directory": "exports-v3",
+  "preview_file": "preview-v3.html",
+  "overview_file": "overview-v3.png",
+  "overview_caption": "3D 公車、捷運列車與動態島排在前面。你的六張全數保留，Pro 功能與方案合併呈現。",
+  "revision": "polished-v3",
+  "scope": "app_store_1.6.1",
+  "quality_note": "使用者提供的照片為壓縮圖片，放大後細字清晰度受原檔限制。",
+  "sources_unchanged": true
+}

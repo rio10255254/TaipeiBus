@@ -1,0 +1,55 @@
+{
+  "version": "1.6.1",
+  "build": "98.1.0",
+  "status": "publication_paused_by_user",
+  "app_source_unchanged_from_uploaded_build": true,
+  "submission_state": "COMPLETE",
+  "native_verification": {
+    "run": 38365539450,
+    "source": "595a56dea01bfa87f8d49710421954c0e834a44c",
+    "purchase_tests_passed": 10,
+    "light_interface_tests_passed": 5,
+    "dark_english_interface_tests_passed": 1,
+    "failures": 0,
+    "device": "iPhone 17 simulator",
+    "physical_device_performance_retested": false
+  },
+  "billing": {
+    "monthly_twd": 39,
+    "annual_twd": 390,
+    "trial_days": 7,
+    "eligible_accounts_only": true,
+    "territories": [
+      "TWN"
+    ],
+    "apple_readback_run": 38365542963,
+    "review_images_match_local": true
+  },
+  "store": {
+    "screenshots": 9,
+    "three_d_features_first": true,
+    "all_six_user_photos_retained": true,
+    "uploaded_order_and_checksums_verified": true,
+    "verify_run": 38367412583,
+    "app_download_price_twd": 0,
+    "automatic_release": false
+  },
+  "submission": {
+    "run": 38368775583,
+    "id": "80221239-b886-418b-8585-57736cf3ef6f",
+    "submitted_at": "2026-10-13T08:22:40Z",
+    "includes": [
+      "app",
+      "monthly_subscription",
+      "annual_subscription",
+      "subscription_group"
+    ]
+  },
+  "version_state": "DEVELOPER_REJECTED",
+  "pause": {
+    "confirmed_at": "2026-10-13T09:02:16Z",
+    "release_type": "MANUAL",
+    "receipt": "app-store-1.6.1-paused.json",
+    "reason": "User reported official travel-time freshness/refresh risk; Claude is handling the repair. Resume publication only after renewed user authorization."
+  }
+}

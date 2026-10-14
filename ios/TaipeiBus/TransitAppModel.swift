@@ -51,10 +51,302 @@ private actor StationLookup {
 
 @MainActor
 final class TransitAppModel: ObservableObject {
+    let purchases = ProPurchases()
+    let commutes = CommuteLibrary()
+
+    // MARK: Pro features and free daily trials
+    /// Free uses of Pro features today (three per Taipei day; the same bus again costs nothing).
+    @Published private(set) var allowance: DailyAllowance = {
+        guard let bytes = UserDefaults.standard.data(forKey: "proDailyAllowance.v1"),
+              let value = try? JSONDecoder().decode(DailyAllowance.self, from: bytes) else { return DailyAllowance() }
+        return value
+    }()
+    // MARK: Alighting reminder (Pro)
+    let alightReminder = AlightReminder()
+    @Published var alightReminderOn: Bool = UserDefaults.standard.object(forKey: "alightReminderOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(alightReminderOn, forKey: "alightReminderOn"); if !alightReminderOn { alightReminder.cancel() } }
+    }
+    var alightReminderActive: Bool { purchases.hasPro && alightReminderOn }
+    /// Seconds until the rider reaches the alighting stop of the ride they are on.
+    func onboardSecondsToAlight(_ ride: TransitRide, at date: Date) -> Double? {
+        if ride.route.mode != .bus { return metroRemaining(ride, at: date).seconds }
+        if let last = onboardArrival, last.rideID == ride.id { return max(0, last.arrival.timeIntervalSince(date)) }
+        guard let boardedAt else { return nil }
+        let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt).seconds
+        return max(0, planned - date.timeIntervalSince(boardedAt))
+    }
+    private func updateAlightReminder() {
+        guard alightReminderActive, boardedAt != nil, case .ride(let index) = planner.currentStep,
+              let rides = planner.selected?.rides, rides.indices.contains(index) else { return }
+        let ride = rides[index], now = Date()
+        guard let seconds = onboardSecondsToAlight(ride, at: now) else { return }
+        alightReminder.update(rideID: ride.id, stopName: ride.alighting.localizedName, secondsToAlight: seconds, now: now)
+    }
+    /// The bell on the riding card: Pro turns the reminder on or off; otherwise it shows Pro.
+    func toggleAlightReminder() {
+        guard purchases.hasPro else { showingProPlans = true; return }
+        if alightReminderOn { alightReminderOn = false; return }
+        Task { [weak self] in
+            guard let self else { return }
+            if await self.alightReminder.authorize() { self.alightReminderOn = true; self.updateAlightReminder() }
+            else { self.proNote = AppText.text("請在「設定」允許台北公車傳送通知，才能收到下車提醒") }
+        }
+    }
+
+    // MARK: Live Activity and Home Screen widget (Pro)
+    let rideActivity = RideActivityController()
+    let commuteWidget = CommuteWidgetBridge()
+    /// The saved trip whose plan is on screen; its first ride is what the widget will watch.
+    private var activeSavedJourneyID: UUID?
+    private var widgetPlanning = false
+    /// While a Pro trip is in progress the app keeps refreshing behind the Lock Screen, through
+    /// iOS background navigation location, so the Live Activity's stops and countdown and the
+    /// alighting reminder follow the real bus or train.
+    var journeyInBackground: Bool {
+        purchases.hasPro && planner.started && !planner.arrived && !location.permissionDenied &&
+            (rideActivityOn || alightReminderOn)
+    }
+    /// Pro setting: show the trip on the Lock Screen and in the Dynamic Island.
+    @Published var rideActivityOn: Bool = UserDefaults.standard.object(forKey: "rideActivityOn") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(rideActivityOn, forKey: "rideActivityOn"); if !rideActivityOn { rideActivity.endAll() } }
+    }
+#if DEBUG
+    /// Interface verification reads whether the system accepted the Live Activity.
+    @Published private(set) var rideActivityDebug = "none"
+#endif
+    /// A widget link that arrived before routes were loaded; opened once they are.
+    private var pendingSavedJourneyID: UUID?
+    private var runsLiveWork: Bool { isActive || journeyInBackground }
+    func updateLiveSurfaces() {
+        // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
+        guard !purchases.checkingAccess else { return }
+        location.setBackgroundNavigation(journeyInBackground)
+        let now = Date()
+        rideActivity.update(rideActivityState(at: now), destination: planner.destination?.localizedName ?? "",
+                            language: language, enabled: purchases.hasPro && rideActivityOn)
+#if DEBUG
+        if rideActivityDebug != rideActivity.debugState { rideActivityDebug = rideActivity.debugState }
+#endif
+        openPendingSavedJourney()
+        recordSavedJourneyRide()
+        let proUntil = purchases.hasPro ? purchases.periodEndsAt ?? now.addingTimeInterval(3 * 86_400) : nil
+        commuteWidget.publish(commuteWidget.payload(commutes.journeys, proUntil: proUntil, language: language, now: now))
+        planSavedJourneyForWidget()
+    }
+    private func widgetRide(_ ride: TransitRide, walkSeconds: Double) -> CommuteWidgetPayload.Ride {
+        let headway = ride.route.mode == .bus ? nil : metroHeadway(ride, at: Date()).map { ($0.lowerSeconds + $0.upperSeconds) / 2 }
+        return CommuteWidgetBridge.ride(ride, walkSeconds: walkSeconds, headwaySeconds: headway)
+    }
+    private func recordSavedJourneyRide() {
+        guard let id = activeSavedJourneyID else { return }
+        guard let saved = commutes.journeys.first(where: { $0.id == id }),
+              planner.destination?.coordinate == saved.destination.coordinate else { activeSavedJourneyID = nil; return }
+        guard let option = planner.selected else { return }
+        let from = saved.origin?.coordinate ?? planner.origin?.coordinate
+        guard let ride = option.rides.first else { commuteWidget.record(id, ride: nil, from: from); return }
+        commuteWidget.record(id, ride: widgetRide(ride, walkSeconds: option.walks.first?.duration ?? option.trip?.planningWalkSeconds.first ?? 0), from: from)
+    }
+    /// One saved trip at a time, in the background, so the widget knows each trip's bus without
+    /// the rider opening every trip first.
+    private func planSavedJourneyForWidget() {
+        guard purchases.hasPro, !widgetPlanning, !planner.planning, !metadata.routes.isEmpty,
+              let journey = commuteWidget.needsPlanning(commutes.journeys, location: location.usableCoordinate, now: Date()) else { return }
+        commuteWidget.markPlanned(journey.id)
+        guard let from = journey.origin?.coordinate ?? location.usableCoordinate else { return }
+        widgetPlanning = true
+        let metadata = self.metadata, preferences = journey.preference.applying(to: liveSettings.planning)
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.planner.firstRide(metadata: metadata, from: from, to: journey.destination.coordinate, preferences: preferences)
+            self.widgetPlanning = false
+            switch result {
+            case .ride(let ride, let walk)?: self.commuteWidget.record(journey.id, ride: self.widgetRide(ride, walkSeconds: walk), from: from)
+            case .walk?: self.commuteWidget.record(journey.id, ride: nil, from: from)
+            case nil: break
+            }
+        }
+    }
+    private func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
+        guard planner.started, !planner.arrived, let option = planner.selected, let step = planner.currentStep else { return nil }
+        switch step {
+        case .walk(let index) where option.rides.indices.contains(index):
+            let ride = option.rides[index]
+            var target: Date?, status: String?
+            if ride.route.mode == .bus {
+                let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: now)
+                if let seconds = guide.estimateSeconds, seconds >= 0 {
+                    target = now.addingTimeInterval(Double(seconds))
+                    status = AppText.text("官方下一班")
+                } else { status = guide.arrivalShortLabel }
+            } else if let seconds = metroArrival(ride, at: now) {
+                target = now.addingTimeInterval(Double(seconds)); status = AppText.text("官方下班列車")
+            } else if let estimate = metroPlatformEstimate(ride, at: now) {
+                if estimate.entering { status = AppText.text("進站中") }
+                else { target = now.addingTimeInterval(estimate.seconds); status = AppText.text("依列車進站紀錄推估") }
+            } else if let headway = metroHeadway(ride, at: now) {
+                target = now.addingTimeInterval(MetroNetwork.expectedWait(headway).typical); status = AppText.text("班距推估")
+            } else { status = AppText.text("營運時間外") }
+            return .init(phase: .waiting, sign: RouteSign(ride.route),
+                         headline: AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction)),
+                         detail: ride.boarding.localizedName, target: target, status: status,
+                         stopsLeft: nil, totalStops: nil, updatedAt: now)
+        case .ride(let index) where option.rides.indices.contains(index):
+            let ride = option.rides[index]
+            let left = ride.route.mode == .bus ? onboardStops(for: ride, at: now).count : metroRemaining(ride, at: now).stops.count
+            let seconds = onboardSecondsToAlight(ride, at: now)
+            return .init(phase: .riding, sign: RouteSign(ride.route), headline: ride.alighting.localizedName,
+                         detail: AppText.remainingStops(left), target: seconds.map { now.addingTimeInterval($0) },
+                         status: nil, stopsLeft: left, totalStops: ride.stopCount, updatedAt: now)
+        default:
+            let walk = journeyDuration(option, at: now)?.totalSeconds
+            return .init(phase: .walking, sign: .walking, headline: planner.destination?.localizedName ?? "",
+                         detail: AppText.text("步行前往目的地"), target: walk.map { now.addingTimeInterval($0) },
+                         status: nil, stopsLeft: nil, totalStops: nil, updatedAt: now)
+        }
+    }
+    private func openPendingSavedJourney() {
+        guard let id = pendingSavedJourneyID, !metadata.routes.isEmpty else { return }
+        pendingSavedJourneyID = nil
+        guard !planner.started, let saved = commutes.journeys.first(where: { $0.id == id }) else { return }
+        previewSavedJourney(saved); showSavedJourneyRequested = true
+    }
+    /// Links from the widget and the Live Activity.
+    func open(_ url: URL) {
+        guard url.scheme == "taipeibus" else { return }
+        switch url.host {
+        case "pro": if !purchases.hasPro { showingProPlans = true }
+        case "commute":
+            guard !planner.started, let id = UUID(uuidString: url.lastPathComponent),
+                  commutes.journeys.contains(where: { $0.id == id }) else { return }
+            pendingSavedJourneyID = id; openPendingSavedJourney()
+        default: break
+        }
+    }
+
+    /// End of a free 15-minute look at live metro trains.
+    @Published private(set) var liveTrainsUntil: Date?
+    /// A short, dismissible note about Pro (a trial used, or none left today). Never blocks navigation.
+    @Published var proNote: String?
+    @Published var showingProPlans = false
+    static let liveTrainTrialMinutes = 15
+    private var unlimitedTrials: Bool {
+#if DEBUG
+        // Interface verification fixtures exercise every feature without spending trials,
+        // except the free-tier check, which verifies the trial path itself.
+        let arguments = ProcessInfo.processInfo.arguments
+        if arguments.contains("--free-tier-check") { return false }
+        return arguments.contains { $0.hasPrefix("--preview-") || $0.hasPrefix("--usability") || $0.hasPrefix("--test-") }
+#else
+        return false
+#endif
+    }
+    var hasProAccess: Bool { purchases.hasPro || unlimitedTrials }
+    /// Live metro trains on the map: Pro, or during a free 15-minute look.
+    var showsLiveTrains: Bool { hasProAccess || (liveTrainsUntil.map { $0 > Date() } ?? false) }
+    var freeTrialsLeft: Int { allowance.remaining(at: Date()) }
+    private func spendTrial(_ id: String, limitNote: String) -> Bool {
+        if hasProAccess { return true }
+        let before = allowance.remaining(at: Date())
+        let allowed = allowance.use(id, at: Date())
+        if let bytes = try? JSONEncoder().encode(allowance) { UserDefaults.standard.set(bytes, forKey: "proDailyAllowance.v1") }
+        let after = allowance.remaining(at: Date())
+        if !allowed { proNote = limitNote }
+        else if after < before { proNote = AppText.text("已使用免費試用，今日剩 %@ 次", after) }
+        return allowed
+    }
+    /// The follow camera on a bus. Pro, or one of today's free trials (the same bus again is free).
+    func beginFollowing(_ vehicleID: String) -> Bool {
+        spendTrial("bus:" + vehicleID, limitNote: AppText.text("今日免費跟隨已用完，Pro 可無限跟隨"))
+    }
+    /// A free 15-minute look at the live metro trains.
+    func startLiveTrainTrial() {
+        guard !showsLiveTrains else { return }
+        guard spendTrial("metro-trains:" + String(Int(Date().timeIntervalSince1970)),
+                         limitNote: AppText.text("今日免費試用已用完，Pro 可隨時查看即時列車")) else { return }
+        liveTrainsUntil = Date().addingTimeInterval(Double(Self.liveTrainTrialMinutes) * 60)
+        metroRevision += 1
+    }
+    /// A free look that ran out hides the trains and stops following them.
+    private func expireLiveTrainTrial() {
+        guard !hasProAccess, let until = liveTrainsUntil, until <= Date() else { return }
+        liveTrainsUntil = nil; followingTrain = false
+        if boardedAt == nil { selectedTrainID = nil }
+        metroRevision += 1
+    }
+    @Published private(set) var tripPreference: RoutePreference?
+    private var effectivePlanning = LiveSettings.Planning()
+    func applyPersonalPreferences() {
+        var settings = liveSettings
+        if purchases.hasPro { settings.planning = (tripPreference ?? commutes.preference).applying(to:settings.planning) }
+        guard settings.planning != effectivePlanning else { return }
+        effectivePlanning = settings.planning; planner.updateSettings(settings)
+        if !planner.started, planner.destination != nil, !metadata.routes.isEmpty { planner.plan(metadata:metadata) }
+    }
+    func setTripPreference(_ value: RoutePreference) {
+        guard purchases.hasPro else { return }
+        tripPreference = value; applyPersonalPreferences()
+    }
+    /// Opening a saved trip stays free after Pro ends; its saved route preference only applies with Pro.
+    func previewSavedJourney(_ saved: SavedJourney) {
+        guard saved.valid else { return }
+        planner.finish(); clearWalkingMap(); clearSelection()
+        activeSavedJourneyID = saved.id
+        tripPreference = purchases.hasPro ? saved.preference : nil; applyPersonalPreferences()
+        if let origin = saved.origin { planner.setOrigin(origin,metadata:metadata) }
+        else { planner.useLocation(location.usableCoordinate,metadata:metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(saved.destination,metadata:metadata,currentLocation:location.usableCoordinate)
+    }
     @Published private(set) var metadata = TransitMetadata()
     @Published private(set) var snapshot = TransitSnapshot()
     @Published private(set) var metroRealtime: MetroRealtime?
     @Published private(set) var metroRevision = 0
+    /// Recent official "train entering station" sightings, kept for 15 minutes.
+    @Published private(set) var metroPlatformEvents: [MetroPlatformEvent] = []
+    /// Trains placed from platform sightings until an authorized per-train feed is connected.
+    @Published private(set) var estimatedTrains: [MetroTrainReport] = []
+    private var trainTracker = MetroTrainTracker()
+    /// Official trains when an authorized feed is live, otherwise the sighting-based estimates.
+    var metroTrains: [MetroTrainReport] {
+        let now = Date()
+        if let official = metroRealtime?.trains.filter({ (-15...60).contains(now.timeIntervalSince($0.observedAt)) }), !official.isEmpty {
+            return official
+        }
+        return estimatedTrains
+    }
+    func metroTrain(_ id: String?) -> MetroTrainReport? {
+        guard let id else { return nil }
+        return metroTrains.first { $0.id == id }
+    }
+    /// The open feed is a few kilobytes and answers "not modified" between rewrites, so it is
+    /// polled whenever the app is in the foreground and trains are drawn on the map. It runs on its
+    /// own task: a slow metro response must never hold back bus positions.
+    private var platformTask: Task<Void, Never>?
+    private var platformGeneration = UUID()
+    private func pollPlatformInBackground() {
+        guard runsLiveWork, platformTask == nil else { return }
+        let token = UUID(); platformGeneration = token
+        let network = metadata.metro
+        platformTask = Task { [weak self] in
+            guard let self else { return }
+            let sightings = await self.service.metroPlatformEvents(network: network)
+            if !Task.isCancelled, self.runsLiveWork, self.platformGeneration == token, let sightings, !sightings.isEmpty {
+                let merged = MetroPlatformFeed.merge(self.metroPlatformEvents, sightings, at: Date())
+                if merged != self.metroPlatformEvents { self.metroPlatformEvents = merged }
+                self.updateEstimatedTrains(with: sightings)
+            }
+            if self.platformGeneration == token { self.platformTask = nil }
+        }
+    }
+    private func updateEstimatedTrains(with sightings: [MetroPlatformEvent]?) {
+        let now = Date()
+        if let sightings { trainTracker.ingest(sightings, network: metadata.metro, at: now) } else { trainTracker.prune(network: metadata.metro, at: now) }
+        let reports = trainTracker.reports(network: metadata.metro, at: now)
+        // Reports carry their own timeline, so the map only reloads when a plan changes.
+        guard reports.map({ $0.id }) != estimatedTrains.map({ $0.id }) || reports.map({ $0.plan }) != estimatedTrains.map({ $0.plan }) else { return }
+        estimatedTrains = reports
+        reacquireBoardedTrain(at: now)
+        metroRevision += 1
+    }
     @Published var selectedTrainID: String?
     @Published var followingTrain = false
     @Published private(set) var loading = true
@@ -97,6 +389,8 @@ final class TransitAppModel: ObservableObject {
     /// The arriving-bus list is presented from the root view, so rebuilding the
     /// waiting card while it settles cannot drop the request.
     @Published var showingArrivingVehicles = false
+    /// Set by the saved-trip list inside Settings: close Settings and show the trip's routes.
+    @Published var showSavedJourneyRequested = false
     @Published var focus: MapFocus?
     @Published var tappedPlace: MapPlaceSelection?
     @Published var focusRevision = 0
@@ -209,6 +503,13 @@ final class TransitAppModel: ObservableObject {
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
+    /// Each refresh downloads the whole city's positions; the short tracking cadence is only
+    /// worth that traffic while a particular vehicle, train or trip is being watched.
+    var refreshSeconds: Double {
+        let watching = following || followingTrain || selectedVehicleID != nil || (planner.started && !planner.arrived)
+        let refresh = liveSettings.refresh
+        return watching ? min(refresh.vehicleSeconds, refresh.trackingSeconds) : refresh.vehicleSeconds
+    }
     var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.localizedName : $0.localizedDisplayName } }
     var routeVariants: [BusRoute] { selectedRouteID.map { metadata.variants(routeID: $0) } ?? [] }
     var routeDirections: [String] {
@@ -244,8 +545,17 @@ final class TransitAppModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
+        if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
-        if !active { updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil; return }
+        if !active {
+            updateLiveSurfaces()
+            settingsTask?.cancel(); settingsTask = nil
+            // A trip in progress keeps its refresh loop; it stops itself when the trip ends.
+            if journeyInBackground { return }
+            updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
+            platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+            return
+        }
         settingsTask = Task { [weak self] in
             guard let self else { return }
             if let cached = await liveService.cached() { await applyLiveSettings(cached) }
@@ -258,6 +568,8 @@ final class TransitAppModel: ObservableObject {
                 do { try await Task.sleep(for: .seconds(interval)) } catch { return }
             }
         }
+        // Returning from the Lock Screen during a trip: the loop never stopped.
+        guard updateTask == nil else { return }
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
@@ -273,22 +585,39 @@ final class TransitAppModel: ObservableObject {
                     applySnapshot(current)
                 }
                 metadata = try await prepared
+                openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     async let rail = service.metroRealtime(network: metadata.metro)
+                    pollPlatformInBackground()
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
                     applySnapshot(result)
+                    updateEstimatedTrains(with: nil)
+                    expireLiveTrainTrial()
+                    updateAlightReminder()
+                    updateLiveSurfaces()
+                    if !isActive, !journeyInBackground {
+                        // The trip ended behind the Lock Screen: stop like a normal suspension.
+                        location.setBackgroundNavigation(false)
+                        platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+                        updateTask = nil; return
+                    }
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    let interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
-                    let elapsed = ProcessInfo.processInfo.systemUptime - requestStartedAt
-                    try await Task.sleep(for: .seconds(max(0.25, interval - elapsed)))
+                    // Wake within a second when the user starts following something mid-wait.
+                    while true {
+                        // Behind the Lock Screen a slower pace still moves the countdown and stops on time.
+                        let interval = isActive ? refreshSeconds : max(refreshSeconds, 15)
+                        let remaining = interval - (ProcessInfo.processInfo.systemUptime - requestStartedAt)
+                        if remaining <= 0.25 { try await Task.sleep(for: .seconds(0.25)); break }
+                        try await Task.sleep(for: .seconds(min(remaining, 1)))
+                    }
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
                     metadataNotice = await service.metadataNotice
@@ -305,7 +634,7 @@ final class TransitAppModel: ObservableObject {
         vocabulary = packet.vocabulary
         liveSettings = packet.settings
         location.updateSettings(packet.settings)
-        planner.updateSettings(packet.settings)
+        applyPersonalPreferences()
         await service.updateSettings(packet.settings)
 #if DEBUG
         markLiveSettingsPreview()
@@ -322,7 +651,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     private func receivePartialSnapshot(_ result: TransitSnapshot) {
-        guard isActive else { return }
+        guard runsLiveWork else { return }
         applySnapshot(result)
     }
 
@@ -350,6 +679,7 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var walkingMapIndex: Int?
     var activeWalkingIndex: Int? {
         if stationWalk.isActive { return nil }
+        guard planner.started else { return nil }
         if let walkingMapIndex { return walkingMapIndex }
         if planner.started, case .walk(let index) = planner.currentStep {
             if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer == true { return nil }
@@ -363,6 +693,14 @@ final class TransitAppModel: ObservableObject {
             stationWalk.update(location: location)
             return
         }
+#if DEBUG
+        // Synthetic boarding journeys have their own origin. The test device's fixed city
+        // location must not reroute them into a real walk across town; walking QA uses its own fix.
+        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil {
+            location.setWalkingNavigation(false)
+            return
+        }
+#endif
         let index = activeWalkingIndex
         location.setWalkingNavigation(index != nil)
         guard let index else {
@@ -469,7 +807,8 @@ final class TransitAppModel: ObservableObject {
             routeOverviewReturn = (routeID, direction, allRouteVariants, routeBoardingStopID)
         }
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
-        selectedStationID = nil; direction = vehicle.direction; following = true; query = ""
+        // Looking at a bus is free; the follow camera starts only with Pro (or an explicit trial).
+        selectedStationID = nil; direction = vehicle.direction; following = hasProAccess; query = ""
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -564,7 +903,13 @@ final class TransitAppModel: ObservableObject {
         return max(60, onboardArrival.arrival.timeIntervalSince(date))
     }
 
-    func journeyDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+    func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
+#if DEBUG
+        let date = ProcessInfo.processInfo.arguments.contains("--preview-mixed-planning")
+            ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : suppliedDate
+#else
+        let date = suppliedDate
+#endif
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
             return planner.duration(option, at: date)
@@ -590,16 +935,17 @@ final class TransitAppModel: ObservableObject {
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
+        var onboardSpread: Double?
         if onboard, let first = remainingRides.first, !riding.isEmpty {
             if first.route.mode != .bus {
                 let remaining = metroRemaining(first, at: date)
-                riding[0] = remaining.seconds; positionUncertain = !remaining.officialPosition
+                riding[0] = remaining.seconds; positionUncertain = remaining.source == .schedule
             } else if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
                let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
                let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
                 if progress.distance < -20 { riding[0] = 0 }
                 else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
-                    riding[0] = prediction.seconds
+                    riding[0] = prediction.seconds; onboardSpread = prediction.uncertaintySeconds
                     onboardArrival = (first.id, date.addingTimeInterval(prediction.seconds), date)
                 } else if let held = heldOnboardSeconds(first, at: date) {
                     riding[0] = held
@@ -627,7 +973,10 @@ final class TransitAppModel: ObservableObject {
         var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
             services: remainingRides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
-            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
+            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds),
+            ridingSpreads: zip(rideEstimates, riding).enumerated().map { index, pair in
+                index == 0 ? onboardSpread ?? pair.1 * pair.0.evidence.spreadFraction : pair.1 * pair.0.evidence.spreadFraction
+            }, at: date)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
@@ -642,11 +991,19 @@ final class TransitAppModel: ObservableObject {
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
         boardedAt = Date()
-        if ride.route.mode != .bus {
-            let selected = metroRealtime?.trains.first { $0.id == selectedTrainID }
-            if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
-                selectedTrainID = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: Date())?.trainID
+        if alightReminderActive {
+            Task { [weak self] in
+                guard let self, await self.alightReminder.authorize() else { return }
+                self.updateAlightReminder()
             }
+        }
+        if ride.route.mode != .bus {
+            let selected = metroTrain(selectedTrainID)
+            if selected.map({ metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }) != true {
+                selectedTrainID = boardingTrain(for: ride, at: Date())?.id
+            }
+            // Riding a train the app has matched: the chase camera follows it, as it does a boarded bus.
+            if selectedTrainID != nil { metroRevisionForSelection(userInitiated: false) }
         }
         boardedVehicle = nil
         if let bus = selectedVehicle, metadata.canServe(ride, vehicle: bus) {
@@ -658,7 +1015,7 @@ final class TransitAppModel: ObservableObject {
     func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
         guard metadata.canServe(ride, vehicle: bus) else { return }
         boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
-        trackApproachingVehicle(bus)
+        trackApproachingVehicle(bus, userInitiated: false)
     }
 
     func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
@@ -718,29 +1075,163 @@ final class TransitAppModel: ObservableObject {
     func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {
         metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.remaining(at: date)
     }
-    func metroRevisionForSelection() {
+    /// Follow the selected train. A free user who taps it starts a trial look at live trains;
+    /// boarding never spends a trial on its own.
+    func metroRevisionForSelection(userInitiated: Bool = true) {
         metroRevision += 1
+        if !showsLiveTrains, userInitiated { startLiveTrainTrial() }
+        guard showsLiveTrains else { followingTrain = false; return }
         followingTrain = true
-        guard let id = selectedTrainID, let report = metroRealtime?.trains.first(where: { $0.id == id }),
-              let pose = MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) else { return }
+        guard let id = selectedTrainID, let report = metroTrain(id),
+              MetroTrainProjection.pose(report, network: metadata.metro, at: Date()) != nil else { return }
         focusMap(.metroTrain(id))
     }
+    /// The train a rider who just confirmed boarding is most likely on: one standing at or just
+    /// leaving the boarding platform, otherwise the next one due there.
+    func boardingTrain(for ride: TransitRide, at date: Date) -> MetroTrainReport? {
+        if let id = metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.trainID, let train = metroTrain(id) { return train }
+        let metro = metadata.metro
+        var best: (train: MetroTrainReport, score: Double)?
+        for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction),
+                  let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
+                  let state = train.state(network: metro, at: date), !state.holding else { continue }
+            let score: Double
+            if state.previousIndex == board, state.atPlatform || state.progress < 0.6 { score = state.atPlatform ? 0 : 20 }
+            else if let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern), seconds <= 240 { score = 30 + seconds }
+            else { continue }
+            if best.map({ score < $0.score }) ?? true { best = (train, score) }
+        }
+        return best?.train
+    }
+    /// A sighting-based train can be dropped and re-created after missed sightings; keep the
+    /// rider attached to the train that is where theirs should be.
+    private func reacquireBoardedTrain(at date: Date) {
+        guard boardedAt != nil, metroTrain(selectedTrainID) == nil, case .ride(let index) = planner.currentStep,
+              let rides = planner.selected?.rides, rides.indices.contains(index), rides[index].route.mode != .bus else { return }
+        let ride = rides[index]
+        let expected = metroScheduleRemaining(ride, at: date).seconds
+        let metro = metadata.metro
+        var best: (id: String, error: Double)?
+        for train in metroTrains where metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID) {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction),
+                  let board = pattern.stationIDs.firstIndex(of: ride.boarding.stationID),
+                  let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
+                  let state = train.state(network: metro, at: date), !state.holding, state.previousIndex >= board, state.previousIndex < alight,
+                  let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) else { continue }
+            let error = abs(seconds - expected)
+            if error <= 150, best.map({ error < $0.error }) ?? true { best = (train.id, error) }
+        }
+        if let best { selectedTrainID = best.id }
+    }
+    /// The soonest tracked train due at a station that continues to `alighting`.
+    func nextTrackedTrain(routeID: String, direction: String, boardingStationID: String, alightingStationID: String?,
+                          at date: Date) -> (train: MetroTrainReport, seconds: Double, entering: Bool)? {
+        let metro = metadata.metro
+        guard let planned = metro.pattern(routeID, direction: direction) else { return nil }
+        var best: (train: MetroTrainReport, seconds: Double, entering: Bool)?
+        for train in metroTrains where train.direction == direction {
+            guard let pattern = metro.pattern(train.patternID, direction: train.direction), pattern.lineID == planned.lineID,
+                  let board = pattern.stationIDs.firstIndex(of: boardingStationID), board < pattern.stationIDs.count - 1,
+                  let state = train.state(network: metro, at: date),
+                  let seconds = MetroTrainTimeline.secondsUntil(board, state: state, pattern: pattern) else { continue }
+            if let alightingStationID {
+                guard let alight = pattern.stationIDs.firstIndex(of: alightingStationID), alight > board else { continue }
+            }
+            if best.map({ seconds < $0.seconds }) ?? true { best = (train, seconds, seconds == 0 && !state.holding) }
+        }
+        return best
+    }
+    /// A tracked train first, then a single recent sighting projected forward. Past one full
+    /// headway an unseen earlier train is likely, so the caller falls back to the headway.
+    private func sightingWait(routeID: String, direction: String, boardingStationID: String, alightingStationID: String?,
+                              at date: Date, longestGap: Double) -> MetroPlatformEstimate? {
+        if let tracked = nextTrackedTrain(routeID: routeID, direction: direction, boardingStationID: boardingStationID,
+                                          alightingStationID: alightingStationID, at: date), tracked.seconds <= max(120, longestGap) {
+            return MetroPlatformEstimate(seconds: tracked.seconds, entering: tracked.entering, observedAt: tracked.train.plan?.lastSeen ?? tracked.train.observedAt)
+        }
+        guard !metroPlatformEvents.isEmpty else { return nil }
+        return MetroPlatformFeed.nextArrival(routeID: routeID, direction: direction, boardingStationID: boardingStationID,
+            alightingStationID: alightingStationID, events: metroPlatformEvents, network: metadata.metro, at: date, longestGap: longestGap)
+    }
+    /// Every train that can carry the rider from boarding to alighting, at their current frequency.
+    func metroHeadway(_ ride: TransitRide, at date: Date) -> BusHeadway? {
+        guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date) else { return nil }
+        return metadata.metro.combinedService(routeID: ride.route.id, direction: ride.direction,
+            from: ride.boarding.stationID, to: ride.alighting.stationID, at: date)?.headway
+    }
+    /// The next train placed by a recent official platform sighting and official running times.
+    func metroPlatformEstimate(_ ride: TransitRide, at date: Date) -> MetroPlatformEstimate? {
+        guard ride.route.mode != .bus else { return nil }
+        return sightingWait(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
+            alightingStationID: ride.alighting.stationID, at: date, longestGap: metroHeadway(ride, at: date)?.upperSeconds ?? 600)
+    }
+    /// Official countdown first, then a sighting-based estimate, then the expected wait from the
+    /// combined headway (half a headway on average for a rider arriving at a random moment).
     func metroWaitLabel(_ ride: TransitRide, at date: Date) -> String {
         if let value = metroArrival(ride, at: date) { return MetroCountdown.label(value) }
-        guard metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction, stationID: ride.boarding.stationID, at: date),
-              let headway = metadata.metro.service(routeID: ride.route.id, direction: ride.direction, at: date)?.headway else { return AppText.text("營運時間外") }
-        return AppText.text("約 %@–%@ 分", 1, max(1, Int(ceil(headway.upperSeconds / 60))))
-    }
-    func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], officialPosition: Bool) {
-        let report = metroRealtime?.trains.first { $0.id == selectedTrainID &&
-            metadata.metro.canServe(ride,patternID:$0.patternID,direction:$0.direction,destinationStationID:$0.destinationStationID) &&
-            (-15...60).contains(date.timeIntervalSince($0.observedAt)) }
-        if let report, let next = ride.stops.firstIndex(where: { $0.stationID == report.nextStationID }) {
-            let after = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
-                from: report.nextStationID, to: ride.alighting.stationID) ?? 0
-            return (max(0, report.remainingSeconds - max(0, date.timeIntervalSince(report.observedAt))) + after,
-                Array(ride.stops[max(1,next)...]), true)
+        if let estimate = metroPlatformEstimate(ride, at: date) {
+            if estimate.entering { return AppText.text("進站中") }
+            return estimate.seconds < 45 ? AppText.text("即將進站") : AppText.text("約 %@ 分", max(1, Int((estimate.seconds / 60).rounded())))
         }
+        guard let headway = metroHeadway(ride, at: date) else { return AppText.text("營運時間外") }
+        return AppText.text("約 %@ 分", max(1, Int((MetroNetwork.expectedWait(headway).typical / 60).rounded())))
+    }
+    /// Where the wait shown above comes from, so an estimate is never read as an official time.
+    func metroWaitSource(_ ride: TransitRide, at date: Date) -> String {
+        if metroArrival(ride, at: date) != nil { return AppText.text("官方下班列車") }
+        if metroPlatformEstimate(ride, at: date) != nil { return AppText.text("依列車進站紀錄推估") }
+        guard let headway = metroHeadway(ride, at: date) else { return AppText.text("依官方班距估計") }
+        return AppText.text("班距推估") + " · " + metroFrequencyLabel(headway)
+    }
+    /// A station departure row: the same order of evidence as a planned ride, for any train
+    /// continuing beyond this station in that direction.
+    func metroStationWaitLabel(serviceID: String, direction: String, stationID: String, at date: Date) -> String {
+        let metro = metadata.metro
+        guard metro.isOperating(routeID: serviceID, direction: direction, stationID: stationID, at: date) else { return AppText.text("營運時間外") }
+        let headway = metro.combinedService(routeID: serviceID, direction: direction, from: stationID, at: date)?.headway
+        if let estimate = sightingWait(routeID: serviceID, direction: direction, boardingStationID: stationID,
+                alightingStationID: nil, at: date, longestGap: headway?.upperSeconds ?? 600) {
+            if estimate.entering { return AppText.text("進站中") }
+            return estimate.seconds < 45 ? AppText.text("即將進站") : AppText.text("約 %@ 分", max(1, Int((estimate.seconds / 60).rounded())))
+        }
+        guard let headway else { return AppText.text("營運時間外") }
+        return metroFrequencyLabel(headway)
+    }
+    func metroFrequencyLabel(_ headway: BusHeadway) -> String {
+        let lower = max(1, Int((headway.lowerSeconds / 60).rounded())), upper = max(lower, Int((headway.upperSeconds / 60).rounded()))
+        return lower == upper ? AppText.text("每 %@ 分一班", lower) : AppText.text("每 %@–%@ 分一班", lower, upper)
+    }
+    enum MetroPositionSource { case official, sightings, schedule }
+    func metroPositionLabel(_ source: MetroPositionSource, detailed: Bool) -> String {
+        switch source {
+        case .official: return detailed ? AppText.text("官方列車訊號 · 位置為估計") : AppText.text("官方列車訊號")
+        case .sightings: return detailed ? AppText.text("依進站紀錄推估 · 到站請確認站名") : AppText.text("依進站紀錄推估")
+        case .schedule: return detailed ? AppText.text("依站間車程估計 · 到站請確認站名") : AppText.text("依站間車程估計")
+        }
+    }
+    func metroRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop], source: MetroPositionSource) {
+        let metro = metadata.metro
+        if let train = metroTrain(selectedTrainID),
+           metro.canServe(ride, patternID: train.patternID, direction: train.direction, destinationStationID: train.destinationStationID),
+           let pattern = metro.pattern(train.patternID, direction: train.direction),
+           let alight = pattern.stationIDs.firstIndex(of: ride.alighting.stationID),
+           let state = train.state(network: metro, at: date), !state.holding {
+            let seconds = MetroTrainTimeline.secondsUntil(alight, state: state, pattern: pattern) ?? 0
+            // Standing at a platform, the next stop is the one after it.
+            let upcoming = state.atPlatform ? state.previousIndex + 1 : state.nextIndex
+            let stops: [BusStop]
+            if pattern.stationIDs.indices.contains(upcoming), let next = ride.stops.firstIndex(where: { $0.stationID == pattern.stationIDs[upcoming] }) {
+                stops = Array(ride.stops[max(1, next)...])
+            } else {
+                stops = upcoming <= alight ? Array(ride.stops.dropFirst()) : []
+            }
+            return (seconds, stops, train.isEstimated ? .sightings : .official)
+        }
+        let schedule = metroScheduleRemaining(ride, at: date)
+        return (schedule.seconds, schedule.stops, .schedule)
+    }
+    private func metroScheduleRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, stops: [BusStop]) {
         let elapsed = boardedAt.map { max(0, date.timeIntervalSince($0)) } ?? 0
         var reached = 0
         for index in ride.stops.indices.dropFirst() {
@@ -751,7 +1242,7 @@ final class TransitAppModel: ObservableObject {
         let remaining = Array(ride.stops.dropFirst(min(reached + 1, ride.stops.count)))
         let total = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) ?? 0
-        return (max(0,total - elapsed), remaining, false)
+        return (max(0,total - elapsed), remaining)
     }
     func metroStopLabel(_ ride: TransitRide, stop: BusStop, at date: Date) -> String {
         let remaining = metroRemaining(ride, at: date)
@@ -786,21 +1277,23 @@ final class TransitAppModel: ObservableObject {
     }
 
     func returnToWaiting() {
+        alightReminder.reset()
         boardedVehicle = nil; planner.returnToWaiting()
         boardedAt = nil; anchorBoardedVehicle()
     }
-    func alight() { boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); clearSelection(); anchorBoardedVehicle() }
+    func alight() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
+    func finishJourney() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
-    func trackApproachingVehicle(_ vehicle: BusVehicle) {
+    func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {
         routeOverviewReturn = nil; routeBoardingStopID = nil
 #if DEBUG
         debugActions.append("track:" + vehicle.plate)
 #endif
         walkingMapIndex = nil
         selectedVehicleID = vehicle.id; selectedRouteID = vehicle.routeID; allRouteVariants = false
-        selectedStationID = nil; direction = vehicle.direction; following = true
+        selectedStationID = nil; direction = vehicle.direction
+        following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -873,6 +1366,11 @@ final class TransitAppModel: ObservableObject {
             Task { [weak self] in _ = await self?.prepareMetroFixture() }
             return
         }
+        if arguments.contains("--preview-mixed-planning") {
+            previewSelectionApplied = true
+            Task { [weak self] in await self?.prepareMixedPlanningFixture() }
+            return
+        }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
             previewNotice = "介面驗證用資料 · 非即時車輛"
@@ -921,12 +1419,18 @@ final class TransitAppModel: ObservableObject {
                 selectStation(station); previewSelectionApplied = true
             }
         } else if arguments.contains("--preview-route-stop-fixture") || arguments.contains("--preview-boarding-fixture") || arguments.contains("--preview-browse-fixture") {
-            previewSelectionApplied = prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
-                transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
-                browse: arguments.contains("--preview-browse-fixture"))
-            if let token = value(after: "--preview-capture"), previewSelectionApplied,
-               let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
-                try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+            previewSelectionApplied = true
+            let captureToken = value(after: "--preview-capture")
+            Task { [weak self] in
+                guard let self else { return }
+                let ready = await self.prepareBoardingFixture(track: arguments.contains("--preview-track-next"),
+                    transfer: arguments.contains("--preview-transfer-fixture"), cooperated: arguments.contains("--preview-cooperated-fixture"),
+                    browse: arguments.contains("--preview-browse-fixture"))
+                if let token = captureToken, ready,
+                   let directory = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+                    try? Data(token.utf8).write(to: directory.appendingPathComponent("transit-preview-ready"), options: .atomic)
+                }
+                if !ready { self.previewSelectionApplied = false }
             }
             return
         } else if arguments.contains("--preview-journey-search") {
@@ -1083,20 +1587,46 @@ final class TransitAppModel: ObservableObject {
               let packet = try? MetroRealtime(data: bytes, network: metadata.metro, at: now) else { return false }
         metroRealtime = packet; metroRevision += 1
         snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
-        planner.updateSnapshot(snapshot, forecast: arrivalForecast); planner.prepareBoardingPreview(trip)
+        planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        planner.prepareBoardingPreview(trip, started: !ProcessInfo.processInfo.arguments.contains("--preview-route-only"))
         selectedTrainID = "QA-TRAIN-01"
         previewNotice = "介面驗證用資料 · 非即時列車"
         focus = .journey(trip.rides.flatMap(\.coordinates)); focusRevision += 1
         return true
     }
 
-    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) -> Bool {
+    private func prepareMixedPlanningFixture() async {
+        let source = metadata
+        guard let startStation = source.metro.stations.first(where:{ $0.code == "BR19" }),
+              let endStation = source.metro.stations.first(where:{ $0.code == "BL12" }) else {
+            previewSelectionApplied = false; return
+        }
+        let date = ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")!
+        let trips = await Task.detached(priority:.userInitiated) {
+            MultimodalPlanner(metadata:source).plan(from:startStation.coordinate,to:endStation.coordinate,maximumWalk:800,limit:36,at:date)
+        }.value
+        let mixed = trips.first { $0.rides.contains { $0.route.mode == .bus } && $0.rides.contains { $0.route.mode != .bus } }
+        let rail = trips.first { $0.rides.allSatisfy { $0.route.mode != .bus } }
+        let bus = trips.first { $0.rides.allSatisfy { $0.route.mode == .bus } }
+        debugActions.append("mixed-planner:\(trips.count):mixed\(mixed != nil):rail\(rail != nil):bus\(bus != nil)")
+        guard let mixed, let rail, let bus else { return }
+        previewNotice = "介面驗證用行程 · 非即時班次"
+        snapshot = TransitSnapshot(); planner.updateSnapshot(snapshot)
+        planner.prepareRouteChoicesPreview([mixed,rail,bus],
+            from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
+            to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
+    }
+
+    private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {
         var planningMetadata = metadata
         if cooperated {
             planningMetadata.routes = metadata.routes.filter { $0.value.name == "630" }
             planningMetadata.rebuildRouteCatalog()
         }
-        let network = TripPlanner(metadata: planningMetadata)
+        let source = planningMetadata
+        let chosen = await Task.detached(priority: .userInitiated) {
+            let metadata = source
+        let network = TripPlanner(metadata: metadata)
         var chosen: TransitTrip?
         if transfer {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
@@ -1128,6 +1658,8 @@ final class TransitAppModel: ObservableObject {
             if chosen != nil { break }
         }
         }
+            return chosen
+        }.value
         guard let trip = chosen, let ride = trip.rides.first,
               let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let line = metadata.line(ride.route.id, direction: ride.direction),

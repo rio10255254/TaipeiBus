@@ -187,7 +187,8 @@ final class JourneyPlannerModel: ObservableObject {
         let riding = estimates.map(\.seconds)
         if let trip = option.trip {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding)
+                preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding,
+                ridingSpreads: estimates.map(\.spreadSeconds))
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
@@ -293,6 +294,23 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
+    /// The ride a saved trip would start with now, for the Home Screen widget. Walks are the
+    /// planning estimates; nothing here touches the trip on screen.
+    enum FirstLeg { case ride(TransitRide, walk: Double), walk }
+    func firstRide(metadata: TransitMetadata, from: Coordinate, to: Coordinate,
+                   preferences: LiveSettings.Planning) async -> FirstLeg? {
+        let estimates = latestSnapshot.estimates, forecast = self.forecast
+        let trips = await network.options(metadata: metadata, from: from, to: to, preferences: preferences, estimates: estimates)
+        let date = Date()
+        let riding = Dictionary(uniqueKeysWithValues: trips.map { trip in
+            (trip.id, forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: estimates,
+                walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
+        })
+        guard let best = TripRanking.recommended(trips, estimates: estimates, at: date, preferences: preferences,
+                                                 limit: 1, ridingDurations: riding).first,
+              let ride = best.rides.first else { return trips.isEmpty && from.distance(to: to) <= 1500 ? .walk : nil }
+        return .ride(ride, walk: best.planningWalkSeconds.first ?? 0)
+    }
     var arrived: Bool { started && stepIndex >= steps.count }
     var mapCoordinates: [Coordinate] {
         guard let option = selected else { return [] }
@@ -509,7 +527,7 @@ final class JourneyPlannerModel: ObservableObject {
     func returnToWaiting() {
         guard case .ride(let index) = currentStep,
               let target = steps.firstIndex(of: .walk(index)) else { return }
-        started = index > 0; stepIndex = target; mapRevision += 1
+        started = true; stepIndex = target; mapRevision += 1
     }
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
@@ -534,6 +552,24 @@ final class JourneyPlannerModel: ObservableObject {
     }
 
 #if DEBUG
+    /// Deterministic UI scenarios use actual planner routes and explicitly simulated walking.
+    func prepareRouteChoicesPreview(_ trips: [TransitTrip], from start: TravelPlace, to end: TravelPlace) {
+        cancelRequests(); origin = start; destination = end; usingLocation = false
+        started = false; stepIndex = 0; selectionConfirmed = true
+        options = trips.map { trip in
+            var walks: [WalkingLeg] = []
+            for index in 0...trip.rides.count {
+                let from = index == 0 ? start.coordinate : trip.rides[index - 1].alighting.coordinate
+                let to = index == trip.rides.count ? end.coordinate : trip.rides[index].boarding.coordinate
+                let distance = trip.walkingDistances[index], duration = trip.planningWalkSeconds[index]
+                var leg = WalkingLeg(from:from,to:to,coordinates:[from,to],distance:distance,duration:duration)
+                leg.road = RouteLine(coordinates:leg.coordinates); walks.append(leg)
+            }
+            return JourneyOption(id:trip.id,trip:trip,walks:walks)
+        }
+        selectedID = options.first?.id; optionLabels = [:]; message = nil; mapRevision += 1
+    }
+
     func prepareWalkingPreview() async {
         cancelRequests(); usingLocation = true
         let start = Coordinate.taipei, end = Coordinate(latitude: 25.0410, longitude: 121.5663)
@@ -547,12 +583,12 @@ final class JourneyPlannerModel: ObservableObject {
         } catch { return }
     }
 
-    func prepareBoardingPreview(_ trip: TransitTrip) {
+    func prepareBoardingPreview(_ trip: TransitTrip, started: Bool = true) {
         cancelRequests()
         guard let first = trip.rides.first, let last = trip.rides.last else { return }
         origin = TravelPlace(name: first.boarding.name, address: "", coordinate: first.boarding.coordinate, englishName: first.boarding.englishName)
         destination = TravelPlace(name: last.alighting.name, address: "", coordinate: last.alighting.coordinate, englishName: last.alighting.englishName)
-        usingLocation = false; started = false; stepIndex = 0
+        usingLocation = false; self.started = started; stepIndex = 0
         var walks = [WalkingLeg(from: first.boarding.coordinate, to: first.boarding.coordinate, distance: 0, duration: 0)]
         for index in trip.rides.indices.dropFirst() {
             let from = trip.rides[index - 1].alighting.coordinate, to = trip.rides[index].boarding.coordinate

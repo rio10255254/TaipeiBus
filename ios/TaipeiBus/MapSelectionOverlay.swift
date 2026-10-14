@@ -84,7 +84,7 @@ struct MapContextLabels: View {
                                   y: min(placement.maxY, max(placement.minY, anchor.y)))
                 Path { path in path.move(to: anchor); path.addLine(to: tip) }
                     .stroke(Color.accentColor.opacity(0.6), style: StrokeStyle(lineWidth: 1, lineCap: .round)).allowsHitTesting(false)
-                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
+                MapContextLabelContent(model: model, signature: "\(model.snapshot.revision):\(model.metroRevision):\(model.metroPlatformEvents.first?.observedAt.timeIntervalSince1970 ?? 0):\(model.mapLabelStation?.id ?? ""):\(model.selectedVehicleID ?? ""):\(model.selectedTrainID ?? ""):\(model.followingTrain):\(model.language.rawValue):\(expanded):\(overlay.compactStation)",
                     expanded: expanded, compact: overlay.compactStation,
                     toggle: {
 #if DEBUG
@@ -149,7 +149,8 @@ private struct MapContextLabelContent: View, Equatable {
                         } label: {
                             HStack(spacing: 5) {
                                 RouteBadge(name: first.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
-                                Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) : AppText.text("看方向")).fontWeight(.semibold).monospacedDigit()
+                                Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) :
+                                        model.metroStationWaitLabel(serviceID: first.stop.serviceID, direction: first.stop.direction, stationID: first.stop.stationID, at: Date())).fontWeight(.semibold).monospacedDigit()
                                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                             }.font(.caption).padding(.leading, 4).padding(.trailing, 10).frame(minHeight: 32)
                                 .background(.regularMaterial, in: Capsule())
@@ -194,27 +195,52 @@ private struct MapContextLabelContent: View, Equatable {
                 Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).readableMapSurface().fixedSize()
-        } else if let id = model.selectedTrainID, let report = model.metroRealtime?.trains.first(where: { $0.id == id }) {
+        } else if model.showsLiveTrains, let id = model.selectedTrainID, let report = model.metroTrain(id) {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                if (-15...60).contains(timeline.date.timeIntervalSince(report.observedAt)),
-                   let pattern = model.metadata.metro.pattern(report.patternID, direction: report.direction),
-                   let line = model.metadata.metro.line(pattern.lineID), let station = model.metadata.metro.station(report.nextStationID) {
+                let metro = model.metadata.metro
+                if let state = report.state(network: metro, at: timeline.date),
+                   let pattern = metro.pattern(report.patternID, direction: report.direction),
+                   let line = metro.line(pattern.lineID) {
+                    // Standing at a platform shows that station; moving shows the next stop and its time.
+                    let stationIndex = state.atPlatform ? state.previousIndex : state.nextIndex
+                    let station = metro.station(pattern.stationIDs[stationIndex])
+                    let terminus = metro.station(report.destinationStationID)
                     VStack(alignment: .leading, spacing: 5) {
                         HStack(spacing: 8) {
                             RouteBadge(name: line.code, tintName: line.name, compact: true)
-                            Text(report.id).font(.caption.weight(.semibold)).lineLimit(1)
+                            Text(report.isEstimated ? AppText.text("往 %@", terminus.map { AppLanguage.current == .english ? $0.englishName : $0.name } ?? "") : report.id)
+                                .font(.caption.weight(.semibold)).lineLimit(1)
                             Spacer(minLength: 2)
-                            Button { model.metroRevisionForSelection() } label: { Image(systemName:"scope").frame(width:32,height:32) }
-                                .accessibilityLabel(AppText.text("跟隨列車"))
+                            // One button starts and stops the chase camera; following shows as a filled chip.
+                            Button {
+                                if model.followingTrain { model.followingTrain = false } else { model.metroRevisionForSelection() }
+                            } label: {
+                                Image(systemName: "scope").font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(model.followingTrain ? Color.white : Color.accentColor)
+                                    .frame(width: 32, height: 32)
+                                    .background(model.followingTrain ? Color.accentColor : Color.accentColor.opacity(0.12), in: Circle())
+                                    .animation(.smooth(duration: 0.2), value: model.followingTrain)
+                            }.buttonStyle(.plain)
+                            .accessibilityLabel(model.followingTrain ? AppText.text("停止跟隨") : AppText.text("跟隨列車"))
+                            .accessibilityIdentifier("map-metro-train-follow")
                         }
-                        HStack {
-                            Text(AppText.text("下一站 · ") + (AppLanguage.current == .english ? station.englishName : station.name)).font(.subheadline.weight(.semibold))
-                            Spacer(minLength:4)
-                            Text(MetroCountdown.label(max(0,Int(report.remainingSeconds - max(0,timeline.date.timeIntervalSince(report.observedAt)))))).font(.subheadline).monospacedDigit()
+                        if let station {
+                            HStack {
+                                Text((state.holding ? AppText.text("約在 · ") : state.atPlatform ? AppText.text("停靠 · ") : AppText.text("下一站 · ")) + (AppLanguage.current == .english ? station.englishName : station.name))
+                                    .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                                Spacer(minLength:4)
+                                if !state.atPlatform && !state.holding {
+                                    Text(MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))).font(.subheadline).monospacedDigit()
+                                        .contentTransition(.numericText(countsDown: true))
+                                }
+                            }
+                            if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
                         }
-                        if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
-                        Text(AppText.text("官方列車訊號 · 位置為估計")).font(.caption2).foregroundStyle(.secondary)
-                    }.mapLabelSurface().accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
+                        // A held train has missed its expected sighting: say so rather than implying it is tracked.
+                        Text(report.isEstimated ? (state.holding ? AppText.text("等待下一筆進站紀錄") : AppText.text("依進站紀錄推估位置")) : AppText.text("官方列車訊號 · 位置為估計"))
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.mapLabelSurface().animation(.smooth(duration: 0.3), value: stationIndex)
+                    .accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
                 }
             }
         }

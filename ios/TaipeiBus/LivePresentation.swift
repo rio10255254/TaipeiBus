@@ -159,9 +159,10 @@ enum RouteTint {
         return general
     }
     static func color(for name: String) -> Color { Color(liveHex: hex(for: name)) }
-    static func signInk(for name: String) -> Color {
-        ["中和新蘆線","環狀線","三鶯線","Zhonghe-Xinlu Line","Circular Line","Sanying Line"].contains(name) ? .black : .white
+    static func darkInk(for name: String) -> Bool {
+        ["中和新蘆線","環狀線","三鶯線","Zhonghe-Xinlu Line","Circular Line","Sanying Line"].contains(name)
     }
+    static func signInk(for name: String) -> Color { darkInk(for: name) ? .black : .white }
     /// The route colour for text and lines on a sheet, lifted in dark mode to stay readable.
     static func accent(for name: String) -> Color {
         Color(uiColor: UIColor { UIColor(liveHex: mapHex(for: name, dark: $0.userInterfaceStyle == .dark)) })

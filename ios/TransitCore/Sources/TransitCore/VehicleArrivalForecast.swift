@@ -15,7 +15,7 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 }
 
 public struct VehicleArrivalPrediction: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case roadHistory, recentMovement, limited }
+    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, limited }
     public let seconds: Double
     public let uncertaintySeconds: Double
     public let evidence: Evidence
@@ -38,6 +38,7 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
     public var evidenceLabel: String {
         switch evidence {
         case .roadHistory: return AppText.text("依近期車輛通過各站的時間估算")
+        case .officialProfile: return AppText.text("依官方分時段車程與近期車流估算")
         case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
         case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
         }
@@ -54,13 +55,26 @@ public struct VehicleArrivalDisplay: Equatable, Sendable {
 
 /// A whole-ride planning estimate, never the official arrival time of a named bus.
 public struct RidingTimeEstimate: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case stationHistory, officialProfile, railProfile, recentTraffic, typical }
+    public enum Evidence: String, Sendable {
+        case stationHistory, officialProfile, railProfile, recentTraffic, typical
+        /// Share of the ride time it may plausibly run early or late, by how the time was obtained.
+        /// Placeholder values until measured against recorded arrivals.
+        public var spreadFraction: Double {
+            switch self {
+            case .railProfile: return 0.05
+            case .stationHistory: return 0.10
+            case .officialProfile, .recentTraffic: return 0.15
+            case .typical: return 0.25
+            }
+        }
+    }
     public let seconds: Double
     public let evidence: Evidence
     public let observedVehicles: Int
     public init(seconds: Double, evidence: Evidence, observedVehicles: Int) {
         self.seconds = seconds; self.evidence = evidence; self.observedVehicles = observedVehicles
     }
+    public var spreadSeconds: Double { seconds * evidence.spreadFraction }
     public var sourceLabel: String {
         switch evidence {
         case .stationHistory: return AppText.text("依近期站間紀錄")
@@ -188,7 +202,11 @@ public struct VehicleArrivalForecast: Sendable {
             speed = min(16, 4.5 * 0.6 + bus.speed / 3.6 * 0.4)
         }
         let along = match.along * Double(journey.direction)
-        var seconds = 0.0, variance = 0.0, learned = 0, fallback = 0
+        let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
+        // A bus standing at its first stop may be in a terminal layover; the official
+        // running time says nothing about when it leaves.
+        let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
+        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0
         let indices = journey.anchors.indices.dropFirst().prefix(target)
         for index in indices {
             let start = journey.anchors[index - 1].match.along * Double(journey.direction)
@@ -199,12 +217,23 @@ public struct VehicleArrivalForecast: Sendable {
             let records = (segments[segmentKey(bus.routeID, bus.direction, journey, index, metadata)] ?? [])
                 .filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
             let values = records.map(\.seconds)
+            let vehicles = Set(records.map(\.vehicleID)).count
             let duration: Double, margin: Double
-            if Set(records.map(\.vehicleID)).count >= 3 {
+            let official = vehicles >= 3 || !inService ? nil : metadata.officialTravelTimes.seconds(route: bus.parentRouteID,
+                subroute: bus.routeID, direction: bus.direction, from: journey.anchors[index - 1].stop.id,
+                to: journey.anchors[index].stop.id, travellingAt: date.addingTimeInterval(seconds), observedAt: date)
+            if vehicles >= 3 {
                 let typical = median(values)
                 duration = typical * fraction
                 margin = max(12, median(values.map { abs($0 - typical) }) * 1.5) * fraction
                 learned += 1
+            } else if let official {
+                // The official hour profile is the baseline; one or two recent crossings refine it
+                // as if the profile were worth two observations.
+                let typical = vehicles == 0 ? official : (median(values) * Double(vehicles) + official * 2) / Double(vehicles + 2)
+                duration = typical * fraction
+                margin = max(12, typical * 0.25) * fraction
+                profiled += 1
             } else {
                 guard let pace = speed ?? (allowTypicalWhenStopped ? 4.5 : nil) else { return nil }
                 duration = remaining / pace + (movingHistory ? 0 : 20 * fraction)
@@ -212,7 +241,6 @@ public struct VehicleArrivalForecast: Sendable {
             }
             seconds += duration; variance += margin * margin
         }
-        let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
         if target == 0 || along < firstAlong {
             guard let pace = speed ?? (allowTypicalWhenStopped ? 4.5 : nil) else { return nil }
             let leading = target == 0 ? progress.distance : firstAlong - along
@@ -222,6 +250,7 @@ public struct VehicleArrivalForecast: Sendable {
         // A short movement sample cannot describe distant traffic or extrapolate a terminal dwell over the whole route.
         let withinObservedHorizon = seconds <= 900 && progress.distance <= max(1_200, observedDistance * 4 + 40)
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
+            fallback == 0 && profiled > 0 ? .officialProfile :
             learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement : .limited
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
         let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, seconds * 0.1) : 0

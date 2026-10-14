@@ -16,6 +16,13 @@
   <key>UILaunchScreen</key><dict/>
   <key>UIApplicationSceneManifest</key><dict><key>UIApplicationSupportsMultipleScenes</key><false/></dict>
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
-  <key>NSLocationWhenInUseUsageDescription</key><string>從目前位置規劃公車行程，尋找附近上車站牌與步行路線。</string>
+  <key>NSLocationWhenInUseUsageDescription</key><string>從目前位置規劃公車行程，尋找附近上車站牌與步行路線；導航進行中也會在背景更新下車提醒與即時動態。</string>
   <key>CADisableMinimumFrameDurationOnPhone</key><true/>
+  <key>NSSupportsLiveActivities</key><true/>
+  <key>UIBackgroundModes</key><array><string>location</string></array>
+  <key>BusSharedKeychainGroup</key><string>$(AppIdentifierPrefix)$(BUS_APP_BUNDLE_ID).shared</string>
+  <key>CFBundleURLTypes</key><array><dict>
+    <key>CFBundleURLName</key><string>$(BUS_APP_BUNDLE_ID)</string>
+    <key>CFBundleURLSchemes</key><array><string>taipeibus</string></array>
+  </dict></array>
 </dict></plist>

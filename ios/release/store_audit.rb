@@ -39,6 +39,10 @@ queries.each do |name, (path, query)|
     report[name] = { error: error.message }
   end
 end
+availability_id = report.dig(:availability, 'data', 'id')
+if availability_id
+  report[:territory_availabilities] = client.all("/v2/appAvailabilities/#{availability_id}/territoryAvailabilities", include: 'territory', limit: '200')
+end
 path = File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-audit.json')
 File.write(path, JSON.pretty_generate(report) + "\n")
 puts "Read-only App Store audit saved for app #{id}; contact values are redacted."

@@ -7,6 +7,8 @@ struct TransitHomeView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var location: LocationService
     @ObservedObject private var planner: JourneyPlannerModel
+    @ObservedObject private var purchases: ProPurchases
+    @ObservedObject private var commutes: CommuteLibrary
     @ObservedObject private var stationWalk: StationWalkingNavigation
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
@@ -16,6 +18,7 @@ struct TransitHomeView: View {
     @State private var showJourney = false
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
+    @State private var journeyPanelHeight: CGFloat = 420
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
     @State private var stationWalkReturnSearch = false
@@ -31,14 +34,21 @@ struct TransitHomeView: View {
         self.model = model
         location = model.location
         planner = model.planner
+        purchases = model.purchases; commutes = model.commutes
         stationWalk = model.stationWalk
     }
 
     private var hasTransitSelection: Bool { model.selectedStationID != nil || model.selectedRouteID != nil || model.selectedVehicleID != nil }
+    /// The metro is part of what is on screen: a trip that rides it, a metro station or a metro line.
+    private var metroInView: Bool {
+        planner.selected?.rides.contains { $0.route.mode != .bus } == true || model.selectedStation?.mode == .metro ||
+            model.selectedRoute.map { $0.mode != .bus } == true
+    }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
+    private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
-        (planner.selected != nil || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
+        (planner.started || stationWalk.isActive) && !showDetails && !showSearch && !showJourney && !pendingJourneyDetail
     }
     private var bannerOffset: CGFloat { showsBanner ? bannerHeight + 10 : 0 }
     private var nearbyStations: [Station] {
@@ -49,7 +59,7 @@ struct TransitHomeView: View {
 
     private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
         let panel: CGFloat
-        if showJourney && planner.selected != nil { panel = journeyDetent == .height(420) ? 420 : 560 }
+        if showJourney { panel = min(journeyPanelHeight, geometry.size.height) }
         else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
         else if showSearch { panel = 390 }
         else { panel = bottomControlsHeight }
@@ -72,8 +82,16 @@ struct TransitHomeView: View {
                     MapContextLabels(model: model, overlay: selectionOverlay, bottomClearance: bottomControlsHeight, topClearance: bannerOffset) { showDetails = true }
                 }
                 topChrome
+                if routeMapPreview, geometry.size.height - journeyPanelHeight > 220 {
+                    VStack {
+                        Spacer()
+                        HStack { Spacer(); MapLocationControl(model:model,location:location) }
+                    }.padding(.trailing,16).padding(.bottom,mapBottomInset(geometry) + 10)
+                }
 
 #if DEBUG
+                Text(model.rideActivityDebug).font(.system(size: 1)).foregroundStyle(.clear)
+                    .frame(width: 1, height: 1).accessibilityIdentifier("debug-live-activity").allowsHitTesting(false)
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
                     Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)
@@ -82,6 +100,7 @@ struct TransitHomeView: View {
                             let timing = model.journeyDuration(option, at: timeline.date)
                             return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
                                 "transfers": max(0, option.rides.count - 1),
+                                "modes": option.rides.map { $0.route.mode == .bus ? "bus" : "metro" },
                                 "boarding_name": option.rides.first?.boarding.name ?? "", "ride_stop_count": option.rides.first?.stopCount ?? 0,
                                 "total": timing?.totalSeconds ?? -1, "travel": timing?.travelSeconds ?? -1,
                                 "walking": timing?.walkingSeconds ?? -1, "waiting": timing?.waitingSeconds ?? -1,
@@ -112,8 +131,9 @@ struct TransitHomeView: View {
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                     bottomChrome
                 }
-                if let error = model.mapError ?? model.loadError {
-                    Text(live.text(error)).liveFont(.caption).padding(12)
+                if model.metadata.routes.isEmpty, model.loadError != nil {
+                    // Without any route data the app cannot plan; say it plainly instead of "updating".
+                    Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
@@ -137,6 +157,11 @@ struct TransitHomeView: View {
                     if model.loadError != nil { model.retry() }
                     else { Task { await model.refresh() } }
                 }
+                // Live train positions are Pro; where the metro matters, a free user can take a look.
+                if !model.hasProAccess, metroInView, !stationWalk.isActive {
+                    LiveTrainsChip(model: model)
+                        .transition(.opacity.combined(with: .scale(scale: 0.92, anchor: .topLeading)))
+                }
                 if model.cityFleetMode, planner.selected == nil, !stationWalk.isActive {
                     Label(AppText.text("全城 %@", model.cityVehicles.count), systemImage: "globe.asia.australia.fill")
                         .liveFont(.subheadline, weight: .semibold).monospacedDigit()
@@ -146,13 +171,18 @@ struct TransitHomeView: View {
                 }
             }
             Spacer(minLength: 0)
-            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive) {
+            MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive,
+                            showsLocation: !routeMapPreview) {
                 showInformation = true
             }
         }
         }
+        .overlay(alignment: .bottom) {
+            ProNoteBanner(model: model).padding(.top, 8).offset(y: 64).padding(.horizontal, 2)
+        }
         .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
         .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: model.cityFleetMode)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.proNote)
         .animation(reduceMotion ? nil : .spring(response: 0.44, dampingFraction: 0.88), value: showsBanner)
     }
 
@@ -196,10 +226,8 @@ struct TransitHomeView: View {
         Group {
         if stationWalk.isActive {
             StationWalkingDock(model: model, navigation: stationWalk)
-        } else if planner.started || planner.selected?.walkingOnly == true {
+        } else if planner.started {
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
-        } else if planner.selected != nil {
-            JourneyArrivalDock(model: model, planner: planner) { showJourneyItinerary = false; journeyDetent = .large; showJourney = true }
         }
         }
         .smoothChanges(planner.currentStep)
@@ -235,6 +263,22 @@ struct TransitHomeView: View {
             }.transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         if planner.selected == nil && !stationWalk.isActive {
+            // Saved shortcuts stay usable after Pro ends; only saving new ones and preferences need Pro.
+            if !hasSelection, !commutes.journeys.isEmpty {
+                ScrollView(.horizontal,showsIndicators:false) {
+                    HStack(spacing:8) {
+                        ForEach(commutes.journeys) { saved in
+                            Button {
+                                model.previewSavedJourney(saved); showJourneyItinerary = false
+                                journeyDetent = .height(420); showJourney = true
+                            } label: {
+                                Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
+                                    .padding(.horizontal,14).frame(minHeight:44)
+                            }.buttonStyle(MapActionStyle()).accessibilityIdentifier("commute-shortcut-"+saved.id.uuidString)
+                        }
+                    }
+                }.accessibilityIdentifier("commute-shortcuts")
+            }
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse)
@@ -266,8 +310,11 @@ struct TransitHomeView: View {
         .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
         .onPreferenceChange(InstructionBannerHeightKey.self) { height in if abs(height - bannerHeight) > 0.5 { bannerHeight = height } }
+        .onChange(of: purchases.hasPro) { _,_ in model.applyPersonalPreferences() }
+        .onChange(of: commutes.preference) { _,_ in model.applyPersonalPreferences() }
         .sheet(isPresented: $showSearch, onDismiss: { model.stationBrowsing = false; restoreJourneyMap() }) {
             TransitPanel(model: model, location: location, showInformation: $showInformation, browseOnly: !hasTransitSelection)
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(hasTransitSelection ? [.height(330), .height(520), .large] : model.mode == .stops ? [.height(390), .large] : [.large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(390)))
                 .presentationDragIndicator(.visible)
@@ -275,6 +322,7 @@ struct TransitHomeView: View {
         }
         .sheet(isPresented: $showDetails, onDismiss: restoreJourneyMap) {
             TransitPanel(model: model, location: location, showInformation: $showInformation)
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents([.height(330), .height(520), .large], selection: $model.sheetDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(520)))
                 .presentationDragIndicator(.visible)
@@ -288,11 +336,29 @@ struct TransitHomeView: View {
                                 compact: journeyDetent == .height(420),
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(420) } })
+                .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
+                .interactiveDismissDisabled(!planner.started && planner.destination != nil)
+                .background {
+                    GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
+                }
+                .onPreferenceChange(JourneyPanelHeightKey.self) { height in
+                    if height > 0, abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height }
+                }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
+        .onChange(of: model.showSavedJourneyRequested) { _, requested in
+            guard requested else { return }
+            model.showSavedJourneyRequested = false
+            showInformation = false
+            // Present the route panel once the Settings sheet has finished dismissing.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
+        }
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
@@ -310,6 +376,9 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
+            if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
             let userChangedJourney = lastJourneyOptionID != planner.selectedID || lastJourneyStep != planner.currentStep
@@ -319,15 +388,15 @@ struct TransitHomeView: View {
                 let sameVehicle = model.selectedVehicle.map { bus in
                     planner.activeRide.map { model.metadata.canServe($0, vehicle: bus) } == true
                 } ?? false
-                let sameTrain = model.metroRealtime?.trains.first(where: { $0.id == model.selectedTrainID }).map { report in
+                let sameTrain = model.metroTrain(model.selectedTrainID).map { report in
                     planner.activeRide.map { model.metadata.metro.canServe($0, patternID: report.patternID, direction: report.direction, destinationStationID: report.destinationStationID) } == true
                 } ?? false
                 if let index = model.walkingMapIndex, !userChangedJourney,
                    planner.selected?.walks.indices.contains(index) == true {
                     if !model.mapWasMoved { model.showWalkOnMap(index) }
                 } else if model.walkingMapIndex != nil, case .ride = planner.currentStep, sameVehicle, let bus = model.selectedVehicle {
-                    model.clearWalkingMap(); model.following = true; model.focusMap(.vehicle(bus.id))
-                } else if !sameVehicle && !sameTrain {
+                    model.clearWalkingMap(); model.following = model.beginFollowing(bus.id); model.focusMap(.vehicle(bus.id))
+                } else if (!planner.started && userChangedJourney) || (!sameVehicle && !sameTrain) {
                     model.clearWalkingMap()
                     model.clearSelection()
                     if !coordinates.isEmpty, userChangedJourney || !model.mapWasMoved { model.focusMap(.journey(coordinates)) }
@@ -343,7 +412,16 @@ struct TransitHomeView: View {
         }
         .onChange(of: model.walkingMapIndex) { _, index in
             model.updateWalkingLocation()
-            if index != nil { pendingJourneyDetail = false; showJourney = false; showDetails = false; showSearch = false }
+            if index != nil {
+                pendingJourneyDetail = false; showDetails = false; showSearch = false
+                if planner.started { showJourney = false }
+                else { showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true }
+            }
+        }
+        .onChange(of: showDetails) { _, visible in
+            if !visible, !pendingJourneyDetail, !showSearch, planner.selected != nil, !planner.started {
+                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+            }
         }
         .onChange(of: stationWalk.isActive) { _, active in
             if active {
@@ -396,7 +474,7 @@ struct TransitHomeView: View {
         guard !stationWalk.isActive, planner.selected != nil else { return }
         if planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
            let bus = model.onboardVehicle(for: ride), model.selectedVehicleID != bus.id {
-            model.trackApproachingVehicle(bus); return
+            model.trackApproachingVehicle(bus, userInitiated: false); return
         }
         if let index = model.walkingMapIndex {
             let relevantBus = model.selectedVehicle.map { bus in
@@ -430,6 +508,11 @@ private struct InstructionBannerHeightKey: PreferenceKey {
 private struct MapBottomControlsHeightKey: PreferenceKey {
     static var defaultValue: CGFloat = 210
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
+}
+
+private struct JourneyPanelHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = nextValue() }
 }
 
 // Native Liquid Glass follows system appearance and accessibility preferences on iOS 26.
@@ -503,6 +586,8 @@ private struct SourceStatusView: View {
                 Button(action: refresh) {
                     HStack(spacing: 7) {
                         // A static dot: a spinner would animate for as long as data is unavailable.
+                        // Loading stays quiet; data that is actually late says so, with its age, and
+                        // a tap retries. An old position is never presented as merely "updating".
                         Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
                         Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
                         if !waiting, let age, age >= 120 {
@@ -597,6 +682,7 @@ private struct HomeSearchRow: View {
             .buttonStyle(PhonePressStyle())
             .phoneGlass(in: Capsule())
             .accessibilityLabel(live.text("搜尋目的地"))
+            .accessibilityIdentifier("home-destination-search")
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.
             HStack(spacing: 0) {
@@ -650,6 +736,7 @@ private struct MapControlStack: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
     let showsCityFleet: Bool
+    var showsLocation = true
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     var body: some View {
@@ -673,6 +760,17 @@ private struct MapControlStack: View {
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
                 }
+                if showsLocation { MapLocationControl(model:model,location:location) }
+            }
+    }
+}
+
+private struct MapLocationControl: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var location: LocationService
+    private var accent: Color { Color(liveHex:live.appearance.accentColor) }
+    var body: some View {
                 Button {
                     model.cycleUserTracking()
                 } label: {
@@ -690,7 +788,6 @@ private struct MapControlStack: View {
                 .accessibilityLabel(live.text("定位與地圖方向"))
                 .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
                 .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
-            }
     }
 }
 
@@ -719,10 +816,11 @@ private struct TransitPanel: View {
                 VStack(spacing: 12) {
                     ProgressView(); Text(live.text("取得站牌與路線中")).liveFont(.subheadline).foregroundStyle(.secondary)
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if let error = model.loadError {
-                ContentUnavailableView {
-                    Label(live.text("無法連線"), systemImage: "wifi.exclamationmark")
-                } description: { Text(live.text(error)) } actions: { Button(live.text("重試")) { model.retry() }.buttonStyle(.borderedProminent) }
+            } else if model.loadError != nil, model.metadata.routes.isEmpty {
+                VStack(spacing:12) {
+                    Text(live.text("更新中")).liveFont(.subheadline).foregroundStyle(.secondary)
+                    Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
+                }.frame(maxWidth:.infinity,maxHeight:.infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1027,7 +1125,8 @@ private struct StationDetails: View {
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) : !model.metadata.metro.isOperating(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date) ? AppText.text("營運時間外") : AppText.text("班距 %@ 分", Int(ceil((model.metadata.metro.service(routeID: row.stop.serviceID, direction: row.stop.direction, at: timeline.date)?.headway?.upperSeconds ?? 360) / 60))))
+                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
+                                        model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date))
                                     .liveFont(.body, weight: .semibold).monospacedDigit()
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
@@ -1274,7 +1373,7 @@ private struct VehicleDetails: View {
             Toggle(AppText.text("淡化建築、凸顯這輛車"), isOn: $model.highlightVehicle).liveFont(.subheadline)
             HStack(spacing: 10) {
                 Button {
-                    model.following = true; model.focusMap(.vehicle(vehicle.id))
+                    model.following = model.beginFollowing(vehicle.id); model.focusMap(.vehicle(vehicle.id))
                 } label: { Label(live.text("跟隨公車"), systemImage: "scope").frame(maxWidth: .infinity, minHeight: 36) }
                     .buttonStyle(.borderedProminent)
                 Button {
@@ -1371,6 +1470,11 @@ private struct AppInformationView: View {
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    NavigationLink { ProSettingsView(model:model) } label: {
+                        Label(AppText.text("台北公車 Pro"),systemImage:"star.circle")
+                    }.accessibilityIdentifier("settings-pro")
+                }
                 Section(live.text("語言")) {
                     Toggle("English", isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) }))
                         .accessibilityIdentifier("app-language-toggle")
@@ -1431,6 +1535,7 @@ private struct PrivacyExplanationView: View {
             }
             Section(AppText.text("保存在手機")) {
                 Text(AppText.text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。"))
+                Text(AppText.text("常用行程與個人路線偏好也保存在手機。Pro 購買由 Apple 處理；App 只確認訂閱權限，不讀取付款卡片資料。"))
             }
             Section(AppText.text("網路服務")) {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
