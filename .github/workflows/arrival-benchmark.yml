@@ -1,11 +1,17 @@
 name: Arrival benchmark recording
 # Two weeks of Taipei's public bus positions and official arrival estimates, so every
 # prediction method can be replayed against actual stop passages. Each run records
-# for just under six hours; runs start every six hours. Public data only.
+# for just under six hours and queues the next one itself (GitHub's schedule did not
+# start the second run), and the schedule stays as a backup. Public data only.
 on:
   schedule:
     - cron: '7 */6 * * *'
   workflow_dispatch:
+    inputs:
+      chained:
+        description: 'Started by the previous recording (set automatically)'
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -17,16 +23,33 @@ jobs:
   record:
     runs-on: ubuntu-latest
     timeout-minutes: 358
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
+      # Queued first, so a failed recording does not end the series. The concurrency group
+      # holds it until this run finishes; a manually dispatched run is allowed to trigger runs.
+      - name: Queue the next recording
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date +%s)" -lt "$(date -d "$BENCHMARK_UNTIL" +%s)" ]; then
+            gh workflow run arrival-benchmark.yml --ref main -f chained=true
+          else
+            echo 'Benchmark period is over; not queuing another recording.'
+          fi
       - name: Test the recorder
         run: cd tools/arrival-benchmark && python3 collect_test.py
       - name: Record public feeds
         run: |
           set -euo pipefail
           flags=()
-          # Route, stop and shape feeds once a day (the run starting after 08:00 Taipei).
-          if [ "$(date -u +%H)" != "00" ] && [ "${{ github.event_name }}" = schedule ]; then flags+=(--no-static); fi
+          # Route, stop and shape feeds about once a day: automatic runs record them only when
+          # they start between 08:00 and 14:00 Taipei; a manual start always records them.
+          automatic=${{ github.event_name == 'schedule' || inputs.chained }}
+          if [ "$automatic" = true ] && [ "$(date -u +%H)" -ge 6 ]; then flags+=(--no-static); fi
           python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark" --minutes 345 "${flags[@]}"
       - uses: actions/upload-artifact@v4
         if: always()
