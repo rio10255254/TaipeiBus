@@ -119,6 +119,65 @@ def carry_forward(candidate, published, now):
     return dict(candidate, routes=routes), carried
 
 
+PLACEHOLDER_SECONDS = 120
+NEIGHBOUR_HOURS = 3
+DAY_CLASSES = ({1, 2, 3, 4, 5}, {0, 6})
+
+
+def usable_seconds(value):
+    return is_int(value) and 1 <= value <= 1800 and value != PLACEHOLDER_SECONDS
+
+
+def fill_placeholders(document):
+    """Replace TDX's 120-second filler and missing values with the edge's own nearby times.
+
+    TDX answers 120 when an hour has no observations: 27% of all values, against about
+    9,000 each for 119 and 121 in weekday daytime. A real 120 is replaced by its almost
+    identical neighbours. Order: nearest hours of the same day (up to 3 hours away, both
+    sides averaged when equally near), then the median of the same hour on days of the
+    same kind (weekday or weekend), then the median of every usable hour of that edge.
+    Edges with no usable hour at all stay as published.
+    """
+    counts = {'placeholder_filled': 0, 'missing_filled': 0, 'left_unchanged': 0}
+    for route in document.get('routes', []):
+        if profile_updated(route) is None:
+            continue
+        table = {(p['weekday'], p['startHour']): p['seconds'] for p in route['periods']
+                 if p['endHour'] == p['startHour'] + 1 and len(p['seconds']) == len(route['edges'])}
+        overall = [sorted(v[edge] for v in table.values() if usable_seconds(v[edge])) for edge in range(len(route['edges']))]
+        filled = {}
+        for (day, hour), values in table.items():
+            for edge, value in enumerate(values):
+                if usable_seconds(value):
+                    continue
+                replacement = None
+                for distance in range(1, NEIGHBOUR_HOURS + 1):
+                    near = [table[(day, h)][edge] for h in (hour - distance, hour + distance)
+                            if (day, h) in table and usable_seconds(table[(day, h)][edge])]
+                    if near:
+                        replacement = round(sum(near) / len(near))
+                        break
+                if replacement is None:
+                    kind = next((c for c in DAY_CLASSES if day in c), {day})
+                    same = sorted(table[(d, hour)][edge] for d in kind if d != day and (d, hour) in table
+                                  and usable_seconds(table[(d, hour)][edge]))
+                    if same:
+                        replacement = same[len(same) // 2] if len(same) % 2 else round((same[len(same) // 2 - 1] + same[len(same) // 2]) / 2)
+                if replacement is None and overall[edge]:
+                    values_seen = overall[edge]
+                    middle = len(values_seen) // 2
+                    replacement = values_seen[middle] if len(values_seen) % 2 else round((values_seen[middle - 1] + values_seen[middle]) / 2)
+                if replacement is None:
+                    counts['left_unchanged'] += 1
+                    continue
+                filled[(day, hour, edge)] = replacement
+                counts['placeholder_filled' if value == PLACEHOLDER_SECONDS else 'missing_filled'] += 1
+        # Fill from the original table only, so one estimate never feeds another.
+        for (day, hour, edge), replacement in filled.items():
+            table[(day, hour)][edge] = replacement
+    return counts
+
+
 def encode(document):
     return json.dumps(document, ensure_ascii=False, separators=(',', ':')).encode()
 
@@ -163,8 +222,10 @@ def prepare(args, now):
     if not isinstance(candidate, dict) or not isinstance(candidate.get('routes'), list):
         raise ValueError('The collected catalog is not a route list')
     merged, carried = carry_forward(candidate, published if isinstance(published, dict) else {}, now)
+    filled = fill_placeholders(merged)
     failures, report = gate(merged, published if isinstance(published, dict) else {}, now, args.allow_smaller)
     coverage['carried_forward_routes'] = carried
+    coverage['filled_values'] = filled
     coverage['publication'] = {'checked_at': now.isoformat(), 'failures': failures, **report}
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / 'official-times.json').write_bytes(encode(merged))
@@ -173,7 +234,9 @@ def prepare(args, now):
                    '| Catalog | Valid profiles | Usable now | Oldest UpdateTime | 10% expired at | Days left |',
                    '|---|---|---|---|---|---|', describe('Published', report['published']), describe('Collected', report['collected']), '',
                    f'Routes failed or without data this run: {len(coverage.get("failed_routes", []))} failed, '
-                   f'{len(coverage.get("missing_routes", []))} without source data; carried forward: {len(carried)}.', ''] +
+                   f'{len(coverage.get("missing_routes", []))} without source data; carried forward: {len(carried)}.',
+                   f'Filled from nearby hours: {filled["placeholder_filled"]} TDX 120 s fillers, {filled["missing_filled"]} missing values; '
+                   f'{filled["left_unchanged"]} left on edges with no usable hour.', ''] +
                   ([f'- Blocked: {f}' for f in failures] or ['Publication checks passed.']))
     if failures and not args.report_only:
         raise SystemExit('Publication refused; the published catalog stays unchanged.')
