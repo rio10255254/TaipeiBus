@@ -1,8 +1,15 @@
 """Collect shared official profiles within a fixed free-tier budget. Never prints credentials."""
-import argparse, gzip, json, os, time, urllib.error, urllib.parse, urllib.request
+import argparse, gzip, http.client, json, os, time, urllib.error, urllib.parse, urllib.request, zlib
 from pathlib import Path
 
 BASE = 'https://tdx.transportdata.tw'
+# Network faults and TDX overload are retried; an unanswered route keeps its previous
+# published profile (official_times_gate.py). Credential and quota refusals stop the run.
+TRANSIENT = (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException, EOFError, zlib.error, gzip.BadGzipFile)
+RETRY_STATUS = {429, 500, 502, 503, 504}
+STOP_STATUS = {401, 403, 429}
+RETRY_PAUSES = (15, 30, 60)
+MAXIMUM_CONSECUTIVE_FAILURES = 8
 
 def read(url, headers=None, data=None, accounting=None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
@@ -19,6 +26,19 @@ def read(url, headers=None, data=None, accounting=None):
         if len(raw) > 32 * 1024 * 1024:
             raise ValueError('Decoded response exceeds the per-request budget')
         return raw
+
+def read_with_retry(url, headers=None, data=None, accounting=None, pause=None):
+    for attempt, wait in enumerate(RETRY_PAUSES + (None,)):
+        try:
+            return read(url, headers, data, accounting)
+        except urllib.error.HTTPError as error:
+            if error.code not in RETRY_STATUS or wait is None:
+                raise
+        except TRANSIENT:
+            if wait is None:
+                raise
+        print(f'Retrying after a temporary TDX or network error (attempt {attempt + 2} of {len(RETRY_PAUSES) + 1})', flush=True)
+        (pause or time.sleep)(wait)
 
 def compact(row):
     periods = row.get('TravelTimes', [])
@@ -55,13 +75,13 @@ def main():
         raise ValueError('The visible website field contains a mask; use its normal Copy control for the existing key')
     if not client_id or not client_secret:
         raise ValueError('Existing TDX credentials are required in encrypted GitHub Secrets; no subscription is created')
-    raw = read('https://tcgbusfs.blob.core.windows.net/blobbus/GetRoute.gz')
+    raw = read_with_retry('https://tcgbusfs.blob.core.windows.net/blobbus/GetRoute.gz')
     published = sorted({str(x['Id']) for x in json.loads(raw)['BusInfo']}, key=int)
     requested = [x.strip() for x in args.routes.split(',') if x.strip()] or published
     if any(x not in published for x in requested) or len(requested) > args.maximum_routes:
         raise ValueError('Requested routes do not fit the published catalog or request budget')
     token, token_at = None, 0
-    profiles, missing = [], []
+    profiles, missing, failed, consecutive = [], [], [], 0
     accounting = {'transferred_bytes': 0, 'requests': 0}
     used = 0
     for index, route in enumerate(requested):
@@ -69,20 +89,34 @@ def main():
             time.sleep(12.2)  # Basic member: at most five requests per minute.
         if token is None or time.monotonic() - token_at >= 600:
             payload = urllib.parse.urlencode({'grant_type': 'client_credentials', 'client_id': client_id, 'client_secret': client_secret}).encode()
-            answer = json.loads(read(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token',
-                                     {'Content-Type': 'application/x-www-form-urlencoded'}, payload))
+            try:
+                answer = json.loads(read_with_retry(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token',
+                                                    {'Content-Type': 'application/x-www-form-urlencoded'}, payload))
+            except urllib.error.HTTPError as error:
+                raise ValueError(f'TDX token request failed (HTTP {error.code}); check the stored credentials') from None
             token, token_at = answer['access_token'], time.monotonic()
         if accounting['transferred_bytes'] + 16 * 1024 * 1024 > args.maximum_transferred_mb * 1024 * 1024:
             raise ValueError('Fixed compressed-transfer budget exhausted; no overage or subscription is requested')
         url = BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/' + urllib.parse.quote(route) + '?$format=JSON'
         try:
-            raw = read(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'}, accounting=accounting)
+            raw = read_with_retry(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'}, accounting=accounting)
         except urllib.error.HTTPError as error:
             if error.code == 404:
                 missing.append(route)
                 print(f'Official profiles {index + 1}/{len(requested)}; route {route}; source unavailable', flush=True)
                 continue
-            raise
+            if error.code in STOP_STATUS:
+                raise ValueError(f'TDX refused route requests (HTTP {error.code}); published data unchanged') from None
+            failed.append(route); consecutive += 1
+        except TRANSIENT:
+            failed.append(route); consecutive += 1
+        else:
+            consecutive = 0
+        if consecutive >= MAXIMUM_CONSECUTIVE_FAILURES:
+            raise ValueError(f'TDX did not answer {consecutive} consecutive routes; published data unchanged')
+        if consecutive:
+            print(f'Official profiles {index + 1}/{len(requested)}; route {route}; no answer after retries', flush=True)
+            continue
         used += len(raw)
         if used > args.maximum_decoded_mb * 1024 * 1024:
             raise ValueError('Fixed decoded-processing budget exhausted; no overage or subscription is requested')
@@ -100,12 +134,12 @@ def main():
     if not profiles or len(blob) > 32 * 1024 * 1024:
         raise ValueError('Empty or oversized catalog; existing public data must remain unchanged')
     args.out.parent.mkdir(parents=True, exist_ok=True);args.out.write_bytes(blob)
-    report = {'requested_routes': requested, 'loaded_patterns': len(profiles), 'missing_routes': missing,
+    report = {'requested_routes': requested, 'loaded_patterns': len(profiles), 'missing_routes': missing, 'failed_routes': failed,
               **accounting, 'maximum_transferred_bytes': args.maximum_transferred_mb * 1024 * 1024,
               'decoded_bytes': used, 'output_bytes': len(blob), 'request_budget': args.maximum_routes,
               'source': result['source'], 'generated_at': result['generatedAt']}
     args.out.with_name('coverage.json').write_text(json.dumps(report, indent=2) + '\n')
-    print(f'Official catalog saved: {len(profiles)} patterns, {len(missing)} source gaps. No credentials in output.')
+    print(f'Official catalog saved: {len(profiles)} patterns, {len(missing)} source gaps, {len(failed)} unanswered. No credentials in output.')
 
 if __name__ == '__main__':
     try:
