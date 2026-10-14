@@ -57,6 +57,21 @@ final class ServiceTimingTests: XCTestCase {
         XCTAssertEqual(timing.waitingLabel, "候車約 28 分")
         XCTAssertEqual(timing.arrivalLabel, "約 12:40 抵達")
     }
+    func testRideVariabilityWidensOnlyTheArrivalClock() throws {
+        let at = date("2026-10-04T04:00:00Z")
+        let exact = JourneyDuration(riding: [1200], walking: [60, 60], arrivals: [300], at: at)
+        XCTAssertEqual(exact.arrivalLabel, "約 12:26 抵達")
+        let varied = JourneyDuration(riding: [1200], walking: [60, 60], arrivals: [300], ridingSpreads: [180], at: at)
+        XCTAssertEqual(varied.totalSeconds, exact.totalSeconds)
+        XCTAssertEqual(varied.waitingLabel, exact.waitingLabel)
+        XCTAssertEqual(varied.earliestTotalSeconds, exact.totalSeconds - 180, accuracy: 0.01)
+        XCTAssertEqual(varied.latestTotalSeconds, exact.totalSeconds + 180, accuracy: 0.01)
+        XCTAssertEqual(varied.arrivalLabel, "約 12:23–12:29 抵達")
+        // Catching a fixed official departure absorbs how the first ride ran.
+        let transfer = JourneyDuration(riding: [600, 600], walking: [60, 60, 0], arrivals: [300, 2400],
+            ridingSpreads: [300, 60], at: at)
+        XCTAssertEqual(transfer.latestTotalSeconds - transfer.earliestTotalSeconds, 120, accuracy: 0.01)
+    }
     func testTwoUncertainConnectionsHaveConsistentWaitsAndArrivalBounds() throws {
         let service = BusDayService(headway: try XCTUnwrap(BusHeadway(published: "1020")))
         let timing = JourneyDuration(riding: [300, 300], walking: [60, 60, 60], arrivals: [nil, nil],

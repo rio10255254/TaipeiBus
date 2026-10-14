@@ -10,6 +10,9 @@ public struct JourneyDuration: Equatable, Sendable {
     public let referenceDate: Date
     public let lowerTotalSeconds: Double
     public let upperTotalSeconds: Double
+    /// Arrival bounds that also include ride-time variability; used only for arrival clocks.
+    public let earliestTotalSeconds: Double
+    public let latestTotalSeconds: Double
     public var positionUncertain = false
     public var ridingEvidence: RidingTimeEstimate.Evidence = .typical
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
@@ -28,8 +31,8 @@ public struct JourneyDuration: Equatable, Sendable {
     }
     public var arrivalClockLabel: String {
         if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
-        if upperTotalSeconds - lowerTotalSeconds >= 120 {
-            return clock(referenceDate.addingTimeInterval(lowerTotalSeconds)) + "–" + clock(referenceDate.addingTimeInterval(upperTotalSeconds))
+        if latestTotalSeconds - earliestTotalSeconds >= 120 {
+            return clock(referenceDate.addingTimeInterval(earliestTotalSeconds)) + "–" + clock(referenceDate.addingTimeInterval(latestTotalSeconds))
         }
         return clock(referenceDate.addingTimeInterval(totalSeconds))
     }
@@ -49,8 +52,8 @@ public struct JourneyDuration: Equatable, Sendable {
     public var missedNext: Bool { waits.first?.missedNext == true }
     public var arrivalLabel: String {
         if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
-        if upperTotalSeconds - lowerTotalSeconds >= 120 {
-            return AppText.text("約 %@–%@ 抵達", clock(referenceDate.addingTimeInterval(lowerTotalSeconds)), clock(referenceDate.addingTimeInterval(upperTotalSeconds)))
+        if latestTotalSeconds - earliestTotalSeconds >= 120 {
+            return AppText.text("約 %@–%@ 抵達", clock(referenceDate.addingTimeInterval(earliestTotalSeconds)), clock(referenceDate.addingTimeInterval(latestTotalSeconds)))
         }
         return AppText.text("約 %@ 抵達", clock(referenceDate.addingTimeInterval(totalSeconds)))
     }
@@ -63,9 +66,11 @@ public struct JourneyDuration: Equatable, Sendable {
     }
 
     public init(riding: [Double], walking: [Double], arrivals: [Int?], minimumServiceWaits: [Double] = [],
-                services: [BusDayService?] = [], boardingOffsets: [Double] = [], at date: Date = Date()) {
+                services: [BusDayService?] = [], boardingOffsets: [Double] = [], ridingSpreads: [Double] = [],
+                at date: Date = Date()) {
         let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: arrivals,
-            minimumServiceWaits: minimumServiceWaits, services: services, boardingOffsets: boardingOffsets, at: date)
+            minimumServiceWaits: minimumServiceWaits, services: services, boardingOffsets: boardingOffsets,
+            ridingSpreads: ridingSpreads, at: date)
         self.init(assessment: assessment, riding: riding)
     }
     public init(assessment: TripAssessment, riding: [Double]) {
@@ -75,5 +80,6 @@ public struct JourneyDuration: Equatable, Sendable {
         uncertainWaits = assessment.uncertainWaits
         waits = assessment.waits; referenceDate = assessment.referenceDate
         lowerTotalSeconds = assessment.lowerSeconds; upperTotalSeconds = assessment.upperSeconds
+        earliestTotalSeconds = assessment.earliestSeconds; latestTotalSeconds = assessment.latestSeconds
     }
 }

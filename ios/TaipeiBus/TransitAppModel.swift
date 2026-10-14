@@ -925,6 +925,7 @@ final class TransitAppModel: ObservableObject {
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
+        var onboardSpread: Double?
         if onboard, let first = remainingRides.first, !riding.isEmpty {
             if first.route.mode != .bus {
                 let remaining = metroRemaining(first, at: date)
@@ -934,7 +935,7 @@ final class TransitAppModel: ObservableObject {
                let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
                 if progress.distance < -20 { riding[0] = 0 }
                 else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
-                    riding[0] = prediction.seconds
+                    riding[0] = prediction.seconds; onboardSpread = prediction.uncertaintySeconds
                     onboardArrival = (first.id, date.addingTimeInterval(prediction.seconds), date)
                 } else if let held = heldOnboardSeconds(first, at: date) {
                     riding[0] = held
@@ -962,7 +963,10 @@ final class TransitAppModel: ObservableObject {
         var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
             services: remainingRides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
-            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds), at: date)
+            boardingOffsets: remainingRides.map(\.boardingOffsetSeconds),
+            ridingSpreads: zip(rideEstimates, riding).enumerated().map { index, pair in
+                index == 0 ? onboardSpread ?? pair.1 * pair.0.evidence.spreadFraction : pair.1 * pair.0.evidence.spreadFraction
+            }, at: date)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :

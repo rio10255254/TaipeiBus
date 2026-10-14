@@ -343,6 +343,7 @@
   "查詢類型": "Search type",
   "上次位置 · ": "Last position · ",
   "依近期車輛通過各站的時間估算": "Based on recent bus travel between stops",
+  "依官方分時段車程與近期車流估算": "Based on official time-of-day ride data and recent traffic",
   "依這輛車近期的行駛情況估算": "Based on this bus’s recent movement",
   "候車請以官方下一班為準。": " Use the official next-bus time while waiting.",
   "候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。": "Use the official next-bus time. Vehicle estimates disagree, so the arriving plate remains unconfirmed.",
