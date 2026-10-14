@@ -119,9 +119,9 @@ public struct OfficialTravelTimes: Sendable {
         for profile in profiles where profile.route == route {
             guard (-300...45 * 86400).contains(observedAt.timeIntervalSince(profile.updated)),
                   let edge = profile.edges[Edge(from: from, to: to)],
-                  let values = days.lazy.compactMap({ profile.hours[$0 * 24 + hour] }).first,
-                  (1...1800).contains(values[edge]) else { continue }
-            return Double(values[edge])
+                  let value = days.lazy.compactMap({ profile.hours[$0 * 24 + hour]?[edge] })
+                      .first(where: { (1...1800).contains($0) }) else { continue }
+            return Double(value)
         }
         return nil
     }
