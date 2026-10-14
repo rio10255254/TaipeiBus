@@ -136,6 +136,39 @@ class GateTests(unittest.TestCase):
         self.assertEqual(report['collected']['usable_profiles'], 40)
 
 
+class PlaceholderTests(unittest.TestCase):
+    def table(self, rows):
+        """rows: {(weekday, hour): [edge values]}"""
+        route = profile('1', NOW)
+        route['edges'] = [['A', 'B'], ['B', 'C']]
+        route['periods'] = [{'weekday': d, 'startHour': h, 'endHour': h + 1, 'seconds': list(v)} for (d, h), v in rows.items()]
+        document = catalog([route], NOW)
+        return document, {(p['weekday'], p['startHour']): p['seconds'] for p in route['periods']}
+
+    def test_nearest_hours_of_the_same_day_are_averaged(self):
+        document, table = self.table({(2, 7): [60, 30], (2, 8): [120, 35], (2, 9): [80, 120], (2, 10): [90, 120]})
+        counts = gate.fill_placeholders(document)
+        self.assertEqual(table[(2, 8)], [70, 35])     # 7 and 9 averaged.
+        self.assertEqual(table[(2, 9)][1], 35)        # Nearest real value, not the newly filled one.
+        self.assertEqual(table[(2, 10)][1], 35)       # Two hours away.
+        self.assertEqual(counts, {'placeholder_filled': 3, 'missing_filled': 0, 'left_unchanged': 0})
+
+    def test_same_hour_on_days_of_the_same_kind_then_whole_edge(self):
+        document, table = self.table({(1, 3): [120, 120], (2, 3): [50, 120], (3, 3): [54, 120], (0, 3): [20, 120],
+                                      (2, 12): [70, 44], (2, 13): [-1, 46]})
+        counts = gate.fill_placeholders(document)
+        self.assertEqual(table[(1, 3)][0], 52)        # Tuesday and Wednesday at 03:00, not Sunday.
+        self.assertEqual(table[(1, 3)][1], 45)        # No nearby or same-kind value: the edge's median.
+        self.assertEqual(table[(2, 13)][0], 70)       # Missing values are filled the same way.
+        self.assertEqual(counts['missing_filled'], 1)
+
+    def test_edges_without_any_real_time_are_left_alone(self):
+        document, table = self.table({(2, 8): [120, 40], (2, 9): [120, 41]})
+        counts = gate.fill_placeholders(document)
+        self.assertEqual([table[(2, 8)][0], table[(2, 9)][0]], [120, 120])
+        self.assertEqual(counts['left_unchanged'], 2)
+
+
 class CommandTests(unittest.TestCase):
     def run_prepare(self, collected, published, coverage, *flags):
         with tempfile.TemporaryDirectory() as folder:
