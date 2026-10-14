@@ -58,13 +58,15 @@ public struct RidingTimeEstimate: Equatable, Sendable {
     public enum Evidence: String, Sendable {
         case stationHistory, officialProfile, railProfile, recentTraffic, typical
         /// Share of the ride time it may plausibly run early or late, by how the time was obtained.
-        /// Placeholder values until measured against recorded arrivals.
+        /// Calibrated remotely (ForecastTuning) against recorded arrivals.
         public var spreadFraction: Double {
+            let tuning = ForecastTuning.current
             switch self {
-            case .railProfile: return 0.05
-            case .stationHistory: return 0.10
-            case .officialProfile, .recentTraffic: return 0.15
-            case .typical: return 0.25
+            case .railProfile: return tuning.railSpread
+            case .stationHistory: return tuning.stationHistorySpread
+            case .officialProfile: return tuning.officialProfileSpread
+            case .recentTraffic: return tuning.recentTrafficSpread
+            case .typical: return tuning.typicalSpread
             }
         }
     }
@@ -164,6 +166,7 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func prediction(_ bus: BusVehicle, stopID: String, metadata: TransitMetadata, at date: Date,
                            allowTypicalWhenStopped: Bool = false) -> VehicleArrivalPrediction? {
+        let tuning = ForecastTuning.current
         guard bus.hasReliablePosition(at: date), bus.aligned, let match = bus.roadMatch,
               (-5...90).contains(date.timeIntervalSince(bus.observedAt)),
               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
@@ -199,7 +202,7 @@ public struct VehicleArrivalForecast: Sendable {
         }
         if speed == nil, bus.hasSpeed, (5...80).contains(bus.speed) {
             // A current speed is a short sample; blend it with a conservative urban driving baseline.
-            speed = min(16, 4.5 * 0.6 + bus.speed / 3.6 * 0.4)
+            speed = min(16, tuning.typicalSpeed * 0.6 + bus.speed / 3.6 * 0.4)
         }
         let along = match.along * Double(journey.direction)
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
@@ -229,20 +232,21 @@ public struct VehicleArrivalForecast: Sendable {
                 learned += 1
             } else if let official {
                 // The official hour profile is the baseline; one or two recent crossings refine it
-                // as if the profile were worth two observations.
-                let typical = vehicles == 0 ? official : (median(values) * Double(vehicles) + official * 2) / Double(vehicles + 2)
+                // as if the profile were worth officialProfileWeight observations.
+                let weight = tuning.officialProfileWeight
+                let typical = vehicles == 0 ? official : (median(values) * Double(vehicles) + official * weight) / (Double(vehicles) + weight)
                 duration = typical * fraction
-                margin = max(12, typical * 0.25) * fraction
+                margin = max(12, typical * tuning.officialSegmentMargin) * fraction
                 profiled += 1
             } else {
-                guard let pace = speed ?? (allowTypicalWhenStopped ? 4.5 : nil) else { return nil }
-                duration = remaining / pace + (movingHistory ? 0 : 20 * fraction)
+                guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
+                duration = remaining / pace + (movingHistory ? 0 : tuning.stopSeconds * fraction)
                 margin = max(12, duration * speedVariation); fallback += 1
             }
             seconds += duration; variance += margin * margin
         }
         if target == 0 || along < firstAlong {
-            guard let pace = speed ?? (allowTypicalWhenStopped ? 4.5 : nil) else { return nil }
+            guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
             let leading = target == 0 ? progress.distance : firstAlong - along
             seconds += leading / pace; variance += pow(leading / pace * speedVariation, 2); fallback += 1
         }
@@ -255,7 +259,7 @@ public struct VehicleArrivalForecast: Sendable {
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
         let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, seconds * 0.1) : 0
         return VehicleArrivalPrediction(seconds: max(15, seconds - elapsed),
-            uncertaintySeconds: max(30, sqrt(variance), seconds * (evidence == .limited ? 0.3 : 0.12)) + age * 0.35,
+            uncertaintySeconds: max(30, sqrt(variance), seconds * (evidence == .limited ? tuning.limitedUncertainty : tuning.minimumUncertainty)) + age * 0.35,
             evidence: evidence, nearStop: false)
     }
 
@@ -325,6 +329,7 @@ public struct VehicleArrivalForecast: Sendable {
 
     public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
                               travellingAt: Date? = nil) -> RidingTimeEstimate {
+        let tuning = ForecastTuning.current
         if ride.route.mode != .bus, let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) {
             return RidingTimeEstimate(seconds: seconds, evidence: .railProfile, observedVehicles: 0)
@@ -345,7 +350,7 @@ public struct VehicleArrivalForecast: Sendable {
                     seconds += official; published += 1
                 } else {
                     let share = totalSpan > 1 ? spans[index - 1] / totalSpan : 1 / Double(max(1, ride.stopCount))
-                    seconds += distance * share / 4.5 + 20
+                    seconds += distance * share / tuning.typicalSpeed + tuning.stopSeconds
                 }
             }
             return RidingTimeEstimate(seconds: seconds,
@@ -370,7 +375,7 @@ public struct VehicleArrivalForecast: Sendable {
                 // and dwell. Adding another 20 seconds per stop would count it twice.
                 seconds += distance / traffic.speed; fallback += 1
             } else {
-                seconds += distance / 4.5 + 20; fallback += 1
+                seconds += distance / tuning.typicalSpeed + tuning.stopSeconds; fallback += 1
             }
         }
         return RidingTimeEstimate(seconds: seconds,

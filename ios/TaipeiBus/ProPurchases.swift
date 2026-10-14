@@ -43,10 +43,17 @@ final class ProPurchases: ObservableObject {
             for await result in StoreKit.Transaction.updates {
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
-                guard case .verified(let transaction) = result,
-                      self.recognizes(transaction) else { continue }
-                await self.refreshAccess()
-                await transaction.finish()
+                switch result {
+                case .verified(let transaction) where self.recognizes(transaction):
+                    await self.refreshAccess()
+                    await transaction.finish()
+                case .unverified(let transaction, _) where self.recognizes(transaction):
+                    // Never grants access (that reads verified entitlements only); finishing stops
+                    // StoreKit redelivering the same failed transaction on every launch.
+                    await transaction.finish()
+                default:
+                    continue
+                }
             }
         }
         // Cancellation and billing-state changes may not create a transaction.

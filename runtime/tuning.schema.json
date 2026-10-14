@@ -1,0 +1,94 @@
+{
+  "type": "object",
+  "required": [
+    "schemaVersion"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "note": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300
+    },
+    "railSpread": {
+      "type": "number",
+      "minimum": 0.01,
+      "maximum": 0.5,
+      "default": 0.05,
+      "description": "捷運車程的誤差比例"
+    },
+    "stationHistorySpread": {
+      "type": "number",
+      "minimum": 0.02,
+      "maximum": 0.6,
+      "default": 0.1,
+      "description": "依近期站間紀錄估算時的誤差比例"
+    },
+    "officialProfileSpread": {
+      "type": "number",
+      "minimum": 0.02,
+      "maximum": 0.6,
+      "default": 0.15,
+      "description": "依官方分時段車程估算時的誤差比例"
+    },
+    "recentTrafficSpread": {
+      "type": "number",
+      "minimum": 0.02,
+      "maximum": 0.6,
+      "default": 0.15,
+      "description": "依目前路線車流估算時的誤差比例"
+    },
+    "typicalSpread": {
+      "type": "number",
+      "minimum": 0.02,
+      "maximum": 0.8,
+      "default": 0.25,
+      "description": "只能用一般車速估算時的誤差比例"
+    },
+    "officialSegmentMargin": {
+      "type": "number",
+      "minimum": 0.05,
+      "maximum": 0.8,
+      "default": 0.25,
+      "description": "官方車程每一段的誤差比例（下一班車的到站範圍）"
+    },
+    "officialProfileWeight": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10,
+      "default": 2,
+      "description": "官方車程相當於幾輛實際車輛的紀錄"
+    },
+    "typicalSpeed": {
+      "type": "number",
+      "minimum": 2,
+      "maximum": 10,
+      "default": 4.5,
+      "description": "沒有資料時假設的公車車速（公尺／秒）"
+    },
+    "stopSeconds": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 90,
+      "default": 20,
+      "description": "沒有資料時每站加上的停靠秒數"
+    },
+    "minimumUncertainty": {
+      "type": "number",
+      "minimum": 0.03,
+      "maximum": 0.5,
+      "default": 0.12,
+      "description": "到站範圍至少佔剩餘時間的比例"
+    },
+    "limitedUncertainty": {
+      "type": "number",
+      "minimum": 0.05,
+      "maximum": 0.8,
+      "default": 0.3,
+      "description": "資料不足時到站範圍至少佔剩餘時間的比例"
+    }
+  }
+}

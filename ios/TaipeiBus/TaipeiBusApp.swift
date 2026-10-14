@@ -11,6 +11,9 @@ struct TaipeiBusApp: App {
     @AppStorage("dismissedRecommendedVersion") private var dismissedRecommendedVersion = ""
     private let updates = AppUpdateService(cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("AppUpdate"))
+    /// Loads the last calibrated arrival constants from disk at launch, then checks for new ones.
+    private let tuning = ForecastTuningService(cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("ForecastTuning"))
 
     var body: some Scene {
         WindowGroup {
@@ -18,7 +21,7 @@ struct TaipeiBusApp: App {
                 .onOpenURL { model.open($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     model.setActive(phase == .active)
-                    if phase == .active { Task { await checkForUpdate() } }
+                    if phase == .active { Task { await checkForUpdate() }; Task { await tuning.refresh() } }
                 }
                 .overlay { if update == .required { RequiredUpdateView(message: updateMessage) } }
                 .alert(AppText.text("有新版本"), isPresented: Binding(

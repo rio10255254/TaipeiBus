@@ -163,6 +163,7 @@ public struct TripPlanner: Sendable {
             }
         }
         // Use source-specific times before limiting candidates.
+        let tuning = ForecastTuning.current
         let routeTimes = patterns.map { pattern -> [Double] in
             var values = [0.0]
             for index in pattern.stops.indices.dropFirst() {
@@ -172,7 +173,7 @@ public struct TripPlanner: Sendable {
                     from: pattern.stops[index - 1].id, to: pattern.stops[index].id,
                     travellingAt: date.addingTimeInterval(previous), observedAt: date)
                 values.append(previous + (official ??
-                    ((pattern.distances[index] - pattern.distances[index - 1]) / 4.5 + 20)))
+                    ((pattern.distances[index] - pattern.distances[index - 1]) / tuning.typicalSpeed + tuning.stopSeconds)))
             }
             return values
         }

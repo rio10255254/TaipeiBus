@@ -59,6 +59,7 @@ public struct MultimodalPlanner: Sendable {
     public init(metadata: TransitMetadata) {
         self.metadata = metadata; busPlanner = TripPlanner(metadata: metadata)
         var patterns: [Pattern] = [], stationStops: [String: BusStop] = [:]
+        let tuning = ForecastTuning.current
         for route in metadata.routes.values.sorted(by: { $0.id < $1.id }) {
             guard !route.name.contains("觀光巴士"), !route.name.hasPrefix("懷恩專車") else { continue }
             for direction in ["0", "1"] {
@@ -73,7 +74,7 @@ public struct MultimodalPlanner: Sendable {
                     let rail = route.mode != .bus ? metadata.metro.ridingSeconds(routeID: route.id, direction: direction, from: a.stationID, to: b.stationID) : nil
                     let distance = anchors[a.id].flatMap { first in anchors[b.id].map { abs($0 - first) } } ?? a.coordinate.distance(to: b.coordinate) * 1.25
                     let dwell = index > 1 && railPattern?.dwellSeconds.indices.contains(index - 1) == true ? railPattern!.dwellSeconds[index - 1] : 0
-                    fallback.append((rail ?? (distance / 4.5 + 20)) + dwell)
+                    fallback.append((rail ?? (distance / tuning.typicalSpeed + tuning.stopSeconds)) + dwell)
                     cumulative.append(cumulative.last! + fallback.last!)
                 }
                 let windows = route.mode != .bus ? stops.map { metadata.metro.boardingWindow(routeID: route.id, direction: direction, stationID: $0.stationID) } : []

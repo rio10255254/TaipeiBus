@@ -37,6 +37,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate downloaded content
         run: python3 ios/live-update.py validate runtime/settings.json
+      - name: Validate arrival tuning
+        run: python3 ios/live-update.py validate-tuning runtime/tuning.json
       - name: Refresh the CDN copy phones use when GitHub is unreachable
         if: github.event_name == 'push'
         run: ./.github/purge-runtime-mirror.sh
@@ -58,6 +60,45 @@ jobs:
                   print(f'::warning::{key} {policy[key]} is above the App Store version {live}; phones ignore it until that version is live.')
           print(f'Update switch valid; App Store (Taiwan) version {live}.')
           PY
+  # Phones accept settings.json only when its revision is higher than the one they have. When
+  # the file is edited by hand on main without raising it, raise it here so the edit takes effect.
+  revision:
+    if: github.event_name == 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    env:
+      BEFORE: ${{ github.event.before }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Raise the revision of a hand-edited settings file
+        run: |
+          set -euo pipefail
+          case "$BEFORE" in ''|0000000000000000000000000000000000000000) echo 'No earlier commit to compare.'; exit 0;; esac
+          git fetch -q --depth=1 origin "$BEFORE"
+          git show "$BEFORE:runtime/settings.json" > "$RUNNER_TEMP/before.json"
+          changed=$(python3 - "$RUNNER_TEMP/before.json" runtime/settings.json <<'PY'
+          import json, sys
+          before, after = (json.load(open(path, encoding='utf-8-sig')) for path in sys.argv[1:])
+          if after['revision'] > before['revision'] or {**before, 'revision': 0} == {**after, 'revision': 0}:
+              print('no')
+          else:
+              after['revision'] = max(after['revision'], before['revision']) + 1
+              open(sys.argv[2], 'w', encoding='utf-8').write(json.dumps(after, ensure_ascii=False, indent=2) + '\n')
+              print(after['revision'])
+          PY
+          )
+          if [ "$changed" = no ]; then echo 'Revision already raised or content unchanged.'; exit 0; fi
+          python3 ios/live-update.py validate runtime/settings.json
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -q -am "Raise app content revision to $changed"
+          git push -q origin HEAD:main
+          ./.github/purge-runtime-mirror.sh
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.operation != 'validate' && github.ref == 'refs/heads/main'
     needs: validate

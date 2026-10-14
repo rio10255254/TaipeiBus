@@ -17,12 +17,13 @@ def load_json(text):
     return json.loads(text, parse_constant=lambda value: (_ for _ in ()).throw(ValueError("Non-finite number: " + value)))
 
 
-def validate(document, app_version=None):
-    schema = load_json((ROOT / "runtime/settings.schema.json").read_text(encoding="utf-8-sig"))
+def require(valid, path):
+    if not valid:
+        raise ValueError("Invalid live setting: " + path)
 
-    def require(valid, path):
-        if not valid:
-            raise ValueError("Invalid live setting: " + path)
+
+def conforms(document, schema, label):
+    """Check a document against the small JSON Schema subset used in runtime/."""
 
     def visit(value, rule, path):
         if "const" in rule:
@@ -55,12 +56,27 @@ def validate(document, app_version=None):
             require(math.isfinite(value) and rule.get("minimum", -math.inf) <= value <= rule.get("maximum", math.inf), path)
         elif kind == "boolean":
             require(type(value) is bool, path)
-    visit(document, schema, "settings")
+    visit(document, schema, label)
+
+
+def validate(document, app_version=None):
+    schema = load_json((ROOT / "runtime/settings.schema.json").read_text(encoding="utf-8-sig"))
+    conforms(document, schema, "settings")
     planning = document.get("planning", {})
     require(planning.get("expandedWalkMeters", 1200) >= planning.get("firstWalkMeters", 800), "walking distances")
     if app_version:
         require(tuple(map(int, document["minimumAppVersion"].split("."))) <= tuple(map(int, app_version.split("."))), "minimumAppVersion")
     require(len(json.dumps(document, ensure_ascii=False).encode("utf-8")) <= 131072, "file size")
+    return document
+
+
+def validate_tuning(path):
+    """runtime/tuning.json: phones ignore the whole file when any value is unknown or out of range."""
+    data = Path(path).read_bytes()
+    if len(data) > 8192:
+        raise ValueError("Tuning file exceeds 8 KB.")
+    document = load_json(data.decode("utf-8-sig"))
+    conforms(document, load_json((ROOT / "runtime/tuning.schema.json").read_text(encoding="utf-8")), "tuning")
     return document
 
 
@@ -116,6 +132,8 @@ def main():
     check.add_argument("path", nargs="?", default="runtime/settings.json")
     send = sub.add_parser("publish")
     send.add_argument("--document-env", default="BUS_LIVE_DOCUMENT")
+    tuning = sub.add_parser("validate-tuning")
+    tuning.add_argument("path", nargs="?", default="runtime/tuning.json")
     rollback = sub.add_parser("rollback")
     rollback.add_argument("revision", type=int)
     args = parser.parse_args()
@@ -127,6 +145,9 @@ def main():
         app_version = load_json((ROOT / "ios/release/testflight.json").read_text(encoding="utf-8"))["version"]
         validate(document, app_version)
         print(f"Live content revision {document['revision']} validated for App {app_version}.")
+    elif args.operation == "validate-tuning":
+        changed = {key: value for key, value in validate_tuning(args.path).items() if key not in ("schemaVersion", "note")}
+        print("Tuning valid; " + (f"overrides {changed}" if changed else "all shipped defaults") + ".")
     elif args.operation == "publish":
         document = os.environ.get(args.document_env, "").strip()
         if not document:
