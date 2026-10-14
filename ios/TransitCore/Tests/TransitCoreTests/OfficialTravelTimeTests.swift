@@ -24,6 +24,24 @@ final class OfficialTravelTimeTests: XCTestCase {
             XCTAssertNil(value.seconds(route: "family", subroute: "arbitrary-subroute", direction: "1", from: "from", to: "to", travellingAt: at, observedAt: at))
         }
     }
+    func testWeekdayNationalHolidayUsesSundayProfile() throws {
+        let periods: [[String: Any]] = [["weekday": 0, "startHour": 8, "endHour": 9, "seconds": [40]],
+                                        ["weekday": 1, "startHour": 8, "endHour": 9, "seconds": [55]],
+                                        ["weekday": 1, "startHour": 9, "endHour": 10, "seconds": [50]],
+                                        ["weekday": 0, "startHour": 10, "endHour": 11, "seconds": [-1]],
+                                        ["weekday": 1, "startHour": 10, "endHour": 11, "seconds": [45]]]
+        let object: [String: Any] = ["schema": 1, "routes": [["route": "family", "subroute": "sub", "direction": "1",
+            "updated": "2026-10-18T05:00:00+08:00", "edges": [["from", "to"]], "periods": periods]]]
+        let value = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: object))
+        func seconds(_ text: String) -> Double? {
+            value.seconds(route: "family", subroute: "sub", direction: "1", from: "from", to: "to", travellingAt: date(text), observedAt: date(text))
+        }
+        XCTAssertEqual(seconds("2026-10-19T08:15:00+08:00"), 55) // Ordinary Monday.
+        XCTAssertEqual(seconds("2026-10-26T08:15:00+08:00"), 40) // Monday national holiday.
+        XCTAssertEqual(seconds("2026-10-26T09:15:00+08:00"), 50) // No Sunday hour: keep the weekday's own value.
+        XCTAssertEqual(seconds("2026-10-26T10:15:00+08:00"), 45) // Sunday value unavailable: keep the weekday's.
+        XCTAssertEqual(seconds("2026-10-25T08:15:00+08:00"), 40) // Sunday itself is unchanged.
+    }
     func testRecordedOfficial630EighteenSegmentsTotal1635Seconds() throws {
         let url = try XCTUnwrap(Bundle.module.url(forResource: "Official630TimingEvidence", withExtension: "json"))
         let raw = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
