@@ -187,7 +187,8 @@ final class JourneyPlannerModel: ObservableObject {
         let riding = estimates.map(\.seconds)
         if let trip = option.trip {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding)
+                preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding,
+                ridingSpreads: estimates.map(\.spreadSeconds))
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :

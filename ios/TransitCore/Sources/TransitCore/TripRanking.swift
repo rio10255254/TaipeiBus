@@ -12,6 +12,10 @@ public struct TripAssessment: Sendable {
     public let waits: [BoardingWait]
     public let lowerSeconds: Double
     public let upperSeconds: Double
+    /// Arrival range including how much each ride itself may run early or late. The
+    /// waiting bounds above stay separate so that waits are not widened by ride time.
+    public let earliestSeconds: Double
+    public let latestSeconds: Double
     public let referenceDate: Date
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
     public var travelSeconds: Double { elapsedSeconds - waitingSeconds }
@@ -23,10 +27,11 @@ public enum TripRanking {
     public static func assess(riding: [Double], walking: [Double], arrivals: [Int?],
                               preferences: LiveSettings.Planning = .init(), minimumServiceWaits: [Double] = [],
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
+                              ridingSpreads: [Double] = [],
                               at date: Date = Date(), serviceTimeOfDay: Double? = nil) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
-        var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false
+        var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false, spread = 0.0
         var waits: [BoardingWait] = []
         let timeOfDay = serviceTimeOfDay ?? BusServiceWindow.secondsOfDay(at: date)
         let unavailable = arrivals.contains { value in value.map { [-2, -3, -4].contains($0) } ?? false }
@@ -46,15 +51,20 @@ public enum TripRanking {
             let before = elapsed, beforeLower = lower, beforeUpper = upper
             let wait = max(0, result.seconds + ready - before)
             let ride = max(0, riding[index])
+            let rideSpread = ridingSpreads.indices.contains(index) ? max(0, ridingSpreads[index]) : 0
             // A reachable official departure is anchored to query time. Earlier
             // uncertainty changes how long we wait, not that departure's clock.
             if result.evidence == .official, let arrival {
                 elapsed = Double(arrival) + ride; lower = elapsed; upper = elapsed
+                // Catching that departure absorbs how early or late the earlier rides ran.
+                spread = rideSpread
             } else if result.evidence == .timetable || result.missedNext {
+                spread += rideSpread
                 elapsed = ready + result.seconds + ride
                 lower = ready + result.lowerSeconds + ride
                 upper = ready + result.upperSeconds + ride
             } else {
+                spread += rideSpread
                 elapsed = ready + result.seconds + ride
                 lower = beforeLower + result.lowerSeconds + ride
                 upper = ready + result.upperSeconds + ride
@@ -75,12 +85,14 @@ public enum TripRanking {
         return TripAssessment(score: unavailable ? .infinity : score, elapsedSeconds: elapsed,
             walkingSeconds: walkingSeconds, waitingSeconds: waiting, missedFirstArrival: missed,
             uncertainWaits: unknown, unavailable: unavailable, waits: waits,
-            lowerSeconds: min(lower, elapsed), upperSeconds: max(upper, elapsed), referenceDate: date)
+            lowerSeconds: min(lower, elapsed), upperSeconds: max(upper, elapsed),
+            earliestSeconds: max(0, min(lower, elapsed) - spread), latestSeconds: max(upper, elapsed) + spread, referenceDate: date)
     }
 
     public static func assessment(_ trip: TransitTrip, estimates: EstimateFeed, at date: Date,
                                   preferences: LiveSettings.Planning = .init(),
-                                  walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil) -> TripAssessment {
+                                  walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil,
+                                  ridingSpreads: [Double]? = nil) -> TripAssessment {
         let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
             return seconds
@@ -90,7 +102,10 @@ public enum TripRanking {
             preferences: preferences, minimumServiceWaits: trip.rides.map {
                 $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds)
             }, services: trip.rides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
-            boardingOffsets: trip.rides.map(\.boardingOffsetSeconds), at: date)
+            boardingOffsets: trip.rides.map(\.boardingOffsetSeconds),
+            ridingSpreads: ridingSpreads ?? zip(trip.rides, ridingDurations ?? trip.rideSeconds).map { ride, seconds in
+                seconds * (ride.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
+            }, at: date)
     }
 
     /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
