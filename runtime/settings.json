@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "revision": 5,
-  "minimumAppVersion": "0.4.2",
+  "revision": 6,
+  "minimumAppVersion": "1.1.8",
   "copy": {},
   "search": {
     "aliases": [
@@ -112,7 +112,8 @@
   "refresh": {
     "vehicleSeconds": 15,
     "metadataHours": 24,
-    "settingsSeconds": 300
+    "settingsSeconds": 300,
+    "trackingSeconds": 10
   },
   "display": {
     "nearbyStops": true,

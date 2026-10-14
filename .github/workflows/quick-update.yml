@@ -37,6 +37,24 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate downloaded content
         run: python3 ios/live-update.py validate runtime/settings.json
+      - name: Validate the update switch against the App Store
+        run: |
+          python3 - <<'PY'
+          import json, re, urllib.request
+          policy = json.load(open('runtime/app-update.json', encoding='utf-8'))
+          version = re.compile(r'\d{1,4}(\.\d{1,4}){0,3}')
+          assert set(policy) <= {'schemaVersion', 'minimumVersion', 'recommendedVersion', 'message', 'englishMessage'}, 'unknown field'
+          assert policy.get('schemaVersion') == 1 and version.fullmatch(policy.get('minimumVersion', '')), 'schema or minimumVersion'
+          assert 'recommendedVersion' not in policy or version.fullmatch(policy['recommendedVersion']), 'recommendedVersion'
+          assert all(0 < len(policy.get(k, 'x')) <= 300 for k in ('message', 'englishMessage')), 'message length'
+          parts = lambda text: [int(x) for x in text.split('.')] + [0] * (4 - text.count('.') - 1)
+          with urllib.request.urlopen('https://itunes.apple.com/lookup?id=6818475740&country=tw', timeout=30) as response:
+              live = json.load(response)['results'][0]['version']
+          for key in ('minimumVersion', 'recommendedVersion'):
+              if key in policy and parts(policy[key]) > parts(live):
+                  print(f'::warning::{key} {policy[key]} is above the App Store version {live}; phones ignore it until that version is live.')
+          print(f'Update switch valid; App Store (Taiwan) version {live}.')
+          PY
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.operation != 'validate' && github.ref == 'refs/heads/main'
     needs: validate
