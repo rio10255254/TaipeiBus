@@ -31,6 +31,9 @@ concurrency:
 env:
   # The address compiled into the app (TransitService.swift).
   PHONE_CATALOG_URL: https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json
+  # Compiled into the app as the jsDelivr mirror (TransitService.swift). Not the release tag name,
+  # so the branch and the tag never share a ref name.
+  MIRROR_BRANCH: phone-data
 jobs:
   collect:
     if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 21 * * 2'
@@ -92,11 +95,37 @@ jobs:
             sleep 20
           done
           python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/downloaded.json" --minimum-days 21
+      - name: Mirror the compressed catalog to the CDN branch
+        if: env.PUBLISH == 'true'
+        # Phones download the gzip copy from jsDelivr first and verify it against the manifest,
+        # so heavy traffic does not depend on GitHub release downloads alone. The branch is a
+        # single orphan commit, replaced each week, so the repository does not grow.
+        run: |
+          set -euo pipefail
+          out="$RUNNER_TEMP/route-times/publish"
+          mirror="$RUNNER_TEMP/mirror"
+          git init -q -b "$MIRROR_BRANCH" "$mirror"
+          cp "$out/official-times.json.gz" "$out/official-times-manifest.json" "$mirror/"
+          cd "$mirror"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -q -m "Official travel times $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["generatedAt"])' official-times-manifest.json)"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$MIRROR_BRANCH"
+          for name in official-times-manifest.json official-times.json.gz; do
+            curl -fsS --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${MIRROR_BRANCH}/$name" > /dev/null ||
+              echo "::warning::jsDelivr purge failed for $name; phones verify the copy and fall back to GitHub."
+          done
 
   watchdog:
     if: github.event.schedule == '41 1 * * *'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - name: Check the catalog phones download
@@ -104,6 +133,10 @@ jobs:
           set -euo pipefail
           curl -fsSL --retry 3 -o "$RUNNER_TEMP/official-times.json" "$PHONE_CATALOG_URL"
           python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/official-times.json" --minimum-days 21
+      - name: Keep the schedules from being disabled
+        # GitHub disables a public repository's schedules after 60 days without activity,
+        # which would also silence this check. Re-enabling the workflow resets that clock.
+        run: gh api --method PUT "repos/$GITHUB_REPOSITORY/actions/workflows/route-times.yml/enable"
 
   report:
     needs: [collect, watchdog]
