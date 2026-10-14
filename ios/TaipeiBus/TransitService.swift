@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import TransitCore
 
 /// Networking, gzip, parsing and road matching all run outside the UI actor.
@@ -180,27 +181,63 @@ actor TransitService {
         [cached, bundled].compactMap { $0 }.max { ($0.generatedAt ?? .distantPast) < ($1.generatedAt ?? .distantPast) }
     }
 
+    private struct OfficialManifest: Decodable { let schema: Int; let generatedAt: String; let sha256: String; let bytes: Int; let gzipBytes: Int }
+    private static let officialRelease = "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/"
+
     private func officialTravelTimes(force: Bool) async -> OfficialTravelTimes {
         let file = cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")
+        let checkFile = cacheDirectory.appendingPathComponent("OfficialTravelTimes.checked")
         let cached = (try? Data(contentsOf: file)).flatMap { try? OfficialTravelTimes(data: $0) }
         let bundled = bundledOfficialTravelTimes()
         let saved = preferredOfficial(cached, bundled)
-        let modified = (try? FileManager.default.attributesOfItem(atPath: file.path))?[.modificationDate] as? Date
-        if !force, let modified, Date().timeIntervalSince(modified) < 86400, let saved { return saved }
+        func age(_ url: URL) -> TimeInterval? {
+            ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date).map { Date().timeIntervalSince($0) }
+        }
+        if !force, let saved, let checked = age(checkFile) ?? age(file), checked < 86400 { return saved }
         if !force, cached == nil, let bundled, let generated = bundled.generatedAt,
            (-300...86400).contains(Date().timeIntervalSince(generated)) { return bundled }
-        // A shared, public, bounded dataset is fetched once per device/day. TDX
-        // credentials and the owner's account quota are never sent to the phone.
-        let url = URL(string: "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json")!
-        var request = URLRequest(url: url); request.timeoutInterval = 4
-        do {
-            let (bytes, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200,
+        // A shared, public, bounded dataset. TDX credentials and the owner's account quota are
+        // never sent to the phone. The catalog changes weekly, so ask its few-hundred-byte
+        // manifest first and download the 6 MB gzip copy only when it is newer.
+        func markChecked() {
+            try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            try? Data().write(to: checkFile, options: .atomic)
+        }
+        if let manifest = await officialManifest() {
+            let plain = ISO8601DateFormatter(), fractional = ISO8601DateFormatter()
+            fractional.formatOptions.insert(.withFractionalSeconds)
+            let published = plain.date(from: manifest.generatedAt) ?? fractional.date(from: manifest.generatedAt)
+            if let saved, let published, (saved.generatedAt ?? .distantPast) >= published { markChecked(); return saved }
+            guard let packed = await download(Self.officialRelease + "official-times.json.gz"), packed.count == manifest.gzipBytes,
+                  let bytes = try? inflate(packed), bytes.count == manifest.bytes,
+                  SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == manifest.sha256,
                   let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { return saved ?? .init() }
-            if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { return saved }
-            try? bytes.write(to: file, options: .atomic)
+            if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { markChecked(); return saved }
+            try? bytes.write(to: file, options: .atomic); markChecked()
             return catalog
-        } catch { return saved ?? .init() }
+        }
+        // Without a manifest (unreachable, or not yet published) fall back to the full file.
+        guard let bytes = await download(Self.officialRelease + "official-times.json"),
+              let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { return saved ?? .init() }
+        if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { return saved }
+        try? bytes.write(to: file, options: .atomic)
+        return catalog
+    }
+
+    private func officialManifest() async -> OfficialManifest? {
+        guard let data = await download(Self.officialRelease + "official-times-manifest.json"), data.count <= 4_096,
+              let manifest = try? JSONDecoder().decode(OfficialManifest.self, from: data), manifest.schema == 1,
+              manifest.sha256.count == 64, (1...(32 * 1_024 * 1_024)).contains(manifest.bytes),
+              (1...manifest.bytes).contains(manifest.gzipBytes) else { return nil }
+        return manifest
+    }
+
+    private func download(_ address: String) async -> Data? {
+        guard let url = URL(string: address) else { return nil }
+        var request = URLRequest(url: url); request.timeoutInterval = 4
+        guard let (bytes, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
+        return bytes
     }
 
     private func metadataFeed(_ name: String, force: Bool) async -> (String, Data?, String?) {

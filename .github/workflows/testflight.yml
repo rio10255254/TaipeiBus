@@ -323,7 +323,11 @@ jobs:
       - name: Publish validated source data for the app
         if: inputs.publish_data
         run: |
-          gh release upload travel-time-data "$RUNNER_TEMP/route-times/publish/official-times.json" "$RUNNER_TEMP/route-times/publish/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
+          set -euo pipefail
+          out="$RUNNER_TEMP/route-times/publish"
+          # The manifest goes last so it never names a catalog that is not yet uploaded.
+          gh release upload travel-time-data "$out/official-times.json" "$out/official-times.json.gz" "$out/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload travel-time-data "$out/official-times-manifest.json" --clobber --repo "$GITHUB_REPOSITORY"
 
   metro:
     if: inputs.operation == 'collect-metro-data'

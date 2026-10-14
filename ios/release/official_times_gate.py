@@ -5,7 +5,7 @@ Phones keep a station-to-station profile only while TDX's UpdateTime is at most
 carries forward still-valid profiles for routes this run did not refresh, and
 refuses anything that would leave phones with fewer or older usable profiles.
 """
-import argparse, json, math, os, re
+import argparse, gzip, hashlib, json, math, os, re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -201,6 +201,19 @@ def gate(candidate, published, now, allow_smaller=False):
     return failures, {'collected': new, 'published': old, 'bytes': len(blob)}
 
 
+def write_compressed(folder, blob, generated):
+    """The gzip copy and a small manifest let phones skip downloading an unchanged catalog.
+
+    Upload the manifest last: it must never name a catalog that is not yet published.
+    """
+    packed = gzip.compress(blob, compresslevel=9, mtime=0)
+    (folder / 'official-times.json.gz').write_bytes(packed)
+    manifest = {'schema': 1, 'generatedAt': generated, 'sha256': hashlib.sha256(blob).hexdigest(),
+                'bytes': len(blob), 'gzipBytes': len(packed)}
+    (folder / 'official-times-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    return manifest
+
+
 def write_summary(lines):
     text = '\n'.join(lines) + '\n'
     print(text, end='')
@@ -228,7 +241,9 @@ def prepare(args, now):
     coverage['filled_values'] = filled
     coverage['publication'] = {'checked_at': now.isoformat(), 'failures': failures, **report}
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / 'official-times.json').write_bytes(encode(merged))
+    blob = encode(merged)
+    (args.out / 'official-times.json').write_bytes(blob)
+    write_compressed(args.out, blob, merged.get('generatedAt'))
     (args.out / 'coverage.json').write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     write_summary(['### Official travel-time catalog', '',
                    '| Catalog | Valid profiles | Usable now | Oldest UpdateTime | 10% expired at | Days left |',
