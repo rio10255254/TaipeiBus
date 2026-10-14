@@ -503,6 +503,13 @@ final class TransitAppModel: ObservableObject {
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
     var selectedVehicle: BusVehicle? { snapshot.vehicles.first { $0.id == selectedVehicleID } }
+    /// Each refresh downloads the whole city's positions; the short tracking cadence is only
+    /// worth that traffic while a particular vehicle, train or trip is being watched.
+    var refreshSeconds: Double {
+        let watching = following || followingTrain || selectedVehicleID != nil || (planner.started && !planner.arrived)
+        let refresh = liveSettings.refresh
+        return watching ? min(refresh.vehicleSeconds, refresh.trackingSeconds) : refresh.vehicleSeconds
+    }
     var selectedRouteName: String? { selectedRoute.map { allRouteVariants ? $0.localizedName : $0.localizedDisplayName } }
     var routeVariants: [BusRoute] { selectedRouteID.map { metadata.variants(routeID: $0) } ?? [] }
     var routeDirections: [String] {
@@ -603,11 +610,14 @@ final class TransitAppModel: ObservableObject {
 #if DEBUG
                     applyPreviewSelection()
 #endif
-                    var interval = min(liveSettings.refresh.vehicleSeconds, liveSettings.refresh.trackingSeconds)
-                    // Behind the Lock Screen a slower pace still moves the countdown and stops on time.
-                    if !isActive { interval = max(interval, 15) }
-                    let elapsed = ProcessInfo.processInfo.systemUptime - requestStartedAt
-                    try await Task.sleep(for: .seconds(max(0.25, interval - elapsed)))
+                    // Wake within a second when the user starts following something mid-wait.
+                    while true {
+                        // Behind the Lock Screen a slower pace still moves the countdown and stops on time.
+                        let interval = isActive ? refreshSeconds : max(refreshSeconds, 15)
+                        let remaining = interval - (ProcessInfo.processInfo.systemUptime - requestStartedAt)
+                        if remaining <= 0.25 { try await Task.sleep(for: .seconds(0.25)); break }
+                        try await Task.sleep(for: .seconds(min(remaining, 1)))
+                    }
                     // prepare() returns immediately while its daily metadata cache is fresh.
                     metadata = try await service.prepare()
                     metadataNotice = await service.metadataNotice

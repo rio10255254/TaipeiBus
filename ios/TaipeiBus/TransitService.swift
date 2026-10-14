@@ -239,12 +239,19 @@ actor TransitService {
     }
 
     private enum LiveResult: Sendable { case vehicles(Data?), estimates(Data?) }
+    /// All stops' estimates are about 150 KB and change every few seconds, while the app shows
+    /// whole minutes counted down from the source time. Fetch them at most this often.
+    private let estimateInterval: TimeInterval = 20
+    private var estimatesRequestedAt = Date.distantPast
 
     private func performRefresh(onPartial: @escaping @Sendable (TransitSnapshot) async -> Void) async -> TransitSnapshot {
         // Publish each independent feed immediately; ETA must not wait for GPS and road matching.
         await withTaskGroup(of: LiveResult.self) { group in
             group.addTask { .vehicles(try? await self.fetch("GetBusData")) }
-            group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
+            if Date().timeIntervalSince(estimatesRequestedAt) >= estimateInterval {
+                estimatesRequestedAt = Date()
+                group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
+            }
             for await result in group {
                 guard !Task.isCancelled else { group.cancelAll(); break }
                 switch result {
