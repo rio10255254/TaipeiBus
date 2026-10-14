@@ -113,12 +113,15 @@ public struct OfficialTravelTimes: Sendable {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
         let weekday = calendar.component(.weekday, from: travellingAt) - 1
         let hour = calendar.component(.hour, from: travellingAt)
+        // Profiles are published per weekday only. Traffic on a weekday national holiday
+        // follows Sunday, about a quarter faster than the same weekday's morning peak.
+        let days = (1...5).contains(weekday) && TransitServiceCalendar.isHoliday(travellingAt) ? [0, weekday, 99] : [weekday, 99]
         for profile in profiles where profile.route == route {
             guard (-300...45 * 86400).contains(observedAt.timeIntervalSince(profile.updated)),
                   let edge = profile.edges[Edge(from: from, to: to)],
-                  let values = profile.hours[weekday * 24 + hour] ?? profile.hours[99 * 24 + hour],
-                  (1...1800).contains(values[edge]) else { continue }
-            return Double(values[edge])
+                  let value = days.lazy.compactMap({ profile.hours[$0 * 24 + hour]?[edge] })
+                      .first(where: { (1...1800).contains($0) }) else { continue }
+            return Double(value)
         }
         return nil
     }
