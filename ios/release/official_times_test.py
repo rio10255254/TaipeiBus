@@ -199,6 +199,19 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report['publication']['failures'], [])
         self.assertIn('Publication checks passed', summary)
 
+    def test_compressed_copy_and_manifest_describe_the_catalog(self):
+        import gzip, hashlib
+        with tempfile.TemporaryDirectory() as folder:
+            blob = gate.encode(catalog([profile('1', NOW)], NOW))
+            manifest = gate.write_compressed(Path(folder), blob, '2026-10-13T04:00:00Z')
+            packed = (Path(folder) / 'official-times.json.gz').read_bytes()
+            self.assertEqual(gzip.decompress(packed), blob)
+            self.assertEqual(manifest, json.loads((Path(folder) / 'official-times-manifest.json').read_text()))
+            self.assertEqual(manifest['sha256'], hashlib.sha256(blob).hexdigest())
+            self.assertEqual((manifest['bytes'], manifest['gzipBytes'], manifest['generatedAt']), (len(blob), len(packed), '2026-10-13T04:00:00Z'))
+            # Identical input gives identical bytes, so an unchanged catalog keeps its hash.
+            self.assertEqual(gate.write_compressed(Path(folder), blob, '2026-10-13T04:00:00Z'), manifest)
+
     def test_prepare_refuses_or_only_reports(self):
         published = catalog([profile(str(i), NOW - timedelta(days=20)) for i in range(20)], NOW - timedelta(days=7))
         collected = catalog([profile(str(i), NOW - timedelta(days=30)) for i in range(20)], NOW)
