@@ -1,0 +1,38 @@
+name: Arrival benchmark recording
+# Two weeks of Taipei's public bus positions and official arrival estimates, so every
+# prediction method can be replayed against actual stop passages. Each run records
+# for just under six hours; runs start every six hours. Public data only.
+on:
+  schedule:
+    - cron: '7 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: arrival-benchmark
+  cancel-in-progress: false
+env:
+  BENCHMARK_UNTIL: '2026-10-29T00:00:00+08:00'
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    timeout-minutes: 358
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the recorder
+        run: cd tools/arrival-benchmark && python3 collect_test.py
+      - name: Record public feeds
+        run: |
+          set -euo pipefail
+          flags=()
+          # Route, stop and shape feeds once a day (the run starting after 08:00 Taipei).
+          if [ "$(date -u +%H)" != "00" ] && [ "${{ github.event_name }}" = schedule ]; then flags+=(--no-static); fi
+          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark" --minutes 345 "${flags[@]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arrival-benchmark-${{ github.run_id }}
+          path: ${{ runner.temp }}/benchmark/
+          retention-days: 90
+          if-no-files-found: ignore
+          compression-level: 0
