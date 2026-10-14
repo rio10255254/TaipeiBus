@@ -1133,7 +1133,8 @@ final class ContinuousGpsUsabilityTests: JourneyUsabilityTestBase {
         launch(["--test-map-controls", "--preview-vehicle-route", "__live__"])
         waitState { ($0["pitch"] as? Double ?? 0) > 50 && !($0["vehicle"] as? String ?? "").isEmpty }
         let initial = state()
-        XCTAssertEqual(initial["vehicleRefreshSeconds"] as? Double, 5)
+        // Following a bus uses the short tracking cadence (5–10 s by live settings), not the 15 s overview.
+        XCTAssertLessThanOrEqual(initial["vehicleRefreshSeconds"] as? Double ?? 99, 10)
         XCTAssertFalse(app.staticTexts["2500 輛壓力測試資料"].exists)
         capture("continuous-official-following-before")
         waitState {
