@@ -96,6 +96,28 @@ final class LiveSettingsTests: XCTestCase {
         XCTAssertEqual(cached?.settings.revision, 2)
         XCTAssertEqual(cached?.settings.text("搜尋目的地"), "想去哪裡")
     }
+    func testMirrorAnswersOnlyWhenGitHubDoesNotAndCannotRollBack() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory); SettingsProtocol.failingHost = nil }
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SettingsProtocol.self]
+        let session = URLSession(configuration: config)
+        let service = LiveSettingsService(url: URL(string: "https://settings.test/content.json")!,
+                                          mirror: URL(string: "https://mirror.test/content.json")!,
+                                          appVersion: "0.4.2", cacheDirectory: directory, session: session)
+        SettingsProtocol.failingHost = "settings.test"
+        SettingsProtocol.set(document: try document(2), status: 200)
+        let fromMirror = await service.refresh(current: .defaults)
+        XCTAssertEqual(fromMirror?.settings.revision, 2)
+        let current = try XCTUnwrap(fromMirror?.settings)
+        SettingsProtocol.set(document: try document(1), status: 200)
+        let staleMirror = await service.refresh(current: current)
+        XCTAssertNil(staleMirror)
+        SettingsProtocol.failingHost = "mirror.test"
+        SettingsProtocol.set(document: try document(3), status: 200)
+        let fromGitHub = await service.refresh(current: current)
+        XCTAssertEqual(fromGitHub?.settings.revision, 3)
+    }
     func testBrokenCacheDoesNotBlockShippedDefaults() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -112,6 +134,12 @@ private final class SettingsProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     private static var document = Data()
     private static var status = 200
+    private static var failingHostValue: String?
+    /// Requests to this host answer 503, as when one of the two content hosts is down.
+    static var failingHost: String? {
+        get { lock.lock(); defer { lock.unlock() }; return failingHostValue }
+        set { lock.lock(); defer { lock.unlock() }; failingHostValue = newValue }
+    }
     static func set(document: Data, status: Int) {
         lock.lock(); defer { lock.unlock() }
         Self.document = document; Self.status = status
@@ -120,7 +148,7 @@ private final class SettingsProtocol: URLProtocol, @unchecked Sendable {
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
         Self.lock.lock()
-        let data = Self.document, status = Self.status
+        let data = Self.document, status = request.url?.host == Self.failingHostValue ? 503 : Self.status
         Self.lock.unlock()
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

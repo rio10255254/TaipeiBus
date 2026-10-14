@@ -183,6 +183,9 @@ actor TransitService {
 
     private struct OfficialManifest: Decodable { let schema: Int; let generatedAt: String; let sha256: String; let bytes: Int; let gzipBytes: Int }
     private static let officialRelease = "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/"
+    /// The same files on jsDelivr's CDN (route-times.yml pushes them to the phone-data branch).
+    /// It may lag a few hours behind; every copy is checked against the manifest's SHA-256.
+    private static let officialMirror = "https://cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@phone-data/"
 
     private func officialTravelTimes(force: Bool) async -> OfficialTravelTimes {
         let file = cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")
@@ -208,10 +211,17 @@ actor TransitService {
             fractional.formatOptions.insert(.withFractionalSeconds)
             let published = plain.date(from: manifest.generatedAt) ?? fractional.date(from: manifest.generatedAt)
             if let saved, let published, (saved.generatedAt ?? .distantPast) >= published { markChecked(); return saved }
-            guard let packed = await download(Self.officialRelease + "official-times.json.gz"), packed.count == manifest.gzipBytes,
-                  let bytes = try? inflate(packed), bytes.count == manifest.bytes,
-                  SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == manifest.sha256,
-                  let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { return saved ?? .init() }
+            // The CDN first keeps heavy traffic off GitHub; GitHub stays the authoritative fallback.
+            var verified: (Data, OfficialTravelTimes)?
+            for source in [Self.officialMirror, Self.officialRelease] where verified == nil {
+                guard let packed = await download(source + "official-times.json.gz"), packed.count == manifest.gzipBytes,
+                      let bytes = try? inflate(packed), bytes.count == manifest.bytes,
+                      SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == manifest.sha256,
+                      let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { continue }
+                verified = (bytes, catalog)
+            }
+            guard let found = verified else { return saved ?? .init() }
+            let (bytes, catalog) = found
             if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { markChecked(); return saved }
             try? bytes.write(to: file, options: .atomic); markChecked()
             return catalog
@@ -224,12 +234,16 @@ actor TransitService {
         return catalog
     }
 
+    /// GitHub first, since it is always current; the CDN copy answers when GitHub does not.
     private func officialManifest() async -> OfficialManifest? {
-        guard let data = await download(Self.officialRelease + "official-times-manifest.json"), data.count <= 4_096,
-              let manifest = try? JSONDecoder().decode(OfficialManifest.self, from: data), manifest.schema == 1,
-              manifest.sha256.count == 64, (1...(32 * 1_024 * 1_024)).contains(manifest.bytes),
-              (1...manifest.bytes).contains(manifest.gzipBytes) else { return nil }
-        return manifest
+        for source in [Self.officialRelease, Self.officialMirror] {
+            guard let data = await download(source + "official-times-manifest.json"), data.count <= 4_096,
+                  let manifest = try? JSONDecoder().decode(OfficialManifest.self, from: data), manifest.schema == 1,
+                  manifest.sha256.count == 64, (1...(32 * 1_024 * 1_024)).contains(manifest.bytes),
+                  (1...manifest.bytes).contains(manifest.gzipBytes) else { continue }
+            return manifest
+        }
+        return nil
     }
 
     private func download(_ address: String) async -> Data? {

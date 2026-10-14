@@ -385,6 +385,7 @@ App 只使用 TDX `UpdateTime` 45 天內的站間車程（`OfficialTravelTimes.s
 - **發布前檢查**（`ios/release/official_times_gate.py`）：用和 App 相同的解析規則計算，以下任一情況就拒絕發布：可用資料少於目前手機可用的 95%（確定是 TDX 調整了路線時，手動執行並勾選 `allow_smaller`）、`generatedAt` 沒有比現有的新（App 會忽略）、到期時間比現有的早、超過 32 MiB 或欄位型別錯誤（App 會拒收整份）。發布後從 App 使用的同一網址下載回來，比對 SHA-256，並確認距離「超過 10% 資料失效」還有 21 天以上。
 - **補 TDX 填充值**：TDX 在某小時沒有觀測時一律填 120 秒（占全部數值 27%，深夜八成以上）。發布前改用同一段前後 3 小時的真實數值，其次是同類日子（平日／週末）同一時段的中位數，再其次是該段所有時段的中位數；完全沒有真實數值的路段（約 600 段）保留原值。數量列在摘要與 `coverage.json` 的 `filled_values`。
 - **壓縮檔與版本說明**：每次發布同時上傳 `official-times.json.gz`（約 6 MB，原檔約 26 MB）與 `official-times-manifest.json`（產生時間、SHA-256、大小），版本說明檔最後上傳。新版 App 每天只讀版本說明，資料較新時才下載壓縮檔並核對 SHA-256；舊版 App 仍下載原檔。
-- **每日檢查**：台北時間 09:41 檢查 App 實際會下載的那份資料；剩不到 21 天，或每週收集失敗時，自動開啟或更新 issue「官方站間車程資料需要處理」。
+- **CDN 備援**：發布後把壓縮檔與版本說明推到只有一個 commit 的 `phone-data` 分支（每週覆蓋，不會讓儲存庫變大），並清除 jsDelivr 快取。新版 App 先從 `cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@phone-data/` 下載壓縮檔、GitHub 版本說明讀不到時也改讀這裡；每份都核對 SHA-256，不符就改從 GitHub 下載。`runtime/settings.json` 與 `runtime/app-update.json` 同樣在 GitHub 沒有回應時改讀 jsDelivr 的 `@main` 副本（最多落後 12 小時；設定的 revision 不會倒退），內容更新時由 `Quick update content` 清除快取。
+- **每日檢查**：台北時間 09:41 檢查 App 實際會下載的那份資料；剩不到 21 天，或每週收集失敗時，自動開啟或更新 issue「官方站間車程資料需要處理」。同一步驟也重新啟用這個工作流程，避免 GitHub 因 60 天沒有活動而停用排程（每週推送 `phone-data` 也算活動）。
 
-每次完整收集約 416 次 TDX 基本查詢，依先前估算約 0.604 點，每月約 4–5 次。只想看結果而不發布時，手動執行工作流程並保持 `publish` 未勾選，摘要中會列出新舊資料的比較。GitHub 會停用公開儲存庫中 60 天沒有活動的排程；若停用，到 Actions 頁面重新啟用。本機測試：`python3 ios/release/official_times_test.py`。
+每次完整收集約 416 次 TDX 基本查詢，依先前估算約 0.604 點，每月約 4–5 次。只想看結果而不發布時，手動執行工作流程並保持 `publish` 未勾選，摘要中會列出新舊資料的比較。若排程仍被停用（例如每日檢查連續失敗），到 Actions 頁面重新啟用。本機測試：`python3 ios/release/official_times_test.py`。

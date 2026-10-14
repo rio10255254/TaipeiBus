@@ -80,6 +80,8 @@ public struct AppStoreRelease: Codable, Equatable, Sendable {
 /// offline launch keeps the same answer instead of opening an update gate.
 public actor AppUpdateService {
     public static let policyURL = URL(string: "https://raw.githubusercontent.com/rio10255254/TaipeiBus/refs/heads/main/runtime/app-update.json")!
+    /// Asked only when GitHub does not answer; it can lag up to 12 hours.
+    public static let policyMirrorURL = URL(string: "https://cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@main/runtime/app-update.json")!
     public static let lookupURL = URL(string: "https://itunes.apple.com/lookup?id=6818475740&country=tw")!
     public static let storeURL = URL(string: "itms-apps://apps.apple.com/app/id6818475740")!
     private struct State: Codable { var policy: AppUpdatePolicy?; var store: AppStoreRelease? }
@@ -103,7 +105,7 @@ public actor AppUpdateService {
     public func requirement(appVersion: String, systemVersion: String, now: Date = Date()) async -> AppUpdateRequirement {
         if now.timeIntervalSince(checkedAt) >= 1_800 {
             checkedAt = now
-            async let policy = fetch(Self.policyURL)
+            async let policy = fetch(Self.policyURL, fallback: Self.policyMirrorURL)
             async let store = fetch(Self.lookupURL)
             var changed = false
             if let data = await policy {
@@ -120,9 +122,10 @@ public actor AppUpdateService {
 
     public func message(english: Bool) -> String? { english ? state.policy?.englishMessage : state.policy?.message }
 
-    private func fetch(_ url: URL) async -> Data? {
-        guard let (data, response) = try? await session.data(from: url),
-              let http = response as? HTTPURLResponse, http.statusCode == 200 else { return nil }
-        return data
+    private func fetch(_ url: URL, fallback: URL? = nil) async -> Data? {
+        if let (data, response) = try? await session.data(from: url),
+           let http = response as? HTTPURLResponse, http.statusCode == 200 { return data }
+        guard let fallback else { return nil }
+        return await fetch(fallback)
     }
 }

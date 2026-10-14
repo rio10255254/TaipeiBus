@@ -497,6 +497,7 @@ final class TransitAppModel: ObservableObject {
            url.absoluteString.hasPrefix("https://raw.githubusercontent.com/rio10255254/TaipeiBus/") { source = url }
 #endif
         liveService = LiveSettingsService(url: source,
+            mirror: source == LiveSettingsService.productionURL ? LiveSettingsService.productionMirrorURL : nil,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.2",
             cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LiveSettings"))
     }

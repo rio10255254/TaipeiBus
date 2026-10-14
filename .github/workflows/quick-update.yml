@@ -37,6 +37,9 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate downloaded content
         run: python3 ios/live-update.py validate runtime/settings.json
+      - name: Refresh the CDN copy phones use when GitHub is unreachable
+        if: github.event_name == 'push'
+        run: ./.github/purge-runtime-mirror.sh
       - name: Validate the update switch against the App Store
         run: |
           python3 - <<'PY'
@@ -84,3 +87,6 @@ jobs:
               command = ['python3', 'ios/live-update.py', 'rollback', value]
           subprocess.run(command, check=True)
           PY
+      # A push made with the workflow token starts no other workflow, so purge here as well.
+      - name: Refresh the CDN copy phones use when GitHub is unreachable
+        run: ./.github/purge-runtime-mirror.sh
