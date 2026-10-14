@@ -628,5 +628,11 @@
   "下一班時間更新中": "Updating the next bus",
   "打開 App 更新": "Open the app to update",
   "導航進行中，App 會在背景持續定位與更新到站時間，讓鎖定畫面與下車提醒跟著車輛即時更新；行程結束即停止。桌面小工具：長按主畫面空白處，點「＋」，搜尋「台北公車」。": "During a trip the app keeps using your location and arrival times in the background, so the Lock Screen and alighting reminder follow the vehicle; it stops when the trip ends. Widget: touch and hold an empty area of the Home Screen, tap +, and search for Taipei Bus.",
-  "導航": "Navigation"
+  "導航": "Navigation",
+  "有新版本": "Update available",
+  "稍後": "Later",
+  "新版本包含修正與改進，建議更新。": "A new version with fixes and improvements is available.",
+  "需要更新 App": "Update required",
+  "這個版本已不再提供服務，請更新到最新版本後繼續使用。": "This version is no longer supported. Please update to keep using the app.",
+  "前往 App Store": "Open App Store"
 }

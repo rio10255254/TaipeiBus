@@ -1,10 +1,16 @@
 import SwiftUI
+import UIKit
 import TransitCore
 
 @main
 struct TaipeiBusApp: App {
     @StateObject private var model = TransitAppModel()
     @Environment(\.scenePhase) private var scenePhase
+    @State private var update = AppUpdateRequirement.none
+    @State private var updateMessage: String?
+    @AppStorage("dismissedRecommendedVersion") private var dismissedRecommendedVersion = ""
+    private let updates = AppUpdateService(cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("AppUpdate"))
 
     var body: some Scene {
         WindowGroup {
@@ -12,8 +18,27 @@ struct TaipeiBusApp: App {
                 .onOpenURL { model.open($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     model.setActive(phase == .active)
+                    if phase == .active { Task { await checkForUpdate() } }
+                }
+                .overlay { if update == .required { RequiredUpdateView(message: updateMessage) } }
+                .alert(AppText.text("有新版本"), isPresented: Binding(
+                    get: { if case .recommended(let version) = update { return version != dismissedRecommendedVersion }; return false },
+                    set: { shown in if !shown, case .recommended(let version) = update { dismissedRecommendedVersion = version } })) {
+                    Button(AppText.text("更新")) { UIApplication.shared.open(AppUpdateService.storeURL) }
+                    Button(AppText.text("稍後"), role: .cancel) {}
+                } message: {
+                    Text(updateMessage ?? AppText.text("新版本包含修正與改進，建議更新。"))
                 }
         }
+    }
+
+    private func checkForUpdate() async {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? ""
+        let system = ProcessInfo.processInfo.operatingSystemVersion
+        let result = await updates.requirement(appVersion: version,
+            systemVersion: "\(system.majorVersion).\(system.minorVersion).\(system.patchVersion)")
+        updateMessage = await updates.message(english: model.language == .english)
+        update = result
     }
 
     @ViewBuilder private var root: some View {
@@ -31,5 +56,27 @@ struct TaipeiBusApp: App {
                 .environment(\.locale, model.language.locale)
                 .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
+    }
+}
+
+/// Covers the whole app until it is updated; shown only when the App Store already offers
+/// a version that meets the remote minimum and runs on this phone.
+private struct RequiredUpdateView: View {
+    let message: String?
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "arrow.down.app.fill").font(.system(size: 56)).foregroundStyle(.tint)
+            Text(AppText.text("需要更新 App")).font(.title2.weight(.semibold))
+            Text(message ?? AppText.text("這個版本已不再提供服務，請更新到最新版本後繼續使用。"))
+                .multilineTextAlignment(.center).foregroundStyle(.secondary)
+            Button { UIApplication.shared.open(AppUpdateService.storeURL) } label: {
+                Text(AppText.text("前往 App Store")).frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent).controlSize(.large)
+        }
+        .padding(32)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea())
+        .accessibilityAddTraits(.isModal)
     }
 }
