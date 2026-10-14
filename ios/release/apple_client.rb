@@ -8,6 +8,9 @@ require 'timeout'
 require 'uri'
 
 module TaipeiBusRelease
+  # App versions Apple still lets the developer edit and send for review. A version withdrawn
+  # from review (DEVELOPER_REJECTED) or rejected by Apple stays editable under any new number.
+  EDITABLE_VERSION_STATES = %w[PREPARE_FOR_SUBMISSION DEVELOPER_REJECTED REJECTED METADATA_REJECTED INVALID_BINARY].freeze
   class Error < StandardError
     attr_reader :diagnostics
     def initialize(message, diagnostics: [])

@@ -24,8 +24,16 @@ build_number = ENV.fetch('BUS_BUILD_NUMBER')
 abort 'An exact uploaded build number is required.' if build_number.empty?
 build = client.all('/v1/builds', release.build_query).find { |row| row.dig('attributes', 'version') == build_number }
 abort 'The selected build must be valid and unexpired.' unless build && build.dig('attributes', 'processingState') == 'VALID' && build.dig('attributes', 'expired') == false
-version = client.all("/v1/apps/#{app_id}/appStoreVersions").find do |row|
-  row.dig('attributes', 'platform') == 'IOS' && row.dig('attributes', 'versionString') == release.version
+versions = client.all("/v1/apps/#{app_id}/appStoreVersions").select { |row| row.dig('attributes', 'platform') == 'IOS' }
+version = versions.find { |row| row.dig('attributes', 'versionString') == release.version }
+# Apple keeps a single unreleased version. Reuse a withdrawn or unsent one under the new
+# number (for example 1.6.1 withdrawn, released as 1.7.0) instead of failing to add another.
+pending = versions.find { |row| TaipeiBusRelease::EDITABLE_VERSION_STATES.include?(row.dig('attributes', 'appStoreState')) }
+if !version && pending
+  version = client.request(:patch, "/v1/appStoreVersions/#{pending.fetch('id')}", {}, data: {
+    type: 'appStoreVersions', id: pending.fetch('id'), attributes: { versionString: release.version }
+  }).fetch('data')
+  abort 'Apple did not rename the unreleased version.' unless version.dig('attributes', 'versionString') == release.version
 end
 unless version
   version = client.request(:post, '/v1/appStoreVersions', {}, data: {
@@ -34,8 +42,9 @@ unless version
     relationships: { app: { data: { type: 'apps', id: app_id } } }
   }).fetch('data')
 end
-abort 'The matching editable App Store version is missing.' unless version && %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW].include?(version.dig('attributes','appStoreState'))
-write_metadata = version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+state = version.dig('attributes','appStoreState')
+abort 'The matching editable App Store version is missing.' unless (TaipeiBusRelease::EDITABLE_VERSION_STATES + ['READY_FOR_REVIEW']).include?(state)
+write_metadata = TaipeiBusRelease::EDITABLE_VERSION_STATES.include?(state)
 if version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
   # READY_FOR_REVIEW is still an unsent draft. Verify that fact before changing
   # its wording for the user-approved annual-price adjustment.

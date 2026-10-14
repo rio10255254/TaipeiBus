@@ -85,7 +85,7 @@ module TaipeiBusRelease
 
     def reopen_app_for_assets(app_version_id)
       version = @client.request(:get,"/v1/appStoreVersions/#{app_version_id}").fetch('data')
-      return nil if version.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+      return nil if EDITABLE_VERSION_STATES.include?(version.dig('attributes','appStoreState'))
       raise Error, 'Screenshots may only change on an unsent version.' unless version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
       owner = nil
       @client.all("/v1/apps/#{@config.fetch('app_id')}/reviewSubmissions").each do |submission|
@@ -99,7 +99,7 @@ module TaipeiBusRelease
       @client.request(:delete,"/v1/reviewSubmissionItems/#{owner.last}")
       20.times do
         saved = @client.request(:get,"/v1/appStoreVersions/#{app_version_id}").fetch('data')
-        return owner.first if saved.dig('attributes','appStoreState') == 'PREPARE_FOR_SUBMISSION'
+        return owner.first if EDITABLE_VERSION_STATES.include?(saved.dig('attributes','appStoreState'))
         sleep 2
       end
       raise Error, 'Apple has not reopened the version for screenshot editing.'
