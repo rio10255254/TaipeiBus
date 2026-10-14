@@ -74,6 +74,7 @@ jobs:
           swift test --package-path ios/TransitCore
           ruby -c ios/apple-connect.rb
           ruby ios/release/apple_client_test.rb
+          python3 ios/release/official_times_test.py
           python3 ios/release-check.py
           python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json

@@ -10,6 +10,25 @@ public struct MultimodalPlanner: Sendable {
         let cumulative: [Double]
         let dwell: [Double]
         let windows: [BusServiceWindow?]
+        /// Per-segment seconds used when no official time applies: rail run plus dwell,
+        /// or the road-distance estimate. Official bus times are applied per query hour.
+        let fallback: [Double]
+        func timed(_ times: OfficialTravelTimes, at date: Date) -> Pattern {
+            guard route.mode == .bus else { return self }
+            var values = [0.0]
+            for index in 1..<stops.count {
+                values.append(values.last! + (times.seconds(route: route.parentID, subroute: route.id, direction: direction,
+                    from: stops[index - 1].id, to: stops[index].id, travellingAt: date, observedAt: date) ?? fallback[index - 1]))
+            }
+            return Pattern(route: route, direction: direction, stops: stops, cumulative: values, dwell: dwell,
+                windows: windows, fallback: fallback)
+        }
+    }
+    /// Bus times for the most recent query hour; a planner lives up to a day, across peaks.
+    private final class TimingCache: @unchecked Sendable {
+        let lock = NSLock()
+        var key = ""
+        var patterns: [Pattern] = []
     }
     private struct Segment: Sendable { let pattern: Int; let first: Int; let last: Int }
     private struct Link: Sendable { let id: String; let distance: Double; let seconds: Double; let internalWalk: Bool }
@@ -35,6 +54,7 @@ public struct MultimodalPlanner: Sendable {
     private let links: [String: [Link]]
     private let stationStops: [String: BusStop]
     private let busPlanner: TripPlanner
+    private let timing = TimingCache()
 
     public init(metadata: TransitMetadata) {
         self.metadata = metadata; busPlanner = TripPlanner(metadata: metadata)
@@ -44,22 +64,21 @@ public struct MultimodalPlanner: Sendable {
             for direction in ["0", "1"] {
                 let stops = metadata.orderedStops(routeID: route.id, direction: direction)
                 guard stops.count > 1 else { continue }
-                var cumulative = [0.0]
+                var cumulative = [0.0], fallback: [Double] = []
                 let railPattern = route.mode != .bus ? metadata.metro.pattern(route.id, direction: direction) : nil
                 let anchors = Dictionary((metadata.journey(routeID: route.id, direction: direction)?.anchors ?? [])
                     .map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for index in 1..<stops.count {
                     let a = stops[index - 1], b = stops[index]
                     let rail = route.mode != .bus ? metadata.metro.ridingSeconds(routeID: route.id, direction: direction, from: a.stationID, to: b.stationID) : nil
-                    let published = metadata.officialTravelTimes.seconds(route: route.parentID, subroute: route.id,
-                        direction: direction, from: a.id, to: b.id, travellingAt: Date(), observedAt: Date())
                     let distance = anchors[a.id].flatMap { first in anchors[b.id].map { abs($0 - first) } } ?? a.coordinate.distance(to: b.coordinate) * 1.25
                     let dwell = index > 1 && railPattern?.dwellSeconds.indices.contains(index - 1) == true ? railPattern!.dwellSeconds[index - 1] : 0
-                    cumulative.append(cumulative.last! + (rail ?? published ?? (distance / 4.5 + 20)) + dwell)
+                    fallback.append((rail ?? (distance / 4.5 + 20)) + dwell)
+                    cumulative.append(cumulative.last! + fallback.last!)
                 }
                 let windows = route.mode != .bus ? stops.map { metadata.metro.boardingWindow(routeID: route.id, direction: direction, stationID: $0.stationID) } : []
                 patterns.append(Pattern(route: route, direction: direction, stops: stops, cumulative: cumulative,
-                    dwell: railPattern?.dwellSeconds ?? [], windows: windows))
+                    dwell: railPattern?.dwellSeconds ?? [], windows: windows, fallback: fallback))
                 for stop in stops { stationStops[stop.stationID] = stop }
             }
         }
@@ -95,12 +114,25 @@ public struct MultimodalPlanner: Sendable {
         self.links = links
     }
 
+    private func timedPatterns(at date: Date) -> [Pattern] {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        let parts = calendar.dateComponents([.year, .month, .day, .hour], from: date)
+        let key = "\(parts.year!)-\(parts.month!)-\(parts.day!)-\(parts.hour!)"
+        timing.lock.lock(); defer { timing.lock.unlock() }
+        if timing.key != key {
+            timing.patterns = patterns.map { $0.timed(metadata.officialTravelTimes, at: date) }
+            timing.key = key
+        }
+        return timing.patterns
+    }
+
     public func plan(from origin: Coordinate, to destination: Coordinate, maximumWalk: Double = 1000, limit: Int = 36,
                      preferences: LiveSettings.Planning = .init(), estimates: EstimateFeed = .init(), at date: Date = Date()) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
         let bus = busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
             preferences: preferences, estimates: estimates, at: date, preservePlatforms: true)
         guard !metadata.metro.patterns.isEmpty else { return bus }
+        let patterns = timedPatterns(at: date)
         func streetDistance(_ stop: BusStop, to c: Coordinate) -> Double {
             if stop.mode == .bus { return stop.coordinate.distance(to: c) }
             return (metadata.metro.nearestExit(stationID: stop.stationID, to: c)?.coordinate ?? stop.coordinate).distance(to: c)

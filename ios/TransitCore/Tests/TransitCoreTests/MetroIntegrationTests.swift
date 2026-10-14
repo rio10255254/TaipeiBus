@@ -123,6 +123,33 @@ final class MetroIntegrationTests: XCTestCase {
         XCTAssertEqual(trip.walkingDistances.count,4);XCTAssertEqual(trip.transferSeconds.count,2)
         XCTAssertTrue(TripRanking.assessment(trip,estimates:.init(),at:noon()).elapsedSeconds.isFinite)
     }
+    func testOneMixedPlannerUsesEachQueryHoursOfficialBusTimes() throws {
+        let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
+        let a = try XCTUnwrap(metro.stations.first { $0.code == "BR19" }), b = try XCTUnwrap(metro.stations.first { $0.code == "BR10" })
+        let origin = Coordinate(latitude:a.coordinate.latitude+0.015,longitude:a.coordinate.longitude)
+        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude)
+        for (name,points) in [("feeder-in",[origin,a.coordinate]),("feeder-out",[b.coordinate,destination])] {
+            metadata.routes[name] = BusRoute(id:name,parentID:name,name:name,variantName:name,departure:"A",destination:"B")
+            for (index,coordinate) in points.enumerated() {
+                let id = "\(name):\(index)", stop = BusStop(id:id,routeID:name,stationID:id,name:id,direction:"0",sequence:index,coordinate:coordinate)
+                metadata.stops[id] = stop;metadata.stations[id] = Station(id:id,name:id,coordinate:coordinate,address:"",bearing:"",stopIDs:[id])
+                metadata.paths[name,default:[]].append(StopReference(stopID:id,sequence:index))
+            }
+        }
+        metadata.rebuildRouteCatalog()
+        // 2026-10-08 is a Thursday: 300 s at noon, 900 s in the evening peak.
+        let periods: [[String: Any]] = [["weekday":4,"startHour":12,"endHour":13,"seconds":[300]],
+                                        ["weekday":4,"startHour":18,"endHour":19,"seconds":[900]]]
+        metadata.officialTravelTimes = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: ["schema":1,"routes":[
+            ["route":"feeder-in","subroute":"feeder-in","direction":"0","updated":"2026-10-05T05:00:00+08:00",
+             "edges":[["feeder-in:0","feeder-in:1"]],"periods":periods]]]))
+        let planner = MultimodalPlanner(metadata:metadata)
+        for (date, seconds) in [(noon(), 300.0), (noon().addingTimeInterval(6 * 3600), 900.0), (noon(), 300.0)] {
+            let trip = try XCTUnwrap(planner.plan(from:origin,to:destination,maximumWalk:100,limit:12,at:date)
+                .first { $0.rides.map(\.route.mode) == [.bus,.metro,.bus] })
+            XCTAssertEqual(trip.rideSeconds.first, seconds)
+        }
+    }
     func testBoardingAnAlternateOperatingPatternRequiresEveryPlannedStationInOrder() throws {
         let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
         let pattern = try XCTUnwrap(metro.patterns.first { $0.id.hasSuffix("BL-1") && $0.direction == "1" })
