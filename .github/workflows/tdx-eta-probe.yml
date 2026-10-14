@@ -1,0 +1,61 @@
+name: TDX ETA probe (temporary)
+on:
+  push:
+    branches: ['claude/sharp-rubin-wjv7wl']
+    paths: ['.github/workflows/tdx-eta-probe.yml']
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
+      TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
+    steps:
+      - name: Compare TDX multi-bus estimates with Taipei's own feeds
+        run: |
+          python3 - <<'PY'
+          import gzip, json, os, time, urllib.parse, urllib.request
+          from collections import Counter
+          BASE = 'https://tdx.transportdata.tw'
+          def get(url, headers=None, data=None):
+              req = urllib.request.Request(url, data=data, headers=headers or {})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  raw = r.read()
+              return gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw
+          token = json.loads(get(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token',
+              {'Content-Type': 'application/x-www-form-urlencoded'},
+              urllib.parse.urlencode({'grant_type': 'client_credentials', 'client_id': os.environ['TDX_CLIENT_ID'],
+                                      'client_secret': os.environ['TDX_CLIENT_SECRET']}).encode()))['access_token']
+          city_bus = json.loads(get('https://tcgbusfs.blob.core.windows.net/blobbus/GetBusData.gz').decode('utf-8-sig'))['BusInfo']
+          city_eta = json.loads(get('https://tcgbusfs.blob.core.windows.net/blobbus/GetEstimateTime.gz').decode('utf-8-sig'))['BusInfo']
+          live_plates = {str(b.get('BusID', '')).strip() for b in city_bus}
+          city = {(str(r['RouteID']), str(r['StopID'])): r['EstimateTime'] for r in city_eta}
+          lines = ['### TDX EstimatedTimeOfArrival sample (Taipei)', '']
+          for name in ['307', '262', '紅30', '敦化幹線', '藍25', '1']:
+              time.sleep(13)  # Basic member: at most five requests per minute.
+              url = BASE + '/api/basic/v2/Bus/EstimatedTimeOfArrival/City/Taipei/' + urllib.parse.quote(name) + '?%24format=JSON'
+              rows = json.loads(get(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'}))
+              rows = [r for r in rows if r.get('RouteName', {}).get('Zh_tw') == name]
+              keys = Counter(k for r in rows for k in r)
+              plate = [r for r in rows if str(r.get('PlateNumb', '')).strip() not in ('', '-1')]
+              lists = [r['Estimates'] for r in rows if isinstance(r.get('Estimates'), list)]
+              depth = Counter(len(x) for x in lists)
+              est_plates = [e.get('PlateNumb') for x in lists for e in x if e.get('PlateNumb')]
+              match = sum(1 for r in rows if (str(r.get('RouteID')), str(r.get('StopID'))) in city and r.get('EstimateTime') is not None
+                          and abs(int(city[(str(r['RouteID']), str(r['StopID']))]) - int(r['EstimateTime'])) <= 60)
+              comparable = sum(1 for r in rows if (str(r.get('RouteID')), str(r.get('StopID'))) in city and r.get('EstimateTime') is not None)
+              lines.append(f'**{name}**: {len(rows)} stop rows; fields {sorted(keys)}')
+              lines.append(f'- rows with PlateNumb: {len(plate)}; rows with Estimates list: {len(lists)}; list lengths {dict(sorted(depth.items()))}')
+              lines.append(f'- plates in Estimates seen in Taipei GPS feed: {sum(p in live_plates for p in est_plates)}/{len(est_plates)}; '
+                           f'plate rows seen in GPS feed: {sum(str(r["PlateNumb"]).strip() in live_plates for r in plate)}/{len(plate)}')
+              lines.append(f'- first-bus EstimateTime within 60 s of Taipei GetEstimateTime: {match}/{comparable}')
+              sample = next((r for r in rows if r.get('Estimates')), None) or next((r for r in plate), None) or (rows[0] if rows else None)
+              if sample:
+                  lines.append('- sample: `' + json.dumps({k: sample.get(k) for k in ('StopName', 'Direction', 'PlateNumb', 'EstimateTime', 'StopStatus', 'Estimates', 'SrcUpdateTime', 'UpdateTime')}, ensure_ascii=False)[:600] + '`')
+              lines.append('')
+          text = '\n'.join(lines)
+          print(text)
+          open(os.environ['GITHUB_STEP_SUMMARY'], 'a').write(text + '\n')
+          PY
