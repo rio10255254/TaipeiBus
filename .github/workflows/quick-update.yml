@@ -32,10 +32,20 @@ concurrency:
 jobs:
   cycling_source_probe:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: macos-15
-    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            developer: /Applications/Xcode_26.3.app/Contents/Developer
+          - runner: macos-26
+            developer: /Applications/Xcode.app/Contents/Developer
+          - runner: xcode-27
+            developer: /Applications/Xcode.app/Contents/Developer
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
     env:
-      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVELOPER_DIR: ${{ matrix.developer }}
     steps:
       - uses: actions/checkout@v4
       - name: Query the actual iPhone cycling source independently of app geometry
@@ -57,7 +67,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: cycling-source
+          name: cycling-source-${{ matrix.runner }}
           path: ${{ runner.temp }}/cycling-source.log
   legacy_compatibility:
     runs-on: macos-15
