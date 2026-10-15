@@ -82,6 +82,26 @@ public enum BikeRouting {
         return walkingSeconds(meters) - connection.totalSeconds >= preferences.bikeMinimumGainSeconds
     }
 
+    /// A station worth riding to before boarding anything: too far to walk to, close enough to
+    /// ride, a real step towards the destination, and with docks free to leave the bike in.
+    /// Searching from there can find services no stop within walking distance offers.
+    public static func gateway(from: Coordinate, to: Coordinate, network: BikeNetwork,
+                               availability: BikeAvailability?, preferences: LiveSettings.Planning = .init(),
+                               at date: Date = Date()) -> BikeStation? {
+        guard preferences.bikeRouting, let availability, from.isInServiceArea, to.isInServiceArea else { return nil }
+        let direct = from.distance(to: to)
+        guard direct >= 2_000 else { return nil }
+        return network.stations(near: from, radius: min(preferences.bikeMaximumRideMeters, 3_000), limit: 150)
+            .filter { station in
+                guard from.distance(to: station.coordinate) >= 1_200,
+                      direct - station.coordinate.distance(to: to) >= 800 else { return false }
+                guard let dock = availability.dock(station.id, at: date), dock.active,
+                      Double(dock.returnable) >= preferences.bikeMinimumDocks else { return false }
+                return true
+            }
+            .min { $0.coordinate.distance(to: to) < $1.coordinate.distance(to: to) }
+    }
+
     /// Whether a station the rider is walking towards can still be counted on.
     public static func stillUsable(_ station: BikeStation, availability: BikeAvailability?, renting: Bool,
                                    preferences: LiveSettings.Planning = .init(), at date: Date = Date()) -> Bool {

@@ -89,6 +89,31 @@ final class BikeRoutingTests: XCTestCase {
         XCTAssertFalse(BikeRouting.worthRiding(nil, insteadOfWalking: 5_000))
     }
 
+    func testTheGatewayStationIsOneTooFarToWalkToAndClearlyOnTheWay() {
+        let now = Date()
+        // A corridor of stations between the rider and a destination five kilometres away.
+        let far = Coordinate(latitude: 25.0300, longitude: 121.5500)
+        let network = BikeNetwork(schema: 1, generatedAt: "", source: "test", stations: [
+            station("close", 25.0300, 121.5020),     // a couple of hundred metres: walkable
+            station("ahead", 25.0300, 121.5150),     // about 1.5 km along the way
+            station("further", 25.0300, 121.5280),   // nearly three kilometres along the way
+            station("sideways", 25.0450, 121.5000),  // far enough, but no closer to the destination
+        ])
+        let stocked = availability(["close": (9, 9), "ahead": (9, 9), "further": (9, 9), "sideways": (9, 9)], at: now)
+        // The one that takes the rider furthest along, not merely the first one out of reach.
+        XCTAssertEqual(BikeRouting.gateway(from: origin, to: far, network: network, availability: stocked, at: now)?.id, "further")
+        // With nowhere to leave the bike it is no gateway at all.
+        let fullRacks = availability(["ahead": (9, 0), "further": (9, 1), "close": (9, 9)], at: now)
+        XCTAssertNil(BikeRouting.gateway(from: origin, to: far, network: network, availability: fullRacks, at: now))
+        // A station off to the side does not count as progress.
+        let onlySideways = availability(["sideways": (9, 9)], at: now)
+        XCTAssertNil(BikeRouting.gateway(from: origin, to: far, network: network, availability: onlySideways, at: now))
+        // Short trips are not worth a detour through a station, and counts are still required.
+        XCTAssertNil(BikeRouting.gateway(from: origin, to: Coordinate(latitude: 25.0300, longitude: 121.5150),
+                                         network: network, availability: stocked, at: now))
+        XCTAssertNil(BikeRouting.gateway(from: origin, to: far, network: network, availability: nil, at: now))
+    }
+
     func testAStationThatRanOutIsReportedWithSomewhereElseToGo() throws {
         let now = Date(), network = network()
         let near = try XCTUnwrap(network.station("near"))

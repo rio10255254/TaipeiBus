@@ -259,8 +259,9 @@ final class JourneyPlannerModel: ObservableObject {
     var plannedPickupStations: [BikeStation] {
         options.compactMap { option in option.bikeLegIndex.flatMap { option.walks[$0].bike?.pickup } }
     }
-    /// True while any offered or chosen trip rides a YouBike, so counts stay fresh for it.
-    var cyclingInPlan: Bool { options.contains(where: \.cycles) }
+    /// True while the chosen trip rides a YouBike, or while one is still among the choices,
+    /// so counts stay fresh exactly as long as they are needed.
+    var cyclingInPlan: Bool { selected.map(\.cycles) ?? options.contains(where: \.cycles) }
     /// The ridden part of each leg on the map, drawn apart from the walked parts.
     var bikeCoordinates: [[Coordinate]] {
         guard let option = selected else { return [] }
@@ -412,21 +413,6 @@ final class JourneyPlannerModel: ObservableObject {
     private var bikeAvailability: BikeAvailability?
     private func entrance(_ stop: BusStop, toward point: Coordinate, metadata: TransitMetadata) -> Coordinate {
         metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
-    }
-    /// A station worth riding to before boarding anything: too far to walk to, close enough to
-    /// ride, a real step towards the destination, and with docks free to leave the bike in.
-    private func gatewayStation(from: Coordinate, to: Coordinate, at date: Date) -> BikeStation? {
-        guard let availability = bikeAvailability else { return nil }
-        let direct = from.distance(to: to)
-        return bikeNetwork.stations(near: from, radius: min(preferences.bikeMaximumRideMeters, 3_000), limit: 150)
-            .filter { station in
-                guard from.distance(to: station.coordinate) >= 1_200,
-                      direct - station.coordinate.distance(to: to) >= 800 else { return false }
-                guard let dock = availability.dock(station.id, at: date), dock.active,
-                      Double(dock.returnable) >= preferences.bikeMinimumDocks else { return false }
-                return true
-            }
-            .min { $0.coordinate.distance(to: to) < $1.coordinate.distance(to: to) }
     }
     private var pickupTask: Task<Void, Never>?
     func updateBikes(network: BikeNetwork, availability: BikeAvailability?) {
@@ -655,8 +641,9 @@ final class JourneyPlannerModel: ObservableObject {
                 let bestElapsed = ordered.first.map {
                     TripRanking.assessment($0, estimates: latestSnapshot.estimates, at: date, preferences: preferences).elapsedSeconds
                 }
-                if origin.coordinate.distance(to: destination.coordinate) >= 2_000, bestElapsed ?? .infinity > 1_500,
-                   let gateway = gatewayStation(from: origin.coordinate, to: destination.coordinate, at: date) {
+                if bestElapsed ?? .infinity > 1_500,
+                   let gateway = BikeRouting.gateway(from: origin.coordinate, to: destination.coordinate,
+                       network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date) {
                     let remote = await network.options(metadata: metadata, from: gateway.coordinate, to: destination.coordinate,
                                                        preferences: preferences, estimates: latestSnapshot.estimates)
                     guard !Task.isCancelled, token == generation else { return }

@@ -199,8 +199,12 @@ final class TransitAppModel: ObservableObject {
                          status: nil, stopsLeft: left, totalStops: ride.stopCount, updatedAt: now)
         default:
             let walk = journeyDuration(option, at: now)?.totalSeconds
-            return .init(phase: .walking, sign: .walking, headline: planner.destination?.localizedName ?? "",
-                         detail: AppText.text("步行前往目的地"), target: walk.map { now.addingTimeInterval($0) },
+            // The last leg can be ridden rather than walked; say which, and where the bike goes back.
+            var cycling: String?
+            if case .walk(let index) = step { cycling = planner.cyclingInstruction(at: index) }
+            return .init(phase: .walking, sign: cycling == nil ? .walking : .cycling,
+                         headline: planner.destination?.localizedName ?? "",
+                         detail: cycling ?? AppText.text("步行前往目的地"), target: walk.map { now.addingTimeInterval($0) },
                          status: nil, stopsLeft: nil, totalStops: nil, updatedAt: now)
         }
     }
