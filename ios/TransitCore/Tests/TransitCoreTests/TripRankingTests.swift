@@ -2,6 +2,20 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testExplicitFewerTransferPreferenceChangesRankingWithoutAddingTravelTime() throws {
+        let baseline = LiveSettings.Planning()
+        var personal = baseline; personal.personalTransferPenaltySeconds = 900
+        let direct = TripRanking.assess(riding:[1800],walking:[0,0],arrivals:[0],preferences:baseline)
+        let transfer = TripRanking.assess(riding:[500,500],walking:[0,0,0],arrivals:[0,900],preferences:baseline)
+        let preferred = TripRanking.assess(riding:[500,500],walking:[0,0,0],arrivals:[0,900],preferences:personal)
+        XCTAssertLessThan(transfer.score,direct.score)
+        XCTAssertGreaterThan(preferred.score,direct.score)
+        XCTAssertEqual(preferred.elapsedSeconds,transfer.elapsedSeconds)
+        XCTAssertEqual(baseline.effectiveTransferPenaltySeconds,300)
+        let shared = try JSONDecoder().decode(LiveSettings.Planning.self,from:JSONEncoder().encode(personal))
+        XCTAssertNil(shared.personalTransferPenaltySeconds)
+        XCTAssertEqual(shared.effectiveTransferPenaltySeconds,baseline.effectiveTransferPenaltySeconds)
+    }
     func testCyclingConnectorIsNotPenalizedAsFifteenMinutesOfWalking() {
         let a=Coordinate(latitude:25.02,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.51)
         func trip(_ id: String, seconds: Double) -> TransitTrip {

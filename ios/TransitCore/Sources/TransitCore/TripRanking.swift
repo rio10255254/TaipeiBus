@@ -81,7 +81,7 @@ public enum TripRanking {
         let cycled = cyclingSeconds.isFinite ? min(walkingSeconds, max(0, cyclingSeconds)) : 0
         let score = elapsed + (walkingSeconds - cycled) * (preferences.walkingWeight - 1 + 0.35) +
             waiting * (preferences.waitingWeight - 1) +
-            Double(max(0, riding.count - 1)) * min(300, preferences.transferPenaltySeconds) +
+            Double(max(0, riding.count - 1)) * preferences.effectiveTransferPenaltySeconds +
             Double(waits.filter { $0.evidence == .unknown }.count) * 180
         return TripAssessment(score: unavailable ? .infinity : score, elapsedSeconds: elapsed,
             walkingSeconds: walkingSeconds, waitingSeconds: waiting, missedFirstArrival: missed,

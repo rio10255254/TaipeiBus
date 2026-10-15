@@ -185,6 +185,8 @@ final class ProPurchaseTests: XCTestCase {
         XCTAssertEqual(restored.journeys.count,1); XCTAssertNil(restored.journeys[0].origin)
         XCTAssertEqual(restored.journeys[0].preference,.fewerTransfers)
         XCTAssertGreaterThan(RoutePreference.fewerTransfers.applying(to:.init()).transferPenaltySeconds,LiveSettings.Planning().transferPenaltySeconds)
+        XCTAssertEqual(RoutePreference.fewerTransfers.applying(to:.init()).effectiveTransferPenaltySeconds,900)
+        XCTAssertEqual(RoutePreference.balanced.applying(to:.init()).effectiveTransferPenaltySeconds,300)
         XCTAssertGreaterThan(RoutePreference.lessWalking.applying(to:.init()).walkingWeight,LiveSettings.Planning().walkingWeight)
         XCTAssertLessThan(RoutePreference.faster.applying(to:.init()).transferPenaltySeconds,LiveSettings.Planning().transferPenaltySeconds)
         XCTAssertFalse(library.store(title:"錯誤",symbol:"house.fill",origin:nil,

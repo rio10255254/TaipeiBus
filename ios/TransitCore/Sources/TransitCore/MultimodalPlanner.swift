@@ -202,7 +202,7 @@ public struct MultimodalPlanner: Sendable {
                         let label = Label(segments: source.segments + [Segment(pattern: pIndex, first: boarded.index, last: index)],
                             access: source.access, distances: source.distances, transferSeconds: source.transferSeconds,
                             elapsed: elapsed, walking: source.walking,
-                            cost: source.cost + wait * preferences.waitingWeight + seconds + (round > 0 ? min(300, preferences.transferPenaltySeconds) : 0),
+                            cost: source.cost + wait * preferences.waitingWeight + seconds + (round > 0 ? preferences.effectiveTransferPenaltySeconds : 0),
                             lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus,
                             family: source.family + "|" + pattern.route.parentID)
                         insert(label, in: &arrived, at: stop.stationID)
