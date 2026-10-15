@@ -37,8 +37,9 @@ jobs:
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
-      - name: Check the cycling transport type in the shipping SDK
-        run: xcrun swift -e 'import MapKit; print(MKDirectionsTransportType.cycling.rawValue)'
+      - uses: actions/checkout@v4
+      - name: Check live cycling directions in Taipei
+        run: xcrun swift ios/release/cycling-source-check.swift
   legacy_compatibility:
     runs-on: macos-15
     timeout-minutes: 10
