@@ -26,9 +26,11 @@ import XCTest
         let bus=choice("18",rideSeconds:2200), green=choice("G",rideSeconds:900,metro:true)
         let p=planner([bus]);p.auditVerifyAdditionalChoices([green]);p.select(bus)
         XCTAssertTrue(p.checkingWalks,"Preview must not cancel the search")
+        let mapRevision=p.mapRevision
         await waitForChoices(p)
         XCTAssertFalse(p.started)
         XCTAssertEqual(p.selectedID,bus.id)
+        XCTAssertEqual(p.mapRevision,mapRevision,"New alternatives must not refocus the inspected route")
         XCTAssertTrue(p.options.contains { $0.id==green.id })
         XCTAssertTrue(p.options.contains { $0.id==bus.id })
         XCTAssertEqual(p.optionLabels[green.id],"推薦")

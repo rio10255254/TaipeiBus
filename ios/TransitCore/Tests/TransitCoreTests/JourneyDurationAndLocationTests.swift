@@ -4,9 +4,9 @@ import XCTest
 final class JourneyDurationAndLocationTests: XCTestCase {
     func testDoorToDoorHeadlineWaitSubtitleAndArrivalShareOneClock() throws {
         let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
-        let duration=JourneyDuration(riding:[27*60],walking:[13*60,2*60],arrivals:[16*60],at:date)
-        XCTAssertEqual(duration.totalSeconds,45*60)
-        XCTAssertEqual(duration.waitingSeconds,3*60)
+        let duration=JourneyDuration(riding:[1620.0],walking:[780.0,120.0],arrivals:[960],at:date)
+        XCTAssertEqual(duration.totalSeconds,2700.0)
+        XCTAssertEqual(duration.waitingSeconds,180.0)
         XCTAssertTrue(duration.conciseLabel.contains("45"))
         XCTAssertTrue(duration.includedWaitingLabel.contains("3"))
         XCTAssertTrue(duration.arrivalLabel.contains("17:10"))

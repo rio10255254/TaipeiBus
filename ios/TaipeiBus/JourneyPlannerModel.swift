@@ -362,11 +362,11 @@ final class JourneyPlannerModel: ObservableObject {
             let order = Dictionary(uniqueKeysWithValues: options.enumerated().map { ($0.element.id, $0.offset) })
             result.sort { (order[$0.id] ?? Int.max) < (order[$1.id] ?? Int.max) }
         }
-        let oldIDs = options.map(\.id)
+        let previousSelection = selectedID
         options = result; optionLabels = labels(for: result, recommendedOption: ranked.first, at: date)
         comparisonChanged = selectionConfirmed && result.map(\.id) != ranked.map(\.id)
         if !selectionConfirmed { selectedID = result.first?.id }
-        if oldIDs != result.map(\.id) { mapRevision += 1 }
+        if previousSelection != selectedID { mapRevision += 1 }
     }
     func refreshRecommendations() {
         guard !started else { return }
