@@ -10,7 +10,9 @@ end
 # repository secret and the Apple review record, never in logs or artifacts.
 abort 'Choose store-prepare explicitly.' unless ENV['BUS_PUBLISH_TESTFLIGHT'] == 'true'
 config = JSON.parse(File.read(File.join(__dir__, 'testflight.json')))
-abort 'This is a TestFlight-only experiment; public App Store preparation is disabled.' if config['distribution'] == 'testflight-only'
+draft_only = ENV['BUS_STORE_DRAFT_ONLY'] == 'true'
+release_type = draft_only ? 'MANUAL' : 'AFTER_APPROVAL'
+abort 'This is a TestFlight-only experiment; public App Store preparation is disabled.' if config['distribution'] == 'testflight-only' && !draft_only
 copy = JSON.parse(File.read(File.join(__dir__, 'app-store.zh-Hant.json')))
 contact = JSON.parse(ENV.fetch('APP_STORE_REVIEW_CONTACT'))
 fields = %w[contactFirstName contactLastName contactPhone contactEmail]
@@ -38,7 +40,7 @@ end
 unless version
   version = client.request(:post, '/v1/appStoreVersions', {}, data: {
     type: 'appStoreVersions', attributes: { platform: 'IOS', versionString: release.version,
-      copyright: copy.fetch('copyright'), releaseType: 'AFTER_APPROVAL' },
+      copyright: copy.fetch('copyright'), releaseType: release_type },
     relationships: { app: { data: { type: 'apps', id: app_id } } }
   }).fetch('data')
 end
@@ -56,6 +58,8 @@ if version.dig('attributes','appStoreState') == 'READY_FOR_REVIEW'
   abort 'The editable app version is not part of an unsent draft.' unless write_metadata
 end
 version_id = version.fetch('id')
+abort 'Draft-only edits cannot touch a version already added to review.' if draft_only && !TaipeiBusRelease::EDITABLE_VERSION_STATES.include?(state)
+unless draft_only
 # Restore the explicitly approved Taiwan storefront if Apple currently has no
 # storefront enabled. Never silently disable an existing foreign storefront.
 availability = client.request(:get,"/v1/apps/#{app_id}/appAvailabilityV2").fetch('data')
@@ -71,6 +75,7 @@ unless taiwan.dig('attributes','available')
 end
 saved_territories = client.all(territories_path, include:'territory',limit:'200')
 abort 'Apple did not confirm Taiwan-only availability.' unless saved_territories.select { |row| row.dig('attributes','available') }.map { |row| row.dig('relationships','territory','data','id') } == ['TWN']
+end
 infos = client.all("/v1/apps/#{app_id}/appInfos")
 info = infos.find { |row| row.dig('attributes', 'state') == 'PREPARE_FOR_SUBMISSION' || row.dig('attributes', 'appStoreState') == 'PREPARE_FOR_SUBMISSION' }
 local_info = info && client.all("/v1/appInfos/#{info.fetch('id')}/appInfoLocalizations").find { |row| row.dig('attributes', 'locale') == config.fetch('locale') }
@@ -116,7 +121,7 @@ else
 end
 client.request(:patch, "/v1/appStoreVersions/#{version_id}", {}, data: {
   type: 'appStoreVersions', id: version_id,
-  attributes: { copyright: copy.fetch('copyright'), releaseType: 'AFTER_APPROVAL' },
+  attributes: { copyright: copy.fetch('copyright'), releaseType: release_type },
   relationships: { build: { data: { type: 'builds', id: build.fetch('id') } } }
 })
 end
@@ -130,16 +135,17 @@ saved_review = client.request(:get, "/v1/appStoreVersions/#{version_id}/appStore
 abort 'Saved content rights mismatch.' unless saved_app.dig('attributes', 'contentRightsDeclaration') == 'USES_THIRD_PARTY_CONTENT'
 abort 'Saved privacy URL mismatch.' unless saved_info.dig('attributes', 'privacyPolicyUrl') == copy.fetch('privacyPolicyUrl')
 abort 'Saved build mismatch.' unless saved_version.dig('relationships', 'build', 'data', 'id') == build.fetch('id')
-abort 'Saved release mode mismatch.' unless saved_version.dig('attributes', 'releaseType') == 'AFTER_APPROVAL'
+abort 'Saved release mode mismatch.' unless saved_version.dig('attributes', 'releaseType') == release_type
 abort 'Saved review contact mismatch.' unless fields.all? { |field| saved_review.dig('attributes', field) == contact[field] }
 abort 'Saved description mismatch.' unless saved_localization.dig('attributes', 'description') == copy.fetch('description')
 abort 'Saved update notes mismatch.' unless saved_localization.dig('attributes', 'whatsNew') == copy.fetch('whatsNew')
 receipt = { app_id: app_id, version: release.version, version_id: version_id,
   build_id: build.fetch('id'), build_number: build_number, locale: config.fetch('locale'),
-  status: 'metadata_and_build_prepared', automatic_release: true, review_contact_verified: true,
+  status: draft_only ? 'store_draft_prepared_not_submitted' : 'metadata_and_build_prepared', automatic_release: !draft_only, review_contact_verified: true,
   privacy_policy_url: copy.fetch('privacyPolicyUrl'), localization_id: local_version.fetch('id'),
   description_verified: true, whats_new_verified: true, subtitle_updated: !local_info.nil?, captured_at: Time.now.utc.iso8601 }
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-receipt.json'), JSON.pretty_generate(receipt) + "\n")
+unless draft_only
 begin
   billing = JSON.parse(File.read(File.join(__dir__,'billing.json')))
   receipt.merge!(TaipeiBusRelease::ReviewBundle.new(client,billing).prepare(version_id))
@@ -149,5 +155,6 @@ rescue TaipeiBusRelease::Error => error
   raise
 ensure
   File.write(File.join(ENV.fetch('RUNNER_TEMP'),'app-store-receipt.json'),JSON.pretty_generate(receipt)+"\n")
+end
 end
 puts "Verified App Store metadata and exact build #{release.version} (#{build_number}); contact values withheld."

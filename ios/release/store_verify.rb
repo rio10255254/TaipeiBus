@@ -9,6 +9,9 @@ release = TaipeiBusRelease::Release.new(client, config)
 app_id = release.app.fetch('id')
 version = client.all("/v1/apps/#{app_id}/appStoreVersions").find { |v| v.dig('attributes', 'platform') == 'IOS' && v.dig('attributes', 'versionString') == release.version }
 abort 'Matching store version missing.' unless version
+if ENV['BUS_STORE_DRAFT_ONLY'] == 'true'
+  abort 'Draft-only operation must keep manual release and stay outside review.' unless TaipeiBusRelease::EDITABLE_VERSION_STATES.include?(version.dig('attributes','appStoreState')) && version.dig('attributes','releaseType') == 'MANUAL'
+end
 availability = client.request(:get, "/v1/apps/#{app_id}/appAvailabilityV2").fetch('data')
 territories = client.all("/v2/appAvailabilities/#{availability.fetch('id')}/territoryAvailabilities", { include: 'territory', limit: '200' })
 enabled = territories.select { |t| t.dig('attributes', 'available') }.map { |t| t.dig('relationships', 'territory', 'data', 'id') }.sort
