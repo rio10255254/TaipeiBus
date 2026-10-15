@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-prepare', 'store-assets', 'store-submit', 'store-pause', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
+        options: ['beta-audit', 'beta-metadata', 'check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-draft', 'store-prepare', 'store-assets', 'store-submit', 'store-pause', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels']
         default: 'check-only'
       metro_endpoints:
         description: 'Optional bounded metro metadata endpoint subset'
@@ -66,10 +66,12 @@ jobs:
       BUS_BUILD_NUMBER: ${{ inputs.resume_build }}
       BUS_FEEDBACK_EMAIL: ${{ vars.BUS_FEEDBACK_EMAIL }}
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
-      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
+      BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'beta-audit' && inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
+      BUS_UPDATE_BETA_METADATA: ${{ inputs.operation == 'beta-metadata' }}
       BUS_PREPARE_BILLING: ${{ inputs.operation == 'billing-prepare' }}
+      BUS_STORE_DRAFT_ONLY: ${{ inputs.operation == 'store-draft' }}
       BUS_PAUSE_STORE: ${{ inputs.operation == 'store-pause' }}
     steps:
       - uses: actions/checkout@v4
@@ -107,6 +109,16 @@ jobs:
           key.write_text(os.environ['ASC_PRIVATE_KEY'].lstrip('\ufeff').strip() + '\n')
           key.chmod(0o600)
           PY
+      - name: Read or update exact TestFlight metadata without rebuilding
+        if: inputs.operation == 'beta-audit' || inputs.operation == 'beta-metadata'
+        run: ruby ios/release/beta_metadata.rb
+      - name: Preserve TestFlight metadata readback
+        if: always() && (inputs.operation == 'beta-audit' || inputs.operation == 'beta-metadata')
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestFlight-metadata-${{ github.run_id }}
+          path: ${{ runner.temp }}/testflight-metadata.json
+          retention-days: 30
       - name: Read-only App Store readiness audit
         if: inputs.operation == 'store-audit'
         run: ruby ios/release/store_audit.rb
@@ -148,12 +160,12 @@ jobs:
           path: ${{ runner.temp }}/app-store-audit.json
           retention-days: 7
       - name: Prepare public App Store metadata and exact valid build
-        if: inputs.operation == 'store-prepare'
+        if: inputs.operation == 'store-prepare' || inputs.operation == 'store-draft'
         run: |
           ruby -c ios/release/store_prepare.rb
           ruby ios/release/store_prepare.rb
       - name: Upload prepared screenshots to the editable update
-        if: inputs.operation == 'store-assets'
+        if: inputs.operation == 'store-assets' || inputs.operation == 'store-draft'
         run: |
           ruby -c ios/release/store_assets.rb
           ruby ios/release/store_assets.rb
@@ -172,7 +184,7 @@ jobs:
           path: ${{ runner.temp }}/app-store-submitted.json
           retention-days: 30
       - name: Preserve public release preparation receipt
-        if: always() && inputs.operation == 'store-prepare'
+        if: always() && (inputs.operation == 'store-prepare' || inputs.operation == 'store-draft')
         uses: actions/upload-artifact@v4
         with:
           name: AppStore-prepared-${{ github.run_id }}
@@ -184,7 +196,7 @@ jobs:
           ruby -c ios/release/store_verify.rb
           ruby ios/release/store_verify.rb
       - name: Preserve public store verification
-        if: inputs.operation == 'store-verify' || inputs.operation == 'store-assets'
+        if: inputs.operation == 'store-verify' || inputs.operation == 'store-assets' || inputs.operation == 'store-draft'
         uses: actions/upload-artifact@v4
         with:
           name: AppStore-verified-${{ github.run_id }}
