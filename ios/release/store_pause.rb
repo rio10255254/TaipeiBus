@@ -3,18 +3,20 @@ require_relative 'apple_client'
 # Withdraw only the exact submission the user asked to pause. No app removal,
 # subscription price change, build expiry, or existing-storefront modification.
 abort 'Explicit pause action required.' unless ENV['BUS_PAUSE_STORE'] == 'true'
-receipt = JSON.parse(File.read(File.join(__dir__, 'app-store-1.6.1-receipt.json')))
-abort 'Unexpected pause target.' unless receipt['app_id'] == '6818475740' && receipt['version'] == '1.6.1' && receipt['build_number'] == '98.1.0'
+requested_version = ENV.fetch('BUS_VERSION')
+abort 'An exact marketing version is required.' unless requested_version.match?(/\A\d+\.\d+\.\d+\z/)
+receipt = JSON.parse(File.read(File.join(__dir__, "app-store-#{requested_version}-receipt.json")))
+abort 'Unexpected pause target.' unless receipt['app_id'] == '6818475740' && receipt['version'] == requested_version && receipt['build_number'] == ENV.fetch('BUS_BUILD_NUMBER')
 key = OpenSSL::PKey.read(ENV.fetch('ASC_PRIVATE_KEY').sub(/\A\uFEFF/, '').strip)
 client = TaipeiBusRelease::Client.new(key_id: ENV.fetch('ASC_KEY_ID'), issuer_id: ENV.fetch('ASC_ISSUER_ID'), key: key)
 version_id, submission_id = receipt.values_at('version_id', 'submission_id')
 version_path = "/v1/appStoreVersions/#{version_id}"
 submission_path = "/v1/reviewSubmissions/#{submission_id}"
-report = {app_id:receipt['app_id'],version:'1.6.1',build_number:'98.1.0',version_id:version_id,submission_id:submission_id,status:'pause_in_progress',requested_at:Time.now.utc.iso8601,errors:[]}
+report = {app_id:receipt['app_id'],version:requested_version,build_number:receipt['build_number'],version_id:version_id,submission_id:submission_id,status:'pause_in_progress',requested_at:Time.now.utc.iso8601,errors:[]}
 save = -> { File.write(File.join(ENV.fetch('RUNNER_TEMP'),'app-store-paused.json'),JSON.pretty_generate(report)+"\n") }
 begin
   version = client.all("/v1/apps/#{receipt['app_id']}/appStoreVersions",include:'build').find { |row| row['id'] == version_id }
-  raise TaipeiBusRelease::Error,'Exact app version/build identity mismatch.' unless version && version.dig('attributes','versionString') == '1.6.1' && version.dig('relationships','build','data','id') == receipt['build_id']
+  raise TaipeiBusRelease::Error,'Exact app version/build identity mismatch.' unless version && version.dig('attributes','versionString') == requested_version && version.dig('relationships','build','data','id') == receipt['build_id']
   submission = client.request(:get,submission_path).fetch('data')
   items = client.all("#{submission_path}/items",include:'appStoreVersion,subscriptionVersion,subscriptionGroupVersion')
   raise TaipeiBusRelease::Error,'The submission does not contain the requested app.' unless items.any? { |item| item.dig('relationships','appStoreVersion','data','id') == version_id }
