@@ -41,6 +41,16 @@ def source_checks(root):
             rows = json.loads(decoded)
             rows = rows if isinstance(rows,list) else rows.get("BusInfo",[])
             require(len(rows) == feed["rows"], "Bundled static metadata row count changed")
+    bikes = json.loads((root / "TaipeiBus/BikeNetwork.json").read_text(encoding="utf-8"))
+    bike_provenance = json.loads((root / "release/youbike-data-provenance.json").read_text(encoding="utf-8"))
+    require(bikes["schema"] == 1 and len(bikes["stations"]) >= 1000, "Bundled YouBike station list is incomplete.")
+    require(len(bikes["stations"]) == bike_provenance["stations"], "Bundled YouBike station count does not match its provenance.")
+    require(len({station["id"] for station in bikes["stations"]}) == len(bikes["stations"]), "Duplicate YouBike station IDs.")
+    live_fields = {"available_rent_bikes", "available_return_bikes", "infoTime", "srcUpdateTime"}
+    for station in bikes["stations"]:
+        require(not live_fields & set(station), "Live YouBike counts must not be bundled with the app.")
+        require(24.90 <= station["coordinate"]["latitude"] <= 25.25, "Bundled YouBike station outside the service area.")
+        require(121.27 <= station["coordinate"]["longitude"] <= 121.72, "Bundled YouBike station outside the service area.")
     icon_set = root / "TaipeiBus/Assets.xcassets/AppIcon.appiconset"
     icon_metadata = json.loads((icon_set / "Contents.json").read_text(encoding="utf-8"))
     icon = icon_set / icon_metadata["images"][0]["filename"]
@@ -77,6 +87,13 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
         require((app / "MetroNetwork.json").is_file(), "Metro metadata missing from signed archive")
         for name in ["GetRoute","GetStop","GetPathDetail","GetProvider","GetBusShape"]:
             require((app / "BusMetadata" / (name + ".gz")).is_file(), "Static bus fallback missing from signed archive: " + name)
+    if tuple(map(int, version.split("."))) >= (1, 8, 0):
+        bike_file = app / "BikeNetwork.json"
+        require(bike_file.is_file(), "YouBike station list missing from signed archive")
+        require(bike_file.stat().st_size <= 4 * 1024 * 1024, "Bundled YouBike data exceeds its verified size limit.")
+        bikes = json.loads(bike_file.read_text(encoding="utf-8"))
+        require(bikes.get("schema") == 1 and len(bikes.get("stations", [])) >= 1000,
+                "The archive does not contain the verified YouBike station list.")
     if tuple(map(int, version.split("."))) >= (1, 1, 9):
         catalog_file = app / "OfficialTravelTimes.json"
         require(catalog_file.is_file(), "The actual archive is missing shared official travel times.")

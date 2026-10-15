@@ -78,6 +78,7 @@ GitHub 連不上時，手機會改從 jsDelivr CDN 讀同一份檔案（最多�
 - `search.aliases`：搜尋別名（例如「內湖捷運站」→「捷運內湖站」）
 - `copy`：替換 App 上的文字，`{"原文字": "新文字"}`
 - `quickDestinations`：首頁快捷目的地
+- `display.bikeStations`：是否顯示 YouBike 站點（設成 `false` 會整個關掉，手機不再查詢即時車位；設成 `true` 仍由使用者在「資訊與設定 · 地圖」決定要不要顯示）
 
 不想手動改檔案時，也可以到 Actions →「Quick update content」→ **Run workflow**，
 `operation` 選 `publish` 並貼上只含要修改部分的 JSON；要退回舊內容選 `rollback` 並填舊的 revision。

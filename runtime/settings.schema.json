@@ -197,6 +197,9 @@
         },
         "routeShortcut": {
           "type": "boolean"
+        },
+        "bikeStations": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false

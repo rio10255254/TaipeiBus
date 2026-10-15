@@ -119,7 +119,8 @@
     "nearbyStops": true,
     "quickDestinations": true,
     "stationShortcut": true,
-    "routeShortcut": true
+    "routeShortcut": true,
+    "bikeStations": true
   },
   "quickDestinations": [
     "臺北車站",

@@ -347,6 +347,44 @@ final class TransitAppModel: ObservableObject {
         reacquireBoardedTrain(at: now)
         metroRevision += 1
     }
+    // MARK: YouBike stations
+    @Published private(set) var bikeNetwork = BikeNetwork.empty
+    @Published private(set) var bikeAvailability: BikeAvailability?
+    /// Docks are drawn at street zoom; the preference and the remote switch can both hide them.
+    @Published var bikeStationsOn: Bool = UserDefaults.standard.object(forKey: "bikeStationsOn") as? Bool ?? true {
+        didSet {
+            guard bikeStationsOn != oldValue else { return }
+            UserDefaults.standard.set(bikeStationsOn, forKey: "bikeStationsOn")
+            if bikeStationsOn { pollBikesInBackground() } else { selectedBikeStationID = nil }
+        }
+    }
+    @Published var selectedBikeStationID: String?
+    var showsBikeStations: Bool { bikeStationsOn && liveSettings.display.bikeStations && !bikeNetwork.stations.isEmpty }
+    var selectedBikeStation: BikeStation? { selectedBikeStationID.flatMap { bikeNetwork.station($0) } }
+    func bikeDock(_ id: String) -> BikeDock? { bikeAvailability?.dock(id) }
+    func selectBikeStation(_ id: String) {
+        guard bikeNetwork.station(id) != nil else { return }
+        tappedPlace = nil
+        selectedBikeStationID = id
+        UISelectionFeedbackGenerator().selectionChanged()
+        pollBikesInBackground()
+    }
+    /// The feed is a single city-wide file, so it runs on its own task at its own pace:
+    /// a slow YouBike response must never hold back bus positions.
+    private var bikeTask: Task<Void, Never>?
+    private var bikeGeneration = UUID()
+    private func pollBikesInBackground() {
+        guard runsLiveWork, showsBikeStations || selectedBikeStationID != nil, bikeTask == nil else { return }
+        let token = UUID(); bikeGeneration = token
+        let network = bikeNetwork
+        bikeTask = Task { [weak self] in
+            guard let self else { return }
+            let packet = await self.service.bikeAvailability(network: network)
+            if !Task.isCancelled, self.runsLiveWork, self.bikeGeneration == token,
+               let packet, packet != self.bikeAvailability { self.bikeAvailability = packet }
+            if self.bikeGeneration == token { self.bikeTask = nil }
+        }
+    }
     @Published var selectedTrainID: String?
     @Published var followingTrain = false
     @Published private(set) var loading = true
@@ -555,6 +593,7 @@ final class TransitAppModel: ObservableObject {
             if journeyInBackground { return }
             updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
             platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+            bikeTask?.cancel(); bikeTask = nil; bikeGeneration = UUID()
             return
         }
         settingsTask = Task { [weak self] in
@@ -574,6 +613,7 @@ final class TransitAppModel: ObservableObject {
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
+                if bikeNetwork.stations.isEmpty { bikeNetwork = await service.bikeNetwork() }
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
                 else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
 #if DEBUG
@@ -594,6 +634,7 @@ final class TransitAppModel: ObservableObject {
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
                     async let rail = service.metroRealtime(network: metadata.metro)
                     pollPlatformInBackground()
+                    pollBikesInBackground()
                     let result = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
@@ -606,6 +647,7 @@ final class TransitAppModel: ObservableObject {
                         // The trip ended behind the Lock Screen: stop like a normal suspension.
                         location.setBackgroundNavigation(false)
                         platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
+                        bikeTask?.cancel(); bikeTask = nil; bikeGeneration = UUID()
                         updateTask = nil; return
                     }
 #if DEBUG

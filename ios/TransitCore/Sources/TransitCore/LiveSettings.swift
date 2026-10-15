@@ -65,6 +65,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var quickDestinations = true
         public var stationShortcut = true
         public var routeShortcut = true
+        public var bikeStations = true
         public init() {}
     }
 

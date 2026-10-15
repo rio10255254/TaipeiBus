@@ -634,5 +634,21 @@
   "新版本包含修正與改進，建議更新。": "A new version with fixes and improvements is available.",
   "需要更新 App": "Update required",
   "這個版本已不再提供服務，請更新到最新版本後繼續使用。": "This version is no longer supported. Please update to keep using the app.",
-  "前往 App Store": "Open App Store"
+  "前往 App Store": "Open App Store",
+  "%@ 分前更新": "Updated %@ min ago",
+  "剛剛更新": "Updated just now",
+  "資料更新中": "Waiting for counts",
+  "資料延遲": "Counts delayed",
+  "暫停服務": "Station suspended",
+  "可借": "Bikes",
+  "可還": "Docks",
+  "未知": "Unknown",
+  "YouBike 站點": "YouBike station",
+  "YouBike %@，可借 %@，可還 %@": "YouBike %@, %@ bikes, %@ docks",
+  "最近可借 %@ · %@": "Bikes at %@ · %@",
+  "顯示 YouBike 站點": "Show YouBike stations",
+  "YouBike 資料說明": "YouBike data",
+  "放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。": "YouBike 2.0 stations appear at street zoom; tap one for the bikes and empty docks it reports.",
+  "YouBike 站點內建於 App，可借車輛與空位為臺北市公開資料，約每分鐘更新，且只在顯示站點時查詢；實際借還以現場為準。目前不含新北市站點。": "Stations ship with the app. Bikes and empty docks come from Taipei City open data, updated about once a minute and requested only while stations are shown; the station itself is the final word. New Taipei stations are not included yet.",
+  "顯示 YouBike 站點時，App 會向臺北市公開資料取得全市即時車位，這個請求不包含你的位置或選取的站點。": "While stations are shown, the app asks Taipei City open data for the whole city’s counts. That request carries neither your location nor the station you picked."
 }

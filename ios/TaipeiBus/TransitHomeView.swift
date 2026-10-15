@@ -234,7 +234,12 @@ struct TransitHomeView: View {
         .smoothChanges(planner.started)
         .smoothChanges(planner.selectedID)
         .smoothChanges(model.language)
-        if let place = model.tappedPlace, !hasSelection {
+        if let bike = model.selectedBikeStation, !hasSelection {
+            BikeStationCard(model: model, station: bike,
+                            distance: location.usableCoordinate.map { $0.distance(to: bike.coordinate) },
+                            close: { model.selectedBikeStationID = nil })
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+        } else if let place = model.tappedPlace, !hasSelection {
             MapPlaceCard(place: place, distance: location.usableCoordinate.map { $0.distance(to: place.coordinate) },
                          route: { routeToPlace(place) }, close: { model.tappedPlace = nil })
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -292,6 +297,7 @@ struct TransitHomeView: View {
     .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
     .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.tappedPlace)
+    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.selectedBikeStationID)
     }
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
@@ -436,7 +442,7 @@ struct TransitHomeView: View {
             if !model.mapWasMoved { model.showStationWalkOverview() }
         }
         .onChange(of: planner.currentStep) { _, _ in model.updateWalkingLocation() }
-        .onChange(of: hasSelection) { _, selected in if selected { model.tappedPlace = nil } }
+        .onChange(of: hasSelection) { _, selected in if selected { model.tappedPlace = nil; model.selectedBikeStationID = nil } }
         .onChange(of: planner.walkingRouteRevision) { _, _ in
             if let index = model.activeWalkingIndex, !model.mapWasMoved {
                 model.focusMap(.journey(planner.walkingCoordinates(at: index)))
@@ -1492,9 +1498,16 @@ private struct AppInformationView: View {
                     Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
                     Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
                     Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
+                    Text(AppText.text("YouBike 站點內建於 App，可借車輛與空位為臺北市公開資料，約每分鐘更新，且只在顯示站點時查詢；實際借還以現場為準。目前不含新北市站點。"))
+                    Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
+                    if live.display.bikeStations {
+                        Toggle(AppText.text("顯示 YouBike 站點"), isOn: $model.bikeStationsOn)
+                            .accessibilityIdentifier("bike-stations-toggle")
+                        Text(live.text("放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。"))
+                    }
                     Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
                     Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
                     Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
@@ -1539,6 +1552,7 @@ private struct PrivacyExplanationView: View {
             }
             Section(AppText.text("網路服務")) {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
+                Text(AppText.text("顯示 YouBike 站點時，App 會向臺北市公開資料取得全市即時車位，這個請求不包含你的位置或選取的站點。"))
                 Link(AppText.text("OpenFreeMap 隱私政策"), destination: URL(string: "https://openfreemap.org/privacy/")!)
             }
             Section(AppText.text("測試回饋")) {
