@@ -871,6 +871,10 @@ final class JourneyPlannerModel: ObservableObject {
         verifiedPool = choices; options = choices
         publishRecommendations()
     }
+    func auditEnrich(_ option: JourneyOption, metadata: TransitMetadata) async throws -> JourneyOption {
+        lastMetadata = metadata
+        return try await enrich(option)
+    }
     func auditVerifyAdditionalChoices(_ choices: [JourneyOption], delay: Double = 0.15) {
         checkingWalks = true
         let token = generation

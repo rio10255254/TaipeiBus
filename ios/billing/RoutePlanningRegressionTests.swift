@@ -52,4 +52,24 @@ import XCTest
         XCTAssertEqual(p.selectedID,bus.id)
         XCTAssertFalse(p.options.contains { $0.id==green.id })
     }
+    func testRealGongguanXimenTripSurvivesPedestrianVerification() async throws {
+        let service=TransitService()
+        let loaded=await service.offlineMetroMetadata()
+        let metadata=try XCTUnwrap(loaded)
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
+        let trips=MultimodalPlanner(metadata:metadata).plan(from:start,to:end,maximumWalk:1200,limit:36,at:date)
+        let trip=try XCTUnwrap(trips.first { $0.rides.count==1 && $0.rides[0].boarding.stationID=="metro:TRTC:G07" && $0.rides[0].alighting.stationID=="metro:TRTC:G12" })
+        let entry=try XCTUnwrap(metadata.metro.nearestExit(stationID:trip.rides[0].boarding.stationID,to:start))
+        let exit=try XCTUnwrap(metadata.metro.nearestExit(stationID:trip.rides[0].alighting.stationID,to:end))
+        let option=JourneyOption(id:trip.id,trip:trip,walks:[
+            WalkingLeg(from:start,to:entry.coordinate,stationSeconds:trip.rides[0].boardingAccessSeconds,stationInstruction:entry.name),
+            WalkingLeg(from:exit.coordinate,to:end,stationSeconds:trip.rides[0].alightingAccessSeconds,stationInstruction:exit.name)])
+        let p=JourneyPlannerModel(), verified=try await p.auditEnrich(option,metadata:metadata)
+        XCTAssertTrue(verified.verified);XCTAssertNil(verified.walkIssue)
+        let timing=try XCTUnwrap(p.duration(verified,at:date))
+        XCTAssertLessThan(timing.totalSeconds,2400.0)
+        XCTAssertEqual(timing.totalSeconds,timing.walkingSeconds+timing.waitingSeconds+timing.ridingSeconds,accuracy:0.001)
+        print("GONGGUAN_VERIFIED entry=\(entry.name) exit=\(exit.name) walking=\(timing.walkingSeconds/60) waiting=\(timing.waitingSeconds/60) riding=\(timing.ridingSeconds/60) total=\(timing.totalSeconds/60) arrival=\(timing.arrivalLabel)")
+    }
+
 }
