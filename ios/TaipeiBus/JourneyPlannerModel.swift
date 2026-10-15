@@ -861,6 +861,7 @@ final class JourneyPlannerModel: ObservableObject {
     func boardCurrentRide() {
         guard let index = boardingRideIndex,
               let target = steps.firstIndex(of: .ride(index)) else { return }
+        cancelRequests()
         started = true; stepIndex = target; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }

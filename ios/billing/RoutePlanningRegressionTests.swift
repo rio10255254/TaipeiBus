@@ -52,6 +52,14 @@ import XCTest
         XCTAssertEqual(p.selectedID,bus.id)
         XCTAssertFalse(p.options.contains { $0.id==green.id })
     }
+    func testBoardingAlsoStopsLaterCandidatesFromChangingTheRide() async {
+        let bus=choice("18",rideSeconds:2200), green=choice("G",rideSeconds:900,metro:true)
+        let p=planner([bus]);p.auditVerifyAdditionalChoices([green]);p.select(bus);p.boardCurrentRide()
+        try? await Task.sleep(for:.milliseconds(250))
+        XCTAssertTrue(p.started);XCTAssertFalse(p.checkingWalks)
+        XCTAssertEqual(p.selectedID,bus.id)
+        XCTAssertFalse(p.options.contains { $0.id==green.id })
+    }
     func testPersonalPreferencesChangeRankingWithoutInflatingTravelTime() throws {
         var bus=choice("18",rideSeconds:1800), green=choice("G",rideSeconds:900,metro:true)
         bus.walks[0].duration=120;green.walks[0].duration=600
