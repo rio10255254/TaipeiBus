@@ -1,0 +1,140 @@
+{
+  "version": "1.8.3",
+  "distribution": "testflight-only",
+  "formal_submission": "paused",
+  "status": "verified_ready_for_testflight",
+  "source": "e047c93",
+  "scope": [
+    "automatic YouBike/transit comparison",
+    "multiple connectors in one journey",
+    "outdoor transfer connectors; indoor transfers remain walking",
+    "additional rail gateways at both endpoints",
+    "multiple rental stage alerts/replacement",
+    "meaningful alternatives retained; compact and full lists"
+  ],
+  "catalog_audit": {
+    "run": 38772359021,
+    "source": "15afe4a",
+    "artifact": 11991813152,
+    "tests_passed": 19,
+    "failures": 0,
+    "line_codes": [
+      "BL",
+      "BR",
+      "G",
+      "LB",
+      "O",
+      "R",
+      "Y"
+    ],
+    "stations": 148,
+    "shared_entrance_repairs": 4
+  },
+  "final_verification_run": 38791374113,
+  "selection_policy": {
+    "headline": "Actual elapsed travel time includes all walking, riding, handling and waiting.",
+    "preference": "Balanced recommendation considers walking and transfers; a slightly faster full-bike alternative does not force it ahead of a simpler transit trip.",
+    "retained_tradeoffs": [
+      "faster",
+      "less walking",
+      "fewer transfers",
+      "fewer rentals",
+      "bike-free"
+    ],
+    "featured_limit": 5,
+    "full_list_limit": null,
+    "preview_behavior": "Do not replace an inspected route; label the fresh recommendation and allow explicit refresh.",
+    "full_list": "All retained distinct reasonable verified candidates; rendered lazily.",
+    "merge_near_equivalent_same_route": {
+      "elapsed_seconds": 60,
+      "walking_seconds": 120
+    }
+  },
+  "bounded_search": {
+    "distinct_additional_rail_corridors_per_endpoint": 2,
+    "additional_route_probes_max": 8,
+    "reasonable_alternative_arrival_window_seconds": 900,
+    "minimum_combined_link_or_whole_journey_gain_seconds": 120,
+    "verification_stop_threshold": 24,
+    "per_batch_limit": 8,
+    "whole_bike_alternative_per_batch_max": 1
+  },
+  "limits": [
+    "This is a bounded candidate search, not a proof of the global mathematical optimum.",
+    "Only data-backed current services and confirmed street paths are offered.",
+    "Bike and dock availability is current, not reserved for arrival.",
+    "Hosted routing fixtures explicitly control supply and geometry where necessary; they are not historical live observations.",
+    "Simulator checks do not establish physical-device frame rate."
+  ],
+  "prior_hosted_verification": {
+    "run": 38772359021,
+    "source": "15afe4a",
+    "tests_passed": 36,
+    "failures": 0,
+    "note": "Final source adds a close whole-bike alternative test and extends the full-list regression beyond twelve options."
+  },
+  "hosted_verification": {
+    "run": 38785533744,
+    "source": "fc6663a",
+    "tests_passed": 39,
+    "failures": 0,
+    "artifact": 11997923633
+  },
+  "core_verification": {
+    "run": 38785533744,
+    "source": "fc6663a",
+    "total": 251,
+    "skipped": 11,
+    "failures": 0,
+    "release_device_compilation": "passed",
+    "english_templates": 694
+  },
+  "runtime_source": "211155d",
+  "ui_diagnostic_run": 38780391072,
+  "additional_cases": [
+    "Same route with substantially different boarding tradeoffs stays visible",
+    "A short bike connector can be worthwhile if it catches a departure walking would miss",
+    "Explicit fewer-transfer preference is honored locally without changing the default/shared settings format or displayed elapsed time"
+  ],
+  "backend_runtime_source": "fc6663a",
+  "ui_diagnostics": {
+    "run": 38780391072,
+    "artifact": 11995224632,
+    "findings": [
+      "Route menu with eight choices is visible in screenshot and AX tree; explicit combined label/value added for stable button identification.",
+      "Dual-bike UI fixture originally ended at a point without a usable dock nearby; changed to an actual bundled Ximen bike station."
+    ],
+    "post_fix_run": 38783857179,
+    "status": "corrected; full light and dark rerun passed"
+  },
+  "ui_verification": {
+    "run": 38791374113,
+    "source": "e047c93",
+    "light_passed": 7,
+    "dark_passed": 4,
+    "failures": 0,
+    "system_appearance_switches": "passed; same tracked vehicle and viewport preserved",
+    "first_pass_artifact": 12001517031,
+    "visual_review": "Light and dark fully loaded two-rental maps, full-list scrolling/selection, and compact menus inspected.",
+    "artifact": 12001653076
+  },
+  "map_verification_run": 38791374113,
+  "map_proof": {
+    "run": 38787829865,
+    "source": "31b1d91",
+    "fully_rendered": true,
+    "camera_moving": false,
+    "route_inside_viewport": true,
+    "route_width_usage": 0.8023915615063081,
+    "visible_bike_stations": 4,
+    "note": "Map and geometry checks passed; this run then exposed a lost Steps tap, so it is not counted as a successful UI run.",
+    "final_full_ui_run": 38791374113,
+    "final_full_ui_status": "passed in both appearances, including Steps after map completion"
+  },
+  "interaction_fix": {
+    "source": "e047c93",
+    "change": "Only time labels refresh on a clock; paging and action controls retain a stable view outside that clock.",
+    "retest_run": 38791374113,
+    "status": "full light and dark rerun passed"
+  }
+}
