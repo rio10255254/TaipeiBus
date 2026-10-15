@@ -24,7 +24,7 @@ begin
   if ENV['BUS_UPDATE_BETA_METADATA'] == 'true'
     description = File.read(File.join(__dir__,config.fetch('description_file')))
     notes = File.read(File.join(__dir__,config.fetch('what_to_test_file')))
-    abort 'TestFlight text must identify the exact version.' unless [description,notes].all? { |text| text.include?(release.version) && !text.strip.empty? }
+    abort 'TestFlight copy must be present and the build notes must identify the exact version.' unless !description.strip.empty? && notes.include?(release.version)
     release.localize('betaAppLocalizations','app',app_id,'description',description)
     release.localize('betaBuildLocalizations','build',build_id,'whatsNew',notes)
     report[:after_description] = read_copy.call('betaAppLocalizations','app',app_id,'description')

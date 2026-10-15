@@ -1,5 +1,11 @@
 # TestFlight 發布手冊（Windows → GitHub macOS → iPhone）
 
+## 只更新 TestFlight 說明（不重新建置）
+
+`betaAppLocalizations.description` 是所有測試版本共用的 App 介紹，請保持不綁版本；特定版本的新功能放在該 build 的 `betaBuildLocalizations.whatsNew`。例如 1.8.0 的 YouBike 說明不可放在共用介紹，否則選取 1.7.0 的測試者也會看到。
+
+使用 `TestFlight` 工作流程的 `beta-audit` 讀取、`beta-metadata` 更新，並提供確切 `version` 與 `resume_build`。此操作只修改介紹及該 build 的測試內容，會逐字讀回核對；不建置、不上傳、不改測試群組、不啟動正式送審。回條保存在 `TestFlight-metadata-<run id>`。
+
 更新：2026-10-05。此專案不需要你先取得 Mac；Xcode 建置和發行簽名由 GitHub 的標準 macOS runner 執行。第一次安裝優先採用 **TestFlight 內部測試**。目前已改為公開儲存庫，標準製作電腦適用公開專案的免費規則；製作紀錄與預覽檔案仍依需要保存，避免重複執行。GitHub Actions 與 GitHub Releases 的成品存放空間適用不同規則。[GitHub Actions 帳務說明](https://docs.github.com/en/billing/concepts/product-billing/github-actions)
 
 ## 公開 App Store 發佈
