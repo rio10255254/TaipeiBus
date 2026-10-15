@@ -56,9 +56,14 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var bikeSpeed = 3.3
         public var bikeHandlingSeconds = 150.0
         public var bikeAccessMeters = 400.0
-        public var bikeMinimumRideMeters = 700.0
+        public var bikeMinimumRideMeters = 500.0
         public var bikeMaximumRideMeters = 5_000.0
+        /// How much faster cycling must be than the bus it would replace. Unlocking a bike to
+        /// save a minute over a ride someone is already waiting for is not worth offering.
         public var bikeMinimumGainSeconds = 240.0
+        /// How much faster it must be than the walk it would replace. A walk has nothing to
+        /// wait for and nothing to compare against, so a smaller saving is already worth it.
+        public var bikeWalkGainSeconds = 120.0
         public var bikeMinimumBikes = 2.0
         public var bikeMinimumDocks = 2.0
         public init() {}

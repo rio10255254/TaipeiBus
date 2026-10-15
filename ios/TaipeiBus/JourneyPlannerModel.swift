@@ -309,13 +309,15 @@ final class JourneyPlannerModel: ObservableObject {
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
             preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides)
         var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
-        // Riding the whole way is offered only when it clearly beats waiting for a bus, and
-        // when there is no transit at all it is simply the way to get there.
+        // Riding the whole way has to clearly beat the bus it would replace, but only modestly
+        // beat a walk: nobody is waiting for a walk. Either comparison can earn it a place, and
+        // with no transit at all it is simply the way to get there.
         if let cycling = valid.first(where: \.bikeOnly), let riding = duration(cycling, at: date) {
-            let best = result.first.flatMap { duration($0, at: date)?.totalSeconds }
-            if best.map({ riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds }) ?? true {
-                result.insert(cycling, at: 0)
-            }
+            let transit = result.first.flatMap { duration($0, at: date)?.totalSeconds }
+            let walking = valid.first(where: \.walkingOnly).flatMap { duration($0, at: date)?.totalSeconds }
+            let beatsTransit = transit.map { riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds } ?? true
+            let beatsWalking = walking.map { riding.totalSeconds <= $0 - preferences.bikeWalkGainSeconds } ?? false
+            if beatsTransit || beatsWalking { result.insert(cycling, at: 0) }
         }
         if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
            result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
@@ -615,7 +617,7 @@ final class JourneyPlannerModel: ObservableObject {
                     guard let first = trip.rides.first, let last = trip.rides.last else { continue }
                     let boarding = entrance(first.boarding, toward: origin.coordinate, metadata: metadata)
                     let toBoarding = origin.coordinate.distance(to: boarding)
-                    if toBoarding >= 500,
+                    if toBoarding >= 350,
                        let connection = BikeRouting.connection(from: origin.coordinate, to: boarding, network: bikeNetwork,
                            availability: bikeAvailability, preferences: preferences, at: date),
                        BikeRouting.worthRiding(connection, insteadOfWalking: toBoarding, preferences: preferences) {
@@ -625,7 +627,7 @@ final class JourneyPlannerModel: ObservableObject {
                     }
                     let alighting = entrance(last.alighting, toward: destination.coordinate, metadata: metadata)
                     let fromAlighting = alighting.distance(to: destination.coordinate)
-                    if fromAlighting >= 500,
+                    if fromAlighting >= 350,
                        let connection = BikeRouting.connection(from: alighting, to: destination.coordinate, network: bikeNetwork,
                            availability: bikeAvailability, preferences: preferences, at: date),
                        BikeRouting.worthRiding(connection, insteadOfWalking: fromAlighting, preferences: preferences) {

@@ -82,7 +82,8 @@ GitHub 連不上時，手機會改從 jsDelivr CDN 讀同一份檔案（最多�
 - `planning.bikeSpeed`：騎乘速度（公尺／秒，內建 3.3，約 12 km/h）
 - `planning.bikeHandlingSeconds`：借車加還車合計預留秒數（內建 150）
 - `planning.bikeMinimumBikes`、`planning.bikeMinimumDocks`：借車站至少要有幾輛車、還車站至少要有幾個空位（內建各 2）
-- `planning.bikeMinimumGainSeconds`：騎車要比走路快多少秒才提出（內建 240）
+- `planning.bikeMinimumGainSeconds`：騎車要比**原本要搭的公車／捷運**快多少秒才提出（內建 240）
+- `planning.bikeWalkGainSeconds`：騎車要比**原本要走的那段路**快多少秒才提出（內建 120；走路沒有班次可等，所以門檻較低）
 - `planning.bikeAccessMeters`、`planning.bikeMinimumRideMeters`、`planning.bikeMaximumRideMeters`：走到站點的距離上限、騎乘距離的下限與上限
 - `display.bikeStations`：是否顯示 YouBike 站點（設成 `false` 會整個關掉，手機不再查詢即時車位；設成 `true` 仍由使用者在「資訊與設定 · 地圖」決定要不要顯示）
 
