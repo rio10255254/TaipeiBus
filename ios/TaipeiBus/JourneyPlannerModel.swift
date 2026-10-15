@@ -255,10 +255,9 @@ final class JourneyPlannerModel: ObservableObject {
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
-    /// The station the chosen trip rents its bike from.
-    var selectedPickupStation: BikeStation? {
-        guard let option = selected, let index = option.bikeLegIndex else { return nil }
-        return option.walks[index].bike?.pickup
+    /// Every station an offered trip would rent a bike from.
+    var plannedPickupStations: [BikeStation] {
+        options.compactMap { option in option.bikeLegIndex.flatMap { option.walks[$0].bike?.pickup } }
     }
     /// True while any offered or chosen trip rides a YouBike, so counts stay fresh for it.
     var cyclingInPlan: Bool { options.contains(where: \.cycles) }

@@ -379,6 +379,10 @@ final class TransitAppModel: ObservableObject {
         showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan
     }
     private func pollBikesInBackground() {
+#if DEBUG
+        // Interface checks run on explicitly fixed counts; a live fetch must not replace them.
+        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil { return }
+#endif
         guard runsLiveWork, needsBikeCounts, bikeTask == nil else { return }
         let token = UUID(); bikeGeneration = token
         let network = bikeNetwork
@@ -1710,11 +1714,14 @@ final class TransitAppModel: ObservableObject {
         planner.prepareCyclingPreview(trip: trip,
             from: TravelPlace(name: "國父紀念館", address: "", coordinate: start, englishName: "Sun Yat-sen Memorial Hall"),
             to: TravelPlace(name: "臺北車站", address: "", coordinate: finish, englishName: "Taipei Main Station"))
-        // The rider is on the way when the station they are heading to runs dry.
-        if emptyPickup, let pickup = planner.selectedPickupStation {
+        // The rider is on the way when the station they are heading to runs dry. Every offered
+        // trip loses its station, so whichever one is opened shows the warning.
+        if emptyPickup {
             var emptied = docks
-            emptied[pickup.id] = BikeDock(stationID: pickup.id, rentable: 0, returnable: 12,
-                                          capacity: pickup.capacity, active: true, observedAt: now)
+            for pickup in planner.plannedPickupStations {
+                emptied[pickup.id] = BikeDock(stationID: pickup.id, rentable: 0, returnable: 12,
+                                              capacity: pickup.capacity, active: true, observedAt: now)
+            }
             bikeAvailability = BikeAvailability(docks: emptied, receivedAt: now)
             planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
         }
