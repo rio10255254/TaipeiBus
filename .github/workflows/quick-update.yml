@@ -13,6 +13,10 @@ on:
         type: choice
         options: ['validate', 'publish', 'rollback']
         default: 'validate'
+      cycling_probe:
+        description: 'Collect diagnostic cycling responses across iOS generations'
+        type: boolean
+        default: false
       document:
         description: 'For publish: full JSON or a partial update (no secrets)'
         type: string
@@ -31,7 +35,7 @@ concurrency:
 
 jobs:
   cycling_source_probe:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.cycling_probe
     strategy:
       fail-fast: false
       matrix:
@@ -73,17 +77,26 @@ jobs:
           name: cycling-source-${{ matrix.runner }}
           path: ${{ runner.temp }}/cycling-source.log
   legacy_compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '1.2.0'
+            commit: bb7bc0ae1a3d622190060700191afa25a419dc24
+          - version: '1.8.0'
+            commit: 6ca91b401086da111b5dd8116658092dc5134260
     runs-on: macos-15
     timeout-minutes: 10
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      LEGACY_APP_VERSION: ${{ matrix.version }}
     steps:
       - uses: actions/checkout@v4
-      - name: Test current quick-update settings on the released 1.8.0 decoder
+      - name: Test current quick-update settings on the released decoder
         run: |
           set -euo pipefail
           cp runtime/settings.json "$RUNNER_TEMP/settings-1.8.1.json"
-          git fetch --depth=1 origin 6ca91b401086da111b5dd8116658092dc5134260
+          git fetch --depth=1 origin ${{ matrix.commit }}
           mkdir -p "$RUNNER_TEMP/legacy-180"
           git archive FETCH_HEAD ios/TransitCore | tar -x -C "$RUNNER_TEMP/legacy-180"
           cat > "$RUNNER_TEMP/legacy-180/ios/TransitCore/Tests/TransitCoreTests/AuditCompatibilityTests.swift" <<'SWIFT'
@@ -96,8 +109,8 @@ jobs:
                   var control = try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
                   var planning = try XCTUnwrap(control["planning"] as? [String:Any])
                   planning.removeValue(forKey:"bikeWalkGainSeconds");control["planning"] = planning
-                  XCTAssertNoThrow(try LiveSettings.decode(JSONSerialization.data(withJSONObject:control),appVersion:"1.8.0"))
-                  XCTAssertNoThrow(try LiveSettings.decode(data,appVersion:"1.8.0"), "The feed declares minimumAppVersion 1.1.8, but the installed 1.8.0 decoder must still accept it")
+                  XCTAssertNoThrow(try LiveSettings.decode(JSONSerialization.data(withJSONObject:control),appVersion:ProcessInfo.processInfo.environment["LEGACY_APP_VERSION"]!))
+                  XCTAssertNoThrow(try LiveSettings.decode(data,appVersion:ProcessInfo.processInfo.environment["LEGACY_APP_VERSION"]!), "The installed released decoder must accept the common feed")
               }
           }
           SWIFT
@@ -105,7 +118,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: audit-config-compatibility
+          name: audit-config-compatibility-${{ matrix.version }}
           path: ${{ runner.temp }}/config-compat-audit.log
           retention-days: 14
   validate:
