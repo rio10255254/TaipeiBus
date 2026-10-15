@@ -17,7 +17,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(item.isHittable,id); item.tap()
     }
     private func openPlans(english: Bool = false) {
-        launch(english ? ["--test-language","en"] : [])
+        launch(["--test-journey-selection"] + (english ? ["--test-language","en"] : []))
         let settings = english ? button("Information and settings") : button("資料來源與地圖設定")
         XCTAssertTrue(settings.waitForExistence(timeout:25))
         settings.tap(); XCTAssertTrue(button("settings-pro").waitForExistence(timeout:10)); button("settings-pro").tap()
@@ -105,6 +105,9 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         if button("完成").exists { button("完成").tap() }
         button("home-destination-search").tap(); chooseNeihu()
         XCTAssertTrue(firstOption.waitForExistence(timeout:150))
+        // The live planner can still replace the first row while verifying bike
+        // alternatives. Start a settled choice, not a lazy firstMatch from an older row.
+        waitForConfirmedChoices()
         selectOptionAndStart(firstOption)
         let state = app.staticTexts["debug-live-activity"]
         let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in

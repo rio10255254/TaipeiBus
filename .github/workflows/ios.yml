@@ -42,7 +42,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['audit-config', 'audit-181', 'all', 'metro', 'metro-routing', 'mixed-route-menu', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['audit-ui', 'audit-config', 'audit-181', 'all', 'metro', 'metro-routing', 'mixed-route-menu', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -62,6 +62,62 @@ env:
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
+  focused_ui_audit:
+    if: inputs.usability_scope == 'audit-ui'
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and run focused Pro and YouBike interactions
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-audit-ui com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -parallel-testing-enabled NO \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing > "$RUNNER_TEMP/audit-ui-build.log"
+          xcrun simctl install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
+          xcrun simctl privacy "$device" grant location com.example.TaipeiBus
+          python3 ios/usability/fresh-location.py "$device" > "$RUNNER_TEMP/location.log" 2>&1 &
+          location_pid=$!
+          trap 'kill "$location_pid" 2>/dev/null || true' EXIT
+          xcrun simctl ui "$device" appearance light
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/audit-ui.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/ProUsabilityTests/testProTripStartsARealLiveActivity \
+            -only-testing:TaipeiBusUsabilityTests/BikeUsabilityTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building | tee "$RUNNER_TEMP/audit-ui.log"
+          xcrun simctl ui "$device" appearance dark
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/audit-ui-dark.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/ProUsabilityTests/testEnglishTrialAndRenewalTermsAreClear \
+            -only-testing:TaipeiBusUsabilityTests/BikeUsabilityTests/testCyclingTripShowsItsStationsCountsAndRouteOnTheMap \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building | tee "$RUNNER_TEMP/audit-ui-dark.log"
+      - name: Export audit screenshots
+        if: always()
+        run: |
+          for mode in audit-ui audit-ui-dark; do
+            if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$mode.xcresult" --output-path "$RUNNER_TEMP/$mode-screenshots"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: focused-ui-audit
+          path: |
+            ${{ runner.temp }}/audit-ui*.log
+            ${{ runner.temp }}/audit-ui*-screenshots
+          retention-days: 14
   config_compat_audit:
     if: inputs.usability_scope == 'audit-config'
     runs-on: macos-15
@@ -139,7 +195,7 @@ jobs:
           retention-days: 14
 
   simulator:
-    if: inputs.usability_scope != 'audit-181' && inputs.usability_scope != 'audit-config'
+    if: inputs.usability_scope != 'audit-181' && inputs.usability_scope != 'audit-config' && inputs.usability_scope != 'audit-ui'
     runs-on: macos-15
     timeout-minutes: ${{ (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
