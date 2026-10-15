@@ -98,7 +98,7 @@ import XCTest
         XCTAssertEqual(p.optionLabels[original.id],"免騎車")
     }
     func testAdditionalTimeWalkingTradeoffsStayInTheFullListAndCanBePreviewed() throws {
-        let choices = (0..<8).map { index -> JourneyOption in
+        let choices = (0..<16).map { index -> JourneyOption in
             let ride = route("route-\(index)",b,c,mode:.bus)
             let trip = TransitTrip(rides:[ride],accessDistance:0,egressDistance:0,transferDistance:0,score:0,
                 rideSeconds:[1800-Double(index)*90])
@@ -107,7 +107,7 @@ import XCTest
         }
         let p = JourneyPlannerModel()
         p.auditLoadChoices(choices,from:TravelPlace(name:"出發",address:"",coordinate:a),to:TravelPlace(name:"目的地",address:"",coordinate:d))
-        XCTAssertEqual(p.options.count,8)
+        XCTAssertEqual(p.options.count,16)
         XCTAssertEqual(p.featuredOptions.count,5)
         let other = try XCTUnwrap(p.options.last)
         XCTAssertFalse(p.featuredOptions.contains { $0.id == other.id })

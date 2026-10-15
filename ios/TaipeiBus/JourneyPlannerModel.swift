@@ -316,7 +316,7 @@ final class JourneyPlannerModel: ObservableObject {
             (option.id, ridingEstimates(option, at: date).map(\.seconds))
         })
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-            preferences: preferences, limit: 12, walkingDurations: walks, ridingDurations: rides,
+            preferences: preferences, limit: max(12, trips.count), walkingDurations: walks, ridingDurations: rides,
             cyclingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.cyclingSeconds) }),
             rentalCounts: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.filter { $0.bike != nil }.count) }),
             choiceGroups: Dictionary(uniqueKeysWithValues: valid.compactMap { option -> (String, String)? in
@@ -350,7 +350,6 @@ final class JourneyPlannerModel: ObservableObject {
             let comparable = result.first.flatMap { duration($0, at: date)?.totalSeconds }.map { walking.totalSeconds <= $0 + 60 } ?? true
             result.insert(foot, at: comparable ? 0 : min(4, result.count))
         }
-        result = Array(result.prefix(12))
         return result
     }
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {

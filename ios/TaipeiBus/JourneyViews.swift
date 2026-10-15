@@ -921,7 +921,7 @@ struct JourneyOptionsView: View {
 
                     }.padding(.top, 4)
                 } else {
-                    VStack(spacing: 0) {
+                    LazyVStack(spacing: 0) {
                         ForEach(planner.options) { option in
                             optionRow(option, at: timeline.date)
                             if option.id != planner.options.last?.id { Divider() }
