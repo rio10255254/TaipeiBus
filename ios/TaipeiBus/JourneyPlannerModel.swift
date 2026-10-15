@@ -329,20 +329,26 @@ final class JourneyPlannerModel: ObservableObject {
         // beat a walk: nobody is waiting for a walk. Either comparison can earn it a place, and
         // with no transit at all it is simply the way to get there.
         if let cycling = valid.first(where: \.bikeOnly), let riding = duration(cycling, at: date) {
-            let transit = result.first.flatMap { duration($0, at: date)?.totalSeconds }
+            let transitTiming = result.first.flatMap { duration($0, at: date) }
+            let transit = transitTiming?.totalSeconds
             let walking = valid.first(where: \.walkingOnly).flatMap { duration($0, at: date)?.totalSeconds }
             let beatsTransit = transit.map { riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds } ?? true
             let beatsWalking = walking.map { riding.totalSeconds <= $0 - preferences.bikeWalkGainSeconds } ?? false
             if beatsTransit { result.insert(cycling, at: 0) }
-            else if beatsWalking {
-                // Eligibility is not a recommendation: keep genuinely faster transit first.
+            else if beatsWalking || transitTiming.map({
+                riding.totalSeconds <= $0.totalSeconds + 900 &&
+                    (riding.totalSeconds <= $0.totalSeconds + 60 ||
+                     riding.walkingSeconds - riding.cyclingSeconds < $0.walkingSeconds - $0.cyclingSeconds - 120)
+            }) == true {
+                // A close alternative can be useful without forcing it ahead of the bus.
                 let position = result.firstIndex { (duration($0, at: date)?.totalSeconds ?? .infinity) > riding.totalSeconds } ?? result.count
-                result.insert(cycling, at: max(1, position))
+                result.insert(cycling, at: min(4, max(1, position)))
             }
         }
         if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
-           result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
-            result.insert(foot, at: 0)
+           result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 300 }) ?? true {
+            let comparable = result.first.flatMap { duration($0, at: date)?.totalSeconds }.map { walking.totalSeconds <= $0 + 60 } ?? true
+            result.insert(foot, at: comparable ? 0 : min(4, result.count))
         }
         result = Array(result.prefix(12))
         return result

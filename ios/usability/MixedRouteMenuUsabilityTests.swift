@@ -103,8 +103,9 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-bike-pickup-0").exists)
         let options = state()["options"] as? [[String:Any]] ?? []
         let selected = options.first { $0["id"] as? String == id }
-        let walkCount = (selected?["walks"] as? [[String:Any]])?.count ?? 2
-        let lastIndex = walkCount - 1
+        let bikeLegs = selected?["bike_legs"] as? [Int] ?? []
+        XCTAssertEqual(bikeLegs.count,2)
+        let lastIndex = bikeLegs.last ?? -1
         let dropoff = button("journey-bike-dropoff-\(lastIndex)")
         for _ in 0..<6 { if dropoff.isHittable { break };app.scrollViews.firstMatch.swipeUp() }
         XCTAssertTrue(dropoff.isHittable);capture("mixed-two-bike-connections-steps");dropoff.tap()

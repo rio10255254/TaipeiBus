@@ -57,6 +57,19 @@ final class BikePlannerTests: XCTestCase {
         print("AUDIT181 riding pickup_empty alert=\(String(describing:p.bikeAlert))")
         XCTAssertNil(p.bikeAlert,"Once riding, an empty original pickup must not tell the rider to borrow another bike")
     }
+    func testSlightlyFasterWholeBikeStaysAvailableWithoutForcingTheRiderOffTransit() {
+        let route=BusRoute(id:"reasonable",parentID:"reasonable",name:"公車",variantName:"",departure:"起點",destination:"終點")
+        let stops=[BusStop(id:"ra",routeID:route.id,stationID:"ra",name:"上車",direction:"0",sequence:1,coordinate:start),
+                   BusStop(id:"rb",routeID:route.id,stationID:"rb",name:"下車",direction:"0",sequence:2,coordinate:end)]
+        let ride=TransitRide(route:route,direction:"0",stops:stops,coordinates:[start,end])
+        let trip=TransitTrip(rides:[ride],accessDistance:0,egressDistance:0,transferDistance:0,score:0,rideSeconds:[900])
+        let transit=JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:start,to:start,duration:0),WalkingLeg(from:end,to:end,duration:0)])
+        let p=planner([transit,cycling()])
+        var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["reasonable:ra":120],updatedAt:Date())
+        p.updateSnapshot(snapshot);p.refreshRecommendations()
+        XCTAssertEqual(p.selectedID,transit.id)
+        XCTAssertTrue(p.options.contains { $0.bikeOnly },"A useful 2-minute saving should remain selectable")
+    }
     func testFullDropoffStillWarnsWhileRiding() throws {
         let p=planner([cycling()]);p.begin()
         let now=Date();p.updateWalking(index:0,coordinate:Coordinate(latitude:25.04,longitude:121.548),accuracy:4,timestamp:now,now:now)

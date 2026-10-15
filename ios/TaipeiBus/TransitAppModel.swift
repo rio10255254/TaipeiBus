@@ -1729,8 +1729,10 @@ final class TransitAppModel: ObservableObject {
         previewNotice = "介面驗證用行程 · 非即時車位"
         snapshot = TransitSnapshot(); planner.updateSnapshot(snapshot)
         let source = metadata
+        let fixtureDate = ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")!
         let trip = await Task.detached(priority: .userInitiated) {
-            MultimodalPlanner(metadata: source).plan(from: boarding, to: finish, maximumWalk: 600, limit: 6).first
+            let choices = MultimodalPlanner(metadata: source).plan(from: boarding, to: finish, maximumWalk: 600, limit: 12, at: fixtureDate)
+            return choices.first { $0.rides.count == 1 && $0.rides[0].route.mode != .bus } ?? choices.first
         }.value
         planner.prepareCyclingPreview(trip: trip,
             from: TravelPlace(name: "國父紀念館", address: "", coordinate: start, englishName: "Sun Yat-sen Memorial Hall"),
