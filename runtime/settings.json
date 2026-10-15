@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 9,
+  "revision": 10,
   "minimumAppVersion": "1.1.8",
   "copy": {},
   "search": {
@@ -107,16 +107,7 @@
     "walkingOnlyMeters": 900,
     "walkingWeight": 1.0,
     "waitingWeight": 1.0,
-    "transferPenaltySeconds": 420,
-    "bikeRouting": true,
-    "bikeSpeed": 3.3,
-    "bikeHandlingSeconds": 150,
-    "bikeAccessMeters": 400,
-    "bikeMinimumRideMeters": 500,
-    "bikeMaximumRideMeters": 5000,
-    "bikeMinimumGainSeconds": 240,
-    "bikeMinimumBikes": 2,
-    "bikeMinimumDocks": 2
+    "transferPenaltySeconds": 420
   },
   "refresh": {
     "vehicleSeconds": 15,
@@ -128,8 +119,7 @@
     "nearbyStops": true,
     "quickDestinations": true,
     "stationShortcut": true,
-    "routeShortcut": true,
-    "bikeStations": true
+    "routeShortcut": true
   },
   "quickDestinations": [
     "臺北車站",
