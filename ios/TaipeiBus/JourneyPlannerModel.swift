@@ -807,7 +807,7 @@ final class JourneyPlannerModel: ObservableObject {
             // geometry, notices and ETA are bicycle-specific (verified against driving and
             // walking queries on the same station pair). The single-mode request is the source
             // of truth; never change a cycling request into a walking or driving fallback.
-            if let path = response.routes.filter { transport == .cycling || $0.transportType == transport }
+            if let path = response.routes.filter({ route in transport == .cycling || route.transportType == transport })
                 .compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {

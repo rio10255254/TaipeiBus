@@ -66,7 +66,7 @@ jobs:
           xcrun simctl bootstatus "$device" -b
           xcrun simctl install "$device" "$RUNNER_TEMP/Probe.app"
           xcrun simctl launch --console "$device" com.example.TaipeiBus.CyclingProbe | tee "$RUNNER_TEMP/cycling-source.log"
-          python3 -c 'import os; p=os.environ["RUNNER_TEMP"]+"/cycling-source.log"; s=open(p).read(); assert all(x in s for x in ["OS=","SOURCE=Taipei cycling","SOURCE=Taipei driving","SOURCE=Taipei walking","SOURCE=Apple sample cycling"]), "Probe must actually execute all queries"' 
+          python3 -c 'import os; p=os.environ["RUNNER_TEMP"]+"/cycling-source.log"; s=open(p).read(); assert all(x in s for x in ["OS=","SOURCE=Taipei cycling","SOURCE=Taipei driving","SOURCE=Taipei walking","SOURCE=Apple sample cycling"]), "Probe must actually execute all queries"'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
