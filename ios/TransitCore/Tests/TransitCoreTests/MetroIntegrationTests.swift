@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(MapKit)
+import MapKit
+#endif
 @testable import TransitCore
 
 final class MetroIntegrationTests: XCTestCase {
@@ -211,6 +214,28 @@ final class MetroIntegrationTests: XCTestCase {
             XCTAssertFalse(green.isEmpty,"A direct Gongguan-Ximen train must be retained in the city catalog")
         }
     }
+
+    #if canImport(MapKit)
+    @MainActor
+    func testGongguanXimenWalkingEndpointsAudit() async throws {
+        guard ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] != nil else { throw XCTSkip("Explicit walking audit") }
+        let metro=try network(), origin=Coordinate(latitude:25.0192,longitude:121.5390), destination=Coordinate(latitude:25.0434,longitude:121.5062)
+        let gongguan=try XCTUnwrap(metro.stations.first { $0.code=="G07" }), ximen=try XCTUnwrap(metro.stations.first { $0.code=="G12" })
+        let entry=try XCTUnwrap(metro.nearestExit(stationID:gongguan.id,to:origin)), exit=try XCTUnwrap(metro.nearestExit(stationID:ximen.id,to:destination))
+        for (name,from,to) in [(entry.name,origin,entry.coordinate),(exit.name,exit.coordinate,destination)] {
+            let request=MKDirections.Request();request.transportType = .walking
+            request.source=MKMapItem(placemark:MKPlacemark(coordinate:CLLocationCoordinate2D(latitude:from.latitude,longitude:from.longitude)))
+            request.destination=MKMapItem(placemark:MKPlacemark(coordinate:CLLocationCoordinate2D(latitude:to.latitude,longitude:to.longitude)))
+            let response=try await MKDirections(request:request).calculate()
+            for route in response.routes {
+                let points=(0..<route.polyline.pointCount).map { i in let c=route.polyline.points()[i].coordinate;return Coordinate(latitude:c.latitude,longitude:c.longitude) }
+                print("GONGGUAN_WALK exit=\(name) from=\(from) to=\(to) seconds=\(route.expectedTravelTime) meters=\(route.distance) startGap=\(points.first.map { $0.distance(to:from) } ?? -1) endGap=\(points.last.map { $0.distance(to:to) } ?? -1) type=\(route.transportType.rawValue)")
+                XCTAssertNotNil(AnchoredPedestrianPath.make(points,from:from,to:to),"Official metro entrance must remain walkable")
+            }
+            XCTAssertFalse(response.routes.isEmpty)
+        }
+    }
+    #endif
 
     func testEveryOfficialStationHasAUsableTrainTrackIncludingOffsetStationCentres() throws {
         let metro = try network(), date = noon()
