@@ -803,7 +803,12 @@ final class JourneyPlannerModel: ObservableObject {
         do {
             let response = try await operation.calculate()
             try Task.checkCancellation()
-            if let path = response.routes.filter { $0.transportType == transport }.compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
+            // MapKit currently labels cycling responses/steps as automobile even when their
+            // geometry, notices and ETA are bicycle-specific (verified against driving and
+            // walking queries on the same station pair). The single-mode request is the source
+            // of truth; never change a cycling request into a walking or driving fallback.
+            if let path = response.routes.filter { transport == .cycling || $0.transportType == transport }
+                .compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()

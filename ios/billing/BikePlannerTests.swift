@@ -1,4 +1,5 @@
 import XCTest
+import MapKit
 @testable import TransitCore
 @testable import TaipeiBus
 
@@ -132,6 +133,16 @@ final class BikePlannerTests: XCTestCase {
         XCTAssertGreaterThan(bike.rideSeconds,60)
         XCTAssertGreaterThan(bike.rideMeters,1000)
         XCTAssertFalse(result.instructions.isEmpty)
+        // Compare the real requested-mode response, not MKRoute's misleading transport flag.
+        // The reported Taipei example has distinct pedestrian and bicycle paths.
+        let walkingRequest=MKDirections.Request()
+        walkingRequest.source=TravelPlace(name:"借車",address:"",coordinate:a.coordinate).mapItem
+        walkingRequest.destination=TravelPlace(name:"還車",address:"",coordinate:b.coordinate).mapItem
+        walkingRequest.transportType = .walking
+        let response=try await MKDirections(request:walkingRequest).calculate()
+        let pedestrian=try XCTUnwrap(response.routes.compactMap { PedestrianPath.leg($0,from:a.coordinate,to:b.coordinate) }.first)
+        XCTAssertNotEqual(bike.ride,pedestrian.coordinates,"Cycling must not reuse the pedestrian path with a faster speed")
+        XCTAssertLessThan(bike.rideSeconds,try XCTUnwrap(pedestrian.duration)/2)
         print("LIVE_CYCLING meters=\(bike.rideMeters) seconds=\(bike.rideSeconds) points=\(bike.ride.count) instructions=\(result.instructions.count)")
     }
 

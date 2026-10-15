@@ -3,9 +3,15 @@ import MapKit
 import UIKit
 import CryptoKit
 @main final class Probe: UIResponder, UIApplicationDelegate {
+    func application(_ application: UIApplication, configurationForConnecting session: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
+        let config=UISceneConfiguration(name:"Probe",sessionRole:session.role);config.delegateClass=ProbeScene.self;return config
+    }
+}
+final class ProbeScene: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        window = UIWindow(frame: UIScreen.main.bounds); window?.rootViewController = UIViewController(); window?.makeKeyAndVisible()
+    func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
+        guard let scene=scene as? UIWindowScene else { return }
+        window = UIWindow(windowScene:scene); window?.rootViewController = UIViewController(); window?.makeKeyAndVisible()
         Task { @MainActor in
             print("OS=\(UIDevice.current.systemVersion)");fflush(stdout)
             let taipeiA=CLLocationCoordinate2D(latitude:25.04459,longitude:121.55252)
@@ -32,6 +38,5 @@ import CryptoKit
             }
             exit(0)
         }
-        return true
     }
 }
