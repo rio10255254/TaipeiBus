@@ -417,12 +417,16 @@ struct NativeBusMap: UIViewRepresentable {
             map.style?.layer(withIdentifier: "bike-station-dots")?.isVisible = visible
             map.style?.layer(withIdentifier: "bike-station-counts")?.isVisible = visible
             guard visible else {
-                if lastBikeKey != "off" { bikeSource?.shape = nil; lastBikeKey = "off" }
+                let key = "off:\(model.bikeAvailability?.receivedAt.timeIntervalSince1970 ?? 0):\(model.planner.mapRevision):\(darkMode):\(Int(Date().timeIntervalSince1970 / 60))"
+                if lastBikeKey != key {
+                    bikeSource?.shape = nil; lastBikeKey = key
+                    if model.planner.selected?.cycles == true { updateTripStops() }
+                }
                 return
             }
             let now = Date()
             // Counts change at most once a minute, and a stale count turns grey on its own.
-            let key = "\(model.bikeNetwork.generatedAt):\(model.bikeAvailability?.receivedAt.timeIntervalSince1970 ?? 0):\(darkMode):\(Int(now.timeIntervalSince1970 / 60))"
+            let key = "\(model.bikeNetwork.generatedAt):\(model.bikeAvailability?.receivedAt.timeIntervalSince1970 ?? 0):\(darkMode):\(Int(now.timeIntervalSince1970 / 60)):trip\(model.planner.mapRevision)"
             guard key != lastBikeKey else { return }
             lastBikeKey = key
             let features = model.bikeNetwork.stations.map { station -> MLNPointFeature in
@@ -435,6 +439,7 @@ struct NativeBusMap: UIViewRepresentable {
                 return feature
             }
             bikeSource?.shape = MLNShapeCollectionFeature(shapes: features)
+            if model.planner.selected?.cycles == true { updateTripStops() }
         }
 
         private func addStationLayer(id: String, style: MLNStyle) -> MLNShapeSource {
@@ -764,6 +769,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.setImage(journeyStopIcon(), forName: "journey-waypoint")
             style.setImage(journeyEndpointIcon(symbol: "bus.fill", color: markerBlue), forName: "journey-boarding")
             style.setImage(journeyEndpointIcon(symbol: "arrow.down", color: markerBlue), forName: "journey-alighting")
+            style.setImage(journeyEndpointIcon(symbol: "figure.walk", color: markerBlue), forName: "journey-entrance")
             style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26), forName: "journey-destination")
         }
 
@@ -985,6 +991,38 @@ struct NativeBusMap: UIViewRepresentable {
                     title: AppText.text(index == option.rides.count - 1 ? "下車" : "轉乘") + " · " + ride.alighting.bilingualName)
                 features[ride.alighting.stationID]?.attributes["icon"] = tripIcon("alighting", route: route)
             }
+            // Mark the actual metro entrance where pedestrian directions end, rather
+            // than leaving the dots unlabelled short of the underground station centre.
+            for (index, leg) in option.walks.enumerated() where !leg.internalTransfer {
+                let isVisible = !model.planner.started || model.planner.currentStep == .walk(index)
+                guard isVisible else { continue }
+                if let instruction = leg.stationInstruction {
+                    let endpoint = option.rides.indices.contains(index) ? leg.to : leg.from
+                    let id = "entrance:\(index)"
+                    add(endpoint, id: id, title: instruction)
+                    features[id]?.attributes["icon"] = "journey-entrance"
+                }
+                guard let bike = leg.bike else { continue }
+                for (station, returning) in [(bike.pickup, false), (bike.dropoff, true)] {
+                    let now = Date(), dock = model.bikeDock(station.id)
+                    let supply = BikeSupply.level(dock, at: now, returning: returning)
+                    let count = dock?.availableCount(returning: returning, at: now)
+                    let status = count.map { AppText.text(returning ? "可還 %@ 格" : "可借 %@ 輛", $0) }
+                        ?? AppText.text(dock?.active == false ? "暫停服務" : returning ? "空位待確認" : "車輛待確認")
+                    let title = AppText.text(returning ? "還車" : "借車") + " · " + status
+                    let hex = Self.bikeTint(supply, dark: darkMode)
+                    let icon = "journey-bike-\(returning ? "return" : "rent")-\(hex)"
+                    if !tintedTripIcons.contains(icon), let style = map?.style {
+                        style.setImage(journeyEndpointIcon(symbol: returning ? "parkingsign" : "bicycle", color: UIColor(liveHex: hex)), forName: icon)
+                        tintedTripIcons.insert(icon)
+                    }
+                    let id = "bike:\(index):\(returning):\(station.id)"
+                    add(station.coordinate, id: id, title: title)
+                    features[id]?.attributes["icon"] = icon
+                    features[id]?.attributes["bikeStationID"] = station.id
+                    features[id]?.attributes["returning"] = returning ? 1 : 0
+                }
+            }
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
                 add(destination.coordinate, id: "destination", title: destination.localizedName)
@@ -1180,6 +1218,14 @@ struct NativeBusMap: UIViewRepresentable {
                 state["walkingPointCount"] = model.activeWalkingIndex.map { model.planner.walkingCoordinates(at: $0).count } ?? 0
                 let layerIDs = mapView.style?.layers.map(\.identifier) ?? []
                 state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
+                state["selectedBikeStation"] = model.selectedBikeStationID ?? ""
+                state["selectedBikeReturning"] = model.selectedBikeStationReturning
+                state["plannedBikePins"] = (model.planner.selected?.walks.compactMap(\.bike) ?? []).flatMap { bike -> [[String: Any]] in
+                    [(bike.pickup, false), (bike.dropoff, true)].map { station, returning in
+                        let point = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)
+                        return ["id": station.id, "returning": returning, "x": point.x, "y": point.y]
+                    }
+                }
                 state["fleetVisible"] = buses?.renderedVehicleCount ?? 0
                 state["fleetModels"] = buses?.modelVehicleCount ?? 0
                 state["metroLines"] = model.metadata.metro.lines.count
@@ -1755,6 +1801,12 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
             model.recordMapTap("map-tap:\(Int(point.x)),\(Int(point.y))")
 #endif
+            // The journey's own borrow/return pins are explicit actions. Resolve
+            // them before nearby transit symbols that share the same entrance.
+            if let bike = plannedBikeStation(at: point, map: map) {
+                model.selectBikeStation(bike.id, returning: bike.returning)
+                return
+            }
             let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
             let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["nearby-station-dots", "nearby-station-names", "journey-stop-dots", "journey-waypoint-dots", "journey-stop-names", "metro-station-dots", "metro-station-names", "metro-exit-labels"]))
             let station = features.compactMap { feature -> Station? in
@@ -1803,6 +1855,19 @@ struct NativeBusMap: UIViewRepresentable {
                 let position = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
                 return (id, hypot(position.x - point.x, position.y - point.y))
             }.min { $0.1 < $1.1 }?.0
+        }
+
+        private func plannedBikeStation(at point: CGPoint, map: MLNMapView) -> (id: String, returning: Bool)? {
+            guard model.planner.selected?.cycles == true else { return nil }
+            let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
+            return map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["journey-stop-dots", "journey-stop-names"]))
+                .compactMap { feature -> (id: String, returning: Bool, distance: CGFloat)? in
+                    guard let id = feature.attribute(forKey: "bikeStationID") as? String,
+                          let station = model.bikeNetwork.station(id) else { return nil }
+                    let projected = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                    return (id, (feature.attribute(forKey: "returning") as? NSNumber)?.boolValue ?? false,
+                            hypot(projected.x - point.x, projected.y - point.y))
+                }.min { $0.distance < $1.distance }.map { ($0.id, $0.returning) }
         }
 
         /// Places are only offered while the map is free to browse, never over a trip or a

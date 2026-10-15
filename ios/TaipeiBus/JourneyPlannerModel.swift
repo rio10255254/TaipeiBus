@@ -3,9 +3,8 @@ import MapKit
 import TransitCore
 
 /// A YouBike connection inside one journey leg: walk to a station that has bikes, ride to a
-/// station that has somewhere to return it, walk on from there. Apple publishes no cycling
-/// directions, so the ridden path is the verified street path between the two stations and its
-/// time comes from the planning cycling speed rather than from Apple.
+/// station that has somewhere to return it, walk on from there. The riding portion uses
+/// Apple cycling directions and their travel time, separately from the two pedestrian legs.
 struct BikeLeg: Sendable {
     var pickup: BikeStation
     var dropoff: BikeStation
@@ -317,7 +316,12 @@ final class JourneyPlannerModel: ObservableObject {
             let walking = valid.first(where: \.walkingOnly).flatMap { duration($0, at: date)?.totalSeconds }
             let beatsTransit = transit.map { riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds } ?? true
             let beatsWalking = walking.map { riding.totalSeconds <= $0 - preferences.bikeWalkGainSeconds } ?? false
-            if beatsTransit || beatsWalking { result.insert(cycling, at: 0) }
+            if beatsTransit { result.insert(cycling, at: 0) }
+            else if beatsWalking {
+                // Eligibility is not a recommendation: keep genuinely faster transit first.
+                let position = result.firstIndex { (duration($0, at: date)?.totalSeconds ?? .infinity) > riding.totalSeconds } ?? result.count
+                result.insert(cycling, at: max(1, position))
+            }
         }
         if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
            result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
@@ -417,6 +421,9 @@ final class JourneyPlannerModel: ObservableObject {
         metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
     }
     private var pickupTask: Task<Void, Never>?
+    private var pickupGeneration = UUID()
+    @Published var changingBikeStation = false
+    @Published var bikeStationUpdateMessage: String?
     func updateBikes(network: BikeNetwork, availability: BikeAvailability?) {
         bikeNetwork = network; bikeAvailability = availability
     }
@@ -439,12 +446,14 @@ final class JourneyPlannerModel: ObservableObject {
         let legStep = steps.firstIndex(of: .walk(index))
         let passed = started && (legStep ?? .max) < stepIndex
         guard !passed else { return nil }
+        let phase = started && legStep == stepIndex ? cyclingPhase(at: index) : .toPickup
+        guard phase != .fromDropoff else { return nil }
         let date = Date()
         func replacement(_ station: BikeStation, renting: Bool) -> BikeStation? {
             BikeRouting.replacement(for: station, network: bikeNetwork, availability: bikeAvailability,
                                     renting: renting, preferences: preferences, at: date)
         }
-        if !BikeRouting.stillUsable(bike.pickup, availability: bikeAvailability, renting: true, preferences: preferences, at: date) {
+        if phase == .toPickup, !BikeRouting.stillUsable(bike.pickup, availability: bikeAvailability, renting: true, preferences: preferences, at: date) {
             return .noBikes(bike.pickup, replacement: replacement(bike.pickup, renting: true))
         }
         if !BikeRouting.stillUsable(bike.dropoff, availability: bikeAvailability, renting: false, preferences: preferences, at: date) {
@@ -456,36 +465,34 @@ final class JourneyPlannerModel: ObservableObject {
     /// keeping the rest of the trip as it is.
     func moveBikeStation(to station: BikeStation, renting: Bool) {
         guard let option = selected, let index = option.bikeLegIndex, var bike = option.walks[index].bike,
-              let slot = options.firstIndex(where: { $0.id == option.id }) else { return }
+              options.contains(where: { $0.id == option.id }) else { return }
         if renting { bike.pickup = station; bike.bikes = bikeAvailability?.dock(station.id)?.rentable ?? 0 }
         else { bike.dropoff = station; bike.docks = bikeAvailability?.dock(station.id)?.returnable ?? 0 }
         var leg = option.walks[index]
-        // A straight-line estimate keeps the trip usable while the streets are re-checked.
-        bike.toPickupMeters = leg.from.distance(to: bike.pickup.coordinate)
-        bike.toPickupSeconds = BikeRouting.walkingSeconds(bike.toPickupMeters)
-        bike.toPickup = [leg.from, bike.pickup.coordinate]
-        bike.rideMeters = bike.pickup.coordinate.distance(to: bike.dropoff.coordinate) * BikeRouting.cyclingDetour
-        bike.rideSeconds = bike.rideMeters / max(1, preferences.bikeSpeed)
-        bike.ride = [bike.pickup.coordinate, bike.dropoff.coordinate]
-        bike.fromDropoffMeters = bike.dropoff.coordinate.distance(to: leg.to)
-        bike.fromDropoffSeconds = BikeRouting.walkingSeconds(bike.fromDropoffMeters)
-        bike.fromDropoff = [bike.dropoff.coordinate, leg.to]
+        // Keep the confirmed trip visible until the replacement has a complete route.
         leg.bike = bike
-        leg.coordinates = bike.coordinates
-        leg.road = RouteLine(coordinates: leg.coordinates)
-        leg.distance = bike.totalMeters
-        leg.streetDuration = bike.totalSeconds
-        leg.duration = bike.totalSeconds + leg.stationSeconds
-        options[slot].walks[index] = leg
-        mapRevision += 1
         let id = option.id, token = generation
         pickupTask?.cancel()
+        let request = UUID(); pickupGeneration = request
+        let step = stepIndex
+        changingBikeStation = true; bikeStationUpdateMessage = nil
         pickupTask = Task { [weak self] in
             guard let self else { return }
+            defer { if self.pickupGeneration == request { self.changingBikeStation = false } }
             let updated = try? await self.cycle(leg)
-            guard !Task.isCancelled, token == self.generation, let updated,
+            guard !Task.isCancelled, token == self.generation, request == self.pickupGeneration,
+                  self.selectedID == id, self.stepIndex == step,
                   let slot = self.options.firstIndex(where: { $0.id == id }) else { return }
+            guard let updated, updated.verified,
+                  BikeRouting.stillUsable(station, availability: self.bikeAvailability, renting: renting,
+                                         preferences: self.preferences) else {
+                self.bikeStationUpdateMessage = "保留原行程，請稍後再試"
+                return
+            }
             self.options[slot].walks[index] = updated
+            if let verified = self.verifiedPool.firstIndex(where: { $0.id == id }) {
+                self.verifiedPool[verified].walks[index] = updated
+            }
             self.endWalkingGuidance()
             self.walkingRevision += 1; self.walkingRouteRevision += 1; self.mapRevision += 1
             UISelectionFeedbackGenerator().selectionChanged()
@@ -746,16 +753,18 @@ final class JourneyPlannerModel: ObservableObject {
         return result
     }
     /// Verifies a cycling leg: the walk to the station, the streets the bike will take, and the
-    /// walk on from where it is returned. Apple has no cycling directions, so the ridden path is
-    /// the pedestrian path between the two stations and its time comes from the planning speed.
+    /// walk on from where it is returned. Never substitute pedestrian directions for cycling.
     private func cycle(_ leg: WalkingLeg) async throws -> WalkingLeg {
+#if DEBUG
+        if let testCycle { return try await testCycle(leg) }
+#endif
         guard var bike = leg.bike else { return leg }
         var result = leg
         let access = try await walk(WalkingLeg(from: leg.from, to: bike.pickup.coordinate))
-        let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate))
+        let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate), transport: .cycling)
         let egress = try await walk(WalkingLeg(from: bike.dropoff.coordinate, to: leg.to))
         guard let accessSeconds = access.duration, let egressSeconds = egress.duration,
-              let rideMeters = street.distance, street.verified, rideMeters > 0 else {
+              let rideMeters = street.distance, let rideSeconds = street.duration, rideMeters > 0, rideSeconds > 0 else {
             result.duration = nil; return result
         }
         bike.toPickup = access.coordinates
@@ -763,7 +772,7 @@ final class JourneyPlannerModel: ObservableObject {
         bike.toPickupSeconds = accessSeconds
         bike.ride = street.coordinates
         bike.rideMeters = rideMeters
-        bike.rideSeconds = rideMeters / max(1, preferences.bikeSpeed)
+        bike.rideSeconds = rideSeconds
         bike.fromDropoff = egress.coordinates
         bike.fromDropoffMeters = egress.distance ?? bike.dropoff.coordinate.distance(to: leg.to)
         bike.fromDropoffSeconds = egressSeconds
@@ -773,11 +782,11 @@ final class JourneyPlannerModel: ObservableObject {
         result.distance = bike.totalMeters
         result.streetDuration = bike.totalSeconds
         result.duration = bike.totalSeconds + leg.stationSeconds
-        result.instructions = []
+        result.instructions = access.instructions + street.instructions + egress.instructions
         return result
     }
-    private func walk(_ leg: WalkingLeg, guidance: Bool = false) async throws -> WalkingLeg {
-        let cacheKey = "\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
+    private func walk(_ leg: WalkingLeg, guidance: Bool = false, transport: MKDirectionsTransportType = .walking) async throws -> WalkingLeg {
+        let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
         if let cached = walkingCache[cacheKey] { return cached }
         var result = leg
         if leg.from.distance(to: leg.to) < 1 {
@@ -786,7 +795,7 @@ final class JourneyPlannerModel: ObservableObject {
         let request = MKDirections.Request()
         request.source = TravelPlace(name: "起點", address: "", coordinate: leg.from).mapItem
         request.destination = TravelPlace(name: "終點", address: "", coordinate: leg.to).mapItem
-        request.transportType = .walking
+        request.transportType = transport
         request.requestsAlternateRoutes = true
         let operation = MKDirections(request: request); directions.append(operation)
         if guidance { walkingRequest = operation }
@@ -794,7 +803,12 @@ final class JourneyPlannerModel: ObservableObject {
         do {
             let response = try await operation.calculate()
             try Task.checkCancellation()
-            if let path = response.routes.compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
+            // MapKit currently labels cycling responses/steps as automobile even when their
+            // geometry, notices and ETA are bicycle-specific (verified against driving and
+            // walking queries on the same station pair). The single-mode request is the source
+            // of truth; never change a cycling request into a walking or driving fallback.
+            if let path = response.routes.filter({ route in transport == .cycling || route.transportType == transport })
+                .compactMap({ PedestrianPath.leg($0, from: leg.from, to: leg.to) })
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()
@@ -843,11 +857,23 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func cancelRequests() {
         endWalkingGuidance()
+        pickupTask?.cancel(); pickupTask = nil; pickupGeneration = UUID()
+        changingBikeStation = false; bikeStationUpdateMessage = nil
         task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
 
 #if DEBUG
+    var testCycle: ((WalkingLeg) async throws -> WalkingLeg)?
+    func verifyCyclingLegForTest(_ leg: WalkingLeg) async throws -> WalkingLeg { try await cycle(leg) }
+    /// Controlled inputs; tests still exercise production ranking and navigation methods.
+    func auditLoadChoices(_ choices: [JourneyOption], from start: TravelPlace, to end: TravelPlace) {
+        cancelRequests(); origin = start; destination = end; usingLocation = false
+        started = false; stepIndex = 0; selectionConfirmed = false
+        verifiedPool = choices; options = choices
+        publishRecommendations()
+    }
+
     /// Deterministic UI scenarios use actual planner routes and explicitly simulated walking.
     func prepareRouteChoicesPreview(_ trips: [TransitTrip], from start: TravelPlace, to end: TravelPlace) {
         cancelRequests(); origin = start; destination = end; usingLocation = false

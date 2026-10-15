@@ -237,7 +237,7 @@ struct TransitHomeView: View {
         if let bike = model.selectedBikeStation, !hasSelection {
             BikeStationCard(model: model, station: bike,
                             distance: location.usableCoordinate.map { $0.distance(to: bike.coordinate) },
-                            close: { model.selectedBikeStationID = nil })
+                            close: { model.selectedBikeStationID = nil }, returning: model.selectedBikeStationReturning)
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
         } else if let place = model.tappedPlace, !hasSelection {
             MapPlaceCard(place: place, distance: location.usableCoordinate.map { $0.distance(to: place.coordinate) },
@@ -355,6 +355,7 @@ struct TransitHomeView: View {
                 }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .bikeStationDetails(model: model, active: hasSelection && !showJourney && !showDetails && !showSearch && !showInformation)
         .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
             guard requested else { return }

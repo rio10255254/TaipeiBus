@@ -11,6 +11,8 @@ struct BikeStationCard: View {
     let station: BikeStation
     let distance: Double?
     let close: () -> Void
+    var returning = false
+    var embedded = false
 
     private var dock: BikeDock? { model.bikeDock(station.id) }
     private func tint(_ supply: BikeSupply) -> Color {
@@ -18,11 +20,11 @@ struct BikeStationCard: View {
     }
     /// A station with nothing to rent is only useful with somewhere else to walk to.
     private func alternative(at date: Date) -> (station: BikeStation, distance: Double)? {
-        guard BikeSupply.level(dock, at: date) == .empty else { return nil }
+        guard BikeSupply.level(dock, at: date, returning: returning) == .empty else { return nil }
         return model.bikeNetwork.stations(near: station.coordinate, radius: 500, limit: 8)
             .first { other in
                 guard other.id != station.id else { return false }
-                let level = BikeSupply.level(model.bikeDock(other.id), at: date)
+                let level = BikeSupply.level(model.bikeDock(other.id), at: date, returning: returning)
                 return level == .plenty || level == .few
             }
             .map { ($0, $0.coordinate.distance(to: station.coordinate)) }
@@ -43,8 +45,8 @@ struct BikeStationCard: View {
             let docks = BikeSupply.level(dock, at: now, returning: true)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
-                    Image(systemName: "bicycle").liveFont(.subheadline, weight: .semibold).foregroundStyle(.white)
-                        .frame(width: 36, height: 36).background(Circle().fill(tint(bikes)))
+                    Image(systemName: returning ? "parkingsign.circle.fill" : "bicycle").liveFont(.subheadline, weight: .semibold).foregroundStyle(.white)
+                        .frame(width: 36, height: 36).background(Circle().fill(tint(returning ? docks : bikes)))
                     VStack(alignment: .leading, spacing: 2) {
                         BilingualName(chinese: station.name, english: station.englishName)
                             .liveFont(.headline, weight: .semibold).lineLimit(2)
@@ -57,6 +59,7 @@ struct BikeStationCard: View {
                         Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
                             .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
                     }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+                        .accessibilityIdentifier("bike-station-close")
                 }
                 HStack(spacing: 14) {
                     count(live.text("可借"), value: dock?.rentable, supply: bikes)
@@ -65,11 +68,16 @@ struct BikeStationCard: View {
                     Text(reportLabel(dock, at: now)).liveFont(.caption).foregroundStyle(.secondary)
                         .accessibilityIdentifier("bike-station-report")
                 }
+                if returning {
+                    Text(dock?.availableCount(returning: true, at: now).map { AppText.text("目前可還 %@ 格", $0) } ?? live.text("空位待確認"))
+                        .liveFont(.headline, weight: .semibold).foregroundStyle(tint(docks))
+                        .accessibilityIdentifier("bike-station-return-status")
+                }
                 if let nearest = alternative(at: now) {
-                    Button { model.selectBikeStation(nearest.station.id) } label: {
+                    Button { model.selectBikeStation(nearest.station.id, returning: returning) } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "figure.walk").liveFont(.caption, weight: .semibold)
-                            Text(AppText.text("最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
+                            Text(AppText.text(returning ? "附近可還 %@ · %@" : "最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
                                 .liveFont(.subheadline, weight: .semibold).lineLimit(1)
                         }.padding(.horizontal, 14).frame(minHeight: 40)
                     }
@@ -78,11 +86,11 @@ struct BikeStationCard: View {
                 }
             }
             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
-            .phoneGlass(in: RoundedRectangle(cornerRadius: 22 * CGFloat(live.appearance.cornerScale), style: .continuous))
+            .modifier(BikeStationSurface(embedded: embedded, radius: 22 * CGFloat(live.appearance.cornerScale)))
             .accessibilityElement(children: .contain).accessibilityIdentifier("bike-station-card")
             .accessibilityLabel(AppText.text("YouBike %@，可借 %@，可還 %@", station.localizedName,
-                                             dock.map { String($0.rentable) } ?? live.text("未知"),
-                                             dock.map { String($0.returnable) } ?? live.text("未知")))
+                                             dock?.availableCount(returning: false, at: now).map(String.init) ?? live.text("未知"),
+                                             dock?.availableCount(returning: true, at: now).map(String.init) ?? live.text("未知")))
         }
     }
 
@@ -90,8 +98,91 @@ struct BikeStationCard: View {
         HStack(spacing: 6) {
             Circle().fill(tint(supply)).frame(width: 9, height: 9)
             Text(title).liveFont(.caption).foregroundStyle(.secondary)
-            Text(supply == .unknown ? "–" : "\(value ?? 0)").liveFont(.headline, weight: .semibold).monospacedDigit()
+            Text(supply == .unknown || supply == .suspended ? "–" : "\(value ?? 0)").liveFont(.headline, weight: .semibold).monospacedDigit()
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct BikeStationSurface: ViewModifier {
+    let embedded: Bool
+    let radius: CGFloat
+    @ViewBuilder func body(content: Content) -> some View {
+        if embedded { content }
+        else { content.phoneGlass(in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
+    }
+}
+
+/// Presented by the currently visible sheet (or the map during navigation), so
+/// inspecting a dock never replaces the trip or changes its navigation phase.
+private struct BikeStationDetailsPresentation: ViewModifier {
+    @ObservedObject var model: TransitAppModel
+    let active: Bool
+    func body(content: Content) -> some View {
+        content.sheet(isPresented: Binding(get: { active && model.selectedBikeStation != nil },
+            set: { if !$0 && active { model.selectedBikeStationID = nil } })) {
+            if let station = model.selectedBikeStation {
+                BikeStationCard(model: model, station: station, distance: nil,
+                    close: { model.selectedBikeStationID = nil }, returning: model.selectedBikeStationReturning, embedded: true)
+                    .padding(18)
+                    .presentationDetents([.height(260), .medium])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(.regularMaterial)
+            }
+        }
+    }
+}
+
+extension View {
+    func bikeStationDetails(model: TransitAppModel, active: Bool = true) -> some View {
+        modifier(BikeStationDetailsPresentation(model: model, active: active))
+    }
+}
+
+struct JourneyBikeStations: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @ObservedObject var model: TransitAppModel
+    let bike: BikeLeg
+    let index: Int
+    var compact = false
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 15)) { timeline in
+            if compact {
+                HStack(spacing: 8) {
+                    station(bike.pickup, returning: false, at: timeline.date)
+                    station(bike.dropoff, returning: true, at: timeline.date)
+                }
+            } else {
+                VStack(spacing: 6) {
+                    station(bike.pickup, returning: false, at: timeline.date)
+                    station(bike.dropoff, returning: true, at: timeline.date)
+                }
+            }
+        }
+    }
+    private func station(_ station: BikeStation, returning: Bool, at date: Date) -> some View {
+        let dock = model.bikeDock(station.id)
+        let count = dock?.availableCount(returning: returning, at: date)
+        let tint = Color(liveHex: NativeBusMap.Coordinator.bikeTint(BikeSupply.level(dock, at: date, returning: returning), dark: colorScheme == .dark))
+        let status = count.map { AppText.text(returning ? "可還 %@ 格" : "可借 %@ 輛", $0) }
+            ?? AppText.text(dock?.active == false ? "暫停服務" : returning ? "空位待確認" : "車輛待確認")
+        return Button { model.selectBikeStation(station.id, returning: returning) } label: {
+            HStack(spacing: 8) {
+                Image(systemName: returning ? "parkingsign.circle" : "bicycle")
+                    .liveFont(.subheadline).frame(width: 22)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 5) {
+                        Text(AppText.text(returning ? "還車" : "借車")).liveFont(.caption).foregroundStyle(.secondary)
+                        if compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint) }
+                    }
+                    Text(station.localizedName).liveFont(compact ? .caption : .subheadline, weight: .medium)
+                        .lineLimit(compact ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                if !compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).fixedSize() }
+                Image(systemName: "chevron.right").liveFont(.caption2).foregroundStyle(.secondary)
+            }.padding(.horizontal, 10).padding(.vertical, 7).frame(maxWidth: .infinity, minHeight: 48)
+        }.buttonStyle(MapActionStyle())
+            .accessibilityIdentifier("journey-bike-\(returning ? "dropoff" : "pickup")-\(index)")
+            .accessibilityLabel(AppText.text(returning ? "還車站 %@，%@" : "借車站 %@，%@", station.localizedName, status))
     }
 }

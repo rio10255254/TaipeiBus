@@ -674,5 +674,18 @@
   "看騎乘路線": "See cycling route",
   "騎到站牌": "Ride to the stop",
   "顯示 YouBike 站點、查看站點或行程含 YouBike 時，App 會向臺北市公開資料取得全市即時車位，這個請求不包含你的位置、目的地或選取的站點。": "While stations are shown, a station is open, or a planned trip rides a YouBike, the app asks Taipei City open data for the whole city’s counts. That request carries neither your location, your destination nor the station you picked.",
-  "路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。": "A YouBike trip is only offered when the station it rents from has bikes and the station it returns to has free docks; without current counts none is offered."
+  "路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。": "A YouBike trip is only offered when the station it rents from has bikes and the station it returns to has free docks; without current counts none is offered.",
+  "借車": "Pick up",
+  "還車": "Return",
+  "目前可還 %@ 格": "%@ free docks now",
+  "可還 %@ 格": "%@ free docks",
+  "可借 %@ 輛": "%@ bikes available",
+  "空位待確認": "Dock availability pending",
+  "車輛待確認": "Bike availability pending",
+  "附近可還 %@ · %@": "Return nearby: %@ · %@",
+  "還車站 %@，%@": "Return station %@, %@",
+  "借車站 %@，%@": "Pickup station %@, %@",
+  "保留原行程，請稍後再試": "Your original trip is kept. Try again shortly.",
+  "正在確認新站點路線": "Checking the route to the new station",
+  "騎乘路徑參考步行資料，請依現場標示騎乘或牽行": "Route based on walking directions. Follow local signs and dismount where required."
 }

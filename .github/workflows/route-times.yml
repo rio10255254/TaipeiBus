@@ -19,6 +19,10 @@ on:
         description: 'Publish validated public data for the app'
         type: boolean
         default: false
+      repack_existing:
+        description: 'Publish missing compressed copies of the current catalog, without TDX requests or changing source dates'
+        type: boolean
+        default: false
       allow_smaller:
         description: 'Accept fewer usable profiles than phones have now (only after TDX restructures routes)'
         type: boolean
@@ -54,10 +58,12 @@ jobs:
       - name: Read the published catalog for comparison (GitHub only, no TDX quota)
         run: gh release download travel-time-data --pattern official-times.json --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
       - name: Collect bounded shared public time profiles
+        if: inputs.repack_existing != true
         env:
           REQUESTED_ROUTES: ${{ inputs.routes }}
         run: python3 ios/release/collect-route-times.py --routes "$REQUESTED_ROUTES" --out "$RUNNER_TEMP/route-times/official-times.json"
       - name: Keep unanswered routes and check what phones would receive
+        if: inputs.repack_existing != true
         run: |
           set -euo pipefail
           flags=()
@@ -68,6 +74,15 @@ jobs:
             --coverage "$RUNNER_TEMP/route-times/coverage.json" \
             --published "$RUNNER_TEMP/published/official-times.json" \
             --out "$RUNNER_TEMP/route-times/publish" "${flags[@]}"
+      - name: Repack the exact existing catalog without using TDX quota
+        if: inputs.repack_existing == true
+        run: |
+          set -euo pipefail
+          gh release download travel-time-data --pattern coverage.json --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
+          python3 ios/release/official_times_gate.py repack \
+            --document "$RUNNER_TEMP/published/official-times.json" \
+            --coverage "$RUNNER_TEMP/published/coverage.json" \
+            --out "$RUNNER_TEMP/route-times/publish"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -116,6 +131,12 @@ jobs:
             curl -fsS --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${MIRROR_BRANCH}/$name" > /dev/null ||
               echo "::warning::jsDelivr purge failed for $name; phones verify the copy and fall back to GitHub."
           done
+
+      - name: Verify compressed downloads from both public sources
+        if: env.PUBLISH == 'true'
+        run: |
+          python3 ios/release/verify_official_mirrors.py
+
 
   watchdog:
     if: github.event.schedule == '41 1 * * *'

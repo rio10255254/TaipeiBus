@@ -363,12 +363,14 @@ final class TransitAppModel: ObservableObject {
         }
     }
     @Published var selectedBikeStationID: String?
+    @Published var selectedBikeStationReturning = false
     var showsBikeStations: Bool { bikeStationsOn && liveSettings.display.bikeStations && !bikeNetwork.stations.isEmpty }
     var selectedBikeStation: BikeStation? { selectedBikeStationID.flatMap { bikeNetwork.station($0) } }
     func bikeDock(_ id: String) -> BikeDock? { bikeAvailability?.dock(id) }
-    func selectBikeStation(_ id: String) {
+    func selectBikeStation(_ id: String, returning: Bool? = nil) {
         guard bikeNetwork.station(id) != nil else { return }
         tappedPlace = nil
+        selectedBikeStationReturning = returning ?? planner.selected?.walks.contains(where: { $0.bike?.dropoff.id == id }) ?? false
         selectedBikeStationID = id
         UISelectionFeedbackGenerator().selectionChanged()
         pollBikesInBackground()
@@ -1727,6 +1729,14 @@ final class TransitAppModel: ObservableObject {
                                               capacity: pickup.capacity, active: true, observedAt: now)
             }
             bikeAvailability = BikeAvailability(docks: emptied, receivedAt: now)
+            planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+        }
+        if ProcessInfo.processInfo.arguments.contains("--preview-youbike-stale") {
+            let old = docks.mapValues { dock in
+                BikeDock(stationID: dock.stationID, rentable: dock.rentable, returnable: dock.returnable,
+                         capacity: dock.capacity, active: dock.active, observedAt: now.addingTimeInterval(-1800))
+            }
+            bikeAvailability = BikeAvailability(docks: old, receivedAt: now)
             planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
         }
     }

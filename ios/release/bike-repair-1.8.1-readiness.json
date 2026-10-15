@@ -1,0 +1,113 @@
+{
+  "version": "1.8.1",
+  "status": "published_to_testflight",
+  "distribution": "testflight-only",
+  "formal_submission": "paused",
+  "source_reviewed": "946aef19783da7dbe1020577311263ce3dfb392c",
+  "repair_source": "6ff29e817fc1dcbda044f5aec55d75006a15761c",
+  "navigation_regressions": {
+    "passed": 7,
+    "run": 38741900458,
+    "cases": [
+      "slower_bike_does_not_replace_fast_transit",
+      "ignore_pickup_after_riding",
+      "ignore_stations_after_return",
+      "warn_upcoming_full_dropoff",
+      "keep_trip_and_retry_unverified_replacement",
+      "keep_navigation_progress_on_network_error",
+      "ignore_late_result_after_closing"
+    ]
+  },
+  "purchases": {
+    "passed": 11,
+    "run": 38741900458,
+    "fix": "Concurrent refresh callers await the settled entitlement read; verified Apple state remains the only authority."
+  },
+  "station_interface": {
+    "initial_light_dark_passed": 6,
+    "run": 38728062114,
+    "latest_run": 38741900458,
+    "latest_status": "passed",
+    "light_passed": 4,
+    "dark_passed": 2,
+    "screenshots_visually_inspected": true
+  },
+  "official_times": {
+    "status": "published_and_verified",
+    "run": 38735645051,
+    "profiles": 595,
+    "original_bytes": 26250699,
+    "compressed_bytes": 6269296,
+    "sha256": "670c37277eda73be6e8617ca91f68c022bb8d0651aa28e58c9cdd9860ce6784f",
+    "generated_at": "2026-10-14T10:54:05Z",
+    "verified_sources": [
+      "GitHub release",
+      "raw GitHub phone-data branch"
+    ],
+    "third_party_cdn": "Intermittent 404/503/timeouts; not relied on as first or only source.",
+    "tdx_requests": 0
+  },
+  "live_settings": {
+    "status": "published_and_read_back",
+    "revision": 10,
+    "commit": "31a18ae609ea3ee172c2281a79a1e083e4ee6ff7",
+    "compatibility": "Actual released 1.2.0 and 1.8.0 decoders accepted the common feed; removed overrides exactly match current built-in bike defaults.",
+    "compatibility_run": 38747936627
+  },
+  "cycling_source": {
+    "status": "validated",
+    "run": 38735507580,
+    "independent_iphone_probe": 38740958980,
+    "requested_transport": 8,
+    "returned_transport": 1,
+    "meters": 2591,
+    "seconds": 596,
+    "from": "八德路三段74巷口",
+    "to": "南京伊通街口",
+    "result": "MapKit mislabels actual cycling routes as automobile. Cycling requests produce different geometry, notices and ETA from both driving and walking. Use the explicit request mode, with no fallback to another transport type.",
+    "comparison_run": 38740958980,
+    "current_integration_run": 38741900458,
+    "observations": {
+      "cycling": {
+        "meters": 2591,
+        "seconds": 596,
+        "notice": "Bike routes and main roads",
+        "geometry_sha256": "1b5cc97fc77daed9311e3282810c3fe3aa748b63a5e0a632b97600788f21a2c5"
+      },
+      "driving": {
+        "meters": 2908,
+        "seconds_range": [
+          412,
+          440
+        ],
+        "geometry_sha256": "ca0b89a86adc4a3a314a8a8844976fa671642c28715ea0559c9bd0fd0543d693"
+      },
+      "walking": {
+        "meters": 2464,
+        "seconds": 2038,
+        "geometry_sha256": "b830188d688c624917d03f6ecbb7953e3dc008b0843bf7e775a2f8c2444a6fd6"
+      }
+    },
+    "integration_run": 38741900458,
+    "integration_meters": 2603.444991029079,
+    "integration_seconds": 606.370825857566,
+    "integration_points": 24,
+    "integration_instructions": 7,
+    "tested_ios_sources": [
+      "26.2",
+      "26.5",
+      "27.0"
+    ]
+  },
+  "physical_device": "Not performed; no claim of road safety or physical-device performance.",
+  "release_decision": "Cycling-source condition met: native request, different pedestrian geometry, complete route, and six light/dark UI checks passed. Publish TestFlight only; do not submit formal App Store review.",
+  "app_source_matches_tested_source": true,
+  "testflight": {
+    "version": "1.8.1",
+    "build_number": "133.1.0",
+    "build_id": "289d3233-f65f-4e8d-b7a3-5fa7c672eb12",
+    "source": "2b01fbfb741fe42813fb4d3ff694451939152b7d",
+    "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38746850671",
+    "status": "internal_group_assigned"
+  }
+}

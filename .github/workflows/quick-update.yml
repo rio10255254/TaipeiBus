@@ -13,6 +13,10 @@ on:
         type: choice
         options: ['validate', 'publish', 'rollback']
         default: 'validate'
+      cycling_probe:
+        description: 'Collect diagnostic cycling responses across iOS generations'
+        type: boolean
+        default: false
       document:
         description: 'For publish: full JSON or a partial update (no secrets)'
         type: string
@@ -30,6 +34,94 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  cycling_source_probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.cycling_probe
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            developer: /Applications/Xcode_26.3.app/Contents/Developer
+          - runner: macos-26
+            developer: /Applications/Xcode.app/Contents/Developer
+          - runner: xcode-27
+            developer: /Applications/Xcode.app/Contents/Developer
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 12
+    env:
+      DEVELOPER_DIR: ${{ matrix.developer }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query the actual iPhone cycling source independently of app geometry
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/Probe.app"
+          xcrun swiftc -parse-as-library -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target arm64-apple-ios17.0-simulator ios/release/cycling-source-check.swift -o "$RUNNER_TEMP/Probe.app/Probe"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.example.TaipeiBus.CyclingProbe' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Probe' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 1' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :UIApplicationSceneManifest dict' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :UIApplicationSceneManifest:UIApplicationSupportsMultipleScenes bool false' "$RUNNER_TEMP/Probe.app/Info.plist"
+          codesign -s - "$RUNNER_TEMP/Probe.app"
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-cycling-probe com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" "$RUNNER_TEMP/Probe.app"
+          xcrun simctl launch --console "$device" com.example.TaipeiBus.CyclingProbe | tee "$RUNNER_TEMP/cycling-source.log"
+          python3 -c 'import os; p=os.environ["RUNNER_TEMP"]+"/cycling-source.log"; s=open(p).read(); assert all(x in s for x in ["OS=","SOURCE=Taipei cycling","SOURCE=Taipei driving","SOURCE=Taipei walking","SOURCE=Apple sample cycling"]), "Probe must actually execute all queries"'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cycling-source-${{ matrix.runner }}
+          path: ${{ runner.temp }}/cycling-source.log
+  legacy_compatibility:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: '1.2.0'
+            commit: bb7bc0ae1a3d622190060700191afa25a419dc24
+          - version: '1.8.0'
+            commit: 6ca91b401086da111b5dd8116658092dc5134260
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      LEGACY_APP_VERSION: ${{ matrix.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test current quick-update settings on the released decoder
+        run: |
+          set -euo pipefail
+          cp runtime/settings.json "$RUNNER_TEMP/settings-1.8.1.json"
+          git fetch --depth=1 origin ${{ matrix.commit }}
+          mkdir -p "$RUNNER_TEMP/legacy-180"
+          git archive -o "$RUNNER_TEMP/legacy-core.tar" FETCH_HEAD ios/TransitCore
+          tar -xf "$RUNNER_TEMP/legacy-core.tar" -C "$RUNNER_TEMP/legacy-180"
+          cat > "$RUNNER_TEMP/legacy-180/ios/TransitCore/Tests/TransitCoreTests/AuditCompatibilityTests.swift" <<'SWIFT'
+          import XCTest
+          @testable import TransitCore
+          final class AuditCompatibilityTests: XCTestCase {
+              func testCurrentSettingsRemainReadableBySupported180() throws {
+                  let path = ProcessInfo.processInfo.environment["RUNNER_TEMP"]! + "/settings-1.8.1.json"
+                  let data = try Data(contentsOf: URL(fileURLWithPath:path))
+                  var control = try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+                  var planning = try XCTUnwrap(control["planning"] as? [String:Any])
+                  planning.removeValue(forKey:"bikeWalkGainSeconds");control["planning"] = planning
+                  XCTAssertNoThrow(try LiveSettings.decode(JSONSerialization.data(withJSONObject:control),appVersion:ProcessInfo.processInfo.environment["LEGACY_APP_VERSION"]!))
+                  XCTAssertNoThrow(try LiveSettings.decode(data,appVersion:ProcessInfo.processInfo.environment["LEGACY_APP_VERSION"]!), "The installed released decoder must accept the common feed")
+              }
+          }
+          SWIFT
+          swift test --package-path "$RUNNER_TEMP/legacy-180/ios/TransitCore" --filter AuditCompatibilityTests | tee "$RUNNER_TEMP/config-compat-audit.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-config-compatibility-${{ matrix.version }}
+          path: ${{ runner.temp }}/config-compat-audit.log
+          retention-days: 14
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -64,7 +156,7 @@ jobs:
   # the file is edited by hand on main without raising it, raise it here so the edit takes effect.
   revision:
     if: github.event_name == 'push'
-    needs: validate
+    needs: [validate, legacy_compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -101,7 +193,7 @@ jobs:
           ./.github/purge-runtime-mirror.sh
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.operation != 'validate' && github.ref == 'refs/heads/main'
-    needs: validate
+    needs: [validate, legacy_compatibility]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

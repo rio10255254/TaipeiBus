@@ -73,6 +73,17 @@ final class ProPurchaseTests: XCTestCase {
         XCTAssertNil(manager.activePlan)
         XCTAssertEqual(CommuteLibrary(defaults:defaults).journeys.count,1)
     }
+    func testConcurrentRefreshesCompleteWithTheVerifiedPurchase() async throws {
+        let buyer=ProPurchases();await buyer.loadProducts();await buyer.purchase(.monthly)
+        XCTAssertTrue(buyer.hasPro)
+        let restored=ProPurchases()
+        async let first: Void = restored.refreshAccess()
+        async let second: Void = restored.refreshAccess()
+        async let third: Void = restored.refreshAccess()
+        _ = await (first,second,third)
+        XCTAssertTrue(restored.hasPro,"Every completed refresh must see the settled verified entitlement")
+        XCTAssertEqual(restored.activePlan,.monthly)
+    }
     func testCancelledAndFailedPurchasesDoNotUnlockOrRemainBusy() async throws {
         let manager = ProPurchases(); await manager.loadProducts()
         try await session.setSimulatedError(.generic(.userCancelled),forAPI:.purchase)

@@ -212,6 +212,21 @@ class CommandTests(unittest.TestCase):
             # Identical input gives identical bytes, so an unchanged catalog keeps its hash.
             self.assertEqual(gate.write_compressed(Path(folder), blob, '2026-10-13T04:00:00Z'), manifest)
 
+    def test_repack_preserves_every_source_byte_and_refuses_old_data(self):
+        import gzip
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            document=root/'original.json';coverage=root/'coverage.json';out=root/'out'
+            blob=json.dumps(catalog([profile('1',NOW)],NOW),indent=2).encode()+b'\n'
+            document.write_bytes(blob);coverage.write_bytes(b'{"existing": true}\n')
+            argv=['repack','--document',str(document),'--coverage',str(coverage),'--out',str(out)]
+            with redirect_stdout(io.StringIO()): gate.main(argv,now=NOW)
+            self.assertEqual((out/'official-times.json').read_bytes(),blob)
+            self.assertEqual(gzip.decompress((out/'official-times.json.gz').read_bytes()),blob)
+            self.assertEqual((out/'coverage.json').read_bytes(),coverage.read_bytes())
+            self.assertEqual(json.loads((out/'official-times-manifest.json').read_bytes())['generatedAt'],json.loads(blob)['generatedAt'])
+            with redirect_stdout(io.StringIO()),self.assertRaises(SystemExit): gate.main(argv,now=NOW+timedelta(days=30))
+
     def test_prepare_refuses_or_only_reports(self):
         published = catalog([profile(str(i), NOW - timedelta(days=20)) for i in range(20)], NOW - timedelta(days=7))
         collected = catalog([profile(str(i), NOW - timedelta(days=30)) for i in range(20)], NOW)

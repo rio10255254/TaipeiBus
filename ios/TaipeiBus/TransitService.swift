@@ -223,6 +223,7 @@ actor TransitService {
     private static let officialRelease = "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/"
     /// The same files on jsDelivr's CDN (route-times.yml pushes them to the phone-data branch).
     /// It may lag a few hours behind; every copy is checked against the manifest's SHA-256.
+    private static let officialRaw = "https://raw.githubusercontent.com/rio10255254/TaipeiBus/phone-data/"
     private static let officialMirror = "https://cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@phone-data/"
 
     private func officialTravelTimes(force: Bool) async -> OfficialTravelTimes {
@@ -249,9 +250,9 @@ actor TransitService {
             fractional.formatOptions.insert(.withFractionalSeconds)
             let published = plain.date(from: manifest.generatedAt) ?? fractional.date(from: manifest.generatedAt)
             if let saved, let published, (saved.generatedAt ?? .distantPast) >= published { markChecked(); return saved }
-            // The CDN first keeps heavy traffic off GitHub; GitHub stays the authoritative fallback.
+            // Use the verified release first; a cold or unavailable third-party mirror must not delay it.
             var verified: (Data, OfficialTravelTimes)?
-            for source in [Self.officialMirror, Self.officialRelease] where verified == nil {
+            for source in [Self.officialRelease, Self.officialRaw, Self.officialMirror] where verified == nil {
                 guard let packed = await download(source + "official-times.json.gz"), packed.count == manifest.gzipBytes,
                       let bytes = try? inflate(packed), bytes.count == manifest.bytes,
                       SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == manifest.sha256,
@@ -274,7 +275,7 @@ actor TransitService {
 
     /// GitHub first, since it is always current; the CDN copy answers when GitHub does not.
     private func officialManifest() async -> OfficialManifest? {
-        for source in [Self.officialRelease, Self.officialMirror] {
+        for source in [Self.officialRelease, Self.officialRaw, Self.officialMirror] {
             guard let data = await download(source + "official-times-manifest.json"), data.count <= 4_096,
                   let manifest = try? JSONDecoder().decode(OfficialManifest.self, from: data), manifest.schema == 1,
                   manifest.sha256.count == 64, (1...(32 * 1_024 * 1_024)).contains(manifest.bytes),
