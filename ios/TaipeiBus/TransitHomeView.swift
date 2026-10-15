@@ -109,7 +109,7 @@ struct TransitHomeView: View {
                                 "duration_label": timing?.label ?? "", "waiting_label": timing?.waitingLabel ?? "",
                                 "arrival_label": timing?.arrivalLabel ?? ""]
                         }
-                        let value: [String: Any] = ["checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "comparison_changed": planner.comparisonChanged, "options": records]
+                        let value: [String: Any] = ["itinerary": showJourneyItinerary, "route_panel_open": showJourney, "checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "comparison_changed": planner.comparisonChanged, "options": records]
                         let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
                         Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
                             .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
