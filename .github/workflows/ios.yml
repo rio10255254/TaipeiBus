@@ -119,6 +119,8 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
       - name: Verify real StoreKit transactions and commute persistence
+        env:
+          BUS_LIVE_CYCLING_TEST: "1"
         id: billing_transactions
         if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
         timeout-minutes: 22

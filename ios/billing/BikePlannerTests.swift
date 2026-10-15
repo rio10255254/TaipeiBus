@@ -119,4 +119,21 @@ final class BikePlannerTests: XCTestCase {
         XCTAssertNil(p.bikeStationUpdateMessage)
     }
 
+    func testLiveTaipeiCyclingDirectionsBetweenUserStations() async throws {
+        guard ProcessInfo.processInfo.environment["BUS_LIVE_CYCLING_TEST"] == "1" else { throw XCTSkip("Opt-in live Apple cycling check") }
+        let p=JourneyPlannerModel()
+        let a=BikeStation(id:"500110026",name:"八德路三段74巷口",district:"",coordinate:Coordinate(latitude:25.04459,longitude:121.55252),capacity:30)
+        let b=BikeStation(id:"500107088",name:"南京伊通街口",district:"",coordinate:Coordinate(latitude:25.05189,longitude:121.53517),capacity:30)
+        let connection=BikeConnection(pickup:a,dropoff:b,bikes:5,docks:5,accessMeters:0,rideMeters:2000,egressMeters:0,accessSeconds:0,rideSeconds:600,egressSeconds:0,handlingSeconds:150)
+        var input=WalkingLeg(from:a.coordinate,to:b.coordinate);input.bike=BikeLeg(connection)
+        let result=try await p.verifyCyclingLegForTest(input)
+        XCTAssertTrue(result.verified,"Real cycling directions must be available for the user's Taipei route")
+        let bike=try XCTUnwrap(result.bike)
+        XCTAssertGreaterThan(bike.ride.count,2)
+        XCTAssertGreaterThan(bike.rideSeconds,60)
+        XCTAssertGreaterThan(bike.rideMeters,1000)
+        XCTAssertFalse(result.instructions.isEmpty)
+        print("LIVE_CYCLING meters=\(bike.rideMeters) seconds=\(bike.rideSeconds) points=\(bike.ride.count) instructions=\(result.instructions.count)")
+    }
+
 }

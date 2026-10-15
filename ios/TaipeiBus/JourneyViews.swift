@@ -1069,9 +1069,7 @@ private struct JourneyWalkingStep: View {
                 }
                 Text(walked ? AppText.text("已完成") : (leg.distance.map { distanceLabel($0) + " · " } ?? "") + leg.timeLabel)
                     .liveFont(.subheadline).foregroundStyle(.secondary)
-                Text(AppText.text("騎乘路徑參考步行資料，請依現場標示騎乘或牽行"))
-                            .liveFont(.caption).foregroundStyle(.secondary)
-                        if let instruction = leg.stationInstruction { Text(instruction).liveFont(.caption).foregroundStyle(.secondary) }
+                if let instruction = leg.stationInstruction { Text(instruction).liveFont(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 0)
             if !walked, !leg.internalTransfer, planner.currentStep == .walk(index) {
@@ -1114,8 +1112,6 @@ private struct JourneyCyclingStep: View {
                                         distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
                         .liveFont(.subheadline).foregroundStyle(.secondary)
                     if !done {
-                        Text(AppText.text("騎乘路徑參考步行資料，請依現場標示騎乘或牽行"))
-                            .liveFont(.caption).foregroundStyle(.secondary)
                         if let instruction = leg.stationInstruction {
                             Text(instruction).liveFont(.caption).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("journey-bike-station-access-\(index)")
