@@ -115,6 +115,23 @@ import XCTest
         XCTAssertTrue(p.featuredOptions.contains { $0.id == other.id })
         XCTAssertEqual(p.featuredOptions.count,5);XCTAssertFalse(p.started)
     }
+    func testSameRouteKeepsDifferentBoardingTradeoffsButMergesNearDuplicates() {
+        func choice(_ index: Int, walk: Double, ride: Double) -> JourneyOption {
+            let r = BusRoute(id:"same-route",parentID:"same-route",name:"同路線",variantName:"",departure:"起點",destination:"終點")
+            let boarding = Coordinate(latitude:25.04,longitude:121.545 + Double(index)*0.003)
+            let stops = [BusStop(id:"board-\(index)",routeID:r.id,stationID:"board-\(index)",name:"上車\(index)",direction:"0",sequence:1,coordinate:boarding),
+                         BusStop(id:"end",routeID:r.id,stationID:"end",name:"下車",direction:"0",sequence:2,coordinate:c)]
+            let segment = TransitRide(route:r,direction:"0",stops:stops,coordinates:[boarding,c])
+            let trip = TransitTrip(rides:[segment],accessDistance:500,egressDistance:0,transferDistance:0,score:0,rideSeconds:[ride])
+            return JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:a,to:boarding,distance:500,duration:walk),WalkingLeg(from:c,to:c,distance:0,duration:0)])
+        }
+        let nearby = choice(0,walk:600,ride:1000), faster = choice(1,walk:900,ride:500), duplicate = choice(2,walk:920,ride:480)
+        let p = JourneyPlannerModel()
+        p.auditLoadChoices([nearby,faster,duplicate],from:TravelPlace(name:"出發",address:"",coordinate:a),to:TravelPlace(name:"目的地",address:"",coordinate:c))
+        XCTAssertTrue(p.options.contains { $0.id == nearby.id })
+        XCTAssertTrue(p.options.contains { $0.id == faster.id })
+        XCTAssertFalse(p.options.contains { $0.id == duplicate.id })
+    }
     func testStreetTransferCanUseABikeButIndoorPlatformChangeCannot() {
         let outdoor = transfer(internalWalk:false), p = planner(outdoor)
         XCTAssertTrue(p.auditBikeConnections([outdoor]).contains { $0.walks[1].bike != nil })

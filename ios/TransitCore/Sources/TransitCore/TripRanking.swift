@@ -157,8 +157,17 @@ public enum TripRanking {
         let fastest = (frontier.isEmpty ? ordered : frontier).min { scores[$0.id]!.elapsedSeconds < scores[$1.id]!.elapsedSeconds }!
         var result = [best]
         func append(_ candidate: TransitTrip?) {
-            guard let candidate, result.count < limit,
-                  !result.contains(where: { $0.id == candidate.id || group($0) == group(candidate) }) else { return }
+            guard let candidate, result.count < limit else { return }
+            let duplicate = result.contains { other in
+                if other.id == candidate.id { return true }
+                guard group(other) == group(candidate) else { return false }
+                // Native verified choices may board the same line at meaningfully different
+                // stops. Merge only near-equivalent elapsed/walking times in that case.
+                guard !choiceGroups.isEmpty else { return true }
+                return abs(scores[other.id]!.elapsedSeconds - scores[candidate.id]!.elapsedSeconds) <= 60 &&
+                    abs(walking(other.id) - walking(candidate.id)) <= 120
+            }
+            guard !duplicate else { return }
             result.append(candidate)
         }
         if scores[fastest.id]!.elapsedSeconds < scores[best.id]!.elapsedSeconds - 60 { append(fastest) }
