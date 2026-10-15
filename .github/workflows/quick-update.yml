@@ -30,6 +30,35 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  cycling_source_probe:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 8
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Query the actual iPhone cycling source independently of app geometry
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/Probe.app"
+          xcrun swiftc -parse-as-library -sdk "$(xcrun --sdk iphonesimulator --show-sdk-path)" -target arm64-apple-ios17.0-simulator ios/release/cycling-source-check.swift -o "$RUNNER_TEMP/Probe.app/Probe"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string com.example.TaipeiBus.CyclingProbe' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Probe' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$RUNNER_TEMP/Probe.app/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 1' "$RUNNER_TEMP/Probe.app/Info.plist"
+          codesign -s - "$RUNNER_TEMP/Probe.app"
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-cycling-probe com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" "$RUNNER_TEMP/Probe.app"
+          xcrun simctl launch --console "$device" com.example.TaipeiBus.CyclingProbe | tee "$RUNNER_TEMP/cycling-source.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cycling-source
+          path: ${{ runner.temp }}/cycling-source.log
   legacy_compatibility:
     runs-on: macos-15
     timeout-minutes: 10

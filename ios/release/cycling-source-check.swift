@@ -1,6 +1,11 @@
 import Foundation
 import MapKit
-Task { @MainActor in
+import UIKit
+@main final class Probe: UIResponder, UIApplicationDelegate {
+    var window: UIWindow?
+    func application(_ application: UIApplication, didFinishLaunchingWithOptions options: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        window = UIWindow(frame: UIScreen.main.bounds); window?.rootViewController = UIViewController(); window?.makeKeyAndVisible()
+        Task { @MainActor in
     let request = MKDirections.Request()
     request.source = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude:25.04459,longitude:121.55252)))
     request.destination = MKMapItem(placemark: MKPlacemark(coordinate: CLLocationCoordinate2D(latitude:25.05189,longitude:121.53517)))
@@ -13,4 +18,6 @@ Task { @MainActor in
         exit(0)
     } catch { print("Cycling source check:",error); exit(1) }
 }
-RunLoop.main.run()
+        return true
+    }
+}
