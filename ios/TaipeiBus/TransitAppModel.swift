@@ -373,15 +373,23 @@ final class TransitAppModel: ObservableObject {
     /// a slow YouBike response must never hold back bus positions.
     private var bikeTask: Task<Void, Never>?
     private var bikeGeneration = UUID()
+    /// Counts are also needed while a planned trip rides a YouBike, whether or not the map
+    /// is showing stations: the rider has to know if their station has run out.
+    private var needsBikeCounts: Bool {
+        showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan
+    }
     private func pollBikesInBackground() {
-        guard runsLiveWork, showsBikeStations || selectedBikeStationID != nil, bikeTask == nil else { return }
+        guard runsLiveWork, needsBikeCounts, bikeTask == nil else { return }
         let token = UUID(); bikeGeneration = token
         let network = bikeNetwork
         bikeTask = Task { [weak self] in
             guard let self else { return }
             let packet = await self.service.bikeAvailability(network: network)
             if !Task.isCancelled, self.runsLiveWork, self.bikeGeneration == token,
-               let packet, packet != self.bikeAvailability { self.bikeAvailability = packet }
+               let packet, packet != self.bikeAvailability {
+                self.bikeAvailability = packet
+                self.planner.updateBikes(network: self.bikeNetwork, availability: packet)
+            }
             if self.bikeGeneration == token { self.bikeTask = nil }
         }
     }
@@ -613,7 +621,10 @@ final class TransitAppModel: ObservableObject {
         updateTask = Task { [weak self] in
             guard let self else { return }
             do {
-                if bikeNetwork.stations.isEmpty { bikeNetwork = await service.bikeNetwork() }
+                if bikeNetwork.stations.isEmpty {
+                    bikeNetwork = await service.bikeNetwork()
+                    planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+                }
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
                 else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
 #if DEBUG
@@ -1414,6 +1425,12 @@ final class TransitAppModel: ObservableObject {
             Task { [weak self] in await self?.prepareMixedPlanningFixture() }
             return
         }
+        if arguments.contains("--preview-youbike-planning") {
+            previewSelectionApplied = true
+            let emptied = arguments.contains("--preview-youbike-empty")
+            Task { [weak self] in await self?.prepareCyclingFixture(emptyPickup: emptied) }
+            return
+        }
         if arguments.contains("--preview-walking-guidance") {
             previewSelectionApplied = true
             previewNotice = "介面驗證用資料 · 非即時車輛"
@@ -1658,6 +1675,49 @@ final class TransitAppModel: ObservableObject {
         planner.prepareRouteChoicesPreview([mixed,rail,bus],
             from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
             to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
+    }
+
+    /// A cycling trip built from the bundled stations with explicitly simulated counts, so the
+    /// YouBike interface can be checked without depending on what is standing in the street.
+    private func prepareCyclingFixture(emptyPickup: Bool) async {
+        if bikeNetwork.stations.isEmpty { bikeNetwork = await service.bikeNetwork() }
+        // Riding the whole way is about four kilometres here, and riding to the metro and
+        // taking it is the obvious alternative: both appear, so both can be looked at.
+        let start = Coordinate(latitude: 25.0405, longitude: 121.5600)
+        let boarding = Coordinate(latitude: 25.0415, longitude: 121.5440)
+        let finish = Coordinate(latitude: 25.0478, longitude: 121.5170)
+        guard !bikeNetwork.stations(near: start, radius: 400, limit: 1).isEmpty else {
+            previewSelectionApplied = false; return
+        }
+        let now = Date()
+        func stocked(_ stations: [BikeStation], rentable: Int) -> [String: BikeDock] {
+            Dictionary(uniqueKeysWithValues: stations.map { station in
+                (station.id, BikeDock(stationID: station.id, rentable: rentable, returnable: 10,
+                                      capacity: station.capacity, active: true, observedAt: now))
+            })
+        }
+        var docks = stocked(bikeNetwork.stations(near: start, radius: 600, limit: 12), rentable: 9)
+        for (id, dock) in stocked(bikeNetwork.stations(near: boarding, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
+        for (id, dock) in stocked(bikeNetwork.stations(near: finish, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
+        bikeAvailability = BikeAvailability(docks: docks, receivedAt: now)
+        planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+        previewNotice = "介面驗證用行程 · 非即時車位"
+        snapshot = TransitSnapshot(); planner.updateSnapshot(snapshot)
+        let source = metadata
+        let trip = await Task.detached(priority: .userInitiated) {
+            MultimodalPlanner(metadata: source).plan(from: boarding, to: finish, maximumWalk: 600, limit: 6).first
+        }.value
+        planner.prepareCyclingPreview(trip: trip,
+            from: TravelPlace(name: "國父紀念館", address: "", coordinate: start, englishName: "Sun Yat-sen Memorial Hall"),
+            to: TravelPlace(name: "臺北車站", address: "", coordinate: finish, englishName: "Taipei Main Station"))
+        // The rider is on the way when the station they are heading to runs dry.
+        if emptyPickup, let pickup = planner.selectedPickupStation {
+            var emptied = docks
+            emptied[pickup.id] = BikeDock(stationID: pickup.id, rentable: 0, returnable: 12,
+                                          capacity: pickup.capacity, active: true, observedAt: now)
+            bikeAvailability = BikeAvailability(docks: emptied, receivedAt: now)
+            planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+        }
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {

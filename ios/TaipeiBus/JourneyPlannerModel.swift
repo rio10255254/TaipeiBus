@@ -2,6 +2,51 @@ import SwiftUI
 import MapKit
 import TransitCore
 
+/// A YouBike connection inside one journey leg: walk to a station that has bikes, ride to a
+/// station that has somewhere to return it, walk on from there. Apple publishes no cycling
+/// directions, so the ridden path is the verified street path between the two stations and its
+/// time comes from the planning cycling speed rather than from Apple.
+struct BikeLeg: Sendable {
+    var pickup: BikeStation
+    var dropoff: BikeStation
+    /// What each station reported when the trip was planned.
+    var bikes: Int
+    var docks: Int
+    var handlingSeconds: Double
+    var toPickup: [Coordinate] = []
+    var toPickupMeters: Double = 0
+    var toPickupSeconds: Double = 0
+    var ride: [Coordinate] = []
+    var rideMeters: Double = 0
+    var rideSeconds: Double = 0
+    var fromDropoff: [Coordinate] = []
+    var fromDropoffMeters: Double = 0
+    var fromDropoffSeconds: Double = 0
+    var walkingSeconds: Double { toPickupSeconds + fromDropoffSeconds }
+    var walkingMeters: Double { toPickupMeters + fromDropoffMeters }
+    var cyclingSeconds: Double { rideSeconds + handlingSeconds }
+    var totalSeconds: Double { walkingSeconds + cyclingSeconds }
+    var totalMeters: Double { walkingMeters + rideMeters }
+    var coordinates: [Coordinate] { toPickup + ride + fromDropoff }
+    /// Which part of the leg the rider is in, from how far along the leg they are.
+    enum Phase { case toPickup, riding, fromDropoff }
+    func phase(remainingMeters: Double) -> Phase {
+        if remainingMeters > rideMeters + fromDropoffMeters { return .toPickup }
+        return remainingMeters > fromDropoffMeters ? .riding : .fromDropoff
+    }
+}
+
+/// Built from a planned connection; the street geometry is filled in when the leg is verified.
+extension BikeLeg {
+    init(_ connection: BikeConnection) {
+        self.init(pickup: connection.pickup, dropoff: connection.dropoff, bikes: connection.bikes,
+                  docks: connection.docks, handlingSeconds: connection.handlingSeconds,
+                  toPickupMeters: connection.accessMeters, toPickupSeconds: connection.accessSeconds,
+                  rideMeters: connection.rideMeters, rideSeconds: connection.rideSeconds,
+                  fromDropoffMeters: connection.egressMeters, fromDropoffSeconds: connection.egressSeconds)
+    }
+}
+
 struct WalkingLeg: Sendable {
     let from: Coordinate
     let to: Coordinate
@@ -15,9 +60,19 @@ struct WalkingLeg: Sendable {
     var internalTransfer = false
     var minimumDuration: Double = 0
     var streetDuration: Double? = nil
+    /// Set when this leg is ridden rather than walked.
+    var bike: BikeLeg? = nil
     var verified: Bool { duration != nil }
+    var cyclingSeconds: Double { bike?.cyclingSeconds ?? 0 }
+    /// Only the parts of this leg that are walked; a cycling leg keeps its ridden path apart.
+    var footPaths: [[Coordinate]] {
+        if let bike { return [bike.toPickup, bike.fromDropoff].filter { $0.count >= 2 } }
+        return coordinates.count >= 2 ? [coordinates] : []
+    }
     var timeLabel: String {
-        duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
+        if let bike, verified { return AppText.text("YouBike %@ 分", Int(ceil(bike.totalSeconds / 60))) }
+        if bike != nil { return AppText.text("YouBike 路線待確認") }
+        return duration.map { $0 < 30 ? AppText.text("就在附近") : AppText.text("步行 %@ 分", Int(ceil($0 / 60))) } ?? AppText.text("步行路線待確認")
     }
 }
 
@@ -27,7 +82,13 @@ struct JourneyOption: Identifiable, Sendable {
     var walks: [WalkingLeg]
     var walkIssue: String?
     var rides: [TransitRide] { trip?.rides ?? [] }
-    var walkingOnly: Bool { trip == nil }
+    var walkingOnly: Bool { trip == nil && walks.allSatisfy { $0.bike == nil } }
+    /// A trip made entirely by YouBike, with no bus or train.
+    var bikeOnly: Bool { trip == nil && walks.contains { $0.bike != nil } }
+    var cycles: Bool { walks.contains { $0.bike != nil } }
+    var cyclingSeconds: Double { walks.reduce(0) { $0 + $1.cyclingSeconds } }
+    /// The station this trip rents a bike from, while one is still to be rented.
+    var bikeLegIndex: Int? { walks.firstIndex { $0.bike != nil } }
     var verified: Bool { walks.allSatisfy(\.verified) }
     var walkingTimeLabel: String {
         guard verified else { return AppText.text("步行路線待確認") }
@@ -124,6 +185,9 @@ final class JourneyPlannerModel: ObservableObject {
         let advanced = progress.update(coordinate: coordinate, accuracy: accuracy, timestamp: timestamp, now: now)
         walkingProgress = progress
         if advanced { walkingRouteUnavailable = false; walkingRevision += 1 }
+        // A cycling leg is three pieces of route, not one walk: rerouting it from here would
+        // quietly turn the ride into a long walk. Its progress still updates.
+        guard leg.bike == nil else { return }
         let fresh = accuracy >= 0 && accuracy <= 35 && abs(now.timeIntervalSince(timestamp)) <= 15
         let startChanged = (first || firstReliable) && coordinate.distance(to: leg.from) > 35 && progress.match == nil
         guard fresh, (startChanged || progress.needsReroute), !walkingRecalculating,
@@ -151,6 +215,25 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
 
+    /// Which part of a cycling leg the rider is in now, from how far along the leg they are.
+    func cyclingPhase(at index: Int) -> BikeLeg.Phase? {
+        guard let option = selected, option.walks.indices.contains(index), let bike = option.walks[index].bike else { return nil }
+        guard walkingLegIndex == index, let progress = walkingProgress, progress.locationConfirmed else { return .toPickup }
+        return bike.phase(remainingMeters: progress.remainingDistance)
+    }
+    /// What to do right now on a cycling leg: fetch the bike, ride it, or walk on after docking.
+    func cyclingInstruction(at index: Int) -> String? {
+        guard let option = selected, option.walks.indices.contains(index), let bike = option.walks[index].bike,
+              let phase = cyclingPhase(at: index) else { return nil }
+        switch phase {
+        case .toPickup: return AppText.text("走到 %@ 借 YouBike", bike.pickup.localizedName)
+        case .riding: return AppText.text("騎到 %@ 還車", bike.dropoff.localizedName)
+        case .fromDropoff:
+            let target = option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName
+                : destination?.localizedName ?? AppText.text("目的地")
+            return AppText.text("已還車，步行到 %@", target)
+        }
+    }
     func walkingCoordinates(at index: Int) -> [Coordinate] {
         if walkingLegIndex == index, let walkingProgress { return walkingProgress.remainingCoordinates }
         return selected?.walks.indices.contains(index) == true ? selected!.walks[index].coordinates : []
@@ -172,6 +255,22 @@ final class JourneyPlannerModel: ObservableObject {
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
+    /// The station the chosen trip rents its bike from.
+    var selectedPickupStation: BikeStation? {
+        guard let option = selected, let index = option.bikeLegIndex else { return nil }
+        return option.walks[index].bike?.pickup
+    }
+    /// True while any offered or chosen trip rides a YouBike, so counts stay fresh for it.
+    var cyclingInPlan: Bool { options.contains(where: \.cycles) }
+    /// The ridden part of each leg on the map, drawn apart from the walked parts.
+    var bikeCoordinates: [[Coordinate]] {
+        guard let option = selected else { return [] }
+        let legs: [WalkingLeg]
+        if started, case .walk(let index) = currentStep, option.walks.indices.contains(index) { legs = [option.walks[index]] }
+        else if started { legs = [] }
+        else { legs = option.walks }
+        return legs.compactMap { $0.bike }.map(\.ride).filter { $0.count >= 2 }
+    }
     func ridingEstimates(_ option: JourneyOption, at date: Date) -> [RidingTimeEstimate] {
         if let trip = option.trip, let metadata = lastMetadata {
             return forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
@@ -190,12 +289,15 @@ final class JourneyPlannerModel: ObservableObject {
                 preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding,
                 ridingSpreads: estimates.map(\.spreadSeconds))
             var duration = JourneyDuration(assessment: assessment, riding: riding)
+            duration.cyclingSeconds = option.cyclingSeconds
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
                 estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : estimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
             return duration
         }
-        return JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
+        var duration = JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
+        duration.cyclingSeconds = option.cyclingSeconds
+        return duration
     }
     private func recommendations(at date: Date) -> [JourneyOption] {
         let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil }
@@ -207,6 +309,14 @@ final class JourneyPlannerModel: ObservableObject {
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
             preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides)
         var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
+        // Riding the whole way is offered only when it clearly beats waiting for a bus, and
+        // when there is no transit at all it is simply the way to get there.
+        if let cycling = valid.first(where: \.bikeOnly), let riding = duration(cycling, at: date) {
+            let best = result.first.flatMap { duration($0, at: date)?.totalSeconds }
+            if best.map({ riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds }) ?? true {
+                result.insert(cycling, at: 0)
+            }
+        }
         if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
            result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
             result.insert(foot, at: 0)
@@ -218,7 +328,12 @@ final class JourneyPlannerModel: ObservableObject {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
         var labels: [String: String] = [:]
         for option in result {
-            if option.id == recommendedOption?.id { labels[option.id] = option.walkingOnly ? "步行即可" : "推薦"; continue }
+            if option.id == recommendedOption?.id {
+                labels[option.id] = option.bikeOnly ? "騎 YouBike" : option.walkingOnly ? "步行即可" : "推薦"
+                continue
+            }
+            if option.bikeOnly { labels[option.id] = "騎 YouBike"; continue }
+            if option.cycles { labels[option.id] = "YouBike 接駁"; continue }
             if let timing = duration(option, at: date), let recommended {
                 if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
                 else if timing.walkingSeconds < recommended.walkingSeconds - 120 { labels[option.id] = "少走路" }
@@ -294,6 +409,101 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func updateSettings(_ settings: LiveSettings) { preferences = settings.planning }
+    private var bikeNetwork = BikeNetwork.empty
+    private var bikeAvailability: BikeAvailability?
+    private func entrance(_ stop: BusStop, toward point: Coordinate, metadata: TransitMetadata) -> Coordinate {
+        metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
+    }
+    /// A station worth riding to before boarding anything: too far to walk to, close enough to
+    /// ride, a real step towards the destination, and with docks free to leave the bike in.
+    private func gatewayStation(from: Coordinate, to: Coordinate, at date: Date) -> BikeStation? {
+        guard let availability = bikeAvailability else { return nil }
+        let direct = from.distance(to: to)
+        return bikeNetwork.stations(near: from, radius: min(preferences.bikeMaximumRideMeters, 3_000), limit: 150)
+            .filter { station in
+                guard from.distance(to: station.coordinate) >= 1_200,
+                      direct - station.coordinate.distance(to: to) >= 800 else { return false }
+                guard let dock = availability.dock(station.id, at: date), dock.active,
+                      Double(dock.returnable) >= preferences.bikeMinimumDocks else { return false }
+                return true
+            }
+            .min { $0.coordinate.distance(to: to) < $1.coordinate.distance(to: to) }
+    }
+    private var pickupTask: Task<Void, Never>?
+    func updateBikes(network: BikeNetwork, availability: BikeAvailability?) {
+        bikeNetwork = network; bikeAvailability = availability
+    }
+    /// A YouBike station this trip is counting on that can no longer be counted on, with the
+    /// nearest station that can take its place. Checked only while that end is still ahead.
+    enum BikeAlert: Equatable {
+        case noBikes(BikeStation, replacement: BikeStation?)
+        case noDocks(BikeStation, replacement: BikeStation?)
+        var station: BikeStation {
+            switch self { case .noBikes(let station, _), .noDocks(let station, _): return station }
+        }
+        var replacement: BikeStation? {
+            switch self { case .noBikes(_, let station), .noDocks(_, let station): return station }
+        }
+        /// True when the rider still has to find a bike, false when they have to return one.
+        var renting: Bool { if case .noBikes = self { return true }; return false }
+    }
+    var bikeAlert: BikeAlert? {
+        guard let option = selected, let index = option.bikeLegIndex, let bike = option.walks[index].bike else { return nil }
+        let legStep = steps.firstIndex(of: .walk(index))
+        let passed = started && (legStep ?? .max) < stepIndex
+        guard !passed else { return nil }
+        let date = Date()
+        func replacement(_ station: BikeStation, renting: Bool) -> BikeStation? {
+            BikeRouting.replacement(for: station, network: bikeNetwork, availability: bikeAvailability,
+                                    renting: renting, preferences: preferences, at: date)
+        }
+        if !BikeRouting.stillUsable(bike.pickup, availability: bikeAvailability, renting: true, preferences: preferences, at: date) {
+            return .noBikes(bike.pickup, replacement: replacement(bike.pickup, renting: true))
+        }
+        if !BikeRouting.stillUsable(bike.dropoff, availability: bikeAvailability, renting: false, preferences: preferences, at: date) {
+            return .noDocks(bike.dropoff, replacement: replacement(bike.dropoff, renting: false))
+        }
+        return nil
+    }
+    /// Moves one end of the cycling leg to another station and re-checks the streets for it,
+    /// keeping the rest of the trip as it is.
+    func moveBikeStation(to station: BikeStation, renting: Bool) {
+        guard let option = selected, let index = option.bikeLegIndex, var bike = option.walks[index].bike,
+              let slot = options.firstIndex(where: { $0.id == option.id }) else { return }
+        if renting { bike.pickup = station; bike.bikes = bikeAvailability?.dock(station.id)?.rentable ?? 0 }
+        else { bike.dropoff = station; bike.docks = bikeAvailability?.dock(station.id)?.returnable ?? 0 }
+        var leg = option.walks[index]
+        // A straight-line estimate keeps the trip usable while the streets are re-checked.
+        bike.toPickupMeters = leg.from.distance(to: bike.pickup.coordinate)
+        bike.toPickupSeconds = BikeRouting.walkingSeconds(bike.toPickupMeters)
+        bike.toPickup = [leg.from, bike.pickup.coordinate]
+        bike.rideMeters = bike.pickup.coordinate.distance(to: bike.dropoff.coordinate) * BikeRouting.cyclingDetour
+        bike.rideSeconds = bike.rideMeters / max(1, preferences.bikeSpeed)
+        bike.ride = [bike.pickup.coordinate, bike.dropoff.coordinate]
+        bike.fromDropoffMeters = bike.dropoff.coordinate.distance(to: leg.to)
+        bike.fromDropoffSeconds = BikeRouting.walkingSeconds(bike.fromDropoffMeters)
+        bike.fromDropoff = [bike.dropoff.coordinate, leg.to]
+        leg.bike = bike
+        leg.coordinates = bike.coordinates
+        leg.road = RouteLine(coordinates: leg.coordinates)
+        leg.distance = bike.totalMeters
+        leg.streetDuration = bike.totalSeconds
+        leg.duration = bike.totalSeconds + leg.stationSeconds
+        options[slot].walks[index] = leg
+        mapRevision += 1
+        let id = option.id, token = generation
+        pickupTask?.cancel()
+        pickupTask = Task { [weak self] in
+            guard let self else { return }
+            let updated = try? await self.cycle(leg)
+            guard !Task.isCancelled, token == self.generation, let updated,
+                  let slot = self.options.firstIndex(where: { $0.id == id }) else { return }
+            self.options[slot].walks[index] = updated
+            self.endWalkingGuidance()
+            self.walkingRevision += 1; self.walkingRouteRevision += 1; self.mapRevision += 1
+            UISelectionFeedbackGenerator().selectionChanged()
+        }
+    }
     /// The ride a saved trip would start with now, for the Home Screen widget. Walks are the
     /// planning estimates; nothing here touches the trip on screen.
     enum FirstLeg { case ride(TransitRide, walk: Double), walk }
@@ -411,6 +621,67 @@ final class JourneyPlannerModel: ObservableObject {
                 selected.append(trip); if selected.count >= 18 { break }
             }
             var pending = selected.map(option)
+            // YouBike alternatives. Nothing is proposed without current counts at both ends: a
+            // station with no bikes, or with nowhere to return one, is not a plan. Each one is
+            // an alternative to the same rides, so only the better of the two is ever offered.
+            if preferences.bikeRouting, bikeAvailability != nil, !bikeNetwork.stations.isEmpty {
+                var cycling: [JourneyOption] = []
+                for trip in selected.prefix(6) {
+                    guard let first = trip.rides.first, let last = trip.rides.last else { continue }
+                    let boarding = entrance(first.boarding, toward: origin.coordinate, metadata: metadata)
+                    let toBoarding = origin.coordinate.distance(to: boarding)
+                    if toBoarding >= 500,
+                       let connection = BikeRouting.connection(from: origin.coordinate, to: boarding, network: bikeNetwork,
+                           availability: bikeAvailability, preferences: preferences, at: date),
+                       BikeRouting.worthRiding(connection, insteadOfWalking: toBoarding, preferences: preferences) {
+                        var choice = option(trip.asVariant("youbike-access"))
+                        choice.walks[0].bike = BikeLeg(connection)
+                        cycling.append(choice)
+                    }
+                    let alighting = entrance(last.alighting, toward: destination.coordinate, metadata: metadata)
+                    let fromAlighting = alighting.distance(to: destination.coordinate)
+                    if fromAlighting >= 500,
+                       let connection = BikeRouting.connection(from: alighting, to: destination.coordinate, network: bikeNetwork,
+                           availability: bikeAvailability, preferences: preferences, at: date),
+                       BikeRouting.worthRiding(connection, insteadOfWalking: fromAlighting, preferences: preferences) {
+                        var choice = option(trip.asVariant("youbike-finish"))
+                        choice.walks[choice.walks.count - 1].bike = BikeLeg(connection)
+                        cycling.append(choice)
+                    }
+                    if cycling.count >= 3 { break }
+                }
+                // A station a short ride away can open a far better trip than anything within
+                // walking distance. That costs a second search, so it runs only for longer
+                // trips where what the walk-based search found is not already quick.
+                let bestElapsed = ordered.first.map {
+                    TripRanking.assessment($0, estimates: latestSnapshot.estimates, at: date, preferences: preferences).elapsedSeconds
+                }
+                if origin.coordinate.distance(to: destination.coordinate) >= 2_000, bestElapsed ?? .infinity > 1_500,
+                   let gateway = gatewayStation(from: origin.coordinate, to: destination.coordinate, at: date) {
+                    let remote = await network.options(metadata: metadata, from: gateway.coordinate, to: destination.coordinate,
+                                                       preferences: preferences, estimates: latestSnapshot.estimates)
+                    guard !Task.isCancelled, token == generation else { return }
+                    for trip in TripRanking.recommended(remote, estimates: latestSnapshot.estimates, at: date,
+                                                        preferences: preferences, limit: 2) {
+                        guard let first = trip.rides.first else { continue }
+                        let boarding = entrance(first.boarding, toward: gateway.coordinate, metadata: metadata)
+                        guard origin.coordinate.distance(to: boarding) >= 1_000,
+                              let connection = BikeRouting.connection(from: origin.coordinate, to: boarding, network: bikeNetwork,
+                                  availability: bikeAvailability, preferences: preferences, at: date) else { continue }
+                        var choice = option(trip.asVariant("youbike-start"))
+                        choice.walks[0].bike = BikeLeg(connection)
+                        cycling.append(choice)
+                        break
+                    }
+                }
+                pending.append(contentsOf: cycling)
+                if let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
+                        network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date) {
+                    var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate)
+                    leg.bike = BikeLeg(whole)
+                    pending.insert(JourneyOption(id: "youbike", trip: nil, walks: [leg]), at: 0)
+                }
+            }
             if origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 1_500) {
                 pending.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
@@ -466,6 +737,10 @@ final class JourneyPlannerModel: ObservableObject {
         for index in option.walks.indices {
             try Task.checkCancellation()
             if option.walks[index].internalTransfer { continue }
+            if option.walks[index].bike != nil {
+                result.walks[index] = try await cycle(option.walks[index])
+                continue
+            }
             result.walks[index] = try await walk(option.walks[index])
             result.walks[index].streetDuration = result.walks[index].duration
             result.walks[index].stationSeconds = option.walks[index].stationSeconds
@@ -473,11 +748,44 @@ final class JourneyPlannerModel: ObservableObject {
             if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
+            // On a cycling leg only the two walks count; the ride itself is meant to be long.
+            if let bike = leg.bike { return max(bike.toPickupMeters, bike.fromDropoffMeters) > 900 }
             let transfer = index > 0 && index < result.walks.count - 1
             return (leg.distance ?? 0) > (transfer ? 600 : 1_800)
         }
-        if hasLongWalk { result.walkIssue = "步行接駁過長" }
-        if !result.verified { result.walkIssue = "步行接駁待確認" }
+        if hasLongWalk { result.walkIssue = result.cycles ? "接駁步行過長" : "步行接駁過長" }
+        if !result.verified { result.walkIssue = result.cycles ? "YouBike 路線待確認" : "步行接駁待確認" }
+        return result
+    }
+    /// Verifies a cycling leg: the walk to the station, the streets the bike will take, and the
+    /// walk on from where it is returned. Apple has no cycling directions, so the ridden path is
+    /// the pedestrian path between the two stations and its time comes from the planning speed.
+    private func cycle(_ leg: WalkingLeg) async throws -> WalkingLeg {
+        guard var bike = leg.bike else { return leg }
+        var result = leg
+        let access = try await walk(WalkingLeg(from: leg.from, to: bike.pickup.coordinate))
+        let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate))
+        let egress = try await walk(WalkingLeg(from: bike.dropoff.coordinate, to: leg.to))
+        guard let accessSeconds = access.duration, let egressSeconds = egress.duration,
+              let rideMeters = street.distance, street.verified, rideMeters > 0 else {
+            result.duration = nil; return result
+        }
+        bike.toPickup = access.coordinates
+        bike.toPickupMeters = access.distance ?? leg.from.distance(to: bike.pickup.coordinate)
+        bike.toPickupSeconds = accessSeconds
+        bike.ride = street.coordinates
+        bike.rideMeters = rideMeters
+        bike.rideSeconds = rideMeters / max(1, preferences.bikeSpeed)
+        bike.fromDropoff = egress.coordinates
+        bike.fromDropoffMeters = egress.distance ?? bike.dropoff.coordinate.distance(to: leg.to)
+        bike.fromDropoffSeconds = egressSeconds
+        result.bike = bike
+        result.coordinates = bike.coordinates
+        result.road = RouteLine(coordinates: result.coordinates)
+        result.distance = bike.totalMeters
+        result.streetDuration = bike.totalSeconds
+        result.duration = bike.totalSeconds + leg.stationSeconds
+        result.instructions = []
         return result
     }
     private func walk(_ leg: WalkingLeg, guidance: Bool = false) async throws -> WalkingLeg {
@@ -568,6 +876,56 @@ final class JourneyPlannerModel: ObservableObject {
             return JourneyOption(id:trip.id,trip:trip,walks:walks)
         }
         selectedID = options.first?.id; optionLabels = [:]; message = nil; mapRevision += 1
+    }
+
+    /// Deterministic cycling scenario: real stations and a real trip, with simulated street
+    /// geometry, so the cycling interface can be checked without Apple's routing. Availability
+    /// must already be injected with `updateBikes`.
+    func prepareCyclingPreview(trip: TransitTrip?, from start: TravelPlace, to end: TravelPlace) {
+        cancelRequests(); origin = start; destination = end; usingLocation = false
+        started = false; stepIndex = 0; selectionConfirmed = true
+        func cycling(_ connection: BikeConnection, from: Coordinate, to: Coordinate) -> WalkingLeg {
+            var bike = BikeLeg(connection)
+            bike.toPickup = [from, connection.pickup.coordinate]
+            bike.ride = [connection.pickup.coordinate, connection.dropoff.coordinate]
+            bike.fromDropoff = [connection.dropoff.coordinate, to]
+            var leg = WalkingLeg(from: from, to: to, coordinates: bike.coordinates,
+                                 distance: bike.totalMeters, duration: bike.totalSeconds)
+            leg.road = RouteLine(coordinates: leg.coordinates)
+            leg.streetDuration = bike.totalSeconds
+            leg.bike = bike
+            return leg
+        }
+        func walking(_ from: Coordinate, _ to: Coordinate) -> WalkingLeg {
+            let meters = from.distance(to: to)
+            var leg = WalkingLeg(from: from, to: to, coordinates: [from, to], distance: meters,
+                                 duration: BikeRouting.walkingSeconds(meters))
+            leg.road = RouteLine(coordinates: leg.coordinates)
+            leg.streetDuration = leg.duration
+            return leg
+        }
+        var result: [JourneyOption] = []
+        if let whole = BikeRouting.connection(from: start.coordinate, to: end.coordinate, network: bikeNetwork,
+                                              availability: bikeAvailability, preferences: preferences) {
+            result.append(JourneyOption(id: "youbike", trip: nil,
+                walks: [cycling(whole, from: start.coordinate, to: end.coordinate)]))
+        }
+        if let trip, let first = trip.rides.first, let last = trip.rides.last,
+           let access = BikeRouting.connection(from: start.coordinate, to: first.boarding.coordinate,
+                                               network: bikeNetwork, availability: bikeAvailability, preferences: preferences) {
+            let variant = trip.asVariant("youbike-access")
+            var walks = [cycling(access, from: start.coordinate, to: first.boarding.coordinate)]
+            for index in trip.rides.indices.dropFirst() {
+                walks.append(walking(trip.rides[index - 1].alighting.coordinate, trip.rides[index].boarding.coordinate))
+            }
+            walks.append(walking(last.alighting.coordinate, end.coordinate))
+            result.append(JourneyOption(id: variant.id, trip: variant, walks: walks))
+        }
+        guard !result.isEmpty else { return }
+        options = result; verifiedPool = result
+        selectedID = result.first?.id
+        optionLabels = Dictionary(uniqueKeysWithValues: result.map { ($0.id, $0.bikeOnly ? "騎 YouBike" : "YouBike 接駁") })
+        message = nil; mapRevision += 1
     }
 
     func prepareWalkingPreview() async {

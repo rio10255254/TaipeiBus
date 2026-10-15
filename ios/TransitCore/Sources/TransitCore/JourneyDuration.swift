@@ -14,6 +14,8 @@ public struct JourneyDuration: Equatable, Sendable {
     public let earliestTotalSeconds: Double
     public let latestTotalSeconds: Double
     public var positionUncertain = false
+    /// Part of `walkingSeconds` that is spent riding a YouBike, including unlocking and docking.
+    public var cyclingSeconds: Double = 0
     public var ridingEvidence: RidingTimeEstimate.Evidence = .typical
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
     public var travelSeconds: Double { walkingSeconds + ridingSeconds }
@@ -39,9 +41,16 @@ public struct JourneyDuration: Equatable, Sendable {
     public var ridingSourceLabel: String {
         RidingTimeEstimate(seconds: ridingSeconds, evidence: ridingEvidence, observedVehicles: 0).sourceLabel
     }
-    public var breakdownLabel: String { AppText.text("步行 %@ 分 · 搭車 %@ 分", minutes(walkingSeconds), minutes(ridingSeconds)) }
+    public var breakdownLabel: String {
+        if cyclingSeconds > 0 {
+            let onFoot = max(0, walkingSeconds - cyclingSeconds)
+            if ridingSeconds <= 0 { return AppText.text("步行 %@ 分 · 騎車 %@ 分", minutes(onFoot), minutes(cyclingSeconds)) }
+            return AppText.text("步行 %@ 分 · 騎車 %@ 分 · 搭車 %@ 分", minutes(onFoot), minutes(cyclingSeconds), minutes(ridingSeconds))
+        }
+        return AppText.text("步行 %@ 分 · 搭車 %@ 分", minutes(walkingSeconds), minutes(ridingSeconds))
+    }
     public var waitingLabel: String {
-        if waits.isEmpty { return AppText.text("步行即可") }
+        if waits.isEmpty { return cyclingSeconds > 0 ? AppText.text("騎車即可") : AppText.text("步行即可") }
         if unknownWaits > 0 { return AppText.text(waits.dropFirst().contains(where: { $0.evidence == .unknown }) ? "轉乘候車待確認" : "候車待確認") }
         // Transfer waits can be correlated: arriving earlier means waiting longer
         // for the same reachable departure. Use the whole-journey bounds.

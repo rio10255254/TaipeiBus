@@ -752,8 +752,10 @@ private struct JourneyWaitingActions: View {
         VStack(spacing: 6) {
             HStack(spacing: 12) {
                 if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer != true {
+                let cycling = planner.selected?.walks[index].bike != nil
                 Button { model.showWalkOnMap(index) } label: {
-                    Label(planner.activeRide?.route.mode == .bus ? live.text("走到站牌") : live.text("走到車站"), systemImage: "figure.walk")
+                    Label(cycling ? live.text("騎到站牌") : planner.activeRide?.route.mode == .bus ? live.text("走到站牌") : live.text("走到車站"),
+                          systemImage: cycling ? "bicycle" : "figure.walk")
                         .liveFont(.body, weight: .semibold).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
                 }.buttonStyle(MapActionStyle())
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
@@ -772,7 +774,13 @@ private struct JourneyWaitingActions: View {
                 else if let walk = option.walks.first, let duration = walk.duration, duration >= 30 {
                     Text(planner.walkingStatus(at: index) ?? walk.timeLabel).liveFont(.caption).foregroundStyle(.secondary).accessibilityIdentifier("walking-live-status")
                 }
-                if let issue = option.walkIssue { Text(issue).liveFont(.caption).foregroundStyle(MapChrome.caution) }
+                if let issue = option.walkIssue { Text(live.text(issue)).liveFont(.caption).foregroundStyle(MapChrome.caution) }
+                if option.walks.first?.bike != nil {
+                    if let instruction = planner.cyclingInstruction(at: index) {
+                        Text(instruction).liveFont(.caption, weight: .semibold).accessibilityIdentifier("cycling-live-instruction")
+                    }
+                    BikeStationAlert(model: model, planner: planner)
+                }
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                     if model.journeyDuration(option, at: timeline.date)?.waits.first?.missedNext == true {
                         Label(AppText.text("下一班可能趕不上"), systemImage: "exclamationmark.triangle.fill")
@@ -822,7 +830,7 @@ private struct JourneyRouteChain: View {
                 if let duration = option.walks[index].duration, duration >= 30 {
                     if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
                     HStack(spacing: 1) {
-                        Image(systemName: "figure.walk")
+                        Image(systemName: option.walks[index].bike == nil ? "figure.walk" : "bicycle")
                         Text("\(max(1, Int(ceil(duration / 60))))")
                     }
                     .liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
@@ -1015,7 +1023,11 @@ struct JourneyItineraryView: View {
                     }
                 }.padding(.bottom, 18)
                 ForEach(option.walks.indices, id: \.self) { index in
-                    JourneyWalkingStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
+                    if option.walks[index].bike != nil {
+                        JourneyCyclingStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
+                    } else {
+                        JourneyWalkingStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
+                    }
                     Divider().padding(.leading, 48)
                     if option.rides.indices.contains(index) {
                         JourneyRideStep(model: model, planner: planner, option: option, index: index, showMap: showMap)
@@ -1065,6 +1077,87 @@ private struct JourneyWalkingStep: View {
                     .accessibilityIdentifier("journey-in-app-walk-\(index)")
             }
         }.padding(.vertical, 16)
+    }
+}
+
+/// One leg ridden on a YouBike: where to pick the bike up, how far it is ridden, and where it
+/// has to be returned. The counts are what the stations reported when the trip was planned;
+/// a station that has since run out is called out by `BikeStationAlert`.
+private struct JourneyCyclingStep: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    let option: JourneyOption
+    let index: Int
+    let showMap: () -> Void
+    private var leg: WalkingLeg { option.walks[index] }
+    private var done: Bool { planner.started && (planner.steps.firstIndex(of: .walk(index)) ?? .max) < planner.stepIndex }
+    private var target: String {
+        option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName
+            : planner.destination?.localizedName ?? AppText.text("目的地")
+    }
+    var body: some View {
+        HStack(alignment: .top, spacing: 14) {
+            Image(systemName: "bicycle").liveFont(.title2).foregroundStyle(.primary).frame(width: 34)
+            VStack(alignment: .leading, spacing: 5) {
+                Text((done ? AppText.text("已騎到 ") : AppText.text("騎 YouBike 至 ")) + target)
+                    .liveFont(.headline).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("journey-bike-status-\(index)")
+                if let bike = leg.bike {
+                    Text(AppText.text("%@ 借車 · %@ 還車", bike.pickup.localizedName, bike.dropoff.localizedName))
+                        .liveFont(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    Text(done ? AppText.text("已完成")
+                         : AppText.text("步行 %@ 分 · 騎 %@ · %@ 分", max(1, Int(ceil(bike.walkingSeconds / 60))),
+                                        distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
+                        .liveFont(.subheadline).foregroundStyle(.secondary)
+                    if !done {
+                        BikeStationAlert(model: model, planner: planner)
+                    }
+                }
+            }
+            Spacer(minLength: 0)
+            if !done, planner.currentStep == .walk(index) {
+                Button { model.showWalkOnMap(index); showMap() } label: {
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 40, height: 44)
+                }.accessibilityLabel(AppText.text("在地圖查看騎乘路線"))
+                    .accessibilityIdentifier("journey-in-app-bike-\(index)")
+            }
+        }.padding(.vertical, 16)
+    }
+}
+
+/// Counts move while the rider is on the way. When the station they are heading to can no
+/// longer serve them, say so and offer the nearest one that can, without replanning the trip.
+struct BikeStationAlert: View {
+    @Environment(\.liveSettings) private var live
+    /// Observed so the warning appears and clears as new counts arrive; the planner holds the
+    /// same counts but does not publish them.
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    var body: some View {
+        if let alert = planner.bikeAlert {
+            let renting = alert.renting, station = alert.station, replacement = alert.replacement
+            VStack(alignment: .leading, spacing: 6) {
+                Label(renting ? AppText.text("%@ 目前沒有車", station.localizedName)
+                              : AppText.text("%@ 目前沒有空位", station.localizedName),
+                      systemImage: "exclamationmark.triangle.fill")
+                    .liveFont(.caption, weight: .semibold).foregroundStyle(MapChrome.caution)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("journey-bike-alert")
+                if let replacement {
+                    Button { planner.moveBikeStation(to: replacement, renting: renting) } label: {
+                        Label(renting ? AppText.text("改到 %@ 借車", replacement.localizedName)
+                                      : AppText.text("改到 %@ 還車", replacement.localizedName),
+                              systemImage: "arrow.triangle.swap")
+                            .liveFont(.caption, weight: .semibold).lineLimit(2)
+                            .padding(.horizontal, 12).frame(minHeight: 38)
+                    }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-bike-switch")
+                } else {
+                    Text(live.text("附近暫時沒有可替代的站點，可重新規劃行程。"))
+                        .liveFont(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
     }
 }
 
@@ -1239,12 +1332,20 @@ struct JourneyGuideCard: View {
                         }.liveFont(.body, weight: .semibold)
                     } else {
                         let index: Int = { if case .walk(let value) = planner.currentStep { return value }; return 0 }()
+                        let cycling = option.walks.indices.contains(index) && option.walks[index].bike != nil
+                        if cycling, let instruction = planner.cyclingInstruction(at: index) {
+                            Text(instruction).liveFont(.subheadline, weight: .semibold)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .accessibilityIdentifier("cycling-live-instruction")
+                        }
                         if option.walks.indices.contains(index) {
                             Text(planner.walkingStatus(at: index) ?? option.walks[index].timeLabel).liveFont(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("walking-live-status")
                         }
+                        if cycling { BikeStationAlert(model: model, planner: planner) }
                         HStack(spacing: 12) {
                             Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index) } label: {
-                                Label(live.text("看步行路線"), systemImage: "figure.walk")
+                                Label(cycling ? live.text("看騎乘路線") : live.text("看步行路線"),
+                                      systemImage: cycling ? "bicycle" : "figure.walk")
                                     .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
                             }.buttonStyle(MapActionStyle()).accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                             Button { if !planner.started { planner.begin() }; planner.advance() } label: {
@@ -1549,14 +1650,20 @@ private struct MetroOnboardSummary: View {
 private struct WalkingBannerContent: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var planner: JourneyPlannerModel
+    /// On a cycling leg the instruction changes as the rider fetches, rides and returns the bike.
+    private var cyclingInstruction: String? {
+        guard case .walk(let index) = planner.currentStep else { return nil }
+        return planner.cyclingInstruction(at: index)
+    }
     var body: some View {
         HStack(spacing: 14) {
-            Image(systemName: planner.arrived ? "checkmark.circle.fill" : "figure.walk")
+            Image(systemName: planner.arrived ? "checkmark.circle.fill" : cyclingInstruction != nil ? "bicycle" : "figure.walk")
                 .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(planner.arrived ? Color(liveHex: "#6EE7A0") : Color.white)
                 .frame(width: 40)
             VStack(alignment: .leading, spacing: 2) {
-                Text(planner.arrived ? live.text("已抵達") : AppText.text("走到「%@」", planner.destination?.localizedName ?? AppText.text("目的地")))
+                Text(planner.arrived ? live.text("已抵達") : cyclingInstruction
+                     ?? AppText.text("走到「%@」", planner.destination?.localizedName ?? AppText.text("目的地")))
                     .liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.8)
                 if live.language == .english, let name = planner.destination?.name {
                     Text(name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))

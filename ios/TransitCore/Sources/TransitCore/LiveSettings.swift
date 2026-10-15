@@ -51,6 +51,16 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var walkingWeight = 1.0
         public var waitingWeight = 1.0
         public var transferPenaltySeconds = 420.0
+        /// YouBike legs. Distances are metres, speeds metres per second.
+        public var bikeRouting = true
+        public var bikeSpeed = 3.3
+        public var bikeHandlingSeconds = 150.0
+        public var bikeAccessMeters = 400.0
+        public var bikeMinimumRideMeters = 700.0
+        public var bikeMaximumRideMeters = 5_000.0
+        public var bikeMinimumGainSeconds = 240.0
+        public var bikeMinimumBikes = 2.0
+        public var bikeMinimumDocks = 2.0
         public init() {}
     }
     public struct Refresh: Codable, Equatable, Sendable {

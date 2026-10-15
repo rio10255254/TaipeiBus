@@ -153,6 +153,49 @@
           "type": "number",
           "minimum": 180,
           "maximum": 900
+        },
+        "bikeRouting": {
+          "type": "boolean"
+        },
+        "bikeSpeed": {
+          "type": "number",
+          "minimum": 1.5,
+          "maximum": 7
+        },
+        "bikeHandlingSeconds": {
+          "type": "number",
+          "minimum": 30,
+          "maximum": 600
+        },
+        "bikeAccessMeters": {
+          "type": "number",
+          "minimum": 100,
+          "maximum": 900
+        },
+        "bikeMinimumRideMeters": {
+          "type": "number",
+          "minimum": 200,
+          "maximum": 3000
+        },
+        "bikeMaximumRideMeters": {
+          "type": "number",
+          "minimum": 1000,
+          "maximum": 12000
+        },
+        "bikeMinimumGainSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1800
+        },
+        "bikeMinimumBikes": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
+        },
+        "bikeMinimumDocks": {
+          "type": "number",
+          "minimum": 1,
+          "maximum": 10
         }
       },
       "additionalProperties": false

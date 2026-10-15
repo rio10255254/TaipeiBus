@@ -107,7 +107,16 @@
     "walkingOnlyMeters": 900,
     "walkingWeight": 1.0,
     "waitingWeight": 1.0,
-    "transferPenaltySeconds": 420
+    "transferPenaltySeconds": 420,
+    "bikeRouting": true,
+    "bikeSpeed": 3.3,
+    "bikeHandlingSeconds": 150,
+    "bikeAccessMeters": 400,
+    "bikeMinimumRideMeters": 700,
+    "bikeMaximumRideMeters": 5000,
+    "bikeMinimumGainSeconds": 240,
+    "bikeMinimumBikes": 2,
+    "bikeMinimumDocks": 2
   },
   "refresh": {
     "vehicleSeconds": 15,

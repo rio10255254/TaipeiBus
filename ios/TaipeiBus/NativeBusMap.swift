@@ -130,6 +130,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var locationMotion = DeviceLocationMotion()
         private var nearbySource: MLNShapeSource?
         private var bikeSource: MLNShapeSource?
+        private var cyclingSource: MLNShapeSource?
         private var lastBikeKey = ""
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
@@ -266,6 +267,20 @@ struct NativeBusMap: UIViewRepresentable {
             walkingCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
             // Walking guidance must remain legible over roofs and dense road colours.
             style.addLayer(walkingCasing); style.addLayer(walkingLine)
+            // The ridden part of a YouBike leg: a solid green line, so it reads as a different
+            // kind of movement from the walking dots at either end of it.
+            let cycling = MLNShapeSource(identifier: "journey-cycling", shape: nil, options: nil)
+            style.addSource(cycling); cyclingSource = cycling
+            let cyclingCasing = MLNLineStyleLayer(identifier: "journey-cycling-casing", source: cycling)
+            cyclingCasing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            cyclingCasing.lineWidth = NSExpression(forConstantValue: 9)
+            cyclingCasing.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            cyclingCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            let cyclingLine = MLNLineStyleLayer(identifier: "journey-cycling-line", source: cycling)
+            cyclingLine.lineWidth = NSExpression(forConstantValue: 5.5)
+            cyclingLine.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            cyclingLine.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            style.addLayer(cyclingCasing); style.addLayer(cyclingLine)
             let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
             style.addSource(tripStops); tripStopsSource = tripStops
             installMarkerImages(style)
@@ -887,12 +902,25 @@ struct NativeBusMap: UIViewRepresentable {
                     if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
                     else { displayedWalks = [] }
                 }
-                let visibleWalks = model.stationWalk.isActive ? [model.stationWalk.coordinates] : model.activeWalkingIndex.map { [model.planner.walkingCoordinates(at: $0)] } ?? displayedWalks.map(\.coordinates)
+                // A cycling leg keeps its walking dots to the two ends; the ride is its own line.
+                let visibleWalks: [[Coordinate]]
+                if model.stationWalk.isActive { visibleWalks = [model.stationWalk.coordinates] }
+                else if let index = model.activeWalkingIndex {
+                    let leg = model.planner.selected?.walks.indices.contains(index) == true ? model.planner.selected?.walks[index] : nil
+                    visibleWalks = leg?.bike != nil ? leg!.footPaths : [model.planner.walkingCoordinates(at: index)]
+                } else { visibleWalks = displayedWalks.flatMap(\.footPaths) }
                 let walks = visibleWalks.filter { $0.count >= 2 }.map { walk -> MLNPolylineFeature in
                     var coordinates = walk.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 walkingSource?.shape = walks.isEmpty ? nil : MLNShapeCollectionFeature(shapes: walks)
+                let rides = model.planner.bikeCoordinates.map { path -> MLNPolylineFeature in
+                    var coordinates = path.map(\.locationCoordinate)
+                    return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
+                }
+                cyclingSource?.shape = rides.isEmpty ? nil : MLNShapeCollectionFeature(shapes: rides)
+                (map.style?.layer(withIdentifier: "journey-cycling-line") as? MLNLineStyleLayer)?.lineColor =
+                    NSExpression(forConstantValue: UIColor(liveHex: Self.bikeTint(.plenty, dark: darkMode)))
                 updateTripStops()
                 lastRouteKey = routeKey
             }

@@ -24,7 +24,10 @@ public struct TransitRide: Identifiable, Sendable {
 }
 
 public struct TransitTrip: Identifiable, Sendable {
-    public var id: String { rides.map(\.id).joined(separator: "|") }
+    /// Distinguishes alternatives built on the same rides, such as cycling to the first stop
+    /// instead of walking. The family stays the same, so only the better one is offered.
+    public var variant: String = ""
+    public var id: String { rides.map(\.id).joined(separator: "|") + (variant.isEmpty ? "" : "#" + variant) }
     public let rides: [TransitRide]
     /// Straight-line access distance for candidate ranking, not a verified walking route.
     public let accessDistance: Double
@@ -51,6 +54,9 @@ public struct TransitTrip: Identifiable, Sendable {
         return result
     }
     public var transfers: Int { max(0, rides.count - 1) }
+    public func asVariant(_ name: String) -> TransitTrip {
+        var result = self; result.variant = name; return result
+    }
     public var familyID: String { rides.map { "\($0.route.parentID):\($0.direction)" }.joined(separator: "|") }
 }
 

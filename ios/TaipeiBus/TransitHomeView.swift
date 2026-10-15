@@ -1499,6 +1499,7 @@ private struct AppInformationView: View {
                     Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
                     Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
                     Text(AppText.text("YouBike 站點內建於 App，可借車輛與空位為臺北市公開資料，約每分鐘更新，且只在顯示站點時查詢；實際借還以現場為準。目前不含新北市站點。"))
+                    Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
                     Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
                 }
                 Section(AppText.text("地圖")) {
@@ -1552,7 +1553,7 @@ private struct PrivacyExplanationView: View {
             }
             Section(AppText.text("網路服務")) {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
-                Text(AppText.text("顯示 YouBike 站點時，App 會向臺北市公開資料取得全市即時車位，這個請求不包含你的位置或選取的站點。"))
+                Text(AppText.text("顯示 YouBike 站點、查看站點或行程含 YouBike 時，App 會向臺北市公開資料取得全市即時車位，這個請求不包含你的位置、目的地或選取的站點。"))
                 Link(AppText.text("OpenFreeMap 隱私政策"), destination: URL(string: "https://openfreemap.org/privacy/")!)
             }
             Section(AppText.text("測試回饋")) {

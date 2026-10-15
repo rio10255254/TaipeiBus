@@ -78,6 +78,12 @@ GitHub 連不上時，手機會改從 jsDelivr CDN 讀同一份檔案（最多�
 - `search.aliases`：搜尋別名（例如「內湖捷運站」→「捷運內湖站」）
 - `copy`：替換 App 上的文字，`{"原文字": "新文字"}`
 - `quickDestinations`：首頁快捷目的地
+- `planning.bikeRouting`：規劃是否納入 YouBike（`false` 代表只用公車與捷運）
+- `planning.bikeSpeed`：騎乘速度（公尺／秒，內建 3.3，約 12 km/h）
+- `planning.bikeHandlingSeconds`：借車加還車合計預留秒數（內建 150）
+- `planning.bikeMinimumBikes`、`planning.bikeMinimumDocks`：借車站至少要有幾輛車、還車站至少要有幾個空位（內建各 2）
+- `planning.bikeMinimumGainSeconds`：騎車要比走路快多少秒才提出（內建 240）
+- `planning.bikeAccessMeters`、`planning.bikeMinimumRideMeters`、`planning.bikeMaximumRideMeters`：走到站點的距離上限、騎乘距離的下限與上限
 - `display.bikeStations`：是否顯示 YouBike 站點（設成 `false` 會整個關掉，手機不再查詢即時車位；設成 `true` 仍由使用者在「資訊與設定 · 地圖」決定要不要顯示）
 
 不想手動改檔案時，也可以到 Actions →「Quick update content」→ **Run workflow**，
