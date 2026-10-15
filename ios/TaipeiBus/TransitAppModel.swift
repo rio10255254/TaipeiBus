@@ -1731,6 +1731,14 @@ final class TransitAppModel: ObservableObject {
             bikeAvailability = BikeAvailability(docks: emptied, receivedAt: now)
             planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
         }
+        if ProcessInfo.processInfo.arguments.contains("--preview-youbike-stale") {
+            let old = docks.mapValues { dock in
+                BikeDock(stationID: dock.stationID, rentable: dock.rentable, returnable: dock.returnable,
+                         capacity: dock.capacity, active: dock.active, observedAt: now.addingTimeInterval(-1800))
+            }
+            bikeAvailability = BikeAvailability(docks: old, receivedAt: now)
+            planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+        }
     }
 
     private func prepareBoardingFixture(track: Bool, transfer: Bool = false, cooperated: Bool = false, browse: Bool = false) async -> Bool {
