@@ -1,0 +1,126 @@
+{
+  "version": "1.8.2",
+  "distribution": "testflight-only",
+  "formal_submission": "paused",
+  "status": "verified_ready_for_testflight",
+  "production_source": "bbf1199",
+  "latest_source": "bbf1199",
+  "user_case": {
+    "origin": "Representative location near NTU from screenshots; exact GPS was not provided",
+    "destination": "Representative Ximen / Emei Street location",
+    "user_confirmed_same_endpoints": true,
+    "user_preference": "balanced/default",
+    "historical_replay_limit": "The original live arrivals and exact GPS coordinates are unavailable; no claim of reproducing the original screenshot exactly."
+  },
+  "findings": [
+    {
+      "issue": "Shared interchange exits were attached only to one line code",
+      "scope": [
+        "Ximen G12/BL11",
+        "Guting O05/G09",
+        "Dongmen R07/O06",
+        "Chiang Kai-shek Memorial Hall G10/R08"
+      ],
+      "fix": "Resolve missing entrances through explicit same-name indoor transfers within 400m; keep raw map exits unique.",
+      "measured_ximen_seconds": {
+        "old_station_center": 292,
+        "exit_6": 209
+      },
+      "limit": "The old center also passed pedestrian endpoint validation in this case. The missing exits alone do not explain the missing MRT screenshot."
+    },
+    {
+      "issue": "Preview selection canceled ongoing verification of alternatives",
+      "fix": "Continue discovery while preserving the inspected route and map; cancel when starting navigation or leaving the journey."
+    },
+    {
+      "issue": "YouBike counts arriving after the initial search were not considered",
+      "fix": "Search counts during planning even with the bike layer hidden and add verified connectors without resetting the inspected journey."
+    },
+    {
+      "issue": "Empty nearby bicycle stations exhausted the station search budget",
+      "fix": "Filter current supply within the walking radius before limiting candidate pairs."
+    },
+    {
+      "issue": "Bike connectors were limited by the first transit families and treated as walking in preference penalties",
+      "fix": "Compare connection savings across candidate families, verify real cycling routes, and separate walking preference cost from cycling while retaining all elapsed travel time."
+    }
+  ],
+  "measured_pedestrian_case": {
+    "run": 38756999368,
+    "origin": [
+      25.0192,
+      121.539
+    ],
+    "destination": [
+      25.0434,
+      121.5062
+    ],
+    "reference_time": "2026-10-15T08:25:00Z",
+    "entry": "Gongguan Exit 3",
+    "exit": "Ximen Exit 6",
+    "walking_minutes_including_station_access": 18.38596299252909,
+    "waiting_minutes": 3.5,
+    "rail_minutes": 8.966666666666667,
+    "total_minutes": 30.85262965919576,
+    "note": "Real Apple pedestrian paths; timetable-based train wait, not historical official realtime."
+  },
+  "validation": {
+    "native_routes_and_purchases_previous": {
+      "run": 38756999368,
+      "tests": 23,
+      "failures": 0
+    },
+    "final_native_and_ui_run": 38761326468,
+    "additional_core_regression_run": 38761633016,
+    "offline_release_checks": "passed",
+    "localization": "693 templates passed",
+    "official_time_download_tests": "28 passed",
+    "native_connector_tests": {
+      "run": 38761326468,
+      "passed": 26,
+      "failures": 0
+    },
+    "core_tests": {
+      "run": 38761633016,
+      "total": 249,
+      "skipped": 11,
+      "failures": 0,
+      "note": "Live/bundled-data gated tests run separately in the native and bundled catalog audits."
+    },
+    "final_boarding_boundary_run": 38762255800,
+    "final_native_tests": {
+      "run": 38762255800,
+      "source": "bbf119980c8c8d924fcdb8588713c936bdc679e0",
+      "passed": 27,
+      "failures": 0,
+      "release_device_build": "passed"
+    },
+    "ui_source": "881f5f9",
+    "ui_source_difference": "Final production code only adds cancelRequests when confirming boarding; separately covered by hosted regression test in 38762255800.",
+    "ui_tests": {
+      "run": 38761326468,
+      "source": "881f5f9",
+      "light_passed": 5,
+      "dark_passed": 2,
+      "failures": 0,
+      "system_appearance_switches": "passed; same process, tracked bus, center and zoom retained",
+      "visual_review": "Native Chinese light metro and English dark mixed-route screenshots inspected; route and Go/Steps are visible."
+    }
+  },
+  "limits": [
+    "No guarantee of a bike or dock at future arrival; only current published supply is used.",
+    "Simulator/native routing verification does not establish physical iPhone frame rate.",
+    "Final TestFlight upload and Apple processing have not yet been confirmed."
+  ],
+  "measured_cycling_case": {
+    "run": 38761326468,
+    "availability": "Controlled test counts: 8 bikes and 8 docks per station; not historical or currently promised availability.",
+    "routes": "Actual Apple cycling and pedestrian directions",
+    "pickup": "臺大原分所北側",
+    "dropoff": "臺大大一女舍北側",
+    "access_seconds_including_station_entry": 654.099782771313,
+    "riding_seconds": 262.224815160625,
+    "total_minutes": 28.448356090159276,
+    "saving_vs_walking_connector_minutes": 2.404273569036483
+  }
+}

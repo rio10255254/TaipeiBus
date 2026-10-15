@@ -63,7 +63,7 @@ env:
 
 jobs:
   bike_behavior:
-    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope == 'youbike'
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu')
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -125,6 +125,13 @@ jobs:
           PY
           swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log"
           swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log"
+      - name: Preserve routing comparison evidence before the UI build
+        if: always() && inputs.bundled_catalog_audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: routing-comparison
+          path: ${{ runner.temp }}/routing-audit.log
+          retention-days: 30
       - name: Build native app
         if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
@@ -152,7 +159,7 @@ jobs:
         env:
           BUS_LIVE_CYCLING_TEST: "1"
         id: billing_transactions
-        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike'
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
         timeout-minutes: 22
         run: |
           set -euo pipefail
@@ -169,7 +176,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - name: Preserve StoreKit verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
         uses: actions/upload-artifact@v4
         with:
           name: billing-tests
@@ -178,7 +185,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
-        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
+        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
         timeout-minutes: 24
         run: |
           set -euo pipefail
@@ -202,7 +209,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/pro-ui-dark.log"
       - name: Preserve native Pro screenshots and verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
         run: |
           for mode in pro-ui pro-ui-dark; do
             if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
@@ -210,7 +217,7 @@ jobs:
             fi
           done
       - name: Save native Pro walkthrough
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
         uses: actions/upload-artifact@v4
         with:
           name: pro-walkthrough

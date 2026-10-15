@@ -40,6 +40,8 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertEqual(state()["started"] as? Bool,false)
             XCTAssertTrue(button("journey-go-"+id).isHittable)
             XCTAssertTrue(button("journey-steps-"+id).isHittable)
+            XCTAssertLessThan(button("journey-go-"+id).frame.maxY, button("journey-all-options").frame.minY,
+                              "Go belongs to the visible route card, above the comparison footer")
             capture("mixed-menu-\(english ? "en" : "zh")-option-\(index)")
         }
         button("journey-page-0").tap()

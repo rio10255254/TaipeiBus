@@ -120,6 +120,45 @@ final class BikePlannerTests: XCTestCase {
         XCTAssertNil(p.bikeStationUpdateMessage)
     }
 
+    private func longAccessTransit() -> JourneyOption {
+        var route=BusRoute(id:"G",parentID:"G",name:"松山新店線",variantName:"",departure:"公館",destination:"西門")
+        route.mode = .metro
+        let destination=Coordinate(latitude:25.06,longitude:end.longitude)
+        let stops=[BusStop(id:"G-a",routeID:"G",stationID:"G-a",name:"公館",direction:"0",sequence:1,coordinate:end),
+                   BusStop(id:"G-b",routeID:"G",stationID:"G-b",name:"西門",direction:"0",sequence:2,coordinate:destination)]
+        let ride=TransitRide(route:route,direction:"0",stops:stops,coordinates:[end,destination])
+        let trip=TransitTrip(rides:[ride],accessDistance:1500,egressDistance:0,transferDistance:0,score:0,rideSeconds:[600])
+        return JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:start,to:end,distance:1500,duration:1500),
+            WalkingLeg(from:destination,to:destination,duration:0)])
+    }
+    func testLateBikeCountsAddMetroConnectorWithoutReplacingTheInspectedRoute() async throws {
+        let base=longAccessTransit(), p=JourneyPlannerModel()
+        p.auditLoadChoices([base],from:TravelPlace(name:"起點",address:"",coordinate:start),to:TravelPlace(name:"終點",address:"",coordinate:base.walks.last!.to))
+        p.select(base)
+        let revision=p.mapRevision
+        p.testCycle = { _ in self.cycling().walks[0] }
+        p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
+        for _ in 0..<200 {
+            if !p.checkingWalks { break }
+            try? await Task.sleep(for:.milliseconds(10))
+        }
+        XCTAssertFalse(p.checkingWalks)
+        XCTAssertEqual(p.selectedID,base.id);XCTAssertEqual(p.mapRevision,revision)
+        XCTAssertFalse(p.started)
+        let bike=try XCTUnwrap(p.options.first { $0.cycles })
+        XCTAssertEqual(bike.rides.first?.route.mode,.metro)
+        XCTAssertTrue(bike.verified)
+        p.refreshRecommendations();XCTAssertEqual(p.selectedID,bike.id)
+    }
+    func testLateCountsCannotReopenAClosedJourney() async {
+        let base=longAccessTransit(), p=planner([base])
+        p.testCycle = { _ in try? await Task.sleep(for:.milliseconds(100));return self.cycling().walks[0] }
+        p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
+        p.finish()
+        try? await Task.sleep(for:.milliseconds(200))
+        XCTAssertNil(p.selected);XCTAssertTrue(p.options.isEmpty);XCTAssertFalse(p.checkingWalks)
+    }
+
     func testLiveTaipeiCyclingDirectionsBetweenUserStations() async throws {
         let p=JourneyPlannerModel()
         let a=BikeStation(id:"500110026",name:"八德路三段74巷口",district:"",coordinate:Coordinate(latitude:25.04459,longitude:121.55252),capacity:30)

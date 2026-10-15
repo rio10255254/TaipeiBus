@@ -278,10 +278,13 @@ final class TransitAppModel: ObservableObject {
         metroRevision += 1
     }
     @Published private(set) var tripPreference: RoutePreference?
+    var activeRoutePreference: RoutePreference {
+        purchases.hasPro ? (tripPreference ?? commutes.preference) : .balanced
+    }
     private var effectivePlanning = LiveSettings.Planning()
     func applyPersonalPreferences() {
         var settings = liveSettings
-        if purchases.hasPro { settings.planning = (tripPreference ?? commutes.preference).applying(to:settings.planning) }
+        settings.planning = activeRoutePreference.applying(to: settings.planning)
         guard settings.planning != effectivePlanning else { return }
         effectivePlanning = settings.planning; planner.updateSettings(settings)
         if !planner.started, planner.destination != nil, !metadata.routes.isEmpty { planner.plan(metadata:metadata) }
@@ -382,7 +385,8 @@ final class TransitAppModel: ObservableObject {
     /// Counts are also needed while a planned trip rides a YouBike, whether or not the map
     /// is showing stations: the rider has to know if their station has run out.
     private var needsBikeCounts: Bool {
-        showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan
+        showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan ||
+            (liveSettings.planning.bikeRouting && planner.destination != nil && !planner.started)
     }
     private func pollBikesInBackground() {
 #if DEBUG
@@ -635,6 +639,7 @@ final class TransitAppModel: ObservableObject {
                     bikeNetwork = await service.bikeNetwork()
                     planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
                 }
+                pollBikesInBackground()
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
                 else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
 #if DEBUG

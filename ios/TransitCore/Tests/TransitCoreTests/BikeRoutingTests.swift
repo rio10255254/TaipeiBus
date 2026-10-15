@@ -88,6 +88,19 @@ final class BikeRoutingTests: XCTestCase {
         XCTAssertFalse(BikeRouting.worthRiding(connection, insteadOfWalking: 400))
         XCTAssertFalse(BikeRouting.worthRiding(nil, insteadOfWalking: 5_000))
     }
+    func testEmptyNearbyStationsDoNotHideAUsableStationWithinWalkingRange() throws {
+        let now = Date()
+        let empty = (0..<9).map { station("empty-\($0)", 25.0300, 121.5001 + Double($0) * 0.0001) }
+        let usable = station("usable", 25.0300, 121.5020)
+        let arrival = station("arrival", 25.0300, 121.5200)
+        let network = BikeNetwork(stations: empty + [usable, arrival])
+        var counts = Dictionary(uniqueKeysWithValues: empty.map { ($0.id, (rent: 0, back: 10)) })
+        counts[usable.id] = (rent: 8, back: 10); counts[arrival.id] = (rent: 5, back: 9)
+        let result = try XCTUnwrap(BikeRouting.connection(from: origin, to: destination, network: network,
+            availability: availability(counts, at: now), at: now))
+        XCTAssertEqual(result.pickup.id, usable.id)
+        XCTAssertEqual(result.dropoff.id, arrival.id)
+    }
 
     func testASavingWorthLeavingAWalkForIsNotWorthLeavingABusFor() {
         let network = network()

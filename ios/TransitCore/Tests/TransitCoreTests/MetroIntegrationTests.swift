@@ -1,4 +1,7 @@
 import XCTest
+#if canImport(MapKit)
+import MapKit
+#endif
 @testable import TransitCore
 
 final class MetroIntegrationTests: XCTestCase {
@@ -188,6 +191,70 @@ final class MetroIntegrationTests: XCTestCase {
             print("METRO_LIVE_AUDIT",from,to,"seconds",elapsed,"choices",trips.count,"rides",trips.first?.rides.map { $0.route.name } ?? [])
         }
     }
+    func testSharedInterchangeExitsAreAvailableOnEveryLineWithoutDuplicatingMapPoints() throws {
+        let metro=try network()
+        for (emptyCode,ownerCode) in [("G12","BL11"),("O05","G09"),("G10","R08"),("R07","O06")] {
+            let station=try XCTUnwrap(metro.stations.first { $0.code==emptyCode })
+            let owner=try XCTUnwrap(metro.stations.first { $0.code==ownerCode })
+            XCTAssertFalse(owner.exits.isEmpty)
+            XCTAssertEqual(Set(metro.station(station.id)!.exits.map(\.id)),Set(owner.exits.map(\.id)))
+            XCTAssertNotNil(metro.nearestExit(stationID:station.id,to:station.coordinate))
+        }
+        XCTAssertEqual(metro.stations.flatMap(\.exits).count,486,"Physical entrances must not be duplicated on the map")
+        var raw=try XCTUnwrap(JSONSerialization.jsonObject(with:JSONEncoder().encode(metro)) as? [String:Any])
+        var transfers=try XCTUnwrap(raw["transfers"] as? [[String:Any]])
+        for i in transfers.indices where transfers[i]["from"] as? String == "metro:TRTC:G12" { transfers[i]["external"]=true }
+        raw["transfers"]=transfers
+        let disconnected=try MetroNetwork(data:JSONSerialization.data(withJSONObject:raw))
+        XCTAssertTrue(try XCTUnwrap(disconnected.station("metro:TRTC:G12")).exits.isEmpty,"Outdoor transfers must not invent shared entrances")
+    }
+
+    func testGongguanXimenCandidateCoverageAudit() throws {
+        guard let folder=ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Explicit bundled city audit") }
+        var feeds:[String:Data]=[:]
+        for name in ["GetRoute","GetStop","GetPathDetail","GetBusShape"] { feeds[name]=try Data(contentsOf:URL(fileURLWithPath:folder).appendingPathComponent(name+".json")) }
+        var metadata=try FeedDecoder.metadata(feeds:feeds)
+        let metro=try network();metro.attach(to:&metadata)
+        let root=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        metadata.officialTravelTimes=try OfficialTravelTimes(data:Data(contentsOf:root.appendingPathComponent("TaipeiBus/OfficialTravelTimes.json"))).matching(metadata)
+        let planner=MultimodalPlanner(metadata:metadata)
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
+        let destination=Coordinate(latitude:25.0434,longitude:121.5062)
+        for origin in [Coordinate(latitude:25.0192,longitude:121.5390),Coordinate(latitude:25.0192,longitude:121.5410),Coordinate(latitude:25.0180,longitude:121.5380)] {
+            let trips=planner.plan(from:origin,to:destination,maximumWalk:1200,limit:36,at:date)
+            let ranked=TripRanking.recommended(trips,estimates:.init(),at:date,limit:36,diverse:false)
+            let green=ranked.filter { $0.rides.count==1 && $0.rides[0].route.lineCode=="G" }
+            print("GONGGUAN_COVERAGE origin=\(origin) candidates=\(trips.count) directGreen=\(green.count)")
+            for (index,trip) in ranked.enumerated() where index<10 || green.contains(where: { $0.id==trip.id }) {
+                let rating=TripRanking.assessment(trip,estimates:.init(),at:date)
+                print("GONGGUAN_CHOICE index=\(index) routes=\(trip.rides.map { $0.route.name }) boarding=\(trip.rides.map { $0.boarding.name }) alighting=\(trip.rides.map { $0.alighting.name }) walk=\(rating.walkingSeconds/60) wait=\(rating.waitingSeconds/60) ride=\(trip.rideSeconds.reduce(0,+)/60) total=\(rating.elapsedSeconds/60)")
+            }
+            XCTAssertFalse(green.isEmpty,"A direct Gongguan-Ximen train must be retained in the city catalog")
+        }
+    }
+
+    #if canImport(MapKit)
+    @MainActor
+    func testGongguanXimenWalkingEndpointsAudit() async throws {
+        guard ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] != nil else { throw XCTSkip("Explicit walking audit") }
+        let metro=try network(), origin=Coordinate(latitude:25.0192,longitude:121.5390), destination=Coordinate(latitude:25.0434,longitude:121.5062)
+        let gongguan=try XCTUnwrap(metro.stations.first { $0.code=="G07" }), ximen=try XCTUnwrap(metro.stations.first { $0.code=="G12" })
+        let entry=try XCTUnwrap(metro.nearestExit(stationID:gongguan.id,to:origin)), exit=try XCTUnwrap(metro.nearestExit(stationID:ximen.id,to:destination))
+        for (name,from,to) in [(entry.name,origin,entry.coordinate),(exit.name,exit.coordinate,destination),("legacy station centre",ximen.coordinate,destination)] {
+            let request=MKDirections.Request();request.transportType = .walking
+            request.source=MKMapItem(placemark:MKPlacemark(coordinate:CLLocationCoordinate2D(latitude:from.latitude,longitude:from.longitude)))
+            request.destination=MKMapItem(placemark:MKPlacemark(coordinate:CLLocationCoordinate2D(latitude:to.latitude,longitude:to.longitude)))
+            let response=try await MKDirections(request:request).calculate()
+            for route in response.routes {
+                let points=(0..<route.polyline.pointCount).map { i in let c=route.polyline.points()[i].coordinate;return Coordinate(latitude:c.latitude,longitude:c.longitude) }
+                print("GONGGUAN_WALK exit=\(name) from=\(from) to=\(to) seconds=\(route.expectedTravelTime) meters=\(route.distance) startGap=\(points.first.map { $0.distance(to:from) } ?? -1) endGap=\(points.last.map { $0.distance(to:to) } ?? -1) type=\(route.transportType.rawValue)")
+                if name != "legacy station centre" { XCTAssertNotNil(AnchoredPedestrianPath.make(points,from:from,to:to),"Official metro entrance must remain walkable") }
+            }
+            XCTAssertFalse(response.routes.isEmpty)
+        }
+    }
+    #endif
+
     func testEveryOfficialStationHasAUsableTrainTrackIncludingOffsetStationCentres() throws {
         let metro = try network(), date = noon()
         for pattern in metro.patterns {
