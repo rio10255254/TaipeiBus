@@ -1,6 +1,19 @@
 import XCTest
 
 final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
+    override func tearDownWithError() throws {
+        let shot = XCTAttachment(screenshot:XCUIScreen.main.screenshot())
+        shot.name = "mixed-menu-final-screen";shot.lifetime = .keepAlways;add(shot)
+    }
+    private func requireRouteMenu() -> Bool {
+        if button("journey-all-options").waitForExistence(timeout:60) { return true }
+        let probe = app.staticTexts["journey-timing-state"]
+        print("ROUTE_MENU_START_STATE " + (probe.exists ? probe.label : "state unavailable"))
+        let shot = XCTAttachment(screenshot:XCUIScreen.main.screenshot())
+        shot.name = "mixed-menu-entry-missing";shot.lifetime = .keepAlways;add(shot)
+        XCTFail("Route menu was not presented after the fixture loaded")
+        return false
+    }
     private func state() -> [String:Any] {
         guard let data = app.staticTexts["journey-timing-state"].label.data(using:.utf8),
               let value = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return [:] }
@@ -73,7 +86,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     func testEnglishMixedRoutesKeepTheSameFlow() { verifyMenu(english:true) }
     func testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel() {
         launch(["--preview-mixed-planning","--preview-many-options","--usability-fixture","--test-journey-selection"])
-        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:120))
+        guard requireRouteMenu() else { return }
         let options = state()["options"] as? [[String:Any]] ?? []
         XCTAssertGreaterThan(options.count,5)
         XCTAssertFalse(button("journey-page-5").exists)
@@ -94,7 +107,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     func testTwoBikeConnectionsHaveSeparateInspectableStations() {
         launch(["--preview-youbike-planning","--preview-youbike-dual","--usability-fixture","--test-journey-selection","--test-language","en"])
-        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:120))
+        guard requireRouteMenu() else { return }
         let id = state()["selected"] as? String ?? ""
         XCTAssertFalse(id.isEmpty)
         capture("mixed-two-bike-connections-compact")
