@@ -1,0 +1,171 @@
+{
+  "version": "1.8.1",
+  "build": "132.1.0",
+  "source_commit": "946aef19783da7dbe1020577311263ce3dfb392c",
+  "runtime_revision": 8,
+  "scope": "Read-only functional audit; isolated debug/test instrumentation, no deployed app changes, no submission.",
+  "findings": [
+    {
+      "id": "replacement-blocks-navigation",
+      "priority": "high",
+      "status": "observed_in_native_ui_and_confirmed_by_code",
+      "title": "Changing bike stations can leave navigation disabled without recovery",
+      "user_effect": "After selecting an alternative pickup, the ETA disappears and Start navigation is disabled even though loading has stopped.",
+      "source": "ios/TaipeiBus/JourneyPlannerModel.swift:481",
+      "cause": "moveBikeStation accepts the result of cycle without checking updated.verified; cycle can return a leg with duration nil. There is no retry/recovery state.",
+      "run": 38722590818,
+      "evidence": {
+        "checking": false,
+        "selected": "youbike",
+        "verified": false,
+        "total": -1,
+        "start_button": "Disabled",
+        "persisted_in": [
+          "youbike-switched-station",
+          "test-final-state"
+        ]
+      },
+      "screenshot": "replacement-disabled.png",
+      "remedy": "Commit a replacement only after its route is verified; otherwise preserve a usable state and offer retry or another station."
+    },
+    {
+      "id": "bike-ranking",
+      "priority": "high",
+      "status": "reproduced",
+      "title": "Slower cycling displaces faster transit",
+      "user_effect": "A 15-minute bike trip is placed ahead of a 7-minute bus trip because it beats a 25-minute walk.",
+      "source": "ios/TaipeiBus/JourneyPlannerModel.swift:315",
+      "cause": "beatsTransit OR beatsWalking inserts cycling at index 0, bypassing comparative ranking.",
+      "test": "Audit181Tests.testCyclingDoesNotLeadWhenTransitIsMuchFaster",
+      "observed": {
+        "bus_seconds": 420,
+        "bike_seconds": 900,
+        "walking_seconds": 1500,
+        "selected": "youbike"
+      },
+      "run": 38719634573,
+      "remedy": "Separate eligibility from ranking; retain bike alternatives without placing dominated trips first."
+    },
+    {
+      "id": "bike-phase-alerts",
+      "priority": "high",
+      "status": "reproduced",
+      "title": "Past pickup stations still interrupt riding and the final walk",
+      "user_effect": "After taking a bike, and after entering the final walk, the app still warns that the original pickup has no bikes.",
+      "source": "ios/TaipeiBus/JourneyPlannerModel.swift:437",
+      "cause": "bikeAlert checks only whether the entire leg has passed; it does not use cyclingPhase.",
+      "tests": [
+        "testEmptyPickupIsIgnoredAfterTheRiderHasTakenABike",
+        "testCompletedDockingDoesNotWarnAboutOldBikeStations"
+      ],
+      "control_passed": "A full upcoming dropoff correctly warns during riding.",
+      "run": 38719634573,
+      "remedy": "Tie pickup/return checks to confirmed trip progress; ignore stations already served."
+    },
+    {
+      "id": "cycling-path-verification",
+      "priority": "high",
+      "status": "confirmed_by_code_review_not_field_tested",
+      "title": "Cycling uses pedestrian directions without cycling suitability checks",
+      "user_effect": "The green ride path is a walking path timed at cycling speed; it has not been verified as suitable for bicycles. Turn instructions are also dropped.",
+      "source": "ios/TaipeiBus/JourneyPlannerModel.swift:748",
+      "evidence": [
+        "cycle calls walk for the ridden segment",
+        "walk requests MKDirections walking transport type",
+        "cycle clears result.instructions"
+      ],
+      "reference": "https://developer.apple.com/documentation/mapkit/mkdirectionstransporttype/walking",
+      "remedy": "Use bicycle-suitable routing or distinguish dismount/walking sections and preserve instructions; validate real street cases."
+    },
+    {
+      "id": "unpublished-download-assets",
+      "priority": "medium",
+      "status": "confirmed_live",
+      "title": "Compressed travel-time download and backup are not deployed",
+      "user_effect": "The app falls back to the 26,250,699-byte full file; GitHub loss has no working travel-time mirror.",
+      "source": "ios/TaipeiBus/TransitService.swift:223",
+      "evidence_file": "live-data-audit.json",
+      "evidence": [
+        "Release manifest 404",
+        "Release gzip 404",
+        "CDN manifest 404",
+        "CDN gzip 404",
+        "phone-data branch 404"
+      ],
+      "remedy": "Publish the verified compressed data and manifest to both configured sources, then check them as part of health monitoring."
+    },
+    {
+      "id": "quick-update-compatibility",
+      "priority": "medium",
+      "status": "reproduced",
+      "title": "Current shared configuration is rejected by installed 1.8.0",
+      "user_effect": "1.8.0 keeps old/default settings instead of applying the new quick update.",
+      "source": "ios/TransitCore/Sources/TransitCore/LiveSettings.swift:114",
+      "cause": "Strict decoder rejects new planning.bikeWalkGainSeconds while the feed declares minimumAppVersion 1.1.8.",
+      "run": 38721983919,
+      "baseline_source": "6ca91b401086da111b5dd8116658092dc5134260",
+      "control": "Removing only bikeWalkGainSeconds allows the actual 1.8.0 decoder to accept the same document.",
+      "remedy": "Keep the shared feed compatible with shipped decoders or serve version-specific settings; 1.8.1 already has a 120-second default."
+    }
+  ],
+  "passed": {
+    "purchase_tests": 10,
+    "official_time_pipeline_tests": 27,
+    "english_templates_checked": 676,
+    "valid_official_time_profiles": 595,
+    "bundled_bike_stations": 1819,
+    "live_bike_stations": 1819,
+    "station_ids_match_live": true,
+    "official_times_health": "healthy; 10% expiry horizon 2026-11-23T02:44:38+08:00",
+    "scheduled_daily_health_run": 38691978060,
+    "general_light_ui_checks": 6,
+    "general_dark_ui_checks": 4,
+    "appearance_switch_same_vehicle": true,
+    "pro_light_ui_checks_initial": 4,
+    "focused_ui_retry_checks": 5,
+    "live_activity_start_and_resume": true,
+    "bike_steps_light_dark": true
+  },
+  "verification_runs": {
+    "pro_and_bike_initial": 38718868507,
+    "map_navigation_general": 38718872150,
+    "planner_reproduction": 38719634573,
+    "old_version_configuration": 38721983919,
+    "focused_ui_retry": 38722590818
+  },
+  "ui_status": {
+    "initial_pro": {
+      "passed": 4,
+      "failed_before_live_activity": 1,
+      "reason": "First route changed during street verification; fixed test wait and retested successfully."
+    },
+    "general_light": {
+      "passed": 6,
+      "not_verified": 2,
+      "reasons": [
+        "City bus tap selected a metro train instead; bus camera round-trip not established.",
+        "Simulator could not terminate the app before the dense-fleet test."
+      ]
+    },
+    "general_dark": {
+      "passed": 4,
+      "failed": 0
+    },
+    "focused_retry": {
+      "passed": 5,
+      "failed": 0,
+      "manual_review_note": "Replacement test did not assert Start navigation remains enabled. Manual screenshot and state review exposed the disabled-start defect."
+    }
+  },
+  "limitations": [
+    "No physical-device road test or physical frame-rate measurement.",
+    "Fixed planner fixtures reproduce logic behavior; they are not actual published bus arrival forecasts.",
+    "The city-overview bus selection/return camera case remains unverified; do not claim all camera animations or real-device frame rates passed."
+  ],
+  "status": "audit_complete_with_findings",
+  "completed_at": "2026-10-15T11:07:30.457550+00:00",
+  "visual_notes": [
+    "English long stop names are truncated in compact navigation banners, while Chinese counterparts remain visible.",
+    "The orange interface-test banners in screenshots identify simulated test data and are not part of production UI."
+  ]
+}
