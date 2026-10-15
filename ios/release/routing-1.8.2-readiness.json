@@ -2,7 +2,7 @@
   "version": "1.8.2",
   "distribution": "testflight-only",
   "formal_submission": "paused",
-  "status": "verified_ready_for_testflight",
+  "status": "published_to_testflight",
   "production_source": "bbf1199",
   "latest_source": "bbf1199",
   "user_case": {
@@ -109,8 +109,7 @@
   },
   "limits": [
     "No guarantee of a bike or dock at future arrival; only current published supply is used.",
-    "Simulator/native routing verification does not establish physical iPhone frame rate.",
-    "Final TestFlight upload and Apple processing have not yet been confirmed."
+    "Simulator/native routing verification does not establish physical iPhone frame rate."
   ],
   "measured_cycling_case": {
     "run": 38761326468,
@@ -122,5 +121,18 @@
     "riding_seconds": 262.224815160625,
     "total_minutes": 28.448356090159276,
     "saving_vs_walking_connector_minutes": 2.404273569036483
+  },
+  "release": {
+    "app_id": "6818475740",
+    "bundle_id": "com.rio10255254.TaipeiBus",
+    "version": "1.8.2",
+    "commit": "16d22b4636b55c87e782094ec90759fd2b750e14",
+    "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38766028947",
+    "status": "internal_group_assigned",
+    "build_number": "134.1.0",
+    "upload_confirmed": true,
+    "uploaded_at": "2026-10-15T16:10:57.911697+00:00",
+    "build_id": "568a528d-e3a4-4b4c-a42a-9ec370568142",
+    "group_id": "4e48a355-f872-4b67-a260-51d343194c62"
   }
 }
