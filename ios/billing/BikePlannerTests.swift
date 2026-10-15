@@ -29,7 +29,8 @@ final class BikePlannerTests: XCTestCase {
     func planner(_ choices: [JourneyOption]) -> JourneyPlannerModel {
         let p=JourneyPlannerModel()
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
-        p.auditLoadChoices(choices,from:TravelPlace(name:"起點",address:"",coordinate:start),to:TravelPlace(name:"終點",address:"",coordinate:end))
+        p.auditLoadChoices(choices,from:TravelPlace(name:"起點",address:"",coordinate:choices.first?.walks.first?.from ?? start),
+                           to:TravelPlace(name:"終點",address:"",coordinate:choices.first?.walks.last?.to ?? end))
         return p
     }
     func testCyclingDoesNotLeadWhenTransitIsMuchFaster() throws {
@@ -176,7 +177,7 @@ final class BikePlannerTests: XCTestCase {
         let p=planner([base]), now=Date()
         var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["G:G-a":1000],updatedAt:now)
         p.updateSnapshot(snapshot)
-        XCTAssertTrue(try XCTUnwrap(p.duration(base,at:now)).waits[0].missedNext)
+        XCTAssertTrue(try XCTUnwrap(try XCTUnwrap(p.duration(base,at:now)).waits.first).missedNext)
         p.testCycle = { _ in self.cycling().walks[0] }
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
         for _ in 0..<200 {
@@ -185,8 +186,9 @@ final class BikePlannerTests: XCTestCase {
         }
         let chosen=try XCTUnwrap(p.selected)
         XCTAssertTrue(chosen.cycles)
+        XCTAssertNotNil(chosen.trip,"The fixture destination is beyond this rental; it must still board transit")
         let timing=try XCTUnwrap(p.duration(chosen,at:now))
-        XCTAssertFalse(timing.waits[0].missedNext)
+        XCTAssertFalse(try XCTUnwrap(timing.waits.first).missedNext)
         XCTAssertLessThan(timing.totalSeconds,try XCTUnwrap(p.duration(base,at:now)).totalSeconds-120)
     }
 
