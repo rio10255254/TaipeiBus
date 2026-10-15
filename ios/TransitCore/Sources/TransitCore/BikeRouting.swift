@@ -74,12 +74,14 @@ public enum BikeRouting {
         return best
     }
 
-    /// Cycling replaces a walk only when it saves real time; a minute here and there is not
-    /// worth unlocking a bike for.
+    /// Cycling replaces a walk only when it saves real time. What counts as real depends on
+    /// what it replaces: a walk of ten minutes is worth cutting by two, while a bus someone is
+    /// already waiting for is not worth abandoning for the same two.
     public static func worthRiding(_ connection: BikeConnection?, insteadOfWalking meters: Double,
-                                   preferences: LiveSettings.Planning = .init()) -> Bool {
+                                   preferences: LiveSettings.Planning = .init(),
+                                   gainSeconds: Double? = nil) -> Bool {
         guard let connection else { return false }
-        return walkingSeconds(meters) - connection.totalSeconds >= preferences.bikeMinimumGainSeconds
+        return walkingSeconds(meters) - connection.totalSeconds >= (gainSeconds ?? preferences.bikeWalkGainSeconds)
     }
 
     /// A station worth riding to before boarding anything: too far to walk to, close enough to

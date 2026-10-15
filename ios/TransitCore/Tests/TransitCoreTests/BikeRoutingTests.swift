@@ -89,6 +89,25 @@ final class BikeRoutingTests: XCTestCase {
         XCTAssertFalse(BikeRouting.worthRiding(nil, insteadOfWalking: 5_000))
     }
 
+    func testASavingWorthLeavingAWalkForIsNotWorthLeavingABusFor() {
+        let network = network()
+        let connection = BikeConnection(pickup: network.stations[0], dropoff: network.stations[2],
+            bikes: 6, docks: 6, accessMeters: 100, rideMeters: 675, egressMeters: 100,
+            accessSeconds: BikeRouting.walkingSeconds(100), rideSeconds: 675 / LiveSettings.Planning().bikeSpeed,
+            egressSeconds: BikeRouting.walkingSeconds(100), handlingSeconds: LiveSettings.Planning().bikeHandlingSeconds)
+        // Around two and a half minutes saved on a ten-minute walk.
+        let saved = BikeRouting.walkingSeconds(700) - connection.totalSeconds
+        XCTAssertGreaterThan(saved, 120)
+        XCTAssertLessThan(saved, 240)
+        // Nobody waits for a walk, so that saving is worth unlocking a bike for.
+        XCTAssertTrue(BikeRouting.worthRiding(connection, insteadOfWalking: 700))
+        // The same saving against a bus the rider is already waiting for is not.
+        XCTAssertFalse(BikeRouting.worthRiding(connection, insteadOfWalking: 700,
+                                               gainSeconds: LiveSettings.Planning().bikeMinimumGainSeconds))
+        // A walk barely longer than the ride itself is still not worth it.
+        XCTAssertFalse(BikeRouting.worthRiding(connection, insteadOfWalking: 600))
+    }
+
     func testTheGatewayStationIsOneTooFarToWalkToAndClearlyOnTheWay() {
         let now = Date()
         // A corridor of stations between the rider and a destination five kilometres away.

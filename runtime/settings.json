@@ -112,11 +112,12 @@
     "bikeSpeed": 3.3,
     "bikeHandlingSeconds": 150,
     "bikeAccessMeters": 400,
-    "bikeMinimumRideMeters": 700,
+    "bikeMinimumRideMeters": 500,
     "bikeMaximumRideMeters": 5000,
     "bikeMinimumGainSeconds": 240,
     "bikeMinimumBikes": 2,
-    "bikeMinimumDocks": 2
+    "bikeMinimumDocks": 2,
+    "bikeWalkGainSeconds": 120
   },
   "refresh": {
     "vehicleSeconds": 15,

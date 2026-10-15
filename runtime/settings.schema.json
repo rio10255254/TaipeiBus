@@ -196,6 +196,11 @@
           "type": "number",
           "minimum": 1,
           "maximum": 10
+        },
+        "bikeWalkGainSeconds": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1800
         }
       },
       "additionalProperties": false
