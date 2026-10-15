@@ -1,4 +1,16 @@
-# App Store gallery for 1.6.1
+# Approved App Store gallery
+
+The nine approved images are now attached to the paused **1.8.0 (124.1.0)**
+App Store draft. Their original capture provenance below is retained; no pixels
+were changed. See `app-store-1.8.0-draft-receipt.json` for Apple's exact metadata,
+build, processed-image checksums and ordering confirmation. Release remains manual
+and this version has not been submitted for review.
+
+TestFlight invitation images are taken from the latest approved App Store version
+in Ready for Distribution, not the selected beta build. A new build or an edited
+store draft does not replace those images. See Apple's [test information guide](https://developer.apple.com/help/app-store-connect/test-a-beta-version/provide-test-information/).
+
+## Original approved gallery for 1.6.1
 
 The approved nine-image gallery accompanies 1.6.1 (98.1.0). Its exact order is
 in `app-store.zh-Hant.json`; the source and rendered SHA-256 values, dimensions,

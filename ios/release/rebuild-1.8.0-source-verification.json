@@ -1,0 +1,43 @@
+{
+  "version": "1.8.0",
+  "baseline_build": "124.1.0",
+  "baseline_source_commit": "6ca91b401086da111b5dd8116658092dc5134260",
+  "rebuild_source_commit": "8c7433e7e2dfafe87a228d116067c205ed137593",
+  "upload_run": 38703796262,
+  "native_source_identical": true,
+  "comparison": [
+    {
+      "path": "ios/TaipeiBus",
+      "baseline_tree": "8bd1f7c352e631ef6918186cf416625c34b25f2d",
+      "rebuild_tree": "8bd1f7c352e631ef6918186cf416625c34b25f2d",
+      "identical": true
+    },
+    {
+      "path": "ios/TransitCore",
+      "baseline_tree": "57785cafaecf8ff5d933dce77662ea7d57b63447",
+      "rebuild_tree": "57785cafaecf8ff5d933dce77662ea7d57b63447",
+      "identical": true
+    },
+    {
+      "path": "ios/TaipeiBusWidgets",
+      "baseline_tree": "3b5efa6171d05274b59a3907e5874362653b7d10",
+      "rebuild_tree": "3b5efa6171d05274b59a3907e5874362653b7d10",
+      "identical": true
+    },
+    {
+      "path": "ios/TaipeiBus.xcodeproj",
+      "baseline_tree": "d55c17ac6c9945dcba472f052b2eae3c1d112077",
+      "rebuild_tree": "d55c17ac6c9945dcba472f052b2eae3c1d112077",
+      "identical": true
+    }
+  ],
+  "allowed_differences": [
+    "CFBundleVersion",
+    "signing and packaging",
+    "TestFlight release metadata"
+  ],
+  "note": "The full app, core, widgets and project trees match. This is source equivalence, not a byte-identical signed binary.",
+  "rebuild_build": "130.1.0",
+  "publication_scope": "testflight_only",
+  "formal_submission_started": false
+}
