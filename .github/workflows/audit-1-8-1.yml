@@ -1,0 +1,43 @@
+name: Focused 1.8.1 behavior audit
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  behavior:
+    runs-on: macos-15
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run the real planner against controlled audit scenarios
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/billing/setup.rb
+          ruby - <<'RUBY'
+          require 'xcodeproj'
+          p=Xcodeproj::Project.open('ios/TaipeiBus.xcodeproj')
+          t=p.targets.find { |x| x.name=='TaipeiBusBillingTests' }
+          g=p.main_group.groups.find { |x| x.path=='billing' }
+          t.source_build_phase.add_file_reference(g.new_file('Audit181Tests.swift'))
+          p.save
+          RUBY
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-audit-181 com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/audit181.xcresult" \
+            -only-testing:TaipeiBusBillingTests/Audit181Tests -parallel-testing-enabled NO \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/audit181.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-181-behavior
+          path: |
+            ${{ runner.temp }}/audit181.log
+            ${{ runner.temp }}/audit181.xcresult
+          retention-days: 14

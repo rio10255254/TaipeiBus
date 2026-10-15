@@ -848,6 +848,14 @@ final class JourneyPlannerModel: ObservableObject {
     }
 
 #if DEBUG
+    /// Audit-only fixture injection. Ranking, duration and navigation use the real methods.
+    func auditLoadChoices(_ choices: [JourneyOption], from start: TravelPlace, to end: TravelPlace) {
+        cancelRequests(); origin = start; destination = end; usingLocation = false
+        started = false; stepIndex = 0; selectionConfirmed = false
+        verifiedPool = choices; options = choices
+        publishRecommendations()
+    }
+
     /// Deterministic UI scenarios use actual planner routes and explicitly simulated walking.
     func prepareRouteChoicesPreview(_ trips: [TransitTrip], from start: TravelPlace, to end: TravelPlace) {
         cancelRequests(); origin = start; destination = end; usingLocation = false
