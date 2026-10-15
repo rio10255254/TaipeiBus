@@ -120,7 +120,6 @@ final class BikePlannerTests: XCTestCase {
     }
 
     func testLiveTaipeiCyclingDirectionsBetweenUserStations() async throws {
-        guard ProcessInfo.processInfo.environment["BUS_LIVE_CYCLING_TEST"] == "1" else { throw XCTSkip("Opt-in live Apple cycling check") }
         let p=JourneyPlannerModel()
         let a=BikeStation(id:"500110026",name:"八德路三段74巷口",district:"",coordinate:Coordinate(latitude:25.04459,longitude:121.55252),capacity:30)
         let b=BikeStation(id:"500107088",name:"南京伊通街口",district:"",coordinate:Coordinate(latitude:25.05189,longitude:121.53517),capacity:30)

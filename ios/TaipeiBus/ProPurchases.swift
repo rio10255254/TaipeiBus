@@ -35,6 +35,7 @@ final class ProPurchases: ObservableObject {
     private var updates: Task<Void,Never>?
     private var statusUpdates: Task<Void,Never>?
     private var expiryCheck: Task<Void,Never>?
+    private var accessTask: Task<Void, Never>?
     private var generation = 0
     private var awaitingApproval = false
 
@@ -67,13 +68,29 @@ final class ProPurchases: ObservableObject {
             }
         }
     }
-    deinit { updates?.cancel(); statusUpdates?.cancel(); expiryCheck?.cancel() }
+    deinit { updates?.cancel(); statusUpdates?.cancel(); expiryCheck?.cancel(); accessTask?.cancel() }
 
     private func recognizes(_ transaction: StoreKit.Transaction) -> Bool {
         transaction.productType == .autoRenewable && ProPlan.allCases.contains { $0.productID == transaction.productID }
     }
     func refreshAccess() async {
-        generation += 1; let token = generation
+        generation += 1
+        if let accessTask { await accessTask.value; return }
+        // All callers await the same refresh, including any status changes received while
+        // it is reading. A superseded read must not return to a purchase/restore caller early.
+        let operation = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                let token = self.generation
+                await self.readAccess(token: token)
+                if token == self.generation { break }
+            }
+            self.accessTask = nil
+        }
+        accessTask = operation
+        await operation.value
+    }
+    private func readAccess(token: Int) async {
         var current: StoreKit.Transaction?
         var renewal: Product.SubscriptionInfo.RenewalInfo?
         var grace = false

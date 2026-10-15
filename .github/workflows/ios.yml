@@ -62,6 +62,35 @@ env:
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
+  bike_behavior:
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope == 'youbike'
+    runs-on: macos-15
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify real planner, Taipei cycling source, and StoreKit behavior
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/billing/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-billing com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/billing-tests.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bike-planner-and-purchases
+          path: |
+            ${{ runner.temp }}/billing-tests.log
+            ${{ runner.temp }}/billing.xcresult
+          retention-days: 14
   simulator:
     runs-on: macos-15
     timeout-minutes: ${{ (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
@@ -122,7 +151,7 @@ jobs:
         env:
           BUS_LIVE_CYCLING_TEST: "1"
         id: billing_transactions
-        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike'
         timeout-minutes: 22
         run: |
           set -euo pipefail
@@ -139,7 +168,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - name: Preserve StoreKit verification
-        if: always() && inputs.billing_tests
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
         uses: actions/upload-artifact@v4
         with:
           name: billing-tests
@@ -148,7 +177,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
-        if: always() && !cancelled() && inputs.billing_tests && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
+        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
         timeout-minutes: 24
         run: |
           set -euo pipefail
@@ -172,7 +201,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/pro-ui-dark.log"
       - name: Preserve native Pro screenshots and verification
-        if: always() && inputs.billing_tests
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
         run: |
           for mode in pro-ui pro-ui-dark; do
             if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
@@ -180,7 +209,7 @@ jobs:
             fi
           done
       - name: Save native Pro walkthrough
-        if: always() && inputs.billing_tests
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike'
         uses: actions/upload-artifact@v4
         with:
           name: pro-walkthrough

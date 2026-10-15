@@ -2,7 +2,7 @@
 import gzip, hashlib, json, time, urllib.request
 BASES = [
     "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/",
-    "https://cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@phone-data/",
+    "https://raw.githubusercontent.com/rio10255254/TaipeiBus/phone-data/",
 ]
 def read(url):
     with urllib.request.urlopen(url, timeout=40) as response:
