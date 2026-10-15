@@ -9,6 +9,7 @@ extension RouteSign {
         self.init(text: text, color: RouteTint.hex(for: route.name), darkInk: RouteTint.darkInk(for: route.name))
     }
     static let walking = RouteSign(text: "🚶", color: "#5E6670", darkInk: false)
+    static let cycling = RouteSign(text: "🚲", color: "#248A3D", darkInk: false)
 }
 
 /// Pro: the current trip on the Lock Screen and in the Dynamic Island. The app pushes a new

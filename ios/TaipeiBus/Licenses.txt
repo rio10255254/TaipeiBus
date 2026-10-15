@@ -166,6 +166,15 @@ Train entering-station reports (station and terminus, updated about every 30 s):
 https://data.taipei/dataset/detail?id=6556e1e8-c908-42d5-b984-b3f7337b139b
 Used to estimate the next train and place trains on the map together with official running times; shown as an estimate.
 
+YouBike 2.0 station data
+Provider: Taipei City Government (Department of Transportation) open data.
+Station names, addresses, coordinates and dock counts for Taipei City are bundled with the app;
+bikes and empty docks are read from the public live feed while stations are shown.
+Source: https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb
+License: Open Government Data License 1.0 https://data.gov.tw/license
+Counts are the operator's published figures, not a prediction, and New Taipei stations are not included.
+
+
 Metro track structure (underground / at grade / viaduct)
 © OpenStreetMap contributors, Open Database License (ODbL) 1.0: https://www.openstreetmap.org/copyright
 Tunnel, bridge and layer tags are matched onto the official track geometry. Viaduct heights are approximate;

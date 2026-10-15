@@ -46,6 +46,44 @@ actor TransitService {
             return events
         } catch { return nil }
     }
+    private var bikeNetworkValue: BikeNetwork?
+    private var checkedBundledBikes = false
+    /// The bundled station list: names, addresses, coordinates and dock counts, which change
+    /// a few times a month. Live counts never ship inside the app.
+    func bikeNetwork() -> BikeNetwork {
+        if let bikeNetworkValue { return bikeNetworkValue }
+        guard !checkedBundledBikes else { return .empty }
+        checkedBundledBikes = true
+        guard let url = Bundle.main.url(forResource: "BikeNetwork", withExtension: "json"),
+              let bytes = try? Data(contentsOf: url), let network = try? BikeNetwork(data: bytes) else { return .empty }
+        bikeNetworkValue = network
+        return network
+    }
+    private var bikeFetchedAt = Date.distantPast
+    private var bikeTag: String?
+    private var bikePacket: BikeAvailability?
+    private static let bikeFeedURL = URL(string: "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json")!
+    /// Taipei's public YouBike 2.0 feed is one file for the whole city, rewritten about once a
+    /// minute and served uncompressed. It is only fetched while bike stations are on screen,
+    /// at most once a minute, and a conditional request costs no body between rewrites.
+    func bikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
+        guard !network.stations.isEmpty else { return nil }
+        if Date().timeIntervalSince(bikeFetchedAt) < 60 { return bikePacket }
+        bikeFetchedAt = Date()
+        var request = URLRequest(url: Self.bikeFeedURL)
+        request.timeoutInterval = 12; request.cachePolicy = .reloadIgnoringLocalCacheData
+        if let bikeTag, bikePacket != nil { request.setValue(bikeTag, forHTTPHeaderField: "If-None-Match") }
+        do {
+            let (bytes, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return bikePacket }
+            if http.statusCode == 304 { return bikePacket }
+            guard http.statusCode == 200 else { return bikePacket }
+            let packet = try BikeAvailability(data: bytes, network: network, at: Date())
+            bikeTag = http.value(forHTTPHeaderField: "ETag")
+            bikePacket = packet
+            return packet
+        } catch { return bikePacket }
+    }
     private let transport: ConditionalFeedTransport
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()

@@ -129,6 +129,9 @@ struct NativeBusMap: UIViewRepresentable {
         private let locationMarker = DeviceLocationMarker()
         private var locationMotion = DeviceLocationMotion()
         private var nearbySource: MLNShapeSource?
+        private var bikeSource: MLNShapeSource?
+        private var cyclingSource: MLNShapeSource?
+        private var lastBikeKey = ""
         private let overlay: MapSelectionOverlay
         private var lastMetadataCount = -1
         private var cityCamera: MLNMapCamera?
@@ -264,6 +267,20 @@ struct NativeBusMap: UIViewRepresentable {
             walkingCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
             // Walking guidance must remain legible over roofs and dense road colours.
             style.addLayer(walkingCasing); style.addLayer(walkingLine)
+            // The ridden part of a YouBike leg: a solid green line, so it reads as a different
+            // kind of movement from the walking dots at either end of it.
+            let cycling = MLNShapeSource(identifier: "journey-cycling", shape: nil, options: nil)
+            style.addSource(cycling); cyclingSource = cycling
+            let cyclingCasing = MLNLineStyleLayer(identifier: "journey-cycling-casing", source: cycling)
+            cyclingCasing.lineColor = NSExpression(forConstantValue: UIColor.white)
+            cyclingCasing.lineWidth = NSExpression(forConstantValue: 9)
+            cyclingCasing.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            cyclingCasing.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            let cyclingLine = MLNLineStyleLayer(identifier: "journey-cycling-line", source: cycling)
+            cyclingLine.lineWidth = NSExpression(forConstantValue: 5.5)
+            cyclingLine.lineCap = NSExpression(forConstantValue: NSValue(mlnLineCap: .round))
+            cyclingLine.lineJoin = NSExpression(forConstantValue: NSValue(mlnLineJoin: .round))
+            style.addLayer(cyclingCasing); style.addLayer(cyclingLine)
             let tripStops = MLNShapeSource(identifier: "journey-stops", shape: nil, options: nil)
             style.addSource(tripStops); tripStopsSource = tripStops
             installMarkerImages(style)
@@ -329,6 +346,7 @@ struct NativeBusMap: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in self?.overlay.update(global, zoom: mapView.zoomLevel) }
             }
             style.addLayer(rail); trains = rail
+            installBikes(style)
             stationSource = addStationLayer(id: "selected-station", style: style)
             let nearby = MLNShapeSource(identifier: "nearby-stations", shape: nil, options: nil)
             style.addSource(nearby); nearbySource = nearby
@@ -351,6 +369,7 @@ struct NativeBusMap: UIViewRepresentable {
             lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""; lastMetroFocusKey = ""
             lastStationBrowsing = nil
             lastStationID = nil
+            lastBikeKey = ""
             update(location: pendingLocation)
             updateNearbyStations(force: true)
 #if DEBUG
@@ -359,6 +378,63 @@ struct NativeBusMap: UIViewRepresentable {
             }
             zoomProbeStyleReady = true
 #endif
+        }
+
+        /// YouBike docks: a small coloured dot per station at street zoom, with the number of
+        /// bikes standing there once the camera is close enough to read it.
+        private func installBikes(_ style: MLNStyle) {
+            let source = MLNShapeSource(identifier: "bike-stations", shape: nil, options: nil)
+            style.addSource(source); bikeSource = source
+            let dots = MLNCircleStyleLayer(identifier: "bike-station-dots", source: source)
+            dots.minimumZoomLevel = 14.5
+            dots.circleRadius = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 14.5, 3.0, 17, 6.2, 19, 8.5])
+            dots.circleColor = NSExpression(mglJSONObject: ["to-color", ["get", "tint"]])
+            dots.circleStrokeColor = NSExpression(forConstantValue: UIColor.white)
+            dots.circleStrokeWidth = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 14.5, 0.9, 17, 1.8])
+            dots.circlePitchAlignment = NSExpression(forConstantValue: "map")
+            style.addLayer(dots)
+            let counts = MLNSymbolStyleLayer(identifier: "bike-station-counts", source: source)
+            counts.minimumZoomLevel = 16.5
+            counts.text = NSExpression(forKeyPath: "label")
+            counts.textFontNames = NSExpression(forConstantValue: ["Noto Sans Bold", "Noto Sans Regular"])
+            counts.textFontSize = NSExpression(mglJSONObject: ["interpolate", ["linear"], ["zoom"], 16.5, 9.5, 19, 12])
+            counts.textHaloWidth = NSExpression(forConstantValue: 1.6)
+            counts.textTranslation = NSExpression(forConstantValue: NSValue(cgVector: CGVector(dx: 0, dy: -13)))
+            style.addLayer(counts)
+        }
+        /// Apple Maps keeps availability readable at a glance: green is stocked, amber is
+        /// nearly empty, red has nothing to rent, grey means the app has no current count.
+        static func bikeTint(_ supply: BikeSupply, dark: Bool) -> String {
+            switch supply {
+            case .plenty: return dark ? "#30D158" : "#248A3D"
+            case .few: return dark ? "#FF9F0A" : "#B35900"
+            case .empty: return dark ? "#FF453A" : "#D70015"
+            case .suspended, .unknown: return dark ? "#8E8E93" : "#8A8A8E"
+            }
+        }
+        private func updateBikes(map: MLNMapView) {
+            let visible = model.showsBikeStations
+            map.style?.layer(withIdentifier: "bike-station-dots")?.isVisible = visible
+            map.style?.layer(withIdentifier: "bike-station-counts")?.isVisible = visible
+            guard visible else {
+                if lastBikeKey != "off" { bikeSource?.shape = nil; lastBikeKey = "off" }
+                return
+            }
+            let now = Date()
+            // Counts change at most once a minute, and a stale count turns grey on its own.
+            let key = "\(model.bikeNetwork.generatedAt):\(model.bikeAvailability?.receivedAt.timeIntervalSince1970 ?? 0):\(darkMode):\(Int(now.timeIntervalSince1970 / 60))"
+            guard key != lastBikeKey else { return }
+            lastBikeKey = key
+            let features = model.bikeNetwork.stations.map { station -> MLNPointFeature in
+                let dock = model.bikeAvailability?.dock(station.id)
+                let supply = BikeSupply.level(dock, at: now)
+                let feature = MLNPointFeature()
+                feature.coordinate = station.coordinate.locationCoordinate
+                feature.attributes = ["bikeStationID": station.id, "tint": Self.bikeTint(supply, dark: darkMode),
+                                      "label": supply == .unknown || supply == .suspended ? "" : "\(dock?.rentable ?? 0)"]
+                return feature
+            }
+            bikeSource?.shape = MLNShapeCollectionFeature(shapes: features)
         }
 
         private func addStationLayer(id: String, style: MLNStyle) -> MLNShapeSource {
@@ -790,6 +866,7 @@ struct NativeBusMap: UIViewRepresentable {
             let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
             let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil):anchor\(model.anchorRevision)"
             updateMetro(map: map)
+            updateBikes(map: map)
             if lastSnapshotRevision != model.snapshot.revision || vehicleKey != lastVehicleKey || lastMotionSetting != reduceMotion {
                 var vehicles = model.snapshot.vehicles
                 if model.cityFleetMode { vehicles = model.cityVehicles }
@@ -825,12 +902,25 @@ struct NativeBusMap: UIViewRepresentable {
                     if case .walk(let index) = model.planner.currentStep { displayedWalks = [displayedWalks[index]] }
                     else { displayedWalks = [] }
                 }
-                let visibleWalks = model.stationWalk.isActive ? [model.stationWalk.coordinates] : model.activeWalkingIndex.map { [model.planner.walkingCoordinates(at: $0)] } ?? displayedWalks.map(\.coordinates)
+                // A cycling leg keeps its walking dots to the two ends; the ride is its own line.
+                let visibleWalks: [[Coordinate]]
+                if model.stationWalk.isActive { visibleWalks = [model.stationWalk.coordinates] }
+                else if let index = model.activeWalkingIndex {
+                    let leg = model.planner.selected?.walks.indices.contains(index) == true ? model.planner.selected?.walks[index] : nil
+                    visibleWalks = leg?.bike != nil ? leg!.footPaths : [model.planner.walkingCoordinates(at: index)]
+                } else { visibleWalks = displayedWalks.flatMap(\.footPaths) }
                 let walks = visibleWalks.filter { $0.count >= 2 }.map { walk -> MLNPolylineFeature in
                     var coordinates = walk.map(\.locationCoordinate)
                     return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
                 }
                 walkingSource?.shape = walks.isEmpty ? nil : MLNShapeCollectionFeature(shapes: walks)
+                let rides = model.planner.bikeCoordinates.map { path -> MLNPolylineFeature in
+                    var coordinates = path.map(\.locationCoordinate)
+                    return MLNPolylineFeature(coordinates: &coordinates, count: UInt(coordinates.count))
+                }
+                cyclingSource?.shape = rides.isEmpty ? nil : MLNShapeCollectionFeature(shapes: rides)
+                (map.style?.layer(withIdentifier: "journey-cycling-line") as? MLNLineStyleLayer)?.lineColor =
+                    NSExpression(forConstantValue: UIColor(liveHex: Self.bikeTint(.plenty, dark: darkMode)))
                 updateTripStops()
                 lastRouteKey = routeKey
             }
@@ -1682,6 +1772,8 @@ struct NativeBusMap: UIViewRepresentable {
                 model.recordMapTap("map-tap:no-bus")
 #endif
                 if let station { model.tappedPlace = nil; model.selectStation(station) }
+                else if let bike = nearestBikeStation(at: point, map: map) { model.selectBikeStation(bike) }
+                else if model.selectedBikeStationID != nil { model.selectedBikeStationID = nil }
                 else { selectPlace(at: point, map: map) }
                 return
             }
@@ -1699,6 +1791,20 @@ struct NativeBusMap: UIViewRepresentable {
             if occluded { return }
             model.selectVehicle(bus)
         }
+        /// A dock is a small dot: a tap within the same finger-sized box takes the nearest one,
+        /// and only when no bus stop, train or bus is under the finger.
+        private func nearestBikeStation(at point: CGPoint, map: MLNMapView) -> String? {
+            guard model.showsBikeStations else { return nil }
+            let rect = CGRect(x: point.x - 22, y: point.y - 22, width: 44, height: 44)
+            let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Set(["bike-station-dots", "bike-station-counts"]))
+            return features.compactMap { feature -> (String, CGFloat)? in
+                guard let id = feature.attribute(forKey: "bikeStationID") as? String,
+                      let station = model.bikeNetwork.station(id) else { return nil }
+                let position = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                return (id, hypot(position.x - point.x, position.y - point.y))
+            }.min { $0.1 < $1.1 }?.0
+        }
+
         /// Places are only offered while the map is free to browse, never over a trip or a
         /// selected stop, route or bus. A tap on empty map clears the current place.
         private func selectPlace(at point: CGPoint, map: MLNMapView) {
