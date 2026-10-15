@@ -188,6 +188,30 @@ final class MetroIntegrationTests: XCTestCase {
             print("METRO_LIVE_AUDIT",from,to,"seconds",elapsed,"choices",trips.count,"rides",trips.first?.rides.map { $0.route.name } ?? [])
         }
     }
+    func testGongguanXimenCandidateCoverageAudit() throws {
+        guard let folder=ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Explicit bundled city audit") }
+        var feeds:[String:Data]=[:]
+        for name in ["GetRoute","GetStop","GetPathDetail","GetBusShape"] { feeds[name]=try Data(contentsOf:URL(fileURLWithPath:folder).appendingPathComponent(name+".json")) }
+        var metadata=try FeedDecoder.metadata(feeds:feeds)
+        let metro=try network();metro.attach(to:&metadata)
+        let root=URL(fileURLWithPath:#filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        metadata.officialTravelTimes=try OfficialTravelTimes(data:Data(contentsOf:root.appendingPathComponent("TaipeiBus/OfficialTravelTimes.json"))).matching(metadata)
+        let planner=MultimodalPlanner(metadata:metadata)
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
+        let destination=Coordinate(latitude:25.0434,longitude:121.5062)
+        for origin in [Coordinate(latitude:25.0192,longitude:121.5390),Coordinate(latitude:25.0192,longitude:121.5410),Coordinate(latitude:25.0180,longitude:121.5380)] {
+            let trips=planner.plan(from:origin,to:destination,maximumWalk:1200,limit:36,at:date)
+            let ranked=TripRanking.recommended(trips,estimates:.init(),at:date,limit:36,diverse:false)
+            let green=ranked.filter { $0.rides.count==1 && $0.rides[0].route.lineCode=="G" }
+            print("GONGGUAN_COVERAGE origin=\(origin) candidates=\(trips.count) directGreen=\(green.count)")
+            for (index,trip) in ranked.enumerated() where index<10 || green.contains(where: { $0.id==trip.id }) {
+                let rating=TripRanking.assessment(trip,estimates:.init(),at:date)
+                print("GONGGUAN_CHOICE index=\(index) routes=\(trip.rides.map { $0.route.name }) boarding=\(trip.rides.map { $0.boarding.name }) alighting=\(trip.rides.map { $0.alighting.name }) walk=\(rating.walkingSeconds/60) wait=\(rating.waitingSeconds/60) ride=\(trip.rideSeconds.reduce(0,+)/60) total=\(rating.elapsedSeconds/60)")
+            }
+            XCTAssertFalse(green.isEmpty,"A direct Gongguan-Ximen train must be retained in the city catalog")
+        }
+    }
+
     func testEveryOfficialStationHasAUsableTrainTrackIncludingOffsetStationCentres() throws {
         let metro = try network(), date = noon()
         for pattern in metro.patterns {
