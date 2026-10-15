@@ -273,6 +273,22 @@ def check(args, now):
         raise SystemExit('The published official travel-time catalog needs attention.')
 
 
+def repack(args, now):
+    # Publication must not disguise old source data as newly collected or change any
+    # of its values. Reuse the healthy original bytes and verify the compressed copy.
+    args.minimum_days = 21
+    check(args, now)
+    blob = args.document.read_bytes()
+    document = json.loads(blob)
+    coverage = args.coverage.read_bytes()
+    json.loads(coverage)
+    args.out.mkdir(parents=True, exist_ok=True)
+    (args.out / 'official-times.json').write_bytes(blob)
+    (args.out / 'coverage.json').write_bytes(coverage)
+    write_compressed(args.out, blob, document['generatedAt'])
+    assert gzip.decompress((args.out / 'official-times.json.gz').read_bytes()) == blob
+
+
 def main(argv=None, now=None):
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
@@ -286,9 +302,13 @@ def main(argv=None, now=None):
     c = commands.add_parser('check', help='Fail when the catalog phones download is close to expiring')
     c.add_argument('--document', type=Path, required=True)
     c.add_argument('--minimum-days', type=float, default=21)
+    r = commands.add_parser('repack', help='Compress a healthy existing catalog without changing its source bytes')
+    r.add_argument('--document', type=Path, required=True)
+    r.add_argument('--coverage', type=Path, required=True)
+    r.add_argument('--out', type=Path, required=True)
     args = parser.parse_args(argv)
     now = now or datetime.now(timezone.utc)
-    (prepare if args.command == 'prepare' else check)(args, now)
+    {'prepare': prepare, 'check': check, 'repack': repack}[args.command](args, now)
 
 
 if __name__ == '__main__':

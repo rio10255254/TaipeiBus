@@ -30,6 +30,42 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  legacy_compatibility:
+    runs-on: macos-15
+    timeout-minutes: 10
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test current quick-update settings on the released 1.8.0 decoder
+        run: |
+          set -euo pipefail
+          cp runtime/settings.json "$RUNNER_TEMP/settings-1.8.1.json"
+          git fetch --depth=1 origin 6ca91b401086da111b5dd8116658092dc5134260
+          mkdir -p "$RUNNER_TEMP/legacy-180"
+          git archive FETCH_HEAD ios/TransitCore | tar -x -C "$RUNNER_TEMP/legacy-180"
+          cat > "$RUNNER_TEMP/legacy-180/ios/TransitCore/Tests/TransitCoreTests/AuditCompatibilityTests.swift" <<'SWIFT'
+          import XCTest
+          @testable import TransitCore
+          final class AuditCompatibilityTests: XCTestCase {
+              func testCurrentSettingsRemainReadableBySupported180() throws {
+                  let path = ProcessInfo.processInfo.environment["RUNNER_TEMP"]! + "/settings-1.8.1.json"
+                  let data = try Data(contentsOf: URL(fileURLWithPath:path))
+                  var control = try XCTUnwrap(JSONSerialization.jsonObject(with:data) as? [String:Any])
+                  var planning = try XCTUnwrap(control["planning"] as? [String:Any])
+                  planning.removeValue(forKey:"bikeWalkGainSeconds");control["planning"] = planning
+                  XCTAssertNoThrow(try LiveSettings.decode(JSONSerialization.data(withJSONObject:control),appVersion:"1.8.0"))
+                  XCTAssertNoThrow(try LiveSettings.decode(data,appVersion:"1.8.0"), "The feed declares minimumAppVersion 1.1.8, but the installed 1.8.0 decoder must still accept it")
+              }
+          }
+          SWIFT
+          swift test --package-path "$RUNNER_TEMP/legacy-180/ios/TransitCore" --filter AuditCompatibilityTests | tee "$RUNNER_TEMP/config-compat-audit.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-config-compatibility
+          path: ${{ runner.temp }}/config-compat-audit.log
+          retention-days: 14
   validate:
     runs-on: ubuntu-latest
     timeout-minutes: 5
