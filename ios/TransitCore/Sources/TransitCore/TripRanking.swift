@@ -114,7 +114,8 @@ public enum TripRanking {
                                    preferences: LiveSettings.Planning = .init(), limit: Int = 3,
                                    walkingDurations: [String: [Double?]] = [:],
                                    ridingDurations: [String: [Double]] = [:], diverse: Bool = true,
-                                   cyclingDurations: [String: Double] = [:]) -> [TransitTrip] {
+                                   cyclingDurations: [String: Double] = [:], rentalCounts: [String: Int] = [:],
+                                   choiceGroups: [String: String] = [:]) -> [TransitTrip] {
         guard limit > 0 else { return [] }
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
@@ -134,18 +135,22 @@ public enum TripRanking {
             if $0.transfers != $1.transfers { return $0.transfers < $1.transfers }
             return $0.id < $1.id
         }
-        guard diverse, limit <= 4, !ordered.isEmpty else { return Array(ordered.prefix(limit)) }
+        guard diverse, !ordered.isEmpty else { return Array(ordered.prefix(limit)) }
+        func rentals(_ id: String) -> Int { max(0, rentalCounts[id] ?? (cycling(id) > 0 ? 1 : 0)) }
+        func group(_ trip: TransitTrip) -> String { choiceGroups[trip.id] ?? trip.familyID }
         // Keep useful trade-offs, then collapse the same bus chain only after walking is verified.
         let frontier = ordered.filter { candidate in
             let a = scores[candidate.id]!
             return !ordered.contains { other in
                 guard other.id != candidate.id else { return false }
+                // Requiring a bike (or two rentals) is a real tradeoff, even if it saves time.
+                guard rentals(other.id) <= rentals(candidate.id) else { return false }
                 let b = scores[other.id]!
                 let fewerTransfers = other.transfers < candidate.transfers
                 return b.elapsedSeconds <= a.elapsedSeconds + (fewerTransfers ? 60 : 0) &&
                     walking(other.id) <= walking(candidate.id) + (fewerTransfers ? 30 : 0) &&
                     other.transfers <= candidate.transfers && b.unknownWaits <= a.unknownWaits &&
-                    (b.elapsedSeconds < a.elapsedSeconds - 30 || walking(other.id) < walking(candidate.id) - 30 || other.transfers < candidate.transfers)
+                    (b.elapsedSeconds < a.elapsedSeconds - 30 || walking(other.id) < walking(candidate.id) - 30 || other.transfers < candidate.transfers || rentals(other.id) < rentals(candidate.id))
             }
         }
         let best = frontier.first ?? ordered[0]
@@ -153,14 +158,15 @@ public enum TripRanking {
         var result = [best]
         func append(_ candidate: TransitTrip?) {
             guard let candidate, result.count < limit,
-                  !result.contains(where: { $0.id == candidate.id || $0.familyID == candidate.familyID }) else { return }
+                  !result.contains(where: { $0.id == candidate.id || group($0) == group(candidate) }) else { return }
             result.append(candidate)
         }
         if scores[fastest.id]!.elapsedSeconds < scores[best.id]!.elapsedSeconds - 60 { append(fastest) }
         let reasonable = frontier.filter { scores[$0.id]!.elapsedSeconds <= scores[fastest.id]!.elapsedSeconds + 900 }
         append(reasonable.min { walking($0.id) < walking($1.id) })
         append(reasonable.first { $0.transfers == 0 })
-        for trip in frontier { append(trip) }
+        append(reasonable.min { rentals($0.id) < rentals($1.id) })
+        for trip in reasonable { append(trip) }
         return result
     }
 }

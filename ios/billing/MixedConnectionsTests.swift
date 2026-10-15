@@ -88,6 +88,33 @@ import XCTest
         XCTAssertTrue(choices.contains { $0.walks.filter { $0.bike != nil }.count == 1 })
         XCTAssertTrue(choices.allSatisfy { !$0.verified },"Known walks must not mark new bike routes verified")
     }
+    func testReasonablySlowerTripWithoutBikeRemainsAnExplicitChoice() async throws {
+        var original = base()
+        original.walks[0].duration = 1000;original.walks[1].duration = 1000
+        let p = planner(original), bikes = network(original)
+        p.updateBikes(network:bikes,availability:counts(bikes));await settle(p)
+        XCTAssertTrue(try XCTUnwrap(p.selected).cycles)
+        XCTAssertTrue(p.options.contains { $0.id == original.id && !$0.cycles })
+        XCTAssertEqual(p.optionLabels[original.id],"免騎車")
+    }
+    func testAdditionalTimeWalkingTradeoffsStayInTheFullListAndCanBePreviewed() throws {
+        let choices = (0..<8).map { index -> JourneyOption in
+            let ride = route("route-\(index)",b,c,mode:.bus)
+            let trip = TransitTrip(rides:[ride],accessDistance:0,egressDistance:0,transferDistance:0,score:0,
+                rideSeconds:[1800-Double(index)*90])
+            return JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:a,to:b,distance:100,duration:Double(index)*60),
+                WalkingLeg(from:c,to:d,distance:0,duration:0)])
+        }
+        let p = JourneyPlannerModel()
+        p.auditLoadChoices(choices,from:TravelPlace(name:"出發",address:"",coordinate:a),to:TravelPlace(name:"目的地",address:"",coordinate:d))
+        XCTAssertEqual(p.options.count,8)
+        XCTAssertEqual(p.featuredOptions.count,5)
+        let other = try XCTUnwrap(p.options.last)
+        XCTAssertFalse(p.featuredOptions.contains { $0.id == other.id })
+        p.select(other)
+        XCTAssertTrue(p.featuredOptions.contains { $0.id == other.id })
+        XCTAssertEqual(p.featuredOptions.count,5);XCTAssertFalse(p.started)
+    }
     func testStreetTransferCanUseABikeButIndoorPlatformChangeCannot() {
         let outdoor = transfer(internalWalk:false), p = planner(outdoor)
         XCTAssertTrue(p.auditBikeConnections([outdoor]).contains { $0.walks[1].bike != nil })

@@ -1687,7 +1687,14 @@ final class TransitAppModel: ObservableObject {
         guard let mixed, let rail, let bus else { return }
         previewNotice = "介面驗證用行程 · 非即時班次"
         snapshot = TransitSnapshot(); planner.updateSnapshot(snapshot)
-        planner.prepareRouteChoicesPreview([mixed,rail,bus],
+        var choices = [mixed,rail,bus]
+        if ProcessInfo.processInfo.arguments.contains("--preview-many-options") {
+            var families = Set(choices.map(\.familyID))
+            for trip in trips where families.insert(trip.familyID).inserted {
+                choices.append(trip); if choices.count == 8 { break }
+            }
+        }
+        planner.prepareRouteChoicesPreview(choices,
             from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
             to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
     }
@@ -1701,6 +1708,8 @@ final class TransitAppModel: ObservableObject {
         let start = Coordinate(latitude: 25.0405, longitude: 121.5600)
         let boarding = Coordinate(latitude: 25.0415, longitude: 121.5440)
         let finish = Coordinate(latitude: 25.0478, longitude: 121.5170)
+        let bothEnds = ProcessInfo.processInfo.arguments.contains("--preview-youbike-dual")
+        let destination = bothEnds ? Coordinate(latitude:25.0478,longitude:121.5000) : finish
         guard !bikeNetwork.stations(near: start, radius: 400, limit: 1).isEmpty else {
             previewSelectionApplied = false; return
         }
@@ -1714,6 +1723,7 @@ final class TransitAppModel: ObservableObject {
         var docks = stocked(bikeNetwork.stations(near: start, radius: 600, limit: 12), rentable: 9)
         for (id, dock) in stocked(bikeNetwork.stations(near: boarding, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
         for (id, dock) in stocked(bikeNetwork.stations(near: finish, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
+        for (id, dock) in stocked(bikeNetwork.stations(near: destination, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
         bikeAvailability = BikeAvailability(docks: docks, receivedAt: now)
         planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
         previewNotice = "介面驗證用行程 · 非即時車位"
@@ -1724,7 +1734,8 @@ final class TransitAppModel: ObservableObject {
         }.value
         planner.prepareCyclingPreview(trip: trip,
             from: TravelPlace(name: "國父紀念館", address: "", coordinate: start, englishName: "Sun Yat-sen Memorial Hall"),
-            to: TravelPlace(name: "臺北車站", address: "", coordinate: finish, englishName: "Taipei Main Station"))
+            to: TravelPlace(name: bothEnds ? "西門附近" : "臺北車站", address: "", coordinate: destination,
+                englishName: bothEnds ? "Near Ximen" : "Taipei Main Station"), bothEnds: bothEnds)
         // The rider is on the way when the station they are heading to runs dry. Every offered
         // trip loses its station, so whichever one is opened shows the warning.
         if emptyPickup {

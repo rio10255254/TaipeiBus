@@ -57,6 +57,13 @@ public struct TransitTrip: Identifiable, Sendable {
     public func asVariant(_ name: String) -> TransitTrip {
         var result = self; result.variant = name; return result
     }
+    public func withEndpointDistances(access: Double, egress: Double) -> TransitTrip {
+        var result = TransitTrip(rides: rides, accessDistance: max(0, access), egressDistance: max(0, egress),
+            transferDistance: transferDistance, score: score, rideSeconds: rideSeconds,
+            transferDistances: transferDistances, transferSeconds: transferSeconds)
+        result.variant = variant
+        return result
+    }
     public var familyID: String { rides.map { "\($0.route.parentID):\($0.direction)" }.joined(separator: "|") }
 }
 

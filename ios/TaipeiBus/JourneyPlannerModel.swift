@@ -254,6 +254,15 @@ final class JourneyPlannerModel: ObservableObject {
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
+    /// Keep the compact carousel readable while the full list retains other useful tradeoffs.
+    var featuredOptions: [JourneyOption] {
+        var result = Array(options.prefix(5))
+        if let selected, !result.contains(where: { $0.id == selected.id }) {
+            if result.count == 5 { result.removeLast() }
+            result.append(selected)
+        }
+        return result
+    }
     /// Every station an offered trip would rent a bike from.
     var plannedPickupStations: [BikeStation] {
         var seen = Set<String>()
@@ -307,8 +316,14 @@ final class JourneyPlannerModel: ObservableObject {
             (option.id, ridingEstimates(option, at: date).map(\.seconds))
         })
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-            preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides,
-            cyclingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.cyclingSeconds) }))
+            preferences: preferences, limit: 12, walkingDurations: walks, ridingDurations: rides,
+            cyclingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.cyclingSeconds) }),
+            rentalCounts: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.filter { $0.bike != nil }.count) }),
+            choiceGroups: Dictionary(uniqueKeysWithValues: valid.compactMap { option -> (String, String)? in
+                guard let trip = option.trip else { return nil }
+                let legs = option.walks.indices.filter { option.walks[$0].bike != nil }.map(String.init).joined(separator: "-")
+                return (option.id, trip.familyID + "|bikes:" + legs)
+            }))
         var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
         // Riding the whole way has to clearly beat the bus it would replace, but only modestly
         // beat a walk: nobody is waiting for a walk. Either comparison can earn it a place, and
@@ -329,7 +344,7 @@ final class JourneyPlannerModel: ObservableObject {
            result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 60 }) ?? true {
             result.insert(foot, at: 0)
         }
-        result = Array(result.prefix(3))
+        result = Array(result.prefix(12))
         return result
     }
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
@@ -342,6 +357,7 @@ final class JourneyPlannerModel: ObservableObject {
             }
             if option.bikeOnly { labels[option.id] = "騎 YouBike"; continue }
             if option.cycles { labels[option.id] = "YouBike 接駁"; continue }
+            if recommendedOption?.cycles == true { labels[option.id] = "免騎車"; continue }
             if let timing = duration(option, at: date), let recommended {
                 if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
                 else if timing.walkingSeconds - timing.cyclingSeconds < recommended.walkingSeconds - recommended.cyclingSeconds - 120 { labels[option.id] = "少走路" }
@@ -746,12 +762,8 @@ final class JourneyPlannerModel: ObservableObject {
         let lastExit = metadata.metro.nearestExit(stationID: last.alighting.stationID, to: destination.coordinate)
         walks.append(WalkingLeg(from: entrance(last.alighting, toward: destination.coordinate), to: destination.coordinate,
             stationSeconds: last.alightingAccessSeconds, stationInstruction: lastExit.map { AppText.text("從 %@ 出站", AppLanguage.current == .english ? $0.englishName : $0.name) }))
-        var aligned = TransitTrip(rides: trip.rides,
-            accessDistance: walks[0].from.distance(to: walks[0].to),
-            egressDistance: walks.last!.from.distance(to: walks.last!.to),
-            transferDistance: trip.transferDistance, score: trip.score, rideSeconds: trip.rideSeconds,
-            transferDistances: trip.transferDistances, transferSeconds: trip.transferSeconds)
-        aligned.variant = trip.variant
+        let aligned = trip.withEndpointDistances(access: walks[0].from.distance(to: walks[0].to),
+            egress: walks.last!.from.distance(to: walks.last!.to))
         return JourneyOption(id: aligned.id, trip: aligned, walks: walks)
     }
     func plan(metadata: TransitMetadata) {
@@ -1044,7 +1056,7 @@ final class JourneyPlannerModel: ObservableObject {
     /// Deterministic cycling scenario: real stations and a real trip, with simulated street
     /// geometry, so the cycling interface can be checked without Apple's routing. Availability
     /// must already be injected with `updateBikes`.
-    func prepareCyclingPreview(trip: TransitTrip?, from start: TravelPlace, to end: TravelPlace) {
+    func prepareCyclingPreview(trip: TransitTrip?, from start: TravelPlace, to end: TravelPlace, bothEnds: Bool = false) {
         cancelRequests(); origin = start; destination = end; usingLocation = false
         started = false; stepIndex = 0; selectionConfirmed = true
         func cycling(_ connection: BikeConnection, from: Coordinate, to: Coordinate) -> WalkingLeg {
@@ -1083,6 +1095,12 @@ final class JourneyPlannerModel: ObservableObject {
             }
             walks.append(walking(last.alighting.coordinate, end.coordinate))
             result.append(JourneyOption(id: variant.id, trip: variant, walks: walks))
+            if bothEnds, let egress = BikeRouting.connection(from: last.alighting.coordinate, to: end.coordinate,
+                network: bikeNetwork, availability: bikeAvailability, preferences: preferences) {
+                let combined = trip.asVariant("youbike-legs-0-\(walks.count - 1)")
+                walks[walks.count - 1] = cycling(egress, from: last.alighting.coordinate, to: end.coordinate)
+                result.insert(JourneyOption(id:combined.id,trip:combined,walks:walks),at:0)
+            }
         }
         guard !result.isEmpty else { return }
         options = result; verifiedPool = result

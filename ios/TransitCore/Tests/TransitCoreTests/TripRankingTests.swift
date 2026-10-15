@@ -22,6 +22,11 @@ final class TripRankingTests: XCTestCase {
         XCTAssertEqual(accurate.first?.id,bikeRail.id,"The connector only has 200 seconds on foot, not 900")
         let timing=TripRanking.assessment(bikeRail,estimates:.init(),at:now,preferences:preference,walkingDurations:connectors[bikeRail.id])
         XCTAssertEqual(timing.elapsedSeconds-timing.waitingSeconds,1500,accuracy:0.001,"All 900 connector seconds still count towards reaching the platform")
+        let aligned = bikeRail.asVariant("bike").withEndpointDistances(access:900,egress:300)
+        XCTAssertEqual(aligned.rides.map(\.id),bikeRail.rides.map(\.id))
+        XCTAssertEqual(aligned.rideSeconds,bikeRail.rideSeconds)
+        XCTAssertEqual(aligned.variant,"bike")
+        XCTAssertEqual(aligned.accessDistance,900);XCTAssertEqual(aligned.egressDistance,300)
     }
     func testNightServiceDoesNotLookLikeAnEightMinuteWaitInTheAfternoon() throws {
         let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-03T06:00:00Z"))

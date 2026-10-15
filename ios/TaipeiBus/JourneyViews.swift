@@ -888,7 +888,7 @@ struct JourneyOptionsView: View {
                     TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
                         if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
                     })) {
-                        ForEach(planner.options) { option in compactCard(option, at: timeline.date).tag(option.id) }
+                        ForEach(planner.featuredOptions) { option in compactCard(option, at: timeline.date).tag(option.id) }
                     }
                     .tabViewStyle(.page(indexDisplayMode: .never))
                     .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)))
@@ -896,7 +896,7 @@ struct JourneyOptionsView: View {
                     .accessibilityIdentifier("journey-preview-pages")
                     HStack(spacing: 8) {
                         HStack(spacing: 0) {
-                            ForEach(Array(planner.options.enumerated()), id: \.element.id) { index, option in
+                            ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
                                 Button { planner.select(option) } label: {
                                     Circle().fill(option.id == planner.selectedID ? Color.primary : Color.secondary.opacity(0.3))
                                         .frame(width: 6, height: 6).frame(width: 20, height: 44)
@@ -905,7 +905,10 @@ struct JourneyOptionsView: View {
                             }
                         }
                         Button(action: expand) {
-                            Text(AppText.text("全部路線")).liveFont(.subheadline).frame(minHeight: 44)
+                            HStack(spacing: 4) {
+                                Text(AppText.text("全部路線"))
+                                if planner.options.count > 5 { Text("\(planner.options.count)").foregroundStyle(.secondary).monospacedDigit() }
+                            }.liveFont(.subheadline).frame(minHeight: 44)
                         }.accessibilityIdentifier("journey-all-options")
                         // Live times reordered the options: offer the new order without moving rows under a finger.
                         if planner.comparisonChanged, !planner.checkingWalks {
