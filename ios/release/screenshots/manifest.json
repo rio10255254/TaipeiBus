@@ -1,7 +1,7 @@
 {
   "app_version": "1.6.1",
   "release_build": "98.1.0",
-  "status": "authorized_for_app_store_submission",
+  "status": "approved_gallery_for_paused_store_draft",
   "slides": [
     {
       "source": "user-06.jpg",
@@ -202,5 +202,7 @@
   "revision": "polished-v3",
   "scope": "app_store_1.6.1",
   "quality_note": "使用者提供的照片為壓縮圖片，放大後細字清晰度受原檔限制。",
-  "sources_unchanged": true
+  "sources_unchanged": true,
+  "target_store_version": "1.8.0",
+  "target_store_build": "124.1.0"
 }
