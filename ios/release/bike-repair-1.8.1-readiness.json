@@ -1,6 +1,6 @@
 {
   "version": "1.8.1",
-  "status": "validated_for_testflight",
+  "status": "published_to_testflight",
   "distribution": "testflight-only",
   "formal_submission": "paused",
   "source_reviewed": "946aef19783da7dbe1020577311263ce3dfb392c",
@@ -52,7 +52,7 @@
     "revision": 10,
     "commit": "31a18ae609ea3ee172c2281a79a1e083e4ee6ff7",
     "compatibility": "Actual released 1.2.0 and 1.8.0 decoders accepted the common feed; removed overrides exactly match current built-in bike defaults.",
-    "compatibility_run": 38743229863
+    "compatibility_run": 38747936627
   },
   "cycling_source": {
     "status": "validated",
@@ -101,5 +101,13 @@
   },
   "physical_device": "Not performed; no claim of road safety or physical-device performance.",
   "release_decision": "Cycling-source condition met: native request, different pedestrian geometry, complete route, and six light/dark UI checks passed. Publish TestFlight only; do not submit formal App Store review.",
-  "app_source_matches_tested_source": true
+  "app_source_matches_tested_source": true,
+  "testflight": {
+    "version": "1.8.1",
+    "build_number": "133.1.0",
+    "build_id": "289d3233-f65f-4e8d-b7a3-5fa7c672eb12",
+    "source": "2b01fbfb741fe42813fb4d3ff694451939152b7d",
+    "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38746850671",
+    "status": "internal_group_assigned"
+  }
 }
