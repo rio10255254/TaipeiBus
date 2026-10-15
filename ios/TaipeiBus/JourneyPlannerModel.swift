@@ -471,6 +471,9 @@ final class JourneyPlannerModel: ObservableObject {
         var seen = Set<String>()
         for base in choices where !base.cycles {
             guard let trip = base.trip else { continue }
+            let originalDurations = trip.planningWalkSeconds.enumerated().map { i, seconds in base.walks.indices.contains(i) ? base.walks[i].duration ?? seconds : seconds }
+            let original = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
+                preferences: preferences, walkingDurations: originalDurations.map { Optional($0) })
             var links: [(index: Int, connection: BikeConnection, gain: Double)] = []
             for index in base.walks.indices where !base.walks[index].internalTransfer {
                 let leg = base.walks[index]
@@ -478,7 +481,7 @@ final class JourneyPlannerModel: ObservableObject {
                     availability: bikeAvailability, preferences: preferences, at: date) else { continue }
                 let walk = leg.duration.map { max(0, $0 - leg.stationSeconds) } ?? BikeRouting.walkingSeconds(leg.from.distance(to: leg.to))
                 let gain = walk - connection.totalSeconds
-                guard gain >= preferences.bikeWalkGainSeconds else { continue }
+                guard gain > 0 else { continue }
                 links.append((index, connection, gain))
             }
             guard !links.isEmpty else { continue }
@@ -494,7 +497,7 @@ final class JourneyPlannerModel: ObservableObject {
                 let variant = trip.asVariant(name)
                 guard !attemptedBikeConnections.contains(variant.id), seen.insert(variant.id).inserted else { continue }
                 var walks = base.walks
-                var predicted = trip.planningWalkSeconds.enumerated().map { i, seconds in walks.indices.contains(i) ? walks[i].duration ?? seconds : seconds }
+                var predicted = originalDurations
                 var cycling = 0.0, gain = 0.0
                 for slot in chosen {
                     let item = links[slot], leg = base.walks[item.index]
@@ -504,9 +507,12 @@ final class JourneyPlannerModel: ObservableObject {
                     predicted[item.index] = item.connection.totalSeconds + leg.stationSeconds
                     cycling += item.connection.rideSeconds + item.connection.handlingSeconds; gain += item.gain
                 }
-                let score = TripRanking.assessment(variant, estimates: latestSnapshot.estimates, at: date,
-                    preferences: preferences, walkingDurations: predicted.map { Optional($0) }, cyclingSeconds: cycling).score
-                candidates.append((JourneyOption(id: variant.id, trip: variant, walks: walks), score, gain))
+                let assessment = TripRanking.assessment(variant, estimates: latestSnapshot.estimates, at: date,
+                    preferences: preferences, walkingDurations: predicted.map { Optional($0) }, cyclingSeconds: cycling)
+                // A short local saving can catch a departure that walking would miss.
+                guard !assessment.unavailable,
+                      gain >= preferences.bikeWalkGainSeconds || assessment.elapsedSeconds <= original.elapsedSeconds - preferences.bikeWalkGainSeconds else { continue }
+                candidates.append((JourneyOption(id: variant.id, trip: variant, walks: walks), assessment.score, gain))
             }
         }
         candidates.sort {

@@ -171,6 +171,24 @@ final class BikePlannerTests: XCTestCase {
         try? await Task.sleep(for:.milliseconds(200))
         XCTAssertNil(p.selected);XCTAssertTrue(p.options.isEmpty);XCTAssertFalse(p.checkingWalks)
     }
+    func testSmallConnectorSavingIsKeptWhenItCatchesTheNextDeparture() async throws {
+        var base=longAccessTransit();base.walks[0].duration=1000
+        let p=planner([base]), now=Date()
+        var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["G:G-a":1000],updatedAt:now)
+        p.updateSnapshot(snapshot)
+        XCTAssertTrue(try XCTUnwrap(p.duration(base,at:now)).waits[0].missedNext)
+        p.testCycle = { _ in self.cycling().walks[0] }
+        p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
+        for _ in 0..<200 {
+            if !p.checkingWalks { break }
+            try? await Task.sleep(for:.milliseconds(10))
+        }
+        let chosen=try XCTUnwrap(p.selected)
+        XCTAssertTrue(chosen.cycles)
+        let timing=try XCTUnwrap(p.duration(chosen,at:now))
+        XCTAssertFalse(timing.waits[0].missedNext)
+        XCTAssertLessThan(timing.totalSeconds,try XCTUnwrap(p.duration(base,at:now)).totalSeconds-120)
+    }
 
     func testLiveTaipeiCyclingDirectionsBetweenUserStations() async throws {
         let p=JourneyPlannerModel()
