@@ -95,6 +95,19 @@ struct JourneyPlanningView: View {
             .navigationTitle(editingOrigin ? AppText.text("出發地") : searchingPlaces ? AppText.text("目的地") : planner.started || showingItinerary ? AppText.text("行程") : AppText.text("路線"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if !searchingPlaces, !showingItinerary, !planner.started, model.activeRoutePreference != .balanced {
+                    ToolbarItem(placement: .principal) {
+                        Button { showingTripPreference = true } label: {
+                            VStack(spacing: 1) {
+                                Text(AppText.text("路線")).font(.headline).foregroundStyle(.primary)
+                                HStack(spacing: 3) {
+                                    Text(model.activeRoutePreference.title)
+                                    Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+                                }.font(.caption2.weight(.semibold)).foregroundStyle(.tint)
+                            }.frame(minWidth: 80, minHeight: 44)
+                        }.buttonStyle(.plain).accessibilityIdentifier("journey-active-preference")
+                    }
+                }
                 if searchingPlaces || showingItinerary || planner.started {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(live.text(searchingPlaces ? "取消" : showingItinerary && !planner.started ? "返回路線" : "返回地圖")) {
@@ -934,13 +947,15 @@ struct JourneyOptionsView: View {
                 Button { go(option) } label: {
                     Text(AppText.text("出發")).liveFont(.body, weight: .bold).frame(width: 66, height: 62)
                 }.buttonStyle(MapTileStyle(prominent: true, tint: MapChrome.go))
-                    .disabled(!usable(option)).accessibilityLabel(AppText.text("開始導航"))
+                    .disabled(!usable(option)).opacity(usable(option) ? 1 : 0.42)
+                    .accessibilityLabel(AppText.text("開始導航"))
                     .accessibilityIdentifier("journey-go-" + option.id)
                 Button { planner.select(option); showSteps() } label: {
                     HStack(spacing: 3) {
                         Text(AppText.text("步驟")); Image(systemName: "chevron.right")
                     }.liveFont(.caption, weight: .semibold).frame(width: 66, height: 44)
                 }.buttonStyle(MapActionStyle())
+                    .disabled(!usable(option))
                     .accessibilityLabel(AppText.text("查看搭乘步驟"))
                     .accessibilityIdentifier("journey-steps-" + option.id)
             }.frame(width: 66)

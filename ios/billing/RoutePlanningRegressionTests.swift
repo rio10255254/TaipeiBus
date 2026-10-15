@@ -52,6 +52,22 @@ import XCTest
         XCTAssertEqual(p.selectedID,bus.id)
         XCTAssertFalse(p.options.contains { $0.id==green.id })
     }
+    func testPersonalPreferencesChangeRankingWithoutInflatingTravelTime() throws {
+        var bus=choice("18",rideSeconds:1800), green=choice("G",rideSeconds:900,metro:true)
+        bus.walks[0].duration=120;green.walks[0].duration=600
+        let p=planner([bus,green])
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
+        let baseline=try XCTUnwrap(p.duration(green,at:date))
+        XCTAssertEqual(p.selectedID,green.id)
+        for preference in RoutePreference.allCases {
+            var settings=LiveSettings.defaults
+            settings.planning=preference.applying(to:settings.planning)
+            p.updateSettings(settings);p.refreshRecommendations()
+            let timing=try XCTUnwrap(p.duration(green,at:date))
+            XCTAssertEqual(timing.totalSeconds,baseline.totalSeconds,accuracy:0.001)
+            if preference == .lessWalking { XCTAssertEqual(p.selectedID,bus.id) }
+        }
+    }
     func testRealGongguanXimenTripSurvivesPedestrianVerification() async throws {
         let service=TransitService()
         let loaded=await service.offlineMetroMetadata()
@@ -70,6 +86,21 @@ import XCTest
         XCTAssertLessThan(timing.totalSeconds,2400.0)
         XCTAssertEqual(timing.totalSeconds,timing.walkingSeconds+timing.waitingSeconds+timing.ridingSeconds,accuracy:0.001)
         print("GONGGUAN_VERIFIED entry=\(entry.name) exit=\(exit.name) walking=\(timing.walkingSeconds/60) waiting=\(timing.waitingSeconds/60) riding=\(timing.ridingSeconds/60) total=\(timing.totalSeconds/60) arrival=\(timing.arrivalLabel)")
+        // Known station geometry and real cycling directions, with explicitly controlled
+        // availability. This does not claim the same bikes were available in the user's photo.
+        let bikes = await service.bikeNetwork(), now = Date()
+        let counts = BikeAvailability(docks: Dictionary(uniqueKeysWithValues: bikes.stations.map {
+            ($0.id, BikeDock(stationID: $0.id, rentable: 8, returnable: 8, capacity: $0.capacity, active: true, observedAt: now))
+        }), receivedAt: now)
+        p.updateBikes(network: bikes, availability: counts)
+        let connector = try XCTUnwrap(p.auditBikeConnections([verified], at: now).first { $0.trip?.variant == "youbike-access" })
+        let cycled = try await p.auditEnrich(connector, metadata: metadata)
+        XCTAssertTrue(cycled.verified); XCTAssertNil(cycled.walkIssue)
+        let bike = try XCTUnwrap(cycled.walks.first?.bike)
+        XCTAssertGreaterThan(bike.ride.count, 2)
+        let cycledTiming = try XCTUnwrap(p.duration(cycled, at: date))
+        XCTAssertLessThan(cycledTiming.totalSeconds, timing.totalSeconds)
+        print("GONGGUAN_CYCLING controlled_counts=true pickup=\(bike.pickup.name) dropoff=\(bike.dropoff.name) access_seconds=\(cycled.walks[0].duration ?? -1) bike_seconds=\(bike.rideSeconds) total_minutes=\(cycledTiming.totalSeconds/60) saved_minutes=\((timing.totalSeconds-cycledTiming.totalSeconds)/60)")
     }
 
 }

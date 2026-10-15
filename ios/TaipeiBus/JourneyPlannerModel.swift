@@ -306,7 +306,8 @@ final class JourneyPlannerModel: ObservableObject {
             (option.id, ridingEstimates(option, at: date).map(\.seconds))
         })
         let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-            preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides)
+            preferences: preferences, limit: 3, walkingDurations: walks, ridingDurations: rides,
+            cyclingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.cyclingSeconds) }))
         var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
         // Riding the whole way has to clearly beat the bus it would replace, but only modestly
         // beat a walk: nobody is waiting for a walk. Either comparison can earn it a place, and
@@ -342,7 +343,7 @@ final class JourneyPlannerModel: ObservableObject {
             if option.cycles { labels[option.id] = "YouBike 接駁"; continue }
             if let timing = duration(option, at: date), let recommended {
                 if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
-                else if timing.walkingSeconds < recommended.walkingSeconds - 120 { labels[option.id] = "少走路" }
+                else if timing.walkingSeconds - timing.cyclingSeconds < recommended.walkingSeconds - recommended.cyclingSeconds - 120 { labels[option.id] = "少走路" }
                 else if option.rides.count == 1 { labels[option.id] = "直達" }
                 else { labels[option.id] = option.rides.count < (recommendedOption?.rides.count ?? 0) ? "少轉乘" : "轉乘" }
             }
@@ -436,6 +437,59 @@ final class JourneyPlannerModel: ObservableObject {
     @Published var bikeStationUpdateMessage: String?
     func updateBikes(network: BikeNetwork, availability: BikeAvailability?) {
         bikeNetwork = network; bikeAvailability = availability
+        discoverBikeConnections()
+    }
+    private var bikeRefinementTask: Task<Void, Never>?
+    private var attemptedBikeConnections = Set<String>()
+    /// Consider every surviving transit family before spending the bounded route-query budget.
+    /// A rail connector must not lose its place just because three bus connectors came first.
+    private func bikeConnections(for choices: [JourneyOption], at date: Date) -> [JourneyOption] {
+        var candidates: [(choice: JourneyOption, gain: Double)] = []
+        for base in choices where !base.cycles {
+            guard let trip = base.trip else { continue }
+            for index in Set([0, base.walks.count - 1]).sorted() where base.walks.indices.contains(index) {
+                let leg = base.walks[index]
+                guard let connection = BikeRouting.connection(from: leg.from, to: leg.to, network: bikeNetwork,
+                    availability: bikeAvailability, preferences: preferences, at: date) else { continue }
+                let walk = leg.duration.map { max(0, $0 - leg.stationSeconds) } ?? BikeRouting.walkingSeconds(leg.from.distance(to: leg.to))
+                let gain = walk - connection.totalSeconds
+                guard gain >= preferences.bikeWalkGainSeconds else { continue }
+                let variant = trip.asVariant(index == 0 ? "youbike-access" : "youbike-finish")
+                guard !attemptedBikeConnections.contains(variant.id) else { continue }
+                var walks = base.walks
+                // A previously verified walk is not proof of a cycling route.
+                var replacement = WalkingLeg(from: leg.from, to: leg.to,
+                    stationSeconds: leg.stationSeconds, stationInstruction: leg.stationInstruction)
+                replacement.bike = BikeLeg(connection); walks[index] = replacement
+                candidates.append((JourneyOption(id: variant.id, trip: variant, walks: walks), gain))
+            }
+        }
+        candidates.sort { $0.gain == $1.gain ? $0.choice.id < $1.choice.id : $0.gain > $1.gain }
+        var families = Set<String>()
+        return Array(candidates.filter { families.insert($0.choice.trip!.familyID).inserted }.prefix(3).map(\.choice))
+    }
+    /// Counts can arrive after the bus/metro routes. Add verified connectors without clearing
+    /// the inspected route or restarting navigation, and never repeat failed requests in a loop.
+    private func discoverBikeConnections() {
+        guard !started, !planning, !checkingWalks, bikeRefinementTask == nil, !verifiedPool.isEmpty else { return }
+        let candidates = bikeConnections(for: verifiedPool, at: Date())
+        guard !candidates.isEmpty else { return }
+        attemptedBikeConnections.formUnion(candidates.map(\.id))
+        checkingWalks = true
+        let token = generation
+        bikeRefinementTask = Task { [weak self] in
+            guard let self else { return }
+            for choice in candidates {
+                guard !Task.isCancelled, token == self.generation else { return }
+                if let result = try? await self.enrich(choice), result.verified, result.walkIssue == nil,
+                   !Task.isCancelled, token == self.generation {
+                    self.verifiedPool.append(result); self.publishRecommendations()
+                }
+            }
+            guard !Task.isCancelled, token == self.generation else { return }
+            self.checkingWalks = false; self.bikeRefinementTask = nil
+            self.publishRecommendations()
+        }
     }
     /// A YouBike station this trip is counting on that can no longer be counted on, with the
     /// nearest station that can take its place. Checked only while that end is still ahead.
@@ -563,6 +617,7 @@ final class JourneyPlannerModel: ObservableObject {
         lastMetadata = metadata; selectionConfirmed = false
         cancelRequests()
         verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil; comparisonChanged = false
+        attemptedBikeConnections = []
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
@@ -629,31 +684,8 @@ final class JourneyPlannerModel: ObservableObject {
             // station with no bikes, or with nowhere to return one, is not a plan. Each one is
             // an alternative to the same rides, so only the better of the two is ever offered.
             if preferences.bikeRouting, bikeAvailability != nil, !bikeNetwork.stations.isEmpty {
-                var cycling: [JourneyOption] = []
-                for trip in selected.prefix(6) {
-                    guard let first = trip.rides.first, let last = trip.rides.last else { continue }
-                    let boarding = entrance(first.boarding, toward: origin.coordinate, metadata: metadata)
-                    let toBoarding = origin.coordinate.distance(to: boarding)
-                    if toBoarding >= 350,
-                       let connection = BikeRouting.connection(from: origin.coordinate, to: boarding, network: bikeNetwork,
-                           availability: bikeAvailability, preferences: preferences, at: date),
-                       BikeRouting.worthRiding(connection, insteadOfWalking: toBoarding, preferences: preferences) {
-                        var choice = option(trip.asVariant("youbike-access"))
-                        choice.walks[0].bike = BikeLeg(connection)
-                        cycling.append(choice)
-                    }
-                    let alighting = entrance(last.alighting, toward: destination.coordinate, metadata: metadata)
-                    let fromAlighting = alighting.distance(to: destination.coordinate)
-                    if fromAlighting >= 350,
-                       let connection = BikeRouting.connection(from: alighting, to: destination.coordinate, network: bikeNetwork,
-                           availability: bikeAvailability, preferences: preferences, at: date),
-                       BikeRouting.worthRiding(connection, insteadOfWalking: fromAlighting, preferences: preferences) {
-                        var choice = option(trip.asVariant("youbike-finish"))
-                        choice.walks[choice.walks.count - 1].bike = BikeLeg(connection)
-                        cycling.append(choice)
-                    }
-                    if cycling.count >= 3 { break }
-                }
+                var cycling = bikeConnections(for: pending, at: date)
+                attemptedBikeConnections.formUnion(cycling.map(\.id))
                 // A station a short ride away can open a far better trip than anything within
                 // walking distance. That costs a second search, so it runs only for longer
                 // trips where what the walk-based search found is not already quick.
@@ -713,7 +745,7 @@ final class JourneyPlannerModel: ObservableObject {
             checkingWalks = false
             publishRecommendations()
             if verifiedPool.isEmpty { message = "步行接駁暫時無法確認，請稍後重試或查看其他交通方式。"; options = []; selectedID = nil }
-            mapRevision += 1
+            discoverBikeConnections()
 
         }
     }
@@ -857,6 +889,7 @@ final class JourneyPlannerModel: ObservableObject {
         endWalkingGuidance()
         pickupTask?.cancel(); pickupTask = nil; pickupGeneration = UUID()
         changingBikeStation = false; bikeStationUpdateMessage = nil
+        bikeRefinementTask?.cancel(); bikeRefinementTask = nil
         task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
@@ -874,6 +907,9 @@ final class JourneyPlannerModel: ObservableObject {
     func auditEnrich(_ option: JourneyOption, metadata: TransitMetadata) async throws -> JourneyOption {
         lastMetadata = metadata
         return try await enrich(option)
+    }
+    func auditBikeConnections(_ choices: [JourneyOption], at date: Date = Date()) -> [JourneyOption] {
+        bikeConnections(for: choices, at: date)
     }
     func auditVerifyAdditionalChoices(_ choices: [JourneyOption], delay: Double = 0.15) {
         checkingWalks = true

@@ -112,14 +112,25 @@ public enum TripRanking {
     public static func recommended(_ trips: [TransitTrip], estimates: EstimateFeed, at date: Date,
                                    preferences: LiveSettings.Planning = .init(), limit: Int = 3,
                                    walkingDurations: [String: [Double?]] = [:],
-                                   ridingDurations: [String: [Double]] = [:], diverse: Bool = true) -> [TransitTrip] {
+                                   ridingDurations: [String: [Double]] = [:], diverse: Bool = true,
+                                   cyclingDurations: [String: Double] = [:]) -> [TransitTrip] {
         guard limit > 0 else { return [] }
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
                 walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id]))
         })
+        // Connector durations include cycling so departure feasibility and arrival clocks
+        // remain correct. Only the preference cost and walking comparison exclude riding.
+        func cycling(_ id: String) -> Double {
+            let seconds = cyclingDurations[id] ?? 0
+            return seconds.isFinite ? min(scores[id]!.walkingSeconds, max(0, seconds)) : 0
+        }
+        func walking(_ id: String) -> Double { scores[id]!.walkingSeconds - cycling(id) }
+        func rankingScore(_ id: String) -> Double {
+            scores[id]!.score - cycling(id) * (preferences.walkingWeight - 1 + 0.35)
+        }
         let ordered = trips.filter { scores[$0.id]?.unavailable == false }.sorted {
-            let a = scores[$0.id]!.score, b = scores[$1.id]!.score
+            let a = rankingScore($0.id), b = rankingScore($1.id)
             if a != b { return a < b }
             if $0.transfers != $1.transfers { return $0.transfers < $1.transfers }
             return $0.id < $1.id
@@ -133,9 +144,9 @@ public enum TripRanking {
                 let b = scores[other.id]!
                 let fewerTransfers = other.transfers < candidate.transfers
                 return b.elapsedSeconds <= a.elapsedSeconds + (fewerTransfers ? 60 : 0) &&
-                    b.walkingSeconds <= a.walkingSeconds + (fewerTransfers ? 30 : 0) &&
+                    walking(other.id) <= walking(candidate.id) + (fewerTransfers ? 30 : 0) &&
                     other.transfers <= candidate.transfers && b.unknownWaits <= a.unknownWaits &&
-                    (b.elapsedSeconds < a.elapsedSeconds - 30 || b.walkingSeconds < a.walkingSeconds - 30 || other.transfers < candidate.transfers)
+                    (b.elapsedSeconds < a.elapsedSeconds - 30 || walking(other.id) < walking(candidate.id) - 30 || other.transfers < candidate.transfers)
             }
         }
         let best = frontier.first ?? ordered[0]
@@ -148,7 +159,7 @@ public enum TripRanking {
         }
         if scores[fastest.id]!.elapsedSeconds < scores[best.id]!.elapsedSeconds - 60 { append(fastest) }
         let reasonable = frontier.filter { scores[$0.id]!.elapsedSeconds <= scores[fastest.id]!.elapsedSeconds + 900 }
-        append(reasonable.min { scores[$0.id]!.walkingSeconds < scores[$1.id]!.walkingSeconds })
+        append(reasonable.min { walking($0.id) < walking($1.id) })
         append(reasonable.first { $0.transfers == 0 })
         for trip in frontier { append(trip) }
         return result

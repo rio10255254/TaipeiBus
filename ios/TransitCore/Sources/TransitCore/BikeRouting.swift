@@ -43,11 +43,11 @@ public enum BikeRouting {
             let needed = renting ? preferences.bikeMinimumBikes : preferences.bikeMinimumDocks
             return Double(count) >= needed ? count : nil
         }
-        let pickups = network.stations(near: from, radius: preferences.bikeAccessMeters, limit: 8)
-            .compactMap { station in usable(station, renting: true).map { (station: station, count: $0) } }
+        let pickups = network.stations(near: from, radius: preferences.bikeAccessMeters, limit: network.stations.count)
+            .compactMap { station in usable(station, renting: true).map { (station: station, count: $0) } }.prefix(8)
         guard !pickups.isEmpty else { return nil }
-        let dropoffs = network.stations(near: to, radius: preferences.bikeAccessMeters, limit: 8)
-            .compactMap { station in usable(station, renting: false).map { (station: station, count: $0) } }
+        let dropoffs = network.stations(near: to, radius: preferences.bikeAccessMeters, limit: network.stations.count)
+            .compactMap { station in usable(station, renting: false).map { (station: station, count: $0) } }.prefix(8)
         guard !dropoffs.isEmpty else { return nil }
         var best: BikeConnection?
         for pickup in pickups {
