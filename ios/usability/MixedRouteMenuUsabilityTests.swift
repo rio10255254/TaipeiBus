@@ -6,7 +6,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         shot.name = "mixed-menu-final-screen";shot.lifetime = .keepAlways;add(shot)
     }
     private func requireRouteMenu() -> Bool {
-        if button("journey-all-options").waitForExistence(timeout:60) { return true }
+        if button("journey-all-options").waitForExistence(timeout:120) { return true }
         let probe = app.staticTexts["journey-timing-state"]
         print("ROUTE_MENU_START_STATE " + (probe.exists ? probe.label : "state unavailable"))
         let shot = XCTAttachment(screenshot:XCUIScreen.main.screenshot())

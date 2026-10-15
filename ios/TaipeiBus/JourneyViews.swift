@@ -909,7 +909,10 @@ struct JourneyOptionsView: View {
                                 Text(AppText.text("全部路線"))
                                 if planner.options.count > 5 { Text("\(planner.options.count)").foregroundStyle(.secondary).monospacedDigit() }
                             }.liveFont(.subheadline).frame(minHeight: 44)
-                        }.accessibilityIdentifier("journey-all-options")
+                        }.accessibilityElement(children: .combine)
+                            .accessibilityLabel(AppText.text("全部路線"))
+                            .accessibilityValue("\(planner.options.count)")
+                            .accessibilityIdentifier("journey-all-options")
                         // Live times reordered the options: offer the new order without moving rows under a finger.
                         if planner.comparisonChanged, !planner.checkingWalks {
                             Button { planner.refreshRecommendations() } label: {

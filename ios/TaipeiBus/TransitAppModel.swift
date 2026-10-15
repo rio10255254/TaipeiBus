@@ -1709,7 +1709,13 @@ final class TransitAppModel: ObservableObject {
         let boarding = Coordinate(latitude: 25.0415, longitude: 121.5440)
         let finish = Coordinate(latitude: 25.0478, longitude: 121.5170)
         let bothEnds = ProcessInfo.processInfo.arguments.contains("--preview-youbike-dual")
-        let destination = bothEnds ? Coordinate(latitude:25.0478,longitude:121.5000) : finish
+        var destination = finish
+        if bothEnds {
+            guard let target = bikeNetwork.stations(near:Coordinate(latitude:25.0415,longitude:121.5070),radius:400,limit:1).first else {
+                previewSelectionApplied = false; return
+            }
+            destination = target.coordinate
+        }
         guard !bikeNetwork.stations(near: start, radius: 400, limit: 1).isEmpty else {
             previewSelectionApplied = false; return
         }
