@@ -28,7 +28,7 @@ public enum TripRanking {
                               preferences: LiveSettings.Planning = .init(), minimumServiceWaits: [Double] = [],
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
                               ridingSpreads: [Double] = [],
-                              at date: Date = Date(), serviceTimeOfDay: Double? = nil) -> TripAssessment {
+                              at date: Date = Date(), serviceTimeOfDay: Double? = nil, cyclingSeconds: Double = 0) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false, spread = 0.0
@@ -78,7 +78,8 @@ public enum TripRanking {
         elapsed += walks.last ?? 0
         lower += walks.last ?? 0; upper += walks.last ?? 0
         let walkingSeconds = walks.reduce(0, +)
-        let score = elapsed + walkingSeconds * (preferences.walkingWeight - 1 + 0.35) +
+        let cycled = cyclingSeconds.isFinite ? min(walkingSeconds, max(0, cyclingSeconds)) : 0
+        let score = elapsed + (walkingSeconds - cycled) * (preferences.walkingWeight - 1 + 0.35) +
             waiting * (preferences.waitingWeight - 1) +
             Double(max(0, riding.count - 1)) * min(300, preferences.transferPenaltySeconds) +
             Double(waits.filter { $0.evidence == .unknown }.count) * 180
@@ -92,7 +93,7 @@ public enum TripRanking {
     public static func assessment(_ trip: TransitTrip, estimates: EstimateFeed, at date: Date,
                                   preferences: LiveSettings.Planning = .init(),
                                   walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil,
-                                  ridingSpreads: [Double]? = nil) -> TripAssessment {
+                                  ridingSpreads: [Double]? = nil, cyclingSeconds: Double = 0) -> TripAssessment {
         let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
             return seconds
@@ -105,7 +106,7 @@ public enum TripRanking {
             boardingOffsets: trip.rides.map(\.boardingOffsetSeconds),
             ridingSpreads: ridingSpreads ?? zip(trip.rides, ridingDurations ?? trip.rideSeconds).map { ride, seconds in
                 seconds * (ride.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
-            }, at: date)
+            }, at: date, cyclingSeconds: cyclingSeconds)
     }
 
     /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
@@ -117,7 +118,8 @@ public enum TripRanking {
         guard limit > 0 else { return [] }
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
-                walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id]))
+                walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id],
+                cyclingSeconds: cyclingDurations[trip.id] ?? 0))
         })
         // Connector durations include cycling so departure feasibility and arrival clocks
         // remain correct. Only the preference cost and walking comparison exclude riding.
@@ -126,11 +128,8 @@ public enum TripRanking {
             return seconds.isFinite ? min(scores[id]!.walkingSeconds, max(0, seconds)) : 0
         }
         func walking(_ id: String) -> Double { scores[id]!.walkingSeconds - cycling(id) }
-        func rankingScore(_ id: String) -> Double {
-            scores[id]!.score - cycling(id) * (preferences.walkingWeight - 1 + 0.35)
-        }
         let ordered = trips.filter { scores[$0.id]?.unavailable == false }.sorted {
-            let a = rankingScore($0.id), b = rankingScore($1.id)
+            let a = scores[$0.id]!.score, b = scores[$1.id]!.score
             if a != b { return a < b }
             if $0.transfers != $1.transfers { return $0.transfers < $1.transfers }
             return $0.id < $1.id

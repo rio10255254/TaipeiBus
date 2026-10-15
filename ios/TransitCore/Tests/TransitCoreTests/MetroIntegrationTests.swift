@@ -208,6 +208,28 @@ final class MetroIntegrationTests: XCTestCase {
         let disconnected=try MetroNetwork(data:JSONSerialization.data(withJSONObject:raw))
         XCTAssertTrue(try XCTUnwrap(disconnected.station("metro:TRTC:G12")).exits.isEmpty,"Outdoor transfers must not invent shared entrances")
     }
+    func testEveryCatalogStationUsesItsOwnOrAnExplicitlySharedEntrance() throws {
+        let metro = try network()
+        var repaired = 0
+        for station in metro.stations {
+            let resolved = try XCTUnwrap(metro.station(station.id))
+            if !station.exits.isEmpty {
+                XCTAssertEqual(Set(resolved.exits.map(\.id)),Set(station.exits.map(\.id)),station.code)
+                continue
+            }
+            let links = metro.transfers.filter { $0.from == station.id && !$0.external }
+            let owners = links.compactMap { link in metro.stations.first { $0.id == link.to } }
+                .filter { $0.name == station.name && !$0.exits.isEmpty && $0.coordinate.distance(to:station.coordinate) <= 400 }
+            if !owners.isEmpty {
+                repaired += 1
+                XCTAssertFalse(resolved.exits.isEmpty,station.code)
+                XCTAssertNotNil(metro.nearestExit(stationID:station.id,to:station.coordinate),station.code)
+            }
+        }
+        XCTAssertGreaterThanOrEqual(repaired,4)
+        XCTAssertTrue(Set(["BL","BR","G","O","R","LB","Y"]).isSubset(of:Set(metro.lines.map(\.code))))
+        print("ALL_LINE_ENTRANCES lines=\(metro.lines.map(\.code).sorted()) stations=\(metro.stations.count) shared_repairs=\(repaired)")
+    }
 
     func testGongguanXimenCandidateCoverageAudit() throws {
         guard let folder=ProcessInfo.processInfo.environment["BUS_LIVE_FEEDS_DIRECTORY"] else { throw XCTSkip("Explicit bundled city audit") }
