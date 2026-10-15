@@ -7,7 +7,8 @@ Task { @MainActor in
     request.transportType = .cycling
     do {
         let response = try await MKDirections(request:request).calculate()
-        guard let route = response.routes.first(where: { $0.transportType == .cycling && $0.distance > 0 && $0.expectedTravelTime > 0 }) else { fatalError("No cycling route returned") }
+        print("REQUESTED=\(request.transportType.rawValue) routes=\(response.routes.map { "type=\($0.transportType.rawValue),meters=\($0.distance),seconds=\($0.expectedTravelTime)" })")
+        guard let route = response.routes.first(where: { $0.transportType == .cycling && $0.distance > 0 && $0.expectedTravelTime > 0 }) else { print("No cycling route returned");exit(1) }
         print("TAIPEI_CYCLING meters=\(route.distance) seconds=\(route.expectedTravelTime) points=\(route.polyline.pointCount) steps=\(route.steps.count)")
         exit(0)
     } catch { print("Cycling source check:",error); exit(1) }
