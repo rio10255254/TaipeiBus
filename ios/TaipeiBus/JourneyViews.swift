@@ -1069,7 +1069,9 @@ private struct JourneyWalkingStep: View {
                 }
                 Text(walked ? AppText.text("已完成") : (leg.distance.map { distanceLabel($0) + " · " } ?? "") + leg.timeLabel)
                     .liveFont(.subheadline).foregroundStyle(.secondary)
-                if let instruction = leg.stationInstruction { Text(instruction).liveFont(.caption).foregroundStyle(.secondary) }
+                Text(AppText.text("騎乘路徑參考步行資料，請依現場標示騎乘或牽行"))
+                            .liveFont(.caption).foregroundStyle(.secondary)
+                        if let instruction = leg.stationInstruction { Text(instruction).liveFont(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 0)
             if !walked, !leg.internalTransfer, planner.currentStep == .walk(index) {
@@ -1112,6 +1114,8 @@ private struct JourneyCyclingStep: View {
                                         distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
                         .liveFont(.subheadline).foregroundStyle(.secondary)
                     if !done {
+                        Text(AppText.text("騎乘路徑參考步行資料，請依現場標示騎乘或牽行"))
+                            .liveFont(.caption).foregroundStyle(.secondary)
                         if let instruction = leg.stationInstruction {
                             Text(instruction).liveFont(.caption).foregroundStyle(.secondary)
                                 .accessibilityIdentifier("journey-bike-station-access-\(index)")
@@ -1157,6 +1161,11 @@ struct BikeStationAlert: View {
                             .liveFont(.caption, weight: .semibold).lineLimit(2)
                             .padding(.horizontal, 12).frame(minHeight: 38)
                     }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-bike-switch")
+                    .disabled(planner.changingBikeStation)
+                    if planner.changingBikeStation { ProgressView().accessibilityLabel(AppText.text("正在確認新站點路線")) }
+                    if let message = planner.bikeStationUpdateMessage {
+                        Text(AppText.text(message)).liveFont(.caption).foregroundStyle(.secondary)
+                    }
                 } else {
                     Text(live.text("附近暫時沒有可替代的站點，可重新規劃行程。"))
                         .liveFont(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

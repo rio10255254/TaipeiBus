@@ -7,6 +7,7 @@ tests.add_dependency(app) unless tests.dependencies.any? { |value| value.target 
 group = project.main_group.groups.find { |value| value.path == 'billing' } || project.main_group.new_group('billing','billing')
 existing = tests.source_build_phase.files.map { |value| value.file_ref&.path }
 tests.source_build_phase.add_file_reference(group.new_file('ProPurchaseTests.swift')) unless existing.include?('ProPurchaseTests.swift')
+tests.source_build_phase.add_file_reference(group.new_file('BikePlannerTests.swift')) unless existing.include?('BikePlannerTests.swift')
 resources = tests.resources_build_phase.files.map { |value| value.file_ref&.path }
 tests.resources_build_phase.add_file_reference(group.new_file('ProProducts.storekit')) unless resources.include?('ProProducts.storekit')
 tests.build_configurations.each do |config|

@@ -41,10 +41,15 @@ final class BikeUsabilityTests: JourneyUsabilityTestBase {
         let switchStation = button("journey-bike-switch")
         XCTAssertTrue(switchStation.waitForExistence(timeout: 10))
         switchStation.tap()
-        // The trip stays; only the station changes, and the warning goes with it.
+        // A network failure must retain the usable trip, rather than clearing the warning
+        // by accepting an unverified replacement. Hosted tests cover both outcomes.
         XCTAssertTrue(app.staticTexts["journey-bike-status-0"].waitForExistence(timeout: 20))
-        let gone = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !alert.exists }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 30), .completed, "The warning clears once another station is chosen")
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in switchStation.isEnabled || !switchStation.exists }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[finished],timeout:60),.completed)
+        XCTAssertTrue(button("journey-start-navigation").isEnabled)
+        let snapshot=state()
+        let selected=(snapshot["options"] as? [[String:Any]])?.first { $0["id"] as? String == snapshot["selected"] as? String }
+        XCTAssertTrue((selected?["total"] as? Double ?? -1) > 0)
         capture("youbike-switched-station")
     }
 

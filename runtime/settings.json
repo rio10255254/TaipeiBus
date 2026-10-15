@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 8,
+  "revision": 9,
   "minimumAppVersion": "1.1.8",
   "copy": {},
   "search": {
@@ -116,8 +116,7 @@
     "bikeMaximumRideMeters": 5000,
     "bikeMinimumGainSeconds": 240,
     "bikeMinimumBikes": 2,
-    "bikeMinimumDocks": 2,
-    "bikeWalkGainSeconds": 120
+    "bikeMinimumDocks": 2
   },
   "refresh": {
     "vehicleSeconds": 15,
