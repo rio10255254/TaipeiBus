@@ -2,6 +2,27 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testCyclingConnectorIsNotPenalizedAsFifteenMinutesOfWalking() {
+        let a=Coordinate(latitude:25.02,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.51)
+        func trip(_ id: String, seconds: Double) -> TransitTrip {
+            let route=BusRoute(id:id,parentID:id,name:id,variantName:"",departure:"起點",destination:"終點")
+            let stops=[BusStop(id:id+"a",routeID:id,stationID:id+"a",name:"起點",direction:"0",sequence:1,coordinate:a),
+                       BusStop(id:id+"b",routeID:id,stationID:id+"b",name:"終點",direction:"0",sequence:2,coordinate:b)]
+            let ride=TransitRide(route:route,direction:"0",stops:stops,coordinates:[a,b])
+            return TransitTrip(rides:[ride],accessDistance:0,egressDistance:0,transferDistance:0,score:0,rideSeconds:[seconds])
+        }
+        let bus=trip("bus",seconds:1400), bikeRail=trip("bike-rail",seconds:600)
+        var preference=LiveSettings.Planning();preference.walkingWeight=2.8
+        let connectors:[String:[Double?]]=[bus.id:[300,0],bikeRail.id:[900,0]]
+        let now=Date()
+        let withoutMode=TripRanking.recommended([bus,bikeRail],estimates:.init(),at:now,preferences:preference,walkingDurations:connectors)
+        XCTAssertEqual(withoutMode.first?.id,bus.id)
+        let accurate=TripRanking.recommended([bus,bikeRail],estimates:.init(),at:now,preferences:preference,
+            walkingDurations:connectors,cyclingDurations:[bikeRail.id:700])
+        XCTAssertEqual(accurate.first?.id,bikeRail.id,"The connector only has 200 seconds on foot, not 900")
+        let timing=TripRanking.assessment(bikeRail,estimates:.init(),at:now,preferences:preference,walkingDurations:connectors[bikeRail.id])
+        XCTAssertEqual(timing.elapsedSeconds-timing.waitingSeconds,1500,accuracy:0.001,"All 900 connector seconds still count towards reaching the platform")
+    }
     func testNightServiceDoesNotLookLikeAnEightMinuteWaitInTheAfternoon() throws {
         let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-03T06:00:00Z"))
         XCTAssertEqual(BusServiceWindow.secondsOfDay(at: date), 14 * 3_600)
