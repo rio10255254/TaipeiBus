@@ -1176,6 +1176,7 @@ struct NativeBusMap: UIViewRepresentable {
                 state["selectedVehicle"] = model.selectedVehicleID ?? ""
                 state["following"] = model.following
                 state["cameraMoving"] = cameraMoving || pendingInset != nil
+                state["fullyRendered"] = zoomProbeFullyRendered
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
                 let open = mapView.bounds.inset(by: mapView.contentInset)

@@ -106,10 +106,20 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         capture("mixed-more-options-selected")
     }
     func testTwoBikeConnectionsHaveSeparateInspectableStations() {
-        launch(["--preview-youbike-planning","--preview-youbike-dual","--usability-fixture","--test-journey-selection","--test-language","en"])
+        launch(["--preview-youbike-planning","--preview-youbike-dual","--usability-fixture","--test-journey-selection","--test-map-controls","--test-language","en"])
         guard requireRouteMenu() else { return }
         let id = state()["selected"] as? String ?? ""
         XCTAssertFalse(id.isEmpty)
+        var readySince: Date?
+        waitFor("Both bike connections fit the completed map") {
+            let value = self.camera()
+            guard value["cameraMoving"] as? Bool == false, value["fullyRendered"] as? Bool == true,
+                  let frame = value["routeFraming"] as? [String:Any], frame["inside"] as? Bool == true else {
+                readySince = nil;return false
+            }
+            if readySince == nil { readySince = Date() }
+            return Date().timeIntervalSince(readySince!) >= 1
+        }
         capture("mixed-two-bike-connections-compact")
         button("journey-steps-"+id).tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
