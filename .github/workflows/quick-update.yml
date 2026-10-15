@@ -98,7 +98,8 @@ jobs:
           cp runtime/settings.json "$RUNNER_TEMP/settings-1.8.1.json"
           git fetch --depth=1 origin ${{ matrix.commit }}
           mkdir -p "$RUNNER_TEMP/legacy-180"
-          git archive FETCH_HEAD ios/TransitCore | tar -x -C "$RUNNER_TEMP/legacy-180"
+          git archive -o "$RUNNER_TEMP/legacy-core.tar" FETCH_HEAD ios/TransitCore
+          tar -xf "$RUNNER_TEMP/legacy-core.tar" -C "$RUNNER_TEMP/legacy-180"
           cat > "$RUNNER_TEMP/legacy-180/ios/TransitCore/Tests/TransitCoreTests/AuditCompatibilityTests.swift" <<'SWIFT'
           import XCTest
           @testable import TransitCore
