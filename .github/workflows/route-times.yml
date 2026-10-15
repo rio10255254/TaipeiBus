@@ -132,6 +132,12 @@ jobs:
               echo "::warning::jsDelivr purge failed for $name; phones verify the copy and fall back to GitHub."
           done
 
+      - name: Verify compressed downloads from both public sources
+        if: env.PUBLISH == 'true'
+        run: |
+          python3 ios/release/verify_official_mirrors.py
+
+
   watchdog:
     if: github.event.schedule == '41 1 * * *'
     runs-on: ubuntu-latest
