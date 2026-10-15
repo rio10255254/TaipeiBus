@@ -21,6 +21,11 @@ public struct BikeDock: Sendable, Equatable, Identifiable {
         let age = date.timeIntervalSince(observedAt)
         return age > -120 && age < Self.freshnessSeconds
     }
+    /// A displayed count must belong to an active station and a current report.
+    public func availableCount(returning: Bool, at date: Date) -> Int? {
+        guard active, isFresh(at: date) else { return nil }
+        return returning ? returnable : rentable
+    }
 }
 
 /// What a rider can count on at a station right now: enough, a couple left, none, or not known.

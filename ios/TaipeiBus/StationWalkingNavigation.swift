@@ -9,11 +9,13 @@ enum PedestrianPath {
         var points = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
         route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: points.count))
         let coordinates = points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
-        guard coordinates.first!.distance(to: from) <= 50, coordinates.last!.distance(to: to) <= 50 else { return nil }
+        guard let anchored = AnchoredPedestrianPath.make(coordinates, from: from, to: to) else { return nil }
         var leg = WalkingLeg(from: from, to: to)
-        leg.coordinates = coordinates; leg.distance = route.distance; leg.duration = route.expectedTravelTime
+        leg.coordinates = anchored.coordinates
+        leg.distance = route.distance + anchored.accessDistance
+        leg.duration = route.expectedTravelTime + anchored.accessDistance / BikeRouting.walkingSpeed
         leg.instructions = route.steps.map(\.instructions).filter { !$0.isEmpty }
-        leg.road = RouteLine(coordinates: coordinates)
+        leg.road = RouteLine(coordinates: anchored.coordinates)
         return leg
     }
 }

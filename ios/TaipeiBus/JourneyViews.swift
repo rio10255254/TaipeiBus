@@ -150,6 +150,7 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
+        .bikeStationDetails(model: model)
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(searchContext)
@@ -776,6 +777,7 @@ private struct JourneyWaitingActions: View {
                 }
                 if let issue = option.walkIssue { Text(live.text(issue)).liveFont(.caption).foregroundStyle(MapChrome.caution) }
                 if option.walks.first?.bike != nil {
+                    if let bike = option.walks.first?.bike { JourneyBikeStations(model: model, bike: bike, index: index, compact: true) }
                     if let instruction = planner.cyclingInstruction(at: index) {
                         Text(instruction).liveFont(.caption, weight: .semibold).accessibilityIdentifier("cycling-live-instruction")
                     }
@@ -1104,13 +1106,16 @@ private struct JourneyCyclingStep: View {
                     .liveFont(.headline).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("journey-bike-status-\(index)")
                 if let bike = leg.bike {
-                    Text(AppText.text("%@ 借車 · %@ 還車", bike.pickup.localizedName, bike.dropoff.localizedName))
-                        .liveFont(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    JourneyBikeStations(model: model, bike: bike, index: index)
                     Text(done ? AppText.text("已完成")
                          : AppText.text("步行 %@ 分 · 騎 %@ · %@ 分", max(1, Int(ceil(bike.walkingSeconds / 60))),
                                         distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
                         .liveFont(.subheadline).foregroundStyle(.secondary)
                     if !done {
+                        if let instruction = leg.stationInstruction {
+                            Text(instruction).liveFont(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("journey-bike-station-access-\(index)")
+                        }
                         BikeStationAlert(model: model, planner: planner)
                     }
                 }
@@ -1341,7 +1346,10 @@ struct JourneyGuideCard: View {
                         if option.walks.indices.contains(index) {
                             Text(planner.walkingStatus(at: index) ?? option.walks[index].timeLabel).liveFont(.subheadline).foregroundStyle(.secondary).accessibilityIdentifier("walking-live-status")
                         }
-                        if cycling { BikeStationAlert(model: model, planner: planner) }
+                        if cycling, let bike = option.walks[index].bike {
+                            JourneyBikeStations(model: model, bike: bike, index: index, compact: true)
+                            BikeStationAlert(model: model, planner: planner)
+                        }
                         HStack(spacing: 12) {
                             Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index) } label: {
                                 Label(cycling ? live.text("看騎乘路線") : live.text("看步行路線"),
