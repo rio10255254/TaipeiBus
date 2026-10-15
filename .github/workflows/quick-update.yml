@@ -30,6 +30,15 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  cycling_api_check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-15
+    timeout-minutes: 3
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - name: Check the cycling transport type in the shipping SDK
+        run: xcrun swift -e 'import MapKit; print(MKDirectionsTransportType.cycling.rawValue)'
   legacy_compatibility:
     runs-on: macos-15
     timeout-minutes: 10
