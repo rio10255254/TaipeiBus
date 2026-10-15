@@ -23,6 +23,6 @@ if submission.dig('attributes', 'state') == 'READY_FOR_REVIEW'
 end
 saved = client.request(:get, "/v1/reviewSubmissions/#{submission.fetch('id')}").fetch('data')
 abort 'Apple did not confirm the review submission.' unless %w[WAITING_FOR_REVIEW IN_REVIEW COMPLETE].include?(saved.dig('attributes', 'state'))
-receipt = verification.merge(bundle).merge(status: 'submitted_for_app_review', submission_id: saved.fetch('id'), submission_state: saved.dig('attributes', 'state'), build_id: build_id, build_number: build.dig('attributes','version'), submitted_at: Time.now.utc.iso8601)
+receipt = verification.merge(bundle).merge(status: 'submitted_for_app_review', submission_id: saved.fetch('id'), submission_state: saved.dig('attributes', 'state'), build_id: build_id, submitted_at: Time.now.utc.iso8601)
 File.write(File.join(ENV.fetch('RUNNER_TEMP'), 'app-store-submitted.json'), JSON.pretty_generate(receipt) + "\n")
 puts "Apple confirmed update #{verification.fetch('version')} submitted for review: #{saved.dig('attributes', 'state')}."

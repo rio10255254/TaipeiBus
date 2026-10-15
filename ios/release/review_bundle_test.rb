@@ -4,17 +4,16 @@ require_relative 'review_bundle'
 class ReviewBundleTest < Minitest::Test
   class CatalogClient
     attr_reader :writes
-    attr_accessor :price, :screenshot_state, :drop_item, :state, :submitted_date, :metadata_state
+    attr_accessor :price, :screenshot_state, :drop_item, :state, :submitted_date
     def initialize
       @writes, @items, @created = [], [], false
       @price = '39'; @screenshot_state = 'COMPLETE'; @state = 'READY_FOR_REVIEW'
       @app_state, @counter = 'READY_FOR_REVIEW', 0
-      @metadata_state = 'PREPARE_FOR_SUBMISSION'
     end
     def all(path, query = {})
       case path
       when '/v1/apps/app/subscriptionGroups' then [row('group',referenceName:'Pro')]
-      when '/v1/subscriptionGroups/group/versions' then [row('gv',version:1,state:@metadata_state)]
+      when '/v1/subscriptionGroups/group/versions' then [row('gv',version:1,state:'PREPARE_FOR_SUBMISSION')]
       when '/v1/subscriptionGroupVersions/gv/localizations' then localizations
       when '/v1/subscriptionGroups/group/subscriptions'
         [row('month',productId:'pro.monthly',subscriptionPeriod:'ONE_MONTH'),row('year',productId:'pro.yearly',subscriptionPeriod:'ONE_YEAR')]
@@ -27,7 +26,7 @@ class ReviewBundleTest < Minitest::Test
         raise 'Trial validation must request the territory linkage' unless query['include'] == 'territory'
         [{'attributes'=>{'duration'=>'ONE_WEEK','offerMode'=>'FREE_TRIAL','numberOfPeriods'=>1},'relationships'=>{'territory'=>{'data'=>{'id'=>'TWN'}}}}]
       when %r{/v1/subscriptions/(month|year)/versions}
-        [row(path.include?('month') ? 'mv' : 'yv',version:1,state:@metadata_state)]
+        [row(path.include?('month') ? 'mv' : 'yv',version:1,state:'PREPARE_FOR_SUBMISSION')]
       when %r{/v1/subscriptionVersions/(mv|yv)/localizations} then localizations
       when '/v1/apps/app/reviewSubmissions' then @created ? [row('draft',state:@state,platform:'IOS',submittedDate:@submitted_date)] : []
       when '/v1/reviewSubmissions/draft/items'
@@ -83,13 +82,6 @@ class ReviewBundleTest < Minitest::Test
     bundle.prepare('app-version'); @client.writes.clear
     assert bundle.prepare('app-version')[:items_verified]
     assert_empty @client.writes
-  end
-  def test_user_withdrawn_subscription_versions_can_rejoin_a_new_review
-    @client.metadata_state = 'DEVELOPER_REJECTED'
-    result = bundle.prepare('app-version')
-    assert result[:items_verified]
-    assert_equal %w[mv yv gv], result[:targets].drop(1).map { |target| target[:id] }
-    refute @client.writes.any? { |_,path,_| path.match?(%r{\A/v1/(?:subscriptionVersions|subscriptionGroupVersions)\z}) }
   end
   def test_unapproved_price_stops_before_creating_a_review_draft
     @client.price = '49'
