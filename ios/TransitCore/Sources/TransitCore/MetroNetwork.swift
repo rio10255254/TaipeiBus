@@ -71,6 +71,10 @@ public struct MetroNetwork: Codable, Sendable {
     public let transfers: [MetroTransfer]
     /// Track heights, attached from MetroLevels after decoding.
     public internal(set) var heightProfiles: [String: MetroHeightProfile] = [:]
+    /// Some providers assign a shared station's entrances only to one line code.
+    /// Keep the raw catalog unchanged for map deduplication; station lookup resolves
+    /// missing exits through explicitly documented indoor interchanges.
+    private var sharedStationExits: [String: [MetroExit]] = [:]
     private enum CodingKeys: String, CodingKey { case schema, generatedAt, source, lines, stations, patterns, transfers }
     public static let empty = MetroNetwork(schema: 1, generatedAt: "", source: "", lines: [], stations: [], patterns: [], transfers: [])
     public init(data: Data) throws {
@@ -86,13 +90,34 @@ public struct MetroNetwork: Codable, Sendable {
                   $0.seconds.count == $0.stationIDs.count - 1 && $0.seconds.allSatisfy({ $0.isFinite && $0 > 0 && $0 < 1800 }) }) else {
             throw FeedError.invalid("Metro network topology")
         }
+        let lookup = Dictionary(uniqueKeysWithValues: stations.map { ($0.id, $0) })
+        let links = Dictionary(grouping: transfers.filter { !$0.external && $0.from != $0.to }, by: \.from)
+        for origin in stations where origin.exits.isEmpty {
+            var visited: Set<String> = [origin.id], queue = [origin.id], exits: [String: MetroExit] = [:]
+            while !queue.isEmpty {
+                let id = queue.removeFirst()
+                for link in links[id] ?? [] {
+                    guard let other = lookup[link.to], other.name == origin.name,
+                          other.coordinate.distance(to: origin.coordinate) <= 400,
+                          visited.insert(other.id).inserted else { continue }
+                    queue.append(other.id)
+                    for exit in other.exits { exits[exit.id] = exit }
+                }
+            }
+            if !exits.isEmpty { sharedStationExits[origin.id] = exits.keys.sorted().compactMap { exits[$0] } }
+        }
     }
     private init(schema: Int, generatedAt: String, source: String, lines: [MetroLine], stations: [MetroStation], patterns: [MetroPattern], transfers: [MetroTransfer]) {
         self.schema = schema; self.generatedAt = generatedAt; self.source = source; self.lines = lines
         self.stations = stations; self.patterns = patterns; self.transfers = transfers
     }
     public func line(_ id: String) -> MetroLine? { lines.first { $0.id == id } }
-    public func station(_ id: String) -> MetroStation? { stations.first { $0.id == id } }
+    public func station(_ id: String) -> MetroStation? {
+        guard let station = stations.first(where: { $0.id == id }) else { return nil }
+        guard station.exits.isEmpty, let exits = sharedStationExits[id] else { return station }
+        return MetroStation(id: station.id, operatorID: station.operatorID, code: station.code,
+            name: station.name, englishName: station.englishName, coordinate: station.coordinate, exits: exits)
+    }
     public func pattern(_ id: String, direction: String) -> MetroPattern? { patterns.first { $0.id == id && $0.direction == direction } }
     public func canServe(_ ride: TransitRide, patternID: String, direction: String, destinationStationID: String) -> Bool {
         guard direction == ride.direction, let pattern = pattern(patternID, direction: direction),

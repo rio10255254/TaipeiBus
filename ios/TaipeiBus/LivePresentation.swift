@@ -217,8 +217,9 @@ struct MapTileStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     var prominent = false
+    var tint: Color? = nil
     func makeBody(configuration: Configuration) -> some View {
-        let accent = Color(liveHex: live.appearance.accentColor)
+        let accent = tint ?? Color(liveHex: live.appearance.accentColor)
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
         let reduced = InterfaceMotion.reduced(systemReduceMotion)
         return configuration.label

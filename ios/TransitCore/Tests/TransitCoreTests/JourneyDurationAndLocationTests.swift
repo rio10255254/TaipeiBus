@@ -2,6 +2,18 @@ import XCTest
 @testable import TransitCore
 
 final class JourneyDurationAndLocationTests: XCTestCase {
+    func testDoorToDoorHeadlineWaitSubtitleAndArrivalShareOneClock() throws {
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-15T08:25:00Z"))
+        let duration=JourneyDuration(riding:[27*60],walking:[13*60,2*60],arrivals:[16*60],at:date)
+        XCTAssertEqual(duration.totalSeconds,45*60)
+        XCTAssertEqual(duration.waitingSeconds,3*60)
+        XCTAssertTrue(duration.conciseLabel.contains("45"))
+        XCTAssertTrue(duration.includedWaitingLabel.contains("3"))
+        XCTAssertTrue(duration.arrivalLabel.contains("17:10"))
+        let unknown=JourneyDuration(riding:[600],walking:[60,60],arrivals:[nil],at:date)
+        XCTAssertEqual(unknown.includedWaitingLabel,unknown.waitingLabel)
+        XCTAssertFalse(unknown.arrivalLabel.contains(":"),"Unknown waits must not promise an arrival clock")
+    }
     func testTotalIncludesEachWalkRideAndCatchableTransferWithoutPreferencePenalty() {
         let duration = JourneyDuration(riding: [300, 420], walking: [60, 120, 90], arrivals: [180, 720])
         XCTAssertEqual(duration.walkingSeconds, 270)

@@ -687,5 +687,9 @@
   "借車站 %@，%@": "Pickup station %@, %@",
   "保留原行程，請稍後再試": "Your original trip is kept. Try again shortly.",
   "正在確認新站點路線": "Checking the route to the new station",
-  "騎乘路徑參考步行資料，請依現場標示騎乘或牽行": "Route based on walking directions. Follow local signs and dismount where required."
+  "騎乘路徑參考步行資料，請依現場標示騎乘或牽行": "Route based on walking directions. Follow local signs and dismount where required.",
+  "比較中": "Comparing",
+  "已含候車 · 即將可搭": "Wait included · Boarding soon",
+  "含候車約 %@–%@ 分": "Includes about %@–%@ min waiting",
+  "含候車約 %@ 分": "Includes about %@ min waiting"
 }

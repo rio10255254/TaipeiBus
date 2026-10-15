@@ -351,10 +351,20 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func publishRecommendations() {
         let date = Date()
-        let result = recommendations(at: date)
+        let ranked = recommendations(at: date)
+        // Previewing a result must not cancel discovery of later alternatives. Keep
+        // the inspected route available even if it falls outside the new top three.
+        var result = ranked
+        if selectionConfirmed, let inspected = selected, !result.contains(where: { $0.id == inspected.id }) {
+            result.append(inspected)
+        }
+        if selectionConfirmed {
+            let order = Dictionary(uniqueKeysWithValues: options.enumerated().map { ($0.element.id, $0.offset) })
+            result.sort { (order[$0.id] ?? Int.max) < (order[$1.id] ?? Int.max) }
+        }
         let oldIDs = options.map(\.id)
-        options = result; optionLabels = labels(for: result, recommendedOption: result.first, at: date)
-        comparisonChanged = false
+        options = result; optionLabels = labels(for: result, recommendedOption: ranked.first, at: date)
+        comparisonChanged = selectionConfirmed && result.map(\.id) != ranked.map(\.id)
         if !selectionConfirmed { selectedID = result.first?.id }
         if oldIDs != result.map(\.id) { mapRevision += 1 }
     }
@@ -710,22 +720,9 @@ final class JourneyPlannerModel: ObservableObject {
     func select(_ option: JourneyOption) {
         guard option.verified, option.walkIssue == nil, unavailableBoarding(option) == nil else { return }
         selectionConfirmed = true
-        // The recommended option can already be verified while alternatives are
-        // still loading. Confirming it must stop that work from selecting another.
-        if selectedID == option.id, option.verified { cancelRequests(); return }
-        cancelRequests(); selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
-        guard !option.verified else { return }
-        checkingWalks = true
-        let token = generation
-        task = Task { [weak self] in
-            guard let self else { return }
-            do {
-                let verified = try await enrich(option)
-                guard token == generation, !Task.isCancelled else { return }
-                if let index = options.firstIndex(where: { $0.id == option.id }) { options[index] = verified }
-                checkingWalks = false; mapRevision += 1
-            } catch { if token == generation { checkingWalks = false } }
-        }
+        guard selectedID != option.id else { return }
+        endWalkingGuidance()
+        selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
     }
     private func enrich(_ option: JourneyOption) async throws -> JourneyOption {
         var result = option
@@ -820,6 +817,7 @@ final class JourneyPlannerModel: ObservableObject {
     func begin() {
         guard let option = selected, option.verified, option.walkIssue == nil else { return }
         guard unavailableBoarding(option) == nil else { return }
+        cancelRequests()
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
@@ -872,6 +870,17 @@ final class JourneyPlannerModel: ObservableObject {
         started = false; stepIndex = 0; selectionConfirmed = false
         verifiedPool = choices; options = choices
         publishRecommendations()
+    }
+    func auditVerifyAdditionalChoices(_ choices: [JourneyOption], delay: Double = 0.15) {
+        checkingWalks = true
+        let token = generation
+        task = Task { [weak self] in
+            do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+            guard let self, token == self.generation, !Task.isCancelled else { return }
+            self.verifiedPool.append(contentsOf: choices)
+            self.checkingWalks = false
+            self.publishRecommendations()
+        }
     }
 
     /// Deterministic UI scenarios use actual planner routes and explicitly simulated walking.

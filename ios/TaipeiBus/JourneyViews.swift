@@ -873,7 +873,7 @@ struct JourneyOptionsView: View {
             TimelineView(.periodic(from: .now, by: 15)) { timeline in
                 if compact, !planner.options.isEmpty {
                     TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
-                        if let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
+                        if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
                     })) {
                         ForEach(planner.options) { option in compactCard(option, at: timeline.date).tag(option.id) }
                     }
@@ -902,14 +902,7 @@ struct JourneyOptionsView: View {
                                 .transition(.opacity)
                         }
                         Spacer(minLength: 4)
-                        if let option = planner.selected {
-                            Button { go(option) } label: {
-                                Text(AppText.text("出發")).liveFont(.subheadline, weight: .bold)
-                                    .padding(.horizontal, 18).frame(minHeight: 42)
-                            }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
-                                .disabled(!usable(option))
-                                .accessibilityLabel(AppText.text("開始導航")).accessibilityIdentifier("journey-go-" + option.id)
-                        }
+
                     }.padding(.top, 4)
                 } else {
                     VStack(spacing: 0) {
@@ -937,14 +930,21 @@ struct JourneyOptionsView: View {
                 summary(option, at: date, compact: true).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("journey-option-" + option.id)
-            Button { planner.select(option); showSteps() } label: {
-                VStack(spacing: 4) {
-                    Image(systemName: "chevron.right.2").liveFont(.title2, weight: .bold)
-                    Text(AppText.text("步驟")).liveFont(.caption, weight: .bold)
-                }.frame(width: 58, height: 70)
-                    .background(Color(liveHex: live.appearance.accentColor).opacity(0.12), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }.buttonStyle(PhonePressStyle()).foregroundStyle(Color(liveHex:live.appearance.accentColor))
-                .accessibilityLabel(AppText.text("查看搭乘步驟")).accessibilityIdentifier("journey-steps-" + option.id)
+            VStack(spacing: 6) {
+                Button { go(option) } label: {
+                    Text(AppText.text("出發")).liveFont(.body, weight: .bold).frame(width: 66, height: 62)
+                }.buttonStyle(MapTileStyle(prominent: true, tint: MapChrome.go))
+                    .disabled(!usable(option)).accessibilityLabel(AppText.text("開始導航"))
+                    .accessibilityIdentifier("journey-go-" + option.id)
+                Button { planner.select(option); showSteps() } label: {
+                    HStack(spacing: 3) {
+                        Text(AppText.text("步驟")); Image(systemName: "chevron.right")
+                    }.liveFont(.caption, weight: .semibold).frame(width: 66, height: 44)
+                }.buttonStyle(MapActionStyle())
+                    .accessibilityLabel(AppText.text("查看搭乘步驟"))
+                    .accessibilityIdentifier("journey-steps-" + option.id)
+            }.frame(width: 66)
+
         }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 1)
@@ -968,12 +968,12 @@ struct JourneyOptionsView: View {
                     .liveFont(compact ? .title2 : .title3, weight: .bold, design: .rounded)
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                 if let label = planner.optionLabels[option.id] {
-                    Text(live.text(label)).liveFont(.caption2, weight: .semibold).foregroundStyle(.secondary)
+                    Text(live.text(label == "推薦" && planner.checkingWalks ? "比較中" : label)).liveFont(.caption2, weight: .semibold).foregroundStyle(.secondary)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 }
             }
             if let timing {
-                if !option.walkingOnly { Text(timing.waitingLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1) }
+                if !option.walkingOnly { Text(timing.includedWaitingLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1) }
                 Text(timing.arrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
             }
             JourneyRouteChain(option: option).padding(.top, 5)

@@ -76,6 +76,8 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastMetroTrainKey = ""
         private var lastMetroFocusKey = ""
         private var metroFocusKey: String {
+            if model.planner.selected != nil, !model.planner.started,
+               model.selectedVehicleID == nil, model.selectedTrainID == nil { return "dim" }
             let busRoute = model.selectedRoute.map { $0.mode == .bus } ?? false
             let busTrip = model.planner.selected.map { option in option.rides.allSatisfy { $0.route.mode == .bus } } ?? false
             if busRoute || busTrip || model.selectedVehicleID != nil { return "dim" }
@@ -295,8 +297,8 @@ struct NativeBusMap: UIViewRepresentable {
             waypointDots.predicate = NSPredicate(format: "waypoint == 1")
             waypointDots.minimumZoomLevel = 10.8
             waypointDots.iconImageName = NSExpression(forKeyPath: "icon")
-            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: false)
-            waypointDots.iconPadding = NSExpression(forConstantValue: 4)
+            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
+            waypointDots.iconPadding = NSExpression(forConstantValue: 1)
             style.insertLayer(waypointDots, below: tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
             tripNames.predicate = NSPredicate(format: "waypoint == 0")
@@ -458,7 +460,7 @@ struct NativeBusMap: UIViewRepresentable {
         /// Only at close street zoom does a viaduct's ground line step back, because the 3D deck
         /// above it carries the same colour and a second copy offset by the camera tilt reads as clutter.
         static func metroLineOpacity(dimmed: Bool, casing: Bool) -> NSExpression {
-            let f = (dimmed ? (casing ? 0.4 : 0.32) : 1.0)
+            let f = (dimmed ? (casing ? 0.18 : 0.14) : 1.0)
             func level(_ elevated: Double) -> [Any] {
                 ["*", ["case", ["get", "focus"], f, f * (casing ? 0.1 : 0.22)],
                  ["match", ["get", "structure"], "elevated", elevated, 1]]

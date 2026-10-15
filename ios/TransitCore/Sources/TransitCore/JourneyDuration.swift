@@ -58,6 +58,15 @@ public struct JourneyDuration: Equatable, Sendable {
         if upper < 30 { return AppText.text("即將可搭") }
         return minutes(upper) - minutes(lower) >= 2 ? AppText.text("候車約 %@–%@ 分", minutes(lower), minutes(upper)) : AppText.text("候車約 %@ 分", minutes(waitingSeconds))
     }
+    /// The headline is door-to-door; this subtitle makes clear that waiting is already included.
+    public var includedWaitingLabel: String {
+        guard !waits.isEmpty, unknownWaits == 0 else { return waitingLabel }
+        let lower = max(0, lowerTotalSeconds - travelSeconds), upper = max(lower, upperTotalSeconds - travelSeconds)
+        if upper < 30 { return AppText.text("已含候車 · 即將可搭") }
+        return minutes(upper) - minutes(lower) >= 2
+            ? AppText.text("含候車約 %@–%@ 分", minutes(lower), minutes(upper))
+            : AppText.text("含候車約 %@ 分", minutes(waitingSeconds))
+    }
     public var missedNext: Bool { waits.first?.missedNext == true }
     public var arrivalLabel: String {
         if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
