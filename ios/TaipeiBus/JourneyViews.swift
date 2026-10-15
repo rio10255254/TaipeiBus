@@ -883,46 +883,50 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
-            TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                if compact, !planner.options.isEmpty {
-                    TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
-                        if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
-                    })) {
-                        ForEach(planner.options) { option in compactCard(option, at: timeline.date).tag(option.id) }
+            if compact, !planner.options.isEmpty {
+                TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
+                    if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
+                })) {
+                    ForEach(planner.featuredOptions) { option in compactCard(option).tag(option.id) }
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+                .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)))
+                .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
+                .accessibilityIdentifier("journey-preview-pages")
+                HStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
+                            Button { planner.select(option) } label: {
+                                Circle().fill(option.id == planner.selectedID ? Color.primary : Color.secondary.opacity(0.3))
+                                    .frame(width: 6, height: 6).frame(width: 20, height: 44)
+                            }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
+                                .accessibilityIdentifier("journey-page-\(index)")
+                        }
                     }
-                    .tabViewStyle(.page(indexDisplayMode: .never))
-                    .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)))
-                    .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
-                    .accessibilityIdentifier("journey-preview-pages")
-                    HStack(spacing: 8) {
-                        HStack(spacing: 0) {
-                            ForEach(Array(planner.options.enumerated()), id: \.element.id) { index, option in
-                                Button { planner.select(option) } label: {
-                                    Circle().fill(option.id == planner.selectedID ? Color.primary : Color.secondary.opacity(0.3))
-                                        .frame(width: 6, height: 6).frame(width: 20, height: 44)
-                                }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
-                                    .accessibilityIdentifier("journey-page-\(index)")
-                            }
-                        }
-                        Button(action: expand) {
-                            Text(AppText.text("全部路線")).liveFont(.subheadline).frame(minHeight: 44)
-                        }.accessibilityIdentifier("journey-all-options")
-                        // Live times reordered the options: offer the new order without moving rows under a finger.
-                        if planner.comparisonChanged, !planner.checkingWalks {
-                            Button { planner.refreshRecommendations() } label: {
-                                Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
-                            }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
-                                .transition(.opacity)
-                        }
-                        Spacer(minLength: 4)
+                    Button(action: expand) {
+                        HStack(spacing: 4) {
+                            Text(AppText.text("全部路線"))
+                            if planner.options.count > 5 { Text("\(planner.options.count)").foregroundStyle(.secondary).monospacedDigit() }
+                        }.liveFont(.subheadline).frame(minHeight: 44)
+                    }.accessibilityElement(children: .combine)
+                        .accessibilityLabel(AppText.text("全部路線"))
+                        .accessibilityValue("\(planner.options.count)")
+                        .accessibilityIdentifier("journey-all-options")
+                    // Live times reordered the options: offer the new order without moving rows under a finger.
+                    if planner.comparisonChanged, !planner.checkingWalks {
+                        Button { planner.refreshRecommendations() } label: {
+                            Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
+                        }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
+                            .transition(.opacity)
+                    }
+                    Spacer(minLength: 4)
 
-                    }.padding(.top, 4)
-                } else {
-                    VStack(spacing: 0) {
-                        ForEach(planner.options) { option in
-                            optionRow(option, at: timeline.date)
-                            if option.id != planner.options.last?.id { Divider() }
-                        }
+                }.padding(.top, 4)
+            } else {
+                LazyVStack(spacing: 0) {
+                    ForEach(planner.options) { option in
+                        optionRow(option)
+                        if option.id != planner.options.last?.id { Divider() }
                     }
                 }
             }
@@ -937,10 +941,12 @@ struct JourneyOptionsView: View {
     private func usable(_ option: JourneyOption) -> Bool {
         option.verified && option.walkIssue == nil && planner.unavailableBoarding(option) == nil
     }
-    private func compactCard(_ option: JourneyOption, at date: Date) -> some View {
+    private func compactCard(_ option: JourneyOption) -> some View {
         HStack(alignment: .center, spacing: 12) {
             Button { planner.select(option); collapse() } label: {
-                summary(option, at: date, compact: true).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                    summary(option, at: timeline.date, compact: true).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                }
             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("journey-option-" + option.id)
             VStack(spacing: 6) {
@@ -950,7 +956,12 @@ struct JourneyOptionsView: View {
                     .disabled(!usable(option)).opacity(usable(option) ? 1 : 0.42)
                     .accessibilityLabel(AppText.text("開始導航"))
                     .accessibilityIdentifier("journey-go-" + option.id)
-                Button { planner.select(option); showSteps() } label: {
+                Button {
+#if DEBUG
+                    model.recordMapTap("journey-steps:" + option.id)
+#endif
+                    planner.select(option); showSteps()
+                } label: {
                     HStack(spacing: 3) {
                         Text(AppText.text("步驟")); Image(systemName: "chevron.right")
                     }.liveFont(.caption, weight: .semibold).frame(width: 66, height: 44)
@@ -964,10 +975,12 @@ struct JourneyOptionsView: View {
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .padding(.horizontal, 1)
     }
-    private func optionRow(_ option: JourneyOption, at date: Date) -> some View {
+    private func optionRow(_ option: JourneyOption) -> some View {
         Button { planner.select(option); collapse() } label: {
             HStack(spacing: 12) {
-                summary(option, at: date, compact: false).frame(maxWidth: .infinity, alignment: .leading)
+                TimelineView(.periodic(from: .now, by: 15)) { timeline in
+                    summary(option, at: timeline.date, compact: false).frame(maxWidth: .infinity, alignment: .leading)
+                }
                 Image(systemName: option.id == planner.selectedID ? "checkmark.circle.fill" : "chevron.right")
                     .foregroundStyle(option.id == planner.selectedID ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
             }.padding(.vertical, 14).contentShape(Rectangle())

@@ -29,7 +29,8 @@ final class BikePlannerTests: XCTestCase {
     func planner(_ choices: [JourneyOption]) -> JourneyPlannerModel {
         let p=JourneyPlannerModel()
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
-        p.auditLoadChoices(choices,from:TravelPlace(name:"起點",address:"",coordinate:start),to:TravelPlace(name:"終點",address:"",coordinate:end))
+        p.auditLoadChoices(choices,from:TravelPlace(name:"起點",address:"",coordinate:choices.first?.walks.first?.from ?? start),
+                           to:TravelPlace(name:"終點",address:"",coordinate:choices.first?.walks.last?.to ?? end))
         return p
     }
     func testCyclingDoesNotLeadWhenTransitIsMuchFaster() throws {
@@ -56,6 +57,19 @@ final class BikePlannerTests: XCTestCase {
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts(pickup:0))
         print("AUDIT181 riding pickup_empty alert=\(String(describing:p.bikeAlert))")
         XCTAssertNil(p.bikeAlert,"Once riding, an empty original pickup must not tell the rider to borrow another bike")
+    }
+    func testSlightlyFasterWholeBikeStaysAvailableWithoutForcingTheRiderOffTransit() {
+        let route=BusRoute(id:"reasonable",parentID:"reasonable",name:"公車",variantName:"",departure:"起點",destination:"終點")
+        let stops=[BusStop(id:"ra",routeID:route.id,stationID:"ra",name:"上車",direction:"0",sequence:1,coordinate:start),
+                   BusStop(id:"rb",routeID:route.id,stationID:"rb",name:"下車",direction:"0",sequence:2,coordinate:end)]
+        let ride=TransitRide(route:route,direction:"0",stops:stops,coordinates:[start,end])
+        let trip=TransitTrip(rides:[ride],accessDistance:0,egressDistance:0,transferDistance:0,score:0,rideSeconds:[900])
+        let transit=JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:start,to:start,duration:0),WalkingLeg(from:end,to:end,duration:0)])
+        let p=planner([transit,cycling()])
+        var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["reasonable:ra":120],updatedAt:Date())
+        p.updateSnapshot(snapshot);p.refreshRecommendations()
+        XCTAssertEqual(p.selectedID,transit.id)
+        XCTAssertTrue(p.options.contains { $0.bikeOnly },"A useful 2-minute saving should remain selectable")
     }
     func testFullDropoffStillWarnsWhileRiding() throws {
         let p=planner([cycling()]);p.begin()
@@ -157,6 +171,25 @@ final class BikePlannerTests: XCTestCase {
         p.finish()
         try? await Task.sleep(for:.milliseconds(200))
         XCTAssertNil(p.selected);XCTAssertTrue(p.options.isEmpty);XCTAssertFalse(p.checkingWalks)
+    }
+    func testSmallConnectorSavingIsKeptWhenItCatchesTheNextDeparture() async throws {
+        var base=longAccessTransit();base.walks[0].duration=1000
+        let p=planner([base]), now=Date()
+        var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["G:G-a":1000],updatedAt:now)
+        p.updateSnapshot(snapshot)
+        XCTAssertTrue(try XCTUnwrap(try XCTUnwrap(p.duration(base,at:now)).waits.first).missedNext)
+        p.testCycle = { _ in self.cycling().walks[0] }
+        p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
+        for _ in 0..<200 {
+            if !p.checkingWalks { break }
+            try? await Task.sleep(for:.milliseconds(10))
+        }
+        let chosen=try XCTUnwrap(p.selected)
+        XCTAssertTrue(chosen.cycles)
+        XCTAssertNotNil(chosen.trip,"The fixture destination is beyond this rental; it must still board transit")
+        let timing=try XCTUnwrap(p.duration(chosen,at:now))
+        XCTAssertFalse(try XCTUnwrap(timing.waits.first).missedNext)
+        XCTAssertLessThan(timing.totalSeconds,try XCTUnwrap(p.duration(base,at:now)).totalSeconds-120)
     }
 
     func testLiveTaipeiCyclingDirectionsBetweenUserStations() async throws {

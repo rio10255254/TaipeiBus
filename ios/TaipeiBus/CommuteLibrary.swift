@@ -9,11 +9,14 @@ enum RoutePreference: String, Codable, CaseIterable, Identifiable, Sendable {
     }
     func applying(to base: LiveSettings.Planning) -> LiveSettings.Planning {
         var value = base
+        value.personalTransferPenaltySeconds = nil
         switch self {
         case .balanced: break
         case .faster: value.walkingWeight = 1; value.waitingWeight = 1; value.transferPenaltySeconds = 120
         case .lessWalking: value.walkingWeight = 2.8; value.waitingWeight = 1; value.transferPenaltySeconds = 420
-        case .fewerTransfers: value.walkingWeight = 1.2; value.waitingWeight = 1; value.transferPenaltySeconds = 900
+        case .fewerTransfers:
+            value.walkingWeight = 1.2; value.waitingWeight = 1; value.transferPenaltySeconds = 900
+            value.personalTransferPenaltySeconds = 900
         }
         return value
     }

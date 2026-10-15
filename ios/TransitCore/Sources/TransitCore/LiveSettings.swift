@@ -51,6 +51,12 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var walkingWeight = 1.0
         public var waitingWeight = 1.0
         public var transferPenaltySeconds = 420.0
+        /// Local preference only; never written into the shared remote settings format.
+        public var personalTransferPenaltySeconds: Double? = nil
+        public var effectiveTransferPenaltySeconds: Double {
+            let value = personalTransferPenaltySeconds ?? min(300, transferPenaltySeconds)
+            return value.isFinite ? min(900, max(0, value)) : 300
+        }
         /// YouBike legs. Distances are metres, speeds metres per second.
         public var bikeRouting = true
         public var bikeSpeed = 3.3
@@ -66,6 +72,11 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var bikeWalkGainSeconds = 120.0
         public var bikeMinimumBikes = 2.0
         public var bikeMinimumDocks = 2.0
+        private enum CodingKeys: String, CodingKey {
+            case firstWalkMeters, expandedWalkMeters, walkingOnlyMeters, walkingWeight, waitingWeight, transferPenaltySeconds
+            case bikeRouting, bikeSpeed, bikeHandlingSeconds, bikeAccessMeters, bikeMinimumRideMeters, bikeMaximumRideMeters
+            case bikeMinimumGainSeconds, bikeWalkGainSeconds, bikeMinimumBikes, bikeMinimumDocks
+        }
         public init() {}
     }
     public struct Refresh: Codable, Equatable, Sendable {

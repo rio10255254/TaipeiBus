@@ -1,6 +1,19 @@
 import XCTest
 
 final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
+    override func tearDownWithError() throws {
+        let shot = XCTAttachment(screenshot:XCUIScreen.main.screenshot())
+        shot.name = "mixed-menu-final-screen";shot.lifetime = .keepAlways;add(shot)
+    }
+    private func requireRouteMenu() -> Bool {
+        if button("journey-all-options").waitForExistence(timeout:120) { return true }
+        let probe = app.staticTexts["journey-timing-state"]
+        print("ROUTE_MENU_START_STATE " + (probe.exists ? probe.label : "state unavailable"))
+        let shot = XCTAttachment(screenshot:XCUIScreen.main.screenshot())
+        shot.name = "mixed-menu-entry-missing";shot.lifetime = .keepAlways;add(shot)
+        XCTFail("Route menu was not presented after the fixture loaded")
+        return false
+    }
     private func state() -> [String:Any] {
         guard let data = app.staticTexts["journey-timing-state"].label.data(using:.utf8),
               let value = try? JSONSerialization.jsonObject(with:data) as? [String:Any] else { return [:] }
@@ -71,4 +84,58 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     func testMixedRoutesShareOneMenuAndFillTheMap() { verifyMenu(english:false) }
     func testEnglishMixedRoutesKeepTheSameFlow() { verifyMenu(english:true) }
+    func testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel() {
+        launch(["--preview-mixed-planning","--preview-many-options","--usability-fixture","--test-journey-selection"])
+        guard requireRouteMenu() else { return }
+        let options = state()["options"] as? [[String:Any]] ?? []
+        XCTAssertGreaterThan(options.count,5)
+        XCTAssertFalse(button("journey-page-5").exists)
+        capture("mixed-more-options-compact")
+        button("journey-all-options").tap()
+        let last = options.last?["id"] as? String ?? ""
+        let row = button("journey-option-"+last)
+        for _ in 0..<8 {
+            if row.isHittable { break }
+            app.scrollViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(row.isHittable);capture("mixed-more-options-full-list");row.tap()
+        XCTAssertTrue(button("journey-go-"+last).waitForExistence(timeout:10))
+        XCTAssertEqual(state()["selected"] as? String,last)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+        XCTAssertFalse(button("journey-page-5").exists)
+        capture("mixed-more-options-selected")
+    }
+    func testTwoBikeConnectionsHaveSeparateInspectableStations() {
+        launch(["--preview-youbike-planning","--preview-youbike-dual","--usability-fixture","--test-journey-selection","--test-map-controls","--test-language","en"])
+        guard requireRouteMenu() else { return }
+        let id = state()["selected"] as? String ?? ""
+        XCTAssertFalse(id.isEmpty)
+        var readySince: Date?
+        waitFor("Both bike connections fit the completed map") {
+            let value = self.camera()
+            guard value["cameraMoving"] as? Bool == false, value["fullyRendered"] as? Bool == true,
+                  let frame = value["routeFraming"] as? [String:Any], frame["inside"] as? Bool == true else {
+                readySince = nil;return false
+            }
+            if readySince == nil { readySince = Date() }
+            return Date().timeIntervalSince(readySince!) >= 1
+        }
+        capture("mixed-two-bike-connections-compact")
+        button("journey-steps-"+id).tap()
+        XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
+        XCTAssertTrue(button("journey-bike-pickup-0").exists)
+        let options = state()["options"] as? [[String:Any]] ?? []
+        let selected = options.first { $0["id"] as? String == id }
+        let bikeLegs = selected?["bike_legs"] as? [Int] ?? []
+        XCTAssertEqual(bikeLegs.count,2)
+        let lastIndex = bikeLegs.last ?? -1
+        let dropoff = button("journey-bike-dropoff-\(lastIndex)")
+        for _ in 0..<6 { if dropoff.isHittable { break };app.scrollViews.firstMatch.swipeUp() }
+        XCTAssertTrue(dropoff.isHittable);capture("mixed-two-bike-connections-steps");dropoff.tap()
+        XCTAssertTrue(button("bike-station-close").waitForExistence(timeout:15))
+        XCTAssertTrue(app.staticTexts["bike-station-return-status"].exists)
+        button("bike-station-close").tap()
+        XCTAssertEqual(state()["selected"] as? String,id)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+    }
 }

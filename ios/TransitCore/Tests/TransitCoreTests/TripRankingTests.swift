@@ -2,6 +2,20 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testExplicitFewerTransferPreferenceChangesRankingWithoutAddingTravelTime() throws {
+        let baseline = LiveSettings.Planning()
+        var personal = baseline; personal.personalTransferPenaltySeconds = 900
+        let direct = TripRanking.assess(riding:[1800],walking:[0,0],arrivals:[0],preferences:baseline)
+        let transfer = TripRanking.assess(riding:[500,500],walking:[0,0,0],arrivals:[0,900],preferences:baseline)
+        let preferred = TripRanking.assess(riding:[500,500],walking:[0,0,0],arrivals:[0,900],preferences:personal)
+        XCTAssertLessThan(transfer.score,direct.score)
+        XCTAssertGreaterThan(preferred.score,direct.score)
+        XCTAssertEqual(preferred.elapsedSeconds,transfer.elapsedSeconds)
+        XCTAssertEqual(baseline.effectiveTransferPenaltySeconds,300)
+        let shared = try JSONDecoder().decode(LiveSettings.Planning.self,from:JSONEncoder().encode(personal))
+        XCTAssertNil(shared.personalTransferPenaltySeconds)
+        XCTAssertEqual(shared.effectiveTransferPenaltySeconds,baseline.effectiveTransferPenaltySeconds)
+    }
     func testCyclingConnectorIsNotPenalizedAsFifteenMinutesOfWalking() {
         let a=Coordinate(latitude:25.02,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.51)
         func trip(_ id: String, seconds: Double) -> TransitTrip {
@@ -22,6 +36,11 @@ final class TripRankingTests: XCTestCase {
         XCTAssertEqual(accurate.first?.id,bikeRail.id,"The connector only has 200 seconds on foot, not 900")
         let timing=TripRanking.assessment(bikeRail,estimates:.init(),at:now,preferences:preference,walkingDurations:connectors[bikeRail.id])
         XCTAssertEqual(timing.elapsedSeconds-timing.waitingSeconds,1500,accuracy:0.001,"All 900 connector seconds still count towards reaching the platform")
+        let aligned = bikeRail.asVariant("bike").withEndpointDistances(access:900,egress:300)
+        XCTAssertEqual(aligned.rides.map(\.id),bikeRail.rides.map(\.id))
+        XCTAssertEqual(aligned.rideSeconds,bikeRail.rideSeconds)
+        XCTAssertEqual(aligned.variant,"bike")
+        XCTAssertEqual(aligned.accessDistance,900);XCTAssertEqual(aligned.egressDistance,300)
     }
     func testNightServiceDoesNotLookLikeAnEightMinuteWaitInTheAfternoon() throws {
         let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-10-03T06:00:00Z"))
