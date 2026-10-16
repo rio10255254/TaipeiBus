@@ -33,7 +33,7 @@ import MapKit
         let began = ProcessInfo.processInfo.systemUptime
         let result = try await gate.execute(.firstChoice) {
             calls += 1
-            if calls == 1 { throw NSError(domain:MKErrorDomain,code:MKError.Code.loadingThrottled.rawValue) }
+            if calls == 1 { throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.loadingThrottled.rawValue)) }
             return 42
         }
         XCTAssertEqual(result,42); XCTAssertEqual(calls,2)
@@ -57,11 +57,11 @@ import MapKit
         var calls = 0
         let result = try await gate.execute(.firstChoice) {
             calls += 1
-            if calls == 1 { throw NSError(domain:MKErrorDomain,code:MKError.Code.unknown.rawValue) }
+            if calls == 1 { throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.unknown.rawValue)) }
             return "confirmed path"
         }
         XCTAssertEqual(result,"confirmed path"); XCTAssertEqual(calls,2)
-        XCTAssertFalse(gate.report(NSError(domain:MKErrorDomain,code:MKError.Code.directionsNotFound.rawValue)),
+        XCTAssertFalse(gate.report(NSError(domain:MKErrorDomain,code:Int(MKError.Code.directionsNotFound.rawValue))),
             "An actual unreachable road is different from a temporarily unavailable service")
     }
 }

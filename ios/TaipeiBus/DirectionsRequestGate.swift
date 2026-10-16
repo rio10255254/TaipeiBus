@@ -77,9 +77,9 @@ import MapKit
     /// unavailable service. Neither proves that a walking connection does not exist.
     @discardableResult func report(_ error: Error) -> Bool {
         let value = error as NSError
-        let throttle = value.domain == MKErrorDomain && value.code == MKError.Code.loadingThrottled.rawValue
+        let throttle = value.domain == MKErrorDomain && value.code == Int(MKError.Code.loadingThrottled.rawValue)
         let interrupted = value.domain == MKErrorDomain &&
-            [MKError.Code.unknown.rawValue,MKError.Code.serverFailure.rawValue].contains(value.code)
+            [Int(MKError.Code.unknown.rawValue),Int(MKError.Code.serverFailure.rawValue)].contains(value.code)
         let network = value.domain == NSURLErrorDomain &&
             [NSURLErrorTimedOut,NSURLErrorNetworkConnectionLost,NSURLErrorCannotConnectToHost].contains(value.code)
         guard throttle || interrupted || network else { return false }
