@@ -467,8 +467,8 @@ final class JourneyPlannerModel: ObservableObject {
     private var connectionBases: [String: JourneyOption] = [:]
     /// Pull freshly possible bike choices between verification batches. A feed arriving
     /// mid-search must not wait for every ordinary boarding platform to finish first.
-    private func takeBikeConnections() -> [JourneyOption] {
-        guard preferences.bikeRouting, attemptedBikeConnections.count < 24 else { return [] }
+    private func takeBikeConnections(limit: Int) -> [JourneyOption] {
+        guard preferences.bikeRouting, attemptedBikeConnections.count < limit else { return [] }
         var choices = bikeConnections(for: Array(connectionBases.values), at: Date())
         if !attemptedBikeConnections.contains("youbike"), let origin, let destination,
            let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
@@ -476,15 +476,16 @@ final class JourneyPlannerModel: ObservableObject {
             var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate); leg.bike = BikeLeg(whole)
             choices.append(JourneyOption(id: "youbike", trip: nil, walks: [leg]))
         }
-        attemptedBikeConnections.formUnion(choices.map(\.id))
-        return choices
+        let reserved = Array(choices.prefix(limit - attemptedBikeConnections.count))
+        attemptedBikeConnections.formUnion(reserved.map(\.id))
+        return reserved
     }
     /// One ordinary route and one cycling alternative share each batch. Later walking
     /// platforms cannot monopolize the queue; at most two routes are verified at once.
-    private func verifyConnections(_ ordinary: [JourneyOption], cycling initial: [JourneyOption] = [], token: UUID) async {
+    private func verifyConnections(_ ordinary: [JourneyOption], cycling initial: [JourneyOption] = [], limit: Int = 12, token: UUID) async {
         var walking = ordinary, cycling = initial
         while !Task.isCancelled, token == generation {
-            cycling.append(contentsOf: takeBikeConnections())
+            cycling.append(contentsOf: takeBikeConnections(limit: limit))
             var batch: [JourneyOption] = []
             if !walking.isEmpty { batch.append(walking.removeFirst()) }
             if !cycling.isEmpty { batch.append(cycling.removeFirst()) }
@@ -617,7 +618,7 @@ final class JourneyPlannerModel: ObservableObject {
     private func discoverBikeConnections() {
         guard !started, !planning, !checkingWalks, bikeRefinementTask == nil, attemptedBikeConnections.count < 24 else { return }
         let probes = bikeGatewayProbes(at: Date())
-        let candidates = takeBikeConnections()
+        let candidates = takeBikeConnections(limit: 12)
         guard !candidates.isEmpty || !probes.isEmpty else { return }
         if !probes.isEmpty { searchedBikeGateways = true }
         checkingWalks = true; message = nil
@@ -639,9 +640,12 @@ final class JourneyPlannerModel: ObservableObject {
                         if self.connectionBases[base.id] == nil { self.connectionBases[base.id] = base }
                         if families.count == 4 { break }
                     }
-                    await self.verifyConnections([], token: token)
                 }
             }
+            // Reserve half of the street-query budget for newly reachable corridors and
+            // compare all probes before spending it, so the first corridor cannot crowd
+            // out a better later one. Existing cycling results are already visible.
+            await self.verifyConnections([], limit: 24, token: token)
             guard !Task.isCancelled, token == self.generation else { return }
             self.checkingWalks = false; self.bikeRefinementTask = nil
             self.publishRecommendations()
@@ -1037,6 +1041,14 @@ final class JourneyPlannerModel: ObservableObject {
         checkingWalks = true
         let token = generation
         await verifyConnections(choices, token: token)
+        guard token == generation, !Task.isCancelled else { return }
+        checkingWalks = false; publishRecommendations()
+    }
+    func auditVerifyAdditionalCorridors(_ choices: [JourneyOption]) async {
+        for choice in choices where connectionBases[choice.id] == nil { connectionBases[choice.id] = choice }
+        checkingWalks = true
+        let token = generation
+        await verifyConnections([], limit: 24, token: token)
         guard token == generation, !Task.isCancelled else { return }
         checkingWalks = false; publishRecommendations()
     }

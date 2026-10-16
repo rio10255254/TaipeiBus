@@ -202,6 +202,33 @@ private final class BikeFeedProtocol: URLProtocol, @unchecked Sendable {
             XCTAssertFalse(p.started)
         }
     }
+    func testEarlyLocalBikeChoicesLeaveRoomForABetterAdditionalRailCorridor() async throws {
+        let base=transit("base"), p=JourneyPlannerModel(), now=Date()
+        let stations=base.walks.enumerated().flatMap { index,leg in
+            [BikeStation(id:"\(index)a",name:"借車",coordinate:leg.from,capacity:30),
+             BikeStation(id:"\(index)b",name:"還車",coordinate:leg.to,capacity:30)]
+        }
+        let bikes=BikeNetwork(stations:stations)
+        let counts=BikeAvailability(docks:Dictionary(uniqueKeysWithValues:stations.map {
+            ($0.id,BikeDock(stationID:$0.id,rentable:8,returnable:8,capacity:30,active:true,observedAt:now))
+        }),receivedAt:now)
+        p.updateBikes(network:bikes,availability:counts)
+        p.auditLoadChoices([base],from:TravelPlace(name:"出發",address:"",coordinate:base.walks[0].from),
+            to:TravelPlace(name:"目的地",address:"",coordinate:base.walks.last!.to))
+        p.testStreet = { input,_ in var result=input;result.duration=1000;return result }
+        p.testCycle = { input in var result=input;result.duration=try XCTUnwrap(input.bike).totalSeconds;return result }
+        await p.auditVerifyConnections((0..<16).map { transit("local-\($0)") })
+        var gateway=transit("gateway")
+        let raw=try XCTUnwrap(gateway.trip)
+        let trip=TransitTrip(rides:raw.rides,accessDistance:raw.accessDistance,egressDistance:raw.egressDistance,
+            transferDistance:0,score:0,rideSeconds:[30])
+        gateway=JourneyOption(id:trip.id,trip:trip,walks:gateway.walks)
+        await p.auditVerifyAdditionalCorridors([gateway])
+        XCTAssertEqual(p.selected?.rides.first?.route.id,"gateway")
+        XCTAssertTrue(try XCTUnwrap(p.selected).cycles,"A large initial candidate pool must not exhaust every cycling query before additional corridors are compared")
+        XCTAssertEqual(p.options.first?.id,p.selectedID)
+        XCTAssertFalse(p.started)
+    }
     private func transit(_ id: String) -> JourneyOption {
         let a=Coordinate(latitude:25.04,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.555)
         let c=Coordinate(latitude:25.06,longitude:121.57), d=Coordinate(latitude:25.06,longitude:121.585)
