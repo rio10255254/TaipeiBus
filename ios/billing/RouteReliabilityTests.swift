@@ -8,6 +8,48 @@ import MapKit
 @MainActor final class RouteReliabilityTests: XCTestCase {
     let campus = Coordinate(latitude: 25.01945, longitude: 121.53955)
 
+    func testTemporaryStreetFailureDoesNotEnterUnreachableCache() async throws {
+        let p = JourneyPlannerModel(); defer { p.finish() }
+        let leg = WalkingLeg(from:campus,to:.init(latitude:25.026154,longitude:121.543636))
+        var calls = 0
+        p.testStreet = { value,_ in
+            calls += 1
+            if calls == 1 { throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.serverFailure.rawValue)) }
+            var checked = value; checked.distance = 1200; checked.duration = 900
+            checked.coordinates = [value.from,value.to]; return checked
+        }
+        let failed = try await p.auditStreet(leg)
+        XCTAssertFalse(failed.verified); XCTAssertTrue(failed.temporaryStreetFailure)
+        let recovered = try await p.auditStreet(leg)
+        XCTAssertTrue(recovered.verified); XCTAssertEqual(calls,2)
+    }
+
+    func testProductionSearchRetriesAfterAnInitialProviderInterruption() async throws {
+        let service = TransitService(), p = JourneyPlannerModel(); defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        var failedAt: Date?, failures = 0
+        p.testStreet = { value,_ in
+            let now = Date(); if failedAt == nil { failedAt = now }
+            if now.timeIntervalSince(failedAt!) < 1.5 {
+                failures += 1
+                throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.unknown.rawValue))
+            }
+            var checked = value
+            checked.distance = value.from.distance(to:value.to)*1.2
+            checked.duration = (checked.distance ?? 0)/1.25
+            checked.coordinates = [value.from,value.to]; return checked
+        }
+        p.setDestination(TravelPlace(name:"內湖站",address:"",coordinate:.init(latitude:25.083675,longitude:121.594363)),
+            metadata:metadata,currentLocation:campus)
+        for _ in 0..<1200 {
+            if !p.planning && !p.checkingWalks { break }
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        XCTAssertGreaterThan(failures,0)
+        XCTAssertTrue(p.options.contains { $0.verified && $0.walkIssue == nil })
+        XCTAssertNil(p.message,"A temporary first pass must recover within the same search")
+    }
+
     func testZhihongIndoorFixRetainsTheProviderWalkingRoute() async throws {
         let p = JourneyPlannerModel(); p.auditStreetDiagnostics = true
         defer { p.finish() }

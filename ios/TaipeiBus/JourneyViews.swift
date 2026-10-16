@@ -899,6 +899,11 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
+            if planner.options.isEmpty, planner.message != nil, !planner.planning, !planner.checkingWalks {
+                Button { planner.plan(metadata:model.metadata) } label: {
+                    Label(AppText.text("重新查詢"),systemImage:"arrow.clockwise").frame(minHeight:44)
+                }.buttonStyle(.bordered).accessibilityIdentifier("journey-retry-search")
+            }
             if compact, !planner.options.isEmpty {
                 // Keep the actions outside the paging collection. Its gesture handling and
                 // recycled pages must never swallow a Steps/Go tap during a clock update.

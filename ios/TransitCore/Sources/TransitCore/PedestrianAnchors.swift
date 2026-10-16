@@ -3,11 +3,17 @@ import Foundation
 /// Street routers snap a requested location to a nearby walkable path. Keep that
 /// verified path and connect only the bounded access offset to its requested anchors.
 public struct AnchoredPedestrianPath: Sendable {
+    /// A location inside a building may be farther from the public footpath than
+    /// the GPS fix's precision. This bounds local building access; it does not
+    /// authorize replacing a missing street route with a straight line.
+    public static let maximumWalkingAccess = 100.0
     public let coordinates: [Coordinate]
     public let accessDistance: Double
     public static func make(_ points: [Coordinate], from: Coordinate, to: Coordinate,
                             maximumOffset: Double = 50) -> AnchoredPedestrianPath? {
         guard points.count >= 2, let first = points.first, let last = points.last,
+              (points + [from,to]).allSatisfy({ $0.latitude.isFinite && $0.longitude.isFinite &&
+                  abs($0.latitude) <= 90 && abs($0.longitude) <= 180 }),
               maximumOffset.isFinite, maximumOffset >= 0 else { return nil }
         let startGap = first.distance(to: from), endGap = last.distance(to: to)
         guard startGap.isFinite, endGap.isFinite, startGap <= maximumOffset, endGap <= maximumOffset else { return nil }

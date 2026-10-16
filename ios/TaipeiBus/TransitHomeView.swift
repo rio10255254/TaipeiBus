@@ -1479,6 +1479,7 @@ struct RouteBadge: View {
 private struct AppInformationView: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
+    @ObservedObject private var diagnostics = JourneyDiagnostics.shared
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -1534,6 +1535,9 @@ private struct AppInformationView: View {
                         .accessibilityIdentifier("app-privacy-policy")
                     Link(AppText.text("支援與聯絡"), destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!)
                         .accessibilityIdentifier("app-support")
+                    ShareLink(item:diagnostics.report) {
+                        Label(AppText.text("分享路線規劃紀錄"),systemImage:"square.and.arrow.up")
+                    }.accessibilityIdentifier("share-journey-diagnostics")
                 }
             }
             .smoothChanges(model.language)
