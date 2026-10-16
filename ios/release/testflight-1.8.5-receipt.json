@@ -1,0 +1,13 @@
+{
+  "app_id": "6818475740",
+  "bundle_id": "com.rio10255254.TaipeiBus",
+  "version": "1.8.5",
+  "commit": "668aee1a23c796a0579b0b30f811c6e068acc65d",
+  "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38861939446",
+  "status": "internal_group_assigned",
+  "build_number": "137.1.0",
+  "upload_confirmed": true,
+  "uploaded_at": "2026-10-16T06:39:29.481934+00:00",
+  "build_id": "25bbb7c6-a126-4c64-a4c4-6b15cf5c416e",
+  "group_id": "4e48a355-f872-4b67-a260-51d343194c62"
+}

@@ -1,0 +1,119 @@
+{
+  "version": "1.8.5",
+  "distribution": "testflight-only",
+  "formal_submission": "paused",
+  "status": "published_to_testflight",
+  "source": "668aee1a23c796a0579b0b30f811c6e068acc65d",
+  "recommendation_policy": {
+    "all_modes_compared_together": true,
+    "cycling_access_transfer_egress_in_initial_search": true,
+    "actual_time_includes": [
+      "walking",
+      "station access",
+      "cycling",
+      "unlocking and docking",
+      "transit",
+      "reachable waiting"
+    ],
+    "preference_cost_added_to_clock": false,
+    "retain_reasonable_no_rental_and_other_tradeoffs": true,
+    "preserve_inspected_route_and_map": true,
+    "refresh_supply_before_switch": true,
+    "active_trip_changes_only_after_explicit_switch": true,
+    "suppress_onboard_and_uncertain_cycling_changes": true
+  },
+  "core_checks": {
+    "run": 38857138290,
+    "source": "724c49b",
+    "tests": 267,
+    "opt_in_skips": 12,
+    "failures": 0,
+    "explicit_catalog_tests": 19,
+    "catalog_failures": 0,
+    "official_profiles": true,
+    "route_records": 735,
+    "controlled_supply": true,
+    "city_search_seconds": [
+      5.131906208333362,
+      4.59874529166666,
+      7.8939900416667115
+    ],
+    "city_budget_seconds": 8,
+    "all_city_cases_preserve_no_rental_rail": true,
+    "gongguan_ximen_direct_green_retained": true,
+    "artifact": 12027866822
+  },
+  "hosted_checks": {
+    "run": 38858603673,
+    "source": "4d38b86",
+    "tests": 62,
+    "failures": 0,
+    "artifact": 12028472037,
+    "real_mapkit_directions": true,
+    "storekit_sandbox_transactions": true,
+    "debug_and_release_iphone_compile": true,
+    "coverage": [
+      "full cycling competes with transit",
+      "new supply reorders without moving preview",
+      "checked stale rows remain selectable",
+      "unknown rows cannot clear selection",
+      "explicit remaining route adoption",
+      "completed boarding and rentals do not invalidate the remaining trip",
+      "piecewise cycling progress",
+      "street cache expiry and mode separation",
+      "multiple street-verified station pairs",
+      "last trains on every supported rail line",
+      "independent cancellable replanning",
+      "new departures and depleted stations invalidate old suggestions",
+      "uncertain bike possession keeps active trip"
+    ]
+  },
+  "native_action_checks": {
+    "run": 38859319965,
+    "source": "ec4e670",
+    "light_tests": 4,
+    "dark_tests": 4,
+    "failures": 0,
+    "light_artifact": 12028124609,
+    "final_artifact": 12029208749,
+    "screenshots_visually_checked": true,
+    "coverage": [
+      "dismiss keeps active journey and boarding",
+      "only Switch changes remaining route",
+      "recommendation refresh keeps inspected route and map",
+      "two bike connections and repeated single-tap Steps round trips",
+      "English and Chinese",
+      "44-point dismiss target"
+    ],
+    "qa_images_directory": "D:/TaipeiBus-release-1.8.5/ui-checks"
+  },
+  "other_checks": {
+    "english_templates": 707,
+    "official_time_maintenance_tests": 28,
+    "failures": 0
+  },
+  "verification_provenance": {
+    "core_unchanged_from_city_run": true,
+    "planner_and_app_model_unchanged_from_hosted_run": true,
+    "final_ui_head_matches_merged_source": true
+  },
+  "limits": {
+    "simulator_not_physical_device": true,
+    "city_supply_is_controlled_not_historical": true,
+    "future_docks_not_reserved": true,
+    "bounded_search_not_global_optimum_proof": true,
+    "qa_screenshots_are_debug_fixtures_not_store_promotions": true
+  },
+  "publication": {
+    "run": 38861939446,
+    "build_number": "137.1.0",
+    "pr": "https://github.com/rio10255254/TaipeiBus/pull/44",
+    "source": "668aee1a23c796a0579b0b30f811c6e068acc65d",
+    "status": "internal_group_assigned",
+    "build_id": "25bbb7c6-a126-4c64-a4c4-6b15cf5c416e",
+    "uploaded_at": "2026-10-16T06:39:29.481934+00:00",
+    "upload_confirmed": true,
+    "symbols_zip_crc_verified": true,
+    "artifact": 12029961276
+  }
+}
