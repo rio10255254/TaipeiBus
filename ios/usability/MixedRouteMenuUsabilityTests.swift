@@ -126,6 +126,9 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(state()["started"] as? Bool,false)
         XCTAssertFalse(button("journey-page-5").exists)
         capture("mixed-more-options-selected")
+        button("journey-go-"+last).tap()
+        waitFor("Go starts the explicitly shown route") { self.state()["started"] as? Bool == true }
+        XCTAssertEqual(state()["selected"] as? String,last)
     }
     func testTwoBikeConnectionsHaveSeparateInspectableStations() {
         launch(["--preview-youbike-planning","--preview-youbike-dual","--usability-fixture","--test-journey-selection","--test-map-controls","--test-language","en"])
@@ -167,5 +170,16 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         button("bike-station-close").tap()
         XCTAssertEqual(state()["selected"] as? String,id)
         XCTAssertEqual(state()["started"] as? Bool,false)
+        // Single taps only: retries would hide the paging collection swallowing an action.
+        // Repeated round trips also exercise actions after the live time labels redraw.
+        for _ in 0..<2 {
+            button("journey-back").tap()
+            XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:10))
+            XCTAssertEqual(state()["selected"] as? String,id)
+            XCTAssertTrue(button("journey-steps-"+id).isHittable)
+            button("journey-steps-"+id).tap()
+            XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
+            XCTAssertEqual(state()["started"] as? Bool,false)
+        }
     }
 }

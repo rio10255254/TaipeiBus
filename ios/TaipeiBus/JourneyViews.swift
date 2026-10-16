@@ -900,15 +900,23 @@ struct JourneyOptionsView: View {
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
             if compact, !planner.options.isEmpty {
+                // Keep the actions outside the paging collection. Its gesture handling and
+                // recycled pages must never swallow a Steps/Go tap during a clock update.
+                HStack(spacing: 12) {
                 TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
                     if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
                 })) {
-                    ForEach(planner.featuredOptions) { option in compactCard(option).tag(option.id) }
+                    ForEach(planner.featuredOptions) { option in compactSummary(option).tag(option.id) }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)))
                 .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
                 .accessibilityIdentifier("journey-preview-pages")
+                if let option = planner.selected ?? planner.featuredOptions.first { compactActions(option) }
+                }
+                .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)) - 28)
+                .padding(14)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .padding(.horizontal, 1)
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
                         ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
@@ -957,15 +965,16 @@ struct JourneyOptionsView: View {
     private func usable(_ option: JourneyOption) -> Bool {
         option.verified && option.walkIssue == nil && planner.unavailableBoarding(option) == nil
     }
-    private func compactCard(_ option: JourneyOption) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button { planner.select(option); collapse() } label: {
+    private func compactSummary(_ option: JourneyOption) -> some View {
+        Button { planner.select(option); collapse() } label: {
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                    summary(option, at: timeline.date, compact: true).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    summary(option, at: timeline.date, compact: true).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("journey-option-" + option.id)
-            VStack(spacing: 6) {
+    }
+    private func compactActions(_ option: JourneyOption) -> some View {
+        VStack(spacing: 6) {
                 Button { go(option) } label: {
                     Text(AppText.text("出發")).liveFont(.body, weight: .bold).frame(width: 66, height: 62)
                 }.buttonStyle(MapTileStyle(prominent: true, tint: MapChrome.go))
@@ -985,11 +994,7 @@ struct JourneyOptionsView: View {
                     .disabled(!usable(option))
                     .accessibilityLabel(AppText.text("查看搭乘步驟"))
                     .accessibilityIdentifier("journey-steps-" + option.id)
-            }.frame(width: 66)
-
-        }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .padding(.horizontal, 1)
+        }.frame(width: 66)
     }
     private func optionRow(_ option: JourneyOption) -> some View {
         Button { planner.select(option); collapse() } label: {
