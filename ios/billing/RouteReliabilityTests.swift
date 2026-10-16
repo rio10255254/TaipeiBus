@@ -24,6 +24,25 @@ import MapKit
         XCTAssertTrue(recovered.verified); XCTAssertEqual(calls,2)
     }
 
+    func testInterruptedBikeAccessDoesNotDownloadTheRideAndEgress() async throws {
+        let p = JourneyPlannerModel(); defer { p.finish() }
+        let pickup = BikeStation(id:"p",name:"pickup",coordinate:.init(latitude:25.0195,longitude:121.54),capacity:30)
+        let dropoff = BikeStation(id:"d",name:"dropoff",coordinate:.init(latitude:25.026,longitude:121.543),capacity:30)
+        let end = Coordinate(latitude:25.026154,longitude:121.543636)
+        var leg = WalkingLeg(from:campus,to:end)
+        leg.bike = BikeLeg(BikeConnection(pickup:pickup,dropoff:dropoff,bikes:8,docks:8,
+            accessMeters:100,rideMeters:900,egressMeters:100,accessSeconds:80,
+            rideSeconds:300,egressSeconds:80,handlingSeconds:60))
+        var calls = 0
+        p.testStreet = { _,_ in
+            calls += 1
+            throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.serverFailure.rawValue))
+        }
+        let failed = try await p.verifyCyclingLegForTest(leg)
+        XCTAssertFalse(failed.verified); XCTAssertTrue(failed.temporaryStreetFailure)
+        XCTAssertEqual(calls,1,"No cycling or onward request is useful until the pickup walk is confirmed")
+    }
+
     func testProductionSearchRetriesAfterAnInitialProviderInterruption() async throws {
         let service = TransitService(), p = JourneyPlannerModel(); defer { p.finish() }
         let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
@@ -46,6 +65,7 @@ import MapKit
             try await Task.sleep(for:.milliseconds(100))
         }
         XCTAssertGreaterThan(failures,0)
+        XCTAssertLessThanOrEqual(failures,2,"A shared provider interruption must stop the batch instead of querying every platform")
         XCTAssertTrue(p.options.contains { $0.verified && $0.walkIssue == nil })
         XCTAssertNil(p.message,"A temporary first pass must recover within the same search")
     }

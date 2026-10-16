@@ -117,7 +117,7 @@ jobs:
           xcrun simctl bootstatus "$device" -b
           selection=('-parallel-testing-enabled' 'NO')
           if [ '${{ inputs.usability_scope }}' = 'route-reliability' ]; then
-            selection+=('SWIFT_OPTIMIZATION_LEVEL=-O')
+            selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \

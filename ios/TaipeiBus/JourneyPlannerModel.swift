@@ -642,10 +642,12 @@ final class JourneyPlannerModel: ObservableObject {
             while batch.count < 2, !walking.isEmpty { batch.append(walking.removeFirst()) }
             while batch.count < 2, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
             guard !batch.isEmpty else { return }
+            var serviceInterrupted = false
             await withTaskGroup(of: JourneyOption?.self) { group in
                 for choice in batch { group.addTask { [weak self] in try? await self?.enrich(choice) } }
                 for await result in group {
                     guard token == self.generation, !Task.isCancelled, let result else { continue }
+                    if result.walks.contains(where: \.temporaryStreetFailure) { serviceInterrupted = true }
                     if result.trip?.variant.isEmpty == true { self.connectionBases[result.id] = result }
                     if result.verified, result.walkIssue == nil {
                         self.verifiedPool.removeAll { $0.id == result.id }
@@ -655,6 +657,10 @@ final class JourneyPlannerModel: ObservableObject {
                     }
                 }
             }
+            // An outage is shared by the provider, not unique to a platform.
+            // Stop the batch and let the bounded recovery pass handle it instead
+            // of immediately sending the same failing access leg for every option.
+            if serviceInterrupted { return }
         }
     }
     /// Compare single and combined access, transfer and egress connections. An indoor
@@ -1113,26 +1119,32 @@ final class JourneyPlannerModel: ObservableObject {
                 availability: bikeAvailability, preferences: preferences, limit: 3)
         }
         var seen = Set<String>(), best: WalkingLeg?, bestCost = Double.infinity
+        var interrupted = false
         for pair in pairs where seen.insert(BikeRouting.pairID(pair)).inserted {
             try Task.checkCancellation()
             // A direct test of the provider can omit live supply. Offered journeys cannot.
             if !bikeNetwork.stations.isEmpty &&
                 (!BikeRouting.confirmed(pair.pickup, availability: bikeAvailability, renting: true) ||
                  !BikeRouting.confirmed(pair.dropoff, availability: bikeAvailability, renting: false)) { continue }
-            guard let result = try? await verifyPair(leg, connection: pair), result.verified, let bike = result.bike else { continue }
+            guard let result = try? await verifyPair(leg, connection: pair) else { continue }
+            if result.temporaryStreetFailure { interrupted = true; break }
+            guard result.verified, let bike = result.bike else { continue }
             let risk = bikeNetwork.stations.isEmpty ? 0 : BikeRouting.supplyPenalty(bike.connection,
                 availability: bikeAvailability, pickupAfter: leg.plannedStartAfter)
             let cost = (result.duration ?? .infinity) + bike.walkingSeconds * max(0, preferences.walkingWeight - 1 + 0.35) + risk
             if cost < bestCost { best = result; bestCost = cost }
         }
         if let best { return best }
-        var unresolved = leg; unresolved.duration = nil; return unresolved
+        var unresolved = leg; unresolved.duration = nil; unresolved.temporaryStreetFailure = interrupted; return unresolved
     }
     private func verifyPair(_ leg: WalkingLeg, connection: BikeConnection) async throws -> WalkingLeg {
         var bike = BikeLeg(connection), result = leg
         let access = try await walk(WalkingLeg(from: leg.from, to: bike.pickup.coordinate))
+        guard access.verified else { result.duration = nil; result.temporaryStreetFailure = access.temporaryStreetFailure; return result }
         let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate), transport: .cycling)
+        guard street.verified else { result.duration = nil; result.temporaryStreetFailure = street.temporaryStreetFailure; return result }
         let egress = try await walk(WalkingLeg(from: bike.dropoff.coordinate, to: leg.to))
+        guard egress.verified else { result.duration = nil; result.temporaryStreetFailure = egress.temporaryStreetFailure; return result }
         guard let accessSeconds = access.duration, let egressSeconds = egress.duration,
               let rideMeters = street.distance, let rideSeconds = street.duration, rideMeters > 0, rideSeconds > 0 else {
             result.duration = nil; return result
