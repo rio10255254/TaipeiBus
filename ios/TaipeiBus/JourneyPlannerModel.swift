@@ -1033,12 +1033,17 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func select(_ option: JourneyOption) {
-        guard option.verified, option.walkIssue == nil, unavailableBoarding(option) == nil else { return }
+        // A row can still receive its tap while a fresh recommendation removes it
+        // from the compact list. Resolve the checked choice and retain it before
+        // changing selection; never leave selectedID pointing at an absent option.
+        guard let current = verifiedPool.first(where: { $0.id == option.id }) ?? options.first(where: { $0.id == option.id }),
+              current.verified, current.walkIssue == nil, unavailableBoarding(current) == nil else { return }
+        if !options.contains(where: { $0.id == current.id }) { options.append(current) }
         selectionConfirmed = true
-        comparisonChanged = option.id != options.first?.id
-        guard selectedID != option.id else { return }
+        comparisonChanged = current.id != options.first?.id
+        guard selectedID != current.id else { return }
         endWalkingGuidance()
-        selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
+        selectedID = current.id; started = false; stepIndex = 0; mapRevision += 1
     }
     private func enrich(_ option: JourneyOption, compareStations: Bool = false) async throws -> JourneyOption {
         var result = option

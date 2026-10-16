@@ -61,13 +61,21 @@ import MapKit
         let original = transit(), alternative = transit("other",seconds:700), p = planner([original,alternative])
         let start = TravelPlace(name:"目前位置",address:"",coordinate:a)
         p.select(original)
+        XCTAssertNotNil(p.selected,"A checked route remains selectable after a better recommendation removes its row")
         XCTAssertFalse(p.adoptRemaining(alternative,from:start));XCTAssertEqual(p.selectedID,original.id)
-        p.begin();let destination = p.destination?.coordinate
+        p.begin();XCTAssertTrue(p.started);let destination = p.destination?.coordinate
         XCTAssertTrue(p.adoptRemaining(alternative,from:start))
         XCTAssertTrue(p.started);XCTAssertEqual(p.currentStep,.walk(0));XCTAssertEqual(p.selectedID,alternative.id)
         XCTAssertEqual(p.destination?.coordinate,destination);XCTAssertEqual(p.origin?.coordinate,a)
         p.boardCurrentRide();XCTAssertFalse(p.adoptRemaining(original,from:start))
         XCTAssertEqual(p.selectedID,alternative.id);XCTAssertEqual(p.currentStep,.ride(0));p.finish()
+    }
+    func testAnUnrecognizedStaleChoiceCannotClearTheCurrentRoute() {
+        let active = transit(), p = planner([active]), unknown = transit("removed")
+        let revision = p.mapRevision
+        p.select(unknown)
+        XCTAssertEqual(p.selectedID,active.id);XCTAssertNotNil(p.selected);XCTAssertEqual(p.mapRevision,revision)
+        p.finish()
     }
     func testCompletedBikeAndClosedPastBoardingDoNotInvalidateTheRemainingJourney() throws {
         let bus = transit(), bike = bicycle(), p = planner([bus,bike])

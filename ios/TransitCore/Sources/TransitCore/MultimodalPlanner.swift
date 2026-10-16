@@ -235,9 +235,10 @@ public struct MultimodalPlanner: Sendable {
                 BikeRouting.confirmed($0, availability: bikeAvailability, renting: true, at: date)
             }) else { streetLinks[id] = result; return result }
             var targets: [BusStop] = []
+            let indoors = Set((links[id] ?? []).filter(\.internalWalk).map(\.id))
             let x = Int(floor(start.longitude / 0.01)), y = Int(floor(start.latitude / 0.01))
             for dx in -3...3 { for dy in -3...3 {
-                for other in transferGrid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id {
+                for other in transferGrid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id && !indoors.contains(other.stationID) {
                     let distance = start.distance(to: other.coordinate)
                     if distance >= preferences.bikeMinimumRideMeters, distance <= min(2_500, bikeRadius) { targets.append(other) }
                 }
@@ -252,6 +253,14 @@ public struct MultimodalPlanner: Sendable {
             // represented by another nearby station. Indoor transfers never rent a bike.
             var eligible = (links[id] ?? []).filter { !$0.internalWalk && $0.distance >= preferences.bikeMinimumRideMeters }
                 .compactMap { stationStops[$0.id] }
+            // Nearby bus route numbers must not crowd every rail line out of the
+            // transfer budget. Include the nearest useful platform of each line,
+            // then fill the remaining corridor slots using the same travel bound.
+            for other in targets where other.mode != .bus {
+                let route = metadata.routes[other.routeID]
+                let corridor = "rail:" + (route?.lineCode ?? other.routeID)
+                if corridors.insert(corridor).inserted { eligible.append(other) }
+            }
             for other in targets {
                 let route = metadata.routes[other.routeID]
                 let corridor = other.mode == .bus ? "bus:" + (route?.parentID ?? other.routeID) : "rail:" + (route?.lineCode ?? other.routeID)
