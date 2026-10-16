@@ -1202,7 +1202,11 @@ final class JourneyPlannerModel: ObservableObject {
         guard started, case .walk = currentStep, canUse(option),
               option.walks.count == option.rides.count + 1 else { return false }
         if case .walk(let index) = currentStep, selected?.walks.indices.contains(index) == true,
-           selected?.walks[index].bike != nil, cyclingPhase(at: index) != .toPickup { return false }
+           selected?.walks[index].bike != nil {
+            guard walkingLegIndex == index, let progress = walkingProgress, progress.locationConfirmed,
+                  let fix = progress.lastFix, Date().timeIntervalSince(fix) < 20,
+                  cyclingPhase(at: index) == .toPickup else { return false }
+        }
         cancelRequests(); origin = start; usingLocation = true
         verifiedPool = [option]; connectionBases = [:]; attemptedBikeConnections = []; stationRefinements = [:]
         options = [option]; selectedID = option.id; selectionConfirmed = true

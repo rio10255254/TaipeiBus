@@ -77,6 +77,14 @@ import MapKit
         XCTAssertEqual(p.selectedID,active.id);XCTAssertNotNil(p.selected);XCTAssertEqual(p.mapRevision,revision)
         p.finish()
     }
+    func testUnconfirmedCyclingProgressCannotBeMistakenForAnUnborrowedBicycle() {
+        let bike = bicycle(), alternate = transit(), p = planner([bike,alternate])
+        p.select(bike);p.begin();XCTAssertTrue(p.started)
+        XCTAssertNil(p.walkingProgress)
+        XCTAssertFalse(p.adoptRemaining(alternate,from:TravelPlace(name:"目前位置",address:"",coordinate:a)),
+            "An uncertain GPS phase must not replace a journey while the rider may already have the bicycle")
+        XCTAssertEqual(p.selectedID,bike.id);XCTAssertTrue(p.started);p.finish()
+    }
     func testCompletedBikeAndClosedPastBoardingDoNotInvalidateTheRemainingJourney() throws {
         let bus = transit(), bike = bicycle(), p = planner([bus,bike])
         var mixed = bus; mixed.walks[0] = bike.walks[0]

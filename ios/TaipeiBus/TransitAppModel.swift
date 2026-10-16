@@ -312,7 +312,9 @@ final class TransitAppModel: ObservableObject {
         if let bike = option.walks[index].bike {
             // Near a dock or already riding, the rider may be holding a rented bicycle.
             // Preserve that commitment; the existing station-replacement flow handles it.
-            guard planner.cyclingPhase(at: index) == .toPickup,
+            guard planner.walkingLegIndex == index, let progress = planner.walkingProgress, progress.locationConfirmed,
+                  let fix = progress.lastFix, Date().timeIntervalSince(fix) < 20,
+                  planner.cyclingPhase(at: index) == .toPickup,
                   let point = location.usableCoordinate, point.distance(to: bike.pickup.coordinate) > 85 else { return false }
         }
         return true
