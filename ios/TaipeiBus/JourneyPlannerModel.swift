@@ -131,11 +131,13 @@ private actor TripNetwork {
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning,
                  estimates: EstimateFeed, bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil) -> [TransitTrip] {
+        guard !Task.isCancelled else { return [] }
         let signature = metadata.revision.uuidString
         if planner == nil || key != signature || Date().timeIntervalSince(builtAt) > 86_400 {
             planner = MultimodalPlanner(metadata: metadata); key = signature; builtAt = Date()
         }
         let budget = JourneySearchBudget(distance: from.distance(to: to), cycling: preferences.bikeRouting && bikeAvailability != nil)
+        guard !Task.isCancelled else { return [] }
         return planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: budget.candidates,
                              preferences: preferences, estimates: estimates, bikeNetwork: bikeNetwork, bikeAvailability: bikeAvailability)
 
@@ -990,7 +992,7 @@ final class JourneyPlannerModel: ObservableObject {
         let supply = bikeAvailability, bikes = bikeNetwork
         let budget = JourneySearchBudget(distance: origin.coordinate.distance(to: destination.coordinate), cycling: supply != nil)
         task = Task { [weak self] in
-            guard let self else { return }
+            guard let self, !Task.isCancelled, token == generation else { return }
             let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
                                               preferences: preferences, estimates: latestSnapshot.estimates,
                                               bikeNetwork: bikes, bikeAvailability: supply)
