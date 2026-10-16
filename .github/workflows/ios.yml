@@ -124,9 +124,11 @@ jobs:
               (root/(name+'.json')).write_bytes(data)
           print('Source: exact bundled official metadata; live observations are not substituted.')
           PY
-          swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log"
-          swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log"
-          swift test -c release --package-path ios/TransitCore --filter IntegratedPlanningTests.testFrozenFullCityPlanningIncludesBikeCorridorsWithinInteractiveTime | tee -a "$RUNNER_TEMP/routing-audit.log"
+          audit_failed=0
+          swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          swift test -c release --package-path ios/TransitCore --filter IntegratedPlanningTests.testFrozenFullCityPlanningIncludesBikeCorridorsWithinInteractiveTime | tee -a "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          exit "$audit_failed"
       - name: Preserve routing comparison evidence before the UI build
         if: always() && inputs.bundled_catalog_audit
         uses: actions/upload-artifact@v4

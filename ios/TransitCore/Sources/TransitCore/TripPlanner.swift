@@ -84,6 +84,14 @@ public struct TransitTrip: Identifiable, Sendable {
         result.planningSupplyRisk = planningSupplyRisk
         return result
     }
+    public func replacingRides(_ rides: [TransitRide]) -> TransitTrip {
+        guard rides.count == self.rides.count else { return self }
+        var result = TransitTrip(rides: rides, accessDistance: accessDistance, egressDistance: egressDistance,
+            transferDistance: transferDistance, score: score, rideSeconds: rideSeconds,
+            transferDistances: transferDistances, transferSeconds: transferSeconds)
+        result.variant = variant; result.bikeConnections = bikeConnections; result.planningSupplyRisk = planningSupplyRisk
+        return result
+    }
     public var familyID: String { rides.map { "\($0.route.parentID):\($0.direction)" }.joined(separator: "|") }
 }
 
@@ -109,6 +117,13 @@ public struct TripPlanner: Sendable {
         let identity: String
         var bikes: [Int: BikeConnection] = [:]
         var supplyRisk: Double = 0
+    }
+    private struct FamilyBound {
+        let score: Double
+        let access: Double
+        let egress: Double
+        let walking: Double
+        let riding: Double
     }
     private struct Cell: Hashable {
         let x: Int; let y: Int
@@ -276,6 +291,9 @@ public struct TripPlanner: Sendable {
                 fullRouteSeconds: routeTimes[index].last ?? 0)
         }
         var candidates: [String: [Candidate]] = [:]
+        var familyBounds: [String: FamilyBound] = [:]
+        let hasBikes = !accessConnections.isEmpty || !egressConnections.isEmpty
+        var evaluated = 0, bounded = 0
         func addVariant(_ segments: [Segment], access: Double, egress: Double, transfer: Double, connections: [Int: BikeConnection]) {
             // Apply availability before ranking and limiting candidates: many cheap closed
             // routes must not crowd all usable alternatives out of the result window.
@@ -284,14 +302,27 @@ public struct TripPlanner: Sendable {
             }
             // Bound each family's work without collapsing different boarding/alighting
             // platforms before pedestrian routing can reveal barriers and detours.
-            let bikeKey = connections.keys.sorted().map { "\($0):\(BikeRouting.pairID(connections[$0]!))" }.joined(separator: "|")
-            let key = segments.map { families[$0.pattern] }.joined(separator: "|") + "|bikes:" + connections.keys.sorted().map(String.init).joined(separator: "-")
+            let key = segments.map { families[$0.pattern] }.joined(separator: "|") + (connections.isEmpty ? "" : "|bikes:" + connections.keys.sorted().map(String.init).joined(separator: "-"))
             let riding = segments.map { segment in
                 return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
             }
             var walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
             for (index, bike) in connections { walking[index] = bike.totalSeconds }
             let cycling = connections.values.reduce(0) { $0 + $1.rideSeconds + $1.handlingSeconds }
+            // Waiting cannot make an itinerary faster or cheaper. Once a route family
+            // has enough alternatives, avoid calculating the same timetable for a
+            // candidate that cannot improve either its score or any retained tradeoff.
+            let minimumScore = JourneyPreferenceCost.score(elapsed: riding.reduce(0,+) + walking.reduce(0,+),
+                walking: max(0,walking.reduce(0,+) - cycling), waiting: 0, transfers: max(0,segments.count-1),
+                rentals: connections.count, unknownWaits: 0, preferences: preferences)
+            if !preservePlatforms, let best = candidates[key]?.first, minimumScore >= best.score { bounded += 1; return }
+            let rideDistance = segments.reduce(0.0) { $0 + patterns[$1.pattern].distances[$1.alight] - patterns[$1.pattern].distances[$1.board] }
+            if let bound = familyBounds[key], minimumScore >= bound.score,
+               access >= bound.access, egress >= bound.egress,
+               access + egress + transfer >= bound.walking, rideDistance >= bound.riding {
+                bounded += 1; return
+            }
+            evaluated += 1
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
             let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
                 minimumServiceWaits: segments.map { serviceWaits[$0.pattern] },
@@ -306,6 +337,7 @@ public struct TripPlanner: Sendable {
             }
             let score = assessment.score + risk
             guard score.isFinite else { return }
+            let bikeKey = connections.isEmpty ? "" : connections.keys.sorted().map { "\($0):\(BikeRouting.pairID(connections[$0]!))" }.joined(separator: "|")
             if !preservePlatforms {
                 if let best = candidates[key]?.first, best.score <= score { return }
                 candidates[key] = [Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score,
@@ -338,8 +370,19 @@ public struct TripPlanner: Sendable {
                 pool = retained
             }
             candidates[key] = pool
+            if pool.count >= 6 {
+                familyBounds[key] = FamilyBound(score: pool.map(\.score).sorted()[2],
+                    access: pool.map(\.access).min()!, egress: pool.map(\.egress).min()!,
+                    walking: pool.map { $0.access + $0.egress + $0.transfer }.min()!,
+                    riding: pool.map { value in value.segments.reduce(0.0) {
+                        $0 + patterns[$1.pattern].distances[$1.alight] - patterns[$1.pattern].distances[$1.board]
+                    } }.min()!)
+            }
         }
         func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
+            if !hasBikes {
+                addVariant(segments, access: access, egress: egress, transfer: transfer, connections: [:]); return
+            }
             guard let first = segments.first, let last = segments.last else { return }
             let startID = patterns[first.pattern].stops[first.board].stationID
             let endID = patterns[last.pattern].stops[last.alight].stationID
@@ -379,6 +422,7 @@ public struct TripPlanner: Sendable {
                 }
             }
         }
+        if ProcessInfo.processInfo.environment["BUS_PLANNING_PROFILE"] == "1" { print("BUS_SEARCH evaluated=\(evaluated) bounded=\(bounded)") }
         let pools = candidates.keys.sorted()
         let all = pools.flatMap { candidates[$0]! }
         let eligible = preservePlatforms ? all : pools.compactMap { candidates[$0]!.min { $0.score < $1.score } }
