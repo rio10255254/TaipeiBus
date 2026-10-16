@@ -17,6 +17,30 @@ final class PedestrianAnchorTests: XCTestCase {
         XCTAssertNil(AnchoredPedestrianPath.make([end,Coordinate(latitude:25.04,longitude:121.551)],from:start,to:end))
         XCTAssertNil(AnchoredPedestrianPath.make([],from:start,to:end))
     }
+    func testIndoorWalkingAccessSurvivesSmallGPSChangesAtZhihong() throws {
+        // A real provider response near this public building starts roughly 54 m
+        // from an indoor fix. The former 50 m cutoff rejected the whole journey.
+        let indoor = Coordinate(latitude:25.0189833,longitude:121.5396361)
+        let pathStart = Coordinate(latitude:25.01947,longitude:121.5396361)
+        let end = Coordinate(latitude:25.026154,longitude:121.543636)
+        XCTAssertGreaterThan(indoor.distance(to:pathStart),50)
+        XCTAssertNil(AnchoredPedestrianPath.make([pathStart,end],from:indoor,to:end))
+        let walking = try XCTUnwrap(AnchoredPedestrianPath.make([pathStart,end],from:indoor,to:end,
+            maximumOffset:AnchoredPedestrianPath.maximumWalkingAccess))
+        XCTAssertEqual(walking.coordinates,[indoor,pathStart,end])
+        XCTAssertEqual(walking.accessDistance,indoor.distance(to:pathStart),accuracy:0.01)
+        let shifted = Coordinate(latitude:indoor.latitude,longitude:indoor.longitude+0.0001)
+        XCTAssertNotNil(AnchoredPedestrianPath.make([pathStart,end],from:shifted,to:end,
+            maximumOffset:AnchoredPedestrianPath.maximumWalkingAccess))
+    }
+    func testBuildingAccessBoundStillRejectsDistantOrInvalidPaths() {
+        let a=Coordinate(latitude:25.019,longitude:121.5395), b=Coordinate(latitude:25.026,longitude:121.5436)
+        let far=Coordinate(latitude:25.0205,longitude:121.5395)
+        XCTAssertNil(AnchoredPedestrianPath.make([far,b],from:a,to:b,
+            maximumOffset:AnchoredPedestrianPath.maximumWalkingAccess))
+        XCTAssertNil(AnchoredPedestrianPath.make([.init(latitude:.nan,longitude:121.54),b],from:a,to:b,
+            maximumOffset:AnchoredPedestrianPath.maximumWalkingAccess))
+    }
     func testExactEndpointsDoNotGainExtraSegmentsOrTime() throws {
         let a=Coordinate(latitude:25.04,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.541)
         let result=try XCTUnwrap(AnchoredPedestrianPath.make([a,b],from:a,to:b))

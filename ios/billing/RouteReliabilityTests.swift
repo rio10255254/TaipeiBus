@@ -8,6 +8,115 @@ import MapKit
 @MainActor final class RouteReliabilityTests: XCTestCase {
     let campus = Coordinate(latitude: 25.01945, longitude: 121.53955)
 
+    func testTemporaryStreetFailureDoesNotEnterUnreachableCache() async throws {
+        let p = JourneyPlannerModel(); defer { p.finish() }
+        let leg = WalkingLeg(from:campus,to:.init(latitude:25.026154,longitude:121.543636))
+        var calls = 0
+        p.testStreet = { value,_ in
+            calls += 1
+            if calls == 1 { throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.serverFailure.rawValue)) }
+            var checked = value; checked.distance = 1200; checked.duration = 900
+            checked.coordinates = [value.from,value.to]; return checked
+        }
+        let failed = try await p.auditStreet(leg)
+        XCTAssertFalse(failed.verified); XCTAssertTrue(failed.temporaryStreetFailure)
+        let recovered = try await p.auditStreet(leg)
+        XCTAssertTrue(recovered.verified); XCTAssertEqual(calls,2)
+    }
+
+    func testInterruptedBikeAccessDoesNotDownloadTheRideAndEgress() async throws {
+        let p = JourneyPlannerModel(); defer { p.finish() }
+        let pickup = BikeStation(id:"p",name:"pickup",coordinate:.init(latitude:25.0195,longitude:121.54),capacity:30)
+        let dropoff = BikeStation(id:"d",name:"dropoff",coordinate:.init(latitude:25.026,longitude:121.543),capacity:30)
+        let end = Coordinate(latitude:25.026154,longitude:121.543636)
+        var leg = WalkingLeg(from:campus,to:end)
+        leg.bike = BikeLeg(BikeConnection(pickup:pickup,dropoff:dropoff,bikes:8,docks:8,
+            accessMeters:100,rideMeters:900,egressMeters:100,accessSeconds:80,
+            rideSeconds:300,egressSeconds:80,handlingSeconds:60))
+        var calls = 0
+        p.testStreet = { _,_ in
+            calls += 1
+            throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.serverFailure.rawValue))
+        }
+        let failed = try await p.verifyCyclingLegForTest(leg)
+        XCTAssertFalse(failed.verified); XCTAssertTrue(failed.temporaryStreetFailure)
+        XCTAssertEqual(calls,1,"No cycling or onward request is useful until the pickup walk is confirmed")
+    }
+
+    func testProductionSearchRetriesAfterAnInitialProviderInterruption() async throws {
+        let service = TransitService(), p = JourneyPlannerModel(); defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        var failedAt: Date?, failures = 0
+        p.testStreet = { value,_ in
+            let now = Date(); if failedAt == nil { failedAt = now }
+            if now.timeIntervalSince(failedAt!) < 1.5 {
+                failures += 1
+                throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.unknown.rawValue))
+            }
+            var checked = value
+            checked.distance = value.from.distance(to:value.to)*1.2
+            checked.duration = (checked.distance ?? 0)/1.25
+            checked.coordinates = [value.from,value.to]; return checked
+        }
+        p.setDestination(TravelPlace(name:"內湖站",address:"",coordinate:.init(latitude:25.083675,longitude:121.594363)),
+            metadata:metadata,currentLocation:campus)
+        for _ in 0..<1200 {
+            if !p.planning && !p.checkingWalks { break }
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        XCTAssertGreaterThan(failures,0)
+        XCTAssertLessThanOrEqual(failures,2,"A shared provider interruption must stop the batch instead of querying every platform")
+        XCTAssertTrue(p.options.contains { $0.verified && $0.walkIssue == nil })
+        XCTAssertNil(p.message,"A temporary first pass must recover within the same search")
+    }
+
+    func testZhihongIndoorFixRetainsTheProviderWalkingRoute() async throws {
+        let p = JourneyPlannerModel(); p.auditStreetDiagnostics = true
+        defer { p.finish() }
+        let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
+        let entrance = Coordinate(latitude:25.026154,longitude:121.543636)
+        let leg = try await p.auditStreet(WalkingLeg(from:from,to:entrance))
+        XCTAssertTrue(leg.verified,"The provider has a real walking route; an ordinary building-access offset must not delete it")
+    }
+
+    func testZhihongToBothReportedDestinationsThroughProductionPlanner() async throws {
+        let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
+        try await verifyOtherJourney(from:from,to:.init(latitude:25.083675,longitude:121.594363),name:"Zhihong_Neihu")
+        // Published shop pin for 牛肆, 吉林路422號. Street planning must not
+        // depend on a separate live POI-name search returning the shop today.
+        try await verifyOtherJourney(from:from,to:.init(latitude:25.0660056,longitude:121.5302137),name:"Zhihong_NiuSi")
+    }
+
+    func testRepeatedProductionSearchWithMovingOriginAndCancelledComparisons() async throws {
+        let service = TransitService(), p = JourneyPlannerModel()
+        defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        let bikes = await service.bikeNetwork(), counts = await service.bikeAvailability(network:bikes)
+        p.updateBikes(network:bikes,availability:counts)
+        p.updateSnapshot(await service.refresh()); p.auditStreetDiagnostics = true
+        let neihu = try XCTUnwrap(metadata.metro.stations.first { $0.code == "BR19" })
+        let targets = [neihu.coordinate, Coordinate(latitude:25.0660056,longitude:121.5302137)]
+        let origins = [campus, Coordinate(latitude:25.01967,longitude:121.53943),
+            Coordinate(latitude:25.0202,longitude:121.5397), Coordinate(latitude:25.0185,longitude:121.5385),
+            Coordinate(latitude:25.0189833,longitude:121.5396361), Coordinate(latitude:25.0189833,longitude:121.5394361)]
+        for index in 0..<12 {
+            let start = Date(), from = origins[index % origins.count], to = targets[index % targets.count]
+            // Changing origin starts work for the old target; selecting the next
+            // target immediately cancels it, just as two consecutive user edits do.
+            p.useLocation(from,metadata:metadata)
+            p.setDestination(TravelPlace(name:"Repeat-\(index)",address:"",coordinate:to),metadata:metadata,currentLocation:from)
+            for _ in 0..<1200 {
+                if p.options.contains(where: { $0.verified && $0.walkIssue == nil }) { break }
+                if !p.planning && !p.checkingWalks { break }
+                try await Task.sleep(for:.milliseconds(100))
+            }
+            let checked = p.options.filter { $0.verified && $0.walkIssue == nil }
+            print("REPEATED_PLAN index=\(index) from=\(from) to=\(to) seconds=\(Date().timeIntervalSince(start)) checked=\(checked.count) planning=\(p.planning) checking=\(p.checkingWalks) message=\(p.message ?? "nil")")
+            XCTAssertFalse(checked.isEmpty,"Repeated search \(index) must retain an actual verified street connection")
+            if checked.isEmpty { break }
+        }
+    }
+
     private func verifyOtherJourney(from: Coordinate, to: Coordinate, name: String) async throws {
         let service = TransitService(), p = JourneyPlannerModel()
         defer { p.finish() }

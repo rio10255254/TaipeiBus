@@ -119,6 +119,7 @@ struct NativeBusMap: UIViewRepresentable {
         private var lastNearbyCenter: Coordinate?
         private var lastStationSearchKey = ""
         private var lastStationBrowsing: Bool?
+        private var lastJourneyStationFocus: Bool?
         private var buildingOpacity = 1.0
         private var buildingOpacityTarget = 1.0
         private var buildingLayer: MLNFillExtrusionStyleLayer?
@@ -297,8 +298,9 @@ struct NativeBusMap: UIViewRepresentable {
             waypointDots.predicate = NSPredicate(format: "waypoint == 1")
             waypointDots.minimumZoomLevel = 10.8
             waypointDots.iconImageName = NSExpression(forKeyPath: "icon")
-            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: true)
-            waypointDots.iconPadding = NSExpression(forConstantValue: 1)
+            waypointDots.iconAllowsOverlap = NSExpression(forConstantValue: false)
+            waypointDots.iconScale = NSExpression(mglJSONObject:["interpolate",["linear"],["zoom"],10.8,0.5,15,0.85,17,1.0])
+            waypointDots.iconPadding = NSExpression(forConstantValue: 2)
             style.insertLayer(waypointDots, below: tripDots)
             let tripNames = MLNSymbolStyleLayer(identifier: "journey-stop-names", source: tripStops)
             tripNames.predicate = NSPredicate(format: "waypoint == 0")
@@ -370,6 +372,7 @@ struct NativeBusMap: UIViewRepresentable {
             style.addLayer(names)
             lastSnapshotRevision = -1; lastRouteKey = ""; lastFocusRevision = -1; lastMetroKey = ""; lastMetroTrainKey = ""; lastMetroFocusKey = ""
             lastStationBrowsing = nil
+            lastJourneyStationFocus = nil
             lastStationID = nil
             lastBikeKey = ""
             update(location: pendingLocation)
@@ -946,7 +949,12 @@ struct NativeBusMap: UIViewRepresentable {
                     NSExpression(forConstantValue: model.stationBrowsing ? 1.0 : 0.85)
                 lastStationBrowsing = model.stationBrowsing
             }
-            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = model.stationBrowsing || (!hasVehicle && model.planner.selected == nil)
+            let journeyFocus = model.planner.destination != nil || model.stationWalk.isActive
+            map.style?.layer(withIdentifier:"nearby-station-dots")?.isVisible = !journeyFocus
+            map.style?.layer(withIdentifier: "nearby-station-names")?.isVisible = !journeyFocus && (model.stationBrowsing || !hasVehicle)
+            if lastJourneyStationFocus != journeyFocus {
+                lastJourneyStationFocus = journeyFocus; updateNearbyStations(force:true)
+            }
             let nextBuildingOpacity = model.highlightVehicle && hasVehicle ? 0.26 : 1.0
             if nextBuildingOpacity != buildingOpacityTarget || reduceMotion && buildingOpacity != nextBuildingOpacity {
                 buildingOpacityTarget = nextBuildingOpacity
@@ -1034,6 +1042,9 @@ struct NativeBusMap: UIViewRepresentable {
 
         private func updateNearbyStations(force: Bool = false) {
             guard let map, nearbySource != nil else { return }
+            guard model.planner.destination == nil, !model.stationWalk.isActive else {
+                nearbySource?.shape = nil; lastNearbyCenter = nil; return
+            }
             // Hidden station labels need no distance scan, sort, or symbol-layout
             // update while the camera is zooming through the city view.
             guard model.stationBrowsing || map.zoomLevel >= 15.5 else { return }
@@ -1181,6 +1192,8 @@ struct NativeBusMap: UIViewRepresentable {
                 state["selectedJourney"] = model.planner.selectedID ?? ""
                 state["userFixAge"] = model.location.updatedAt.map { Date().timeIntervalSince($0) } ?? -1
                 state["userFixAccuracy"] = model.location.accuracy ?? -1
+                state["nearbyStationsVisible"] = mapView.style?.layer(withIdentifier:"nearby-station-dots")?.isVisible ?? false
+                state["waypointOverlapAllowed"] = (mapView.style?.layer(withIdentifier:"journey-waypoint-dots") as? MLNSymbolStyleLayer)?.iconAllowsOverlap?.constantValue as? Bool ?? true
                 let open = mapView.bounds.inset(by: mapView.contentInset)
                 state["routeViewport"] = ["x":open.minX,"y":open.minY,"width":open.width,"height":open.height]
                 if model.planner.selected != nil, !model.planner.started {

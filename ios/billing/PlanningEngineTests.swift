@@ -41,11 +41,12 @@ import MapKit
         p.auditLoadChoices(choices,from:TravelPlace(name:"起點",address:"",coordinate:a),to:TravelPlace(name:"終點",address:"",coordinate:b))
         return p
     }
-    func testWholeCyclingCompetesOnTheSameScaleWithoutAnExtraFourMinuteGate() throws {
+    func testTransitLeadsAndWholeCyclingRemainsAvailableWithItsRealTime() throws {
         let bus = transit(), bike = bicycle(), p = planner([bus,bike])
         XCTAssertEqual(try XCTUnwrap(p.duration(bus,at:Date())).totalSeconds,1000,accuracy:1)
         XCTAssertEqual(try XCTUnwrap(p.duration(bike,at:Date())).totalSeconds,850,accuracy:0.001)
-        XCTAssertEqual(p.options.first?.id,bike.id,"A worthwhile 150-second saving can win after rental inconvenience is counted")
+        XCTAssertEqual(p.options.first?.id,bus.id,"A small whole-trip cycling saving does not replace the transit recommendation")
+        XCTAssertTrue(p.options.contains { $0.id == bike.id },"The faster cycling choice remains available")
         XCTAssertTrue(p.options.contains { $0.id == bus.id },"The convenient no-rental choice remains available")
     }
     func testEmptyPickupReordersTheRecommendationWithoutMovingTheInspectedMap() {

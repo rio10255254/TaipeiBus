@@ -6,6 +6,12 @@ import MapKit
     var providerRequests = 0, deferred = 0, primaryConfirmed = 0, failures = 0
     let destination = CLLocationCoordinate2D(latitude:25.026154,longitude:121.543636)
     let normal = [
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0190833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0188833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5394361),
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5396361),
+        CLLocationCoordinate2D(latitude:25.0191833,longitude:121.5395361),
         CLLocationCoordinate2D(latitude:25.0192,longitude:121.5390),
         CLLocationCoordinate2D(latitude:25.01945,longitude:121.53955),
         CLLocationCoordinate2D(latitude:25.01965,longitude:121.53965),
@@ -14,6 +20,14 @@ import MapKit
         CLLocationCoordinate2D(latitude:25.01905,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01885,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01865,longitude:121.53975)
+        ,CLLocationCoordinate2D(latitude:25.0202,longitude:121.5397)
+        ,CLLocationCoordinate2D(latitude:25.0185,longitude:121.5385)
+        ,CLLocationCoordinate2D(latitude:25.0180,longitude:121.5385)
+        ,CLLocationCoordinate2D(latitude:25.0174,longitude:121.5360)
+        ,CLLocationCoordinate2D(latitude:25.0157,longitude:121.5380)
+        ,CLLocationCoordinate2D(latitude:25.0175,longitude:121.5405)
+        ,CLLocationCoordinate2D(latitude:25.0185,longitude:121.5415)
+        ,CLLocationCoordinate2D(latitude:25.0203,longitude:121.5413)
     ]
     // Two ordinary searches used to issue this many optional street requests in
     // a burst. Stop at the first provider limit, and never retry this probe.

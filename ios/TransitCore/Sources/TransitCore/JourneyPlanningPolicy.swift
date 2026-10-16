@@ -1,5 +1,36 @@
 import Foundation
 
+/// A bicycle connects the rider to transit. Longer or repeated rentals remain
+/// inspectable alternatives, rather than displacing a practical transit journey.
+public enum TransitBikePolicy {
+    public static let maximumFeederMeters = 2_000.0
+    public static let maximumFeederRideSeconds = 600.0
+    /// Candidate distances are conservative detours. Keep some room until real
+    /// cycling directions replace them; only verified legs decide recommendation.
+    public static let maximumFeederSearchMeters = 2_500.0
+    public static func feederPreferences(_ source: LiveSettings.Planning) -> LiveSettings.Planning {
+        var value = source
+        value.bikeMaximumRideMeters = min(value.bikeMaximumRideMeters,maximumFeederSearchMeters)
+        return value
+    }
+    public static func isLocalFeeder(_ connection: BikeConnection) -> Bool {
+        connection.rideMeters.isFinite && connection.rideSeconds.isFinite &&
+            connection.rideMeters <= maximumFeederMeters && connection.rideSeconds <= maximumFeederRideSeconds
+    }
+    public static func isFeederCandidate(_ connection: BikeConnection) -> Bool {
+        connection.rideMeters.isFinite && connection.rideSeconds.isFinite &&
+            connection.rideMeters <= 3_000 && connection.rideSeconds <= 900
+    }
+    public static func isTransitLed(transitSeconds: Double, rideSeconds: [Double], rideMeters: [Double]) -> Bool {
+        if rideSeconds.isEmpty { return true }
+        guard rideSeconds.count == 1, rideSeconds.count == rideMeters.count,
+              transitSeconds.isFinite, transitSeconds > 0,
+              rideSeconds.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= maximumFeederRideSeconds }),
+              rideMeters.allSatisfy({ $0.isFinite && $0 >= 0 && $0 <= maximumFeederMeters }) else { return false }
+        return rideSeconds.reduce(0,+) <= max(300,transitSeconds)
+    }
+}
+
 /// One preference model for transit, direct cycling and walking. These costs never
 /// become minutes on an arrival clock.
 public enum JourneyPreferenceCost {
@@ -25,11 +56,13 @@ public struct JourneyChoice: Sendable {
     public let unknownWaits: Int
     public let supplyRisk: Double
     public let score: Double
+    public let transitLed: Bool
     public init(id: String, group: String, elapsed: Double, walking: Double, waiting: Double,
                 transfers: Int, rentals: Int, unknownWaits: Int, supplyRisk: Double = 0,
-                preferences: LiveSettings.Planning = .init()) {
+                preferences: LiveSettings.Planning = .init(), transitLed: Bool = true) {
         self.id = id; self.group = group; self.elapsed = elapsed; self.walking = walking
         self.transfers = transfers; self.rentals = rentals; self.unknownWaits = unknownWaits; self.supplyRisk = supplyRisk
+        self.transitLed = transitLed
         score = JourneyPreferenceCost.score(elapsed: elapsed, walking: walking, waiting: waiting,
             transfers: transfers, rentals: rentals, unknownWaits: unknownWaits, supplyRisk: supplyRisk, preferences: preferences)
     }
@@ -43,7 +76,7 @@ public enum JourneyChoiceRanking {
             if $0.elapsed != $1.elapsed { return $0.elapsed < $1.elapsed }
             return $0.id < $1.id
         }
-        guard let best = ordered.first else { return [] }
+        guard let best = ordered.first(where: \.transitLed) ?? ordered.first else { return [] }
         let frontier = ordered.filter { a in
             !ordered.contains { b in
                 b.id != a.id && b.elapsed <= a.elapsed && b.walking <= a.walking && b.transfers <= a.transfers &&
@@ -64,11 +97,14 @@ public enum JourneyChoiceRanking {
             result.append(choice)
         }
         append(best)
-        if fastest.elapsed < best.elapsed - 60 { append(fastest) }
-        append(reasonable.min { $0.walking < $1.walking })
-        append(reasonable.min { $0.transfers < $1.transfers })
-        append(reasonable.min { $0.rentals < $1.rentals })
-        for choice in reasonable { append(choice) }
+        if fastest.transitLed, fastest.elapsed < best.elapsed - 60 { append(fastest) }
+        let transit = reasonable.filter(\.transitLed)
+        append(transit.min { $0.walking < $1.walking })
+        append(transit.min { $0.transfers < $1.transfers })
+        append(transit.min { $0.rentals < $1.rentals })
+        for choice in transit { append(choice) }
+        if !fastest.transitLed, fastest.elapsed < best.elapsed - 60 { append(fastest) }
+        for choice in reasonable where !choice.transitLed { append(choice) }
         return result.map(\.id)
     }
 }

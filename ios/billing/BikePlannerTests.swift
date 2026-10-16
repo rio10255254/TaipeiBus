@@ -150,7 +150,11 @@ final class BikePlannerTests: XCTestCase {
         p.auditLoadChoices([base],from:TravelPlace(name:"起點",address:"",coordinate:start),to:TravelPlace(name:"終點",address:"",coordinate:base.walks.last!.to))
         p.select(base)
         let revision=p.mapRevision
-        p.testCycle = { _ in self.cycling().walks[0] }
+        p.testCycle = { _ in
+            var checked = self.cycling().walks[0]
+            if var bike = checked.bike { bike.rideSeconds = 300; checked.bike = bike; checked.duration = bike.totalSeconds }
+            return checked
+        }
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
         for _ in 0..<200 {
             if !p.checkingWalks { break }
@@ -178,7 +182,14 @@ final class BikePlannerTests: XCTestCase {
         var snapshot=TransitSnapshot();snapshot.estimates=EstimateFeed(seconds:["G:G-a":1000],updatedAt:now)
         p.updateSnapshot(snapshot)
         XCTAssertTrue(try XCTUnwrap(try XCTUnwrap(p.duration(base,at:now)).waits.first).missedNext)
-        p.testCycle = { _ in self.cycling().walks[0] }
+        p.testCycle = { _ in
+            var checked = self.cycling().walks[0]
+            if var bike = checked.bike {
+                bike.rideSeconds = 500; bike.toPickupSeconds = 200; bike.fromDropoffSeconds = 200
+                checked.bike = bike; checked.duration = bike.totalSeconds
+            }
+            return checked
+        }
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts())
         for _ in 0..<200 {
             if !p.checkingWalks { break }

@@ -1,5 +1,25 @@
 import Foundation
 import MapKit
+import Combine
+
+/// A bounded on-device troubleshooting history. Deliberately accepts no places,
+/// coordinates, route IDs or provider error descriptions. Sharing is user initiated.
+@MainActor final class JourneyDiagnostics: ObservableObject {
+    static let shared = JourneyDiagnostics()
+    private let key = "journeyDiagnostics.v1"
+    @Published private(set) var entries: [String]
+    init() { entries = Array((UserDefaults.standard.stringArray(forKey:"journeyDiagnostics.v1") ?? []).suffix(80)) }
+    func record(_ event: String) {
+        let timestamp = ISO8601DateFormatter().string(from:Date())
+        entries.append("\(timestamp) \(event)"); entries = Array(entries.suffix(80))
+        UserDefaults.standard.set(entries,forKey:key)
+    }
+    var report: String {
+        let version = Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "?"
+        let build = Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "?"
+        return "TaipeiBus \(version) (\(build))\n\(ProcessInfo.processInfo.operatingSystemVersionString)\nNo coordinates or place names recorded.\n" + entries.joined(separator:"\n")
+    }
+}
 
 /// One budget for the whole app: initial choices and active guidance retain room
 /// even while many optional street/dock combinations are being compared.
@@ -85,6 +105,15 @@ import MapKit
         guard throttle || interrupted || network else { return false }
         blockedUntil = max(blockedUntil,ProcessInfo.processInfo.systemUptime + (throttle ? window : min(2,window)))
         drain(); return true
+    }
+    static func isTemporary(_ error: Error) -> Bool {
+        let value = error as NSError
+        if value.domain == MKErrorDomain {
+            return [MKError.Code.loadingThrottled, .unknown, .serverFailure].contains { Int($0.rawValue) == value.code }
+        }
+        return value.domain == NSURLErrorDomain &&
+            [NSURLErrorTimedOut,NSURLErrorNetworkConnectionLost,NSURLErrorCannotConnectToHost,
+             NSURLErrorNotConnectedToInternet,NSURLErrorCannotFindHost,NSURLErrorDNSLookupFailed].contains(value.code)
     }
     private func drain() {
         wake?.cancel(); wake = nil

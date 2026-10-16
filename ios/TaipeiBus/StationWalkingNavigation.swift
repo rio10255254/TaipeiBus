@@ -4,12 +4,17 @@ import TransitCore
 
 /// One verified pedestrian route format shared by journey and station walking.
 enum PedestrianPath {
-    static func leg(_ route: MKRoute, from: Coordinate, to: Coordinate) -> WalkingLeg? {
-        guard route.polyline.pointCount >= 2 else { return nil }
+    static func leg(_ route: MKRoute, from: Coordinate, to: Coordinate,
+                    transport: MKDirectionsTransportType = .walking) -> WalkingLeg? {
+        guard route.polyline.pointCount >= 2, route.distance.isFinite, route.distance >= 0,
+              route.expectedTravelTime.isFinite, route.expectedTravelTime >= 0 else { return nil }
         var points = Array(repeating: CLLocationCoordinate2D(), count: route.polyline.pointCount)
         route.polyline.getCoordinates(&points, range: NSRange(location: 0, length: points.count))
         let coordinates = points.map { Coordinate(latitude: $0.latitude, longitude: $0.longitude) }
-        guard let anchored = AnchoredPedestrianPath.make(coordinates, from: from, to: to) else { return nil }
+        // Walking directions start at the public footpath, not necessarily at an
+        // indoor GPS fix. Cycling retains its stricter station-to-station bound.
+        let offset = transport == .walking ? AnchoredPedestrianPath.maximumWalkingAccess : 50
+        guard let anchored = AnchoredPedestrianPath.make(coordinates, from: from, to: to, maximumOffset:offset) else { return nil }
         var leg = WalkingLeg(from: from, to: to)
         leg.coordinates = anchored.coordinates
         leg.distance = route.distance + anchored.accessDistance
