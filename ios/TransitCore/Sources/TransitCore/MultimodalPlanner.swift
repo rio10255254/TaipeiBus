@@ -225,6 +225,7 @@ public struct MultimodalPlanner: Sendable {
             "\(Int(floor(point.longitude / 0.01))):\(Int(floor(point.latitude / 0.01)))"
         }
         let transferGrid = cycling ? Dictionary(grouping: stationStops.values, by: { transferCell($0.coordinate) }) : [:]
+        let destinationPotential = cycling ? stationStops.mapValues { $0.coordinate.distance(to: destination) / 12 } : [:]
         var streetLinks: [String: [(Link, BikeConnection?)]] = [:]
         func connections(from id: String) -> [(Link, BikeConnection?)] {
             if let cached = streetLinks[id] { return cached }
@@ -234,20 +235,20 @@ public struct MultimodalPlanner: Sendable {
             guard bikeSearch.stations(near: start).contains(where: {
                 BikeRouting.confirmed($0, availability: bikeAvailability, renting: true, at: date)
             }) else { streetLinks[id] = result; return result }
-            var targets: [BusStop] = []
+            var scoredTargets: [(stop: BusStop, cost: Double)] = []
             let indoors = Set((links[id] ?? []).filter(\.internalWalk).map(\.id))
             let x = Int(floor(start.longitude / 0.01)), y = Int(floor(start.latitude / 0.01))
             for dx in -3...3 { for dy in -3...3 {
                 for other in transferGrid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id && !indoors.contains(other.stationID) {
                     let distance = start.distance(to: other.coordinate)
-                    if distance >= preferences.bikeMinimumRideMeters, distance <= min(2_500, bikeRadius) { targets.append(other) }
+                    if distance >= preferences.bikeMinimumRideMeters, distance <= min(2_500, bikeRadius) {
+                        scoredTargets.append((other,distance / preferences.bikeSpeed + (destinationPotential[other.stationID] ?? 0)))
+                    }
                 }
             } }
-            targets.sort {
-                let a = start.distance(to: $0.coordinate) / preferences.bikeSpeed + $0.coordinate.distance(to: destination) / 12
-                let b = start.distance(to: $1.coordinate) / preferences.bikeSpeed + $1.coordinate.distance(to: destination) / 12
-                return a == b ? $0.stationID < $1.stationID : a < b
-            }
+            let targets = scoredTargets.sorted {
+                $0.cost == $1.cost ? $0.stop.stationID < $1.stop.stationID : $0.cost < $1.cost
+            }.map(\.stop)
             var corridors = Set<String>(), added = Set<String>()
             // Include every published outdoor interchange even when its corridor is also
             // represented by another nearby station. Indoor transfers never rent a bike.

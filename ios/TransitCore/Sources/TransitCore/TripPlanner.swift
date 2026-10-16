@@ -141,6 +141,11 @@ public struct TripPlanner: Sendable {
             return a.bikes < b.bikes
         }
     }
+    private struct BoardingKey: Hashable {
+        let pattern: Int
+        let index: Int
+        let cycling: Bool
+    }
     private struct Cell: Hashable {
         let x: Int; let y: Int
         init(_ coordinate: Coordinate) {
@@ -313,15 +318,21 @@ public struct TripPlanner: Sendable {
         // transfer combinations. This preserves every service, early boarding for
         // short trips, the nearest walk and the best downstream arrival.
         var allowedBoards: [Int: Set<Int>] = [:]
+        var firstWaits: [BoardingKey: BoardingWait] = [:]
+        func initialWait(_ pattern: Int, _ index: Int, walking: Double, cycling: Bool) -> BoardingWait {
+            let key = BoardingKey(pattern: pattern,index: index,cycling: cycling)
+            if let cached = firstWaits[key] { return cached }
+            let value = BoardingTime.wait(official: arrivals[pattern][index], readyAt: walking,
+                buffer: ConnectionTiming.buffer(first: true, walking: walking), service: services[pattern],
+                secondsOfDay: timeOfDay, boardingOffset: routeTimes[pattern][index], minimumServiceWait: serviceWaits[pattern])
+            firstWaits[key] = value; return value
+        }
         if preservePlatforms {
             var originGroups: [Int: [BoardingOrigin]] = [:]
             for start in origins { for board in occurrences[start.id] ?? [] {
                 let walk = start.distance * 1.25 / 1.2
                 func boardingCost(seconds: Double, cycling: Double, rentals: Int, risk: Double) -> Double {
-                    let wait = BoardingTime.wait(official: arrivals[board.pattern][board.index], readyAt: seconds,
-                        buffer: ConnectionTiming.buffer(first: true, walking: seconds), service: services[board.pattern],
-                        secondsOfDay: timeOfDay, boardingOffset: routeTimes[board.pattern][board.index],
-                        minimumServiceWait: serviceWaits[board.pattern])
+                    let wait = initialWait(board.pattern,board.index,walking: seconds,cycling: rentals > 0)
                     return JourneyPreferenceCost.score(elapsed: seconds + wait.seconds, walking: max(0,seconds-cycling),
                         waiting: wait.seconds, transfers: 0, rentals: rentals, unknownWaits: wait.evidence == .unknown ? 1 : 0,
                         supplyRisk: risk, preferences: preferences)
@@ -346,6 +357,7 @@ public struct TripPlanner: Sendable {
         }
         var candidates: [FamilyKey: [Candidate]] = [:]
         var familyBounds: [FamilyKey: FamilyBound] = [:]
+        var bestComplete = Double.infinity, bestWithoutRental = Double.infinity
         let hasBikes = !accessConnections.isEmpty || !egressConnections.isEmpty
         var evaluated = 0, bounded = 0
         func addVariant(_ segments: [Segment], access: Double, egress: Double, transfer: Double, connections: [Int: BikeConnection]) {
@@ -368,9 +380,15 @@ public struct TripPlanner: Sendable {
             // Waiting cannot make an itinerary faster or cheaper. Once a route family
             // has enough alternatives, avoid calculating the same timetable for a
             // candidate that cannot improve either its score or any retained tradeoff.
-            let minimumScore = JourneyPreferenceCost.score(elapsed: riding.reduce(0,+) + walking.reduce(0,+),
+            var minimumScore = JourneyPreferenceCost.score(elapsed: riding.reduce(0,+) + walking.reduce(0,+),
                 walking: max(0,walking.reduce(0,+) - cycling), waiting: 0, transfers: max(0,segments.count-1),
                 rentals: connections.count, unknownWaits: 0, preferences: preferences)
+            let first = segments[0]
+            let wait = initialWait(first.pattern,first.board,walking: walking[0],cycling: connections[0] != nil)
+            minimumScore += wait.seconds * preferences.waitingWeight + (wait.evidence == .unknown ? 180 : 0)
+            if segments.count > 1 { minimumScore += 90 * preferences.waitingWeight }
+            let complete = connections.isEmpty ? bestWithoutRental : bestComplete
+            if preservePlatforms, minimumScore > complete + max(1200,complete * 0.35) { bounded += 1; return }
             if !preservePlatforms, let best = candidates[key]?.first, minimumScore >= best.score { bounded += 1; return }
             let rideDistance = segments.reduce(0.0) { $0 + patterns[$1.pattern].distances[$1.alight] - patterns[$1.pattern].distances[$1.board] }
             if let bound = familyBounds[key], minimumScore >= bound.score,
@@ -393,6 +411,8 @@ public struct TripPlanner: Sendable {
             }
             let score = assessment.score + risk
             guard score.isFinite else { return }
+            bestComplete = min(bestComplete,score)
+            if connections.isEmpty { bestWithoutRental = min(bestWithoutRental,score) }
             let bikeKey = connections.isEmpty ? "" : connections.keys.sorted().map { "\($0):\(BikeRouting.pairID(connections[$0]!))" }.joined(separator: "|")
             if !preservePlatforms {
                 if let best = candidates[key]?.first, best.score <= score { return }

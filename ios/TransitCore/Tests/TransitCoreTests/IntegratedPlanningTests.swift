@@ -72,6 +72,17 @@ final class IntegratedPlanningTests: XCTestCase {
             XCTAssertEqual(cached.connections(from:start,to:end,limit:3),plain)
         }
     }
+    func testWalkingAndCyclingAccessKeepTheirOwnReachableDepartureAndNoRentalAlternative() throws {
+        let (metadata,bikes,counts) = fixture()
+        let estimates = EstimateFeed(seconds:["bus:stop-0":1000],updatedAt:date)
+        let result = MultimodalPlanner(metadata:metadata).plan(from:a,to:d,maximumWalk:2000,limit:54,
+            estimates:estimates,at:date,bikeNetwork:bikes,bikeAvailability:counts)
+        let foot = try XCTUnwrap(result.first { $0.bikeConnections.isEmpty })
+        let bicycle = try XCTUnwrap(result.first { $0.bikeConnections[0] != nil })
+        XCTAssertTrue(TripRanking.assessment(foot,estimates:estimates,at:date).missedFirstArrival)
+        XCTAssertFalse(TripRanking.assessment(bicycle,estimates:estimates,at:date).missedFirstArrival)
+        XCTAssertTrue(result.contains { $0.bikeConnections.isEmpty },"A fast rental must not erase the no-rental search bound")
+    }
     func testSeveralDockPairsSurviveUntilActualStreetVerification() {
         let (_,original,counts) = fixture()
         let extra = BikeStation(id:"alternative",name:"另一站",coordinate:Coordinate(latitude:a.latitude,longitude:a.longitude+0.001),capacity:30)
