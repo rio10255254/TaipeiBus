@@ -43,6 +43,16 @@ on:
         type: choice
         options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings', 'usability']
         default: 'all'
+      usability_first_pass:
+        description: 'Mixed-menu first pass: all checks, or recheck suggestion interactions before the complete dark pass'
+        type: choice
+        options: ['all', 'suggestions']
+        default: 'all'
+      usability_appearance:
+        description: 'Check both system appearances, or resume one appearance without repeating the completed one'
+        type: choice
+        options: ['both', 'light', 'dark']
+        default: 'both'
       content_revision_before:
         description: 'For live-settings verification: current live content revision'
         type: string
@@ -122,7 +132,7 @@ jobs:
   simulator:
     if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe'
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
+    timeout-minutes: ${{ inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -739,6 +749,16 @@ jobs:
           fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'suggestions' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped')
+          fi
+          if [ '${{ inputs.usability_appearance }}' = 'dark' ]; then
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+            export TEST_RUNNER_BUS_TEST_DARK=true
+          elif [ '${{ inputs.usability_appearance }}' = 'light' ]; then
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
@@ -766,7 +786,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify system dark appearance with native journeys
-        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
+        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_appearance != 'light' && inputs.usability_appearance != 'dark' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
