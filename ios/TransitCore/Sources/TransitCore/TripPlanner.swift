@@ -131,6 +131,16 @@ public struct TripPlanner: Sendable {
         let walking: Double
         let ready: Double
     }
+    private struct FamilyKey: Hashable, Comparable {
+        let first: Int
+        let second: Int
+        let bikes: Int
+        static func < (a: Self, b: Self) -> Bool {
+            if a.first != b.first { return a.first < b.first }
+            if a.second != b.second { return a.second < b.second }
+            return a.bikes < b.bikes
+        }
+    }
     private struct Cell: Hashable {
         let x: Int; let y: Int
         init(_ coordinate: Coordinate) {
@@ -290,6 +300,8 @@ public struct TripPlanner: Sendable {
             estimates?.value(routeID: pattern.route.parentID, stopID: $0.id, at: date)
         } }
         let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
+        let familyIndex = Dictionary(uniqueKeysWithValues: Set(families).sorted().enumerated().map { ($0.element,$0.offset) })
+        let familyIDs = families.map { familyIndex[$0]! }
         let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
         let services = patterns.map { $0.route.servicePlans[$0.direction]?.service(at: date) }
         let serviceWaits = patterns.enumerated().map { index, pattern in
@@ -332,8 +344,8 @@ public struct TripPlanner: Sendable {
                 allowedBoards[pattern] = kept
             }
         }
-        var candidates: [String: [Candidate]] = [:]
-        var familyBounds: [String: FamilyBound] = [:]
+        var candidates: [FamilyKey: [Candidate]] = [:]
+        var familyBounds: [FamilyKey: FamilyBound] = [:]
         let hasBikes = !accessConnections.isEmpty || !egressConnections.isEmpty
         var evaluated = 0, bounded = 0
         func addVariant(_ segments: [Segment], access: Double, egress: Double, transfer: Double, connections: [Int: BikeConnection]) {
@@ -344,7 +356,9 @@ public struct TripPlanner: Sendable {
             }
             // Bound each family's work without collapsing different boarding/alighting
             // platforms before pedestrian routing can reveal barriers and detours.
-            let key = segments.map { families[$0.pattern] }.joined(separator: "|") + (connections.isEmpty ? "" : "|bikes:" + connections.keys.sorted().map(String.init).joined(separator: "-"))
+            let key = FamilyKey(first: familyIDs[segments[0].pattern],
+                second: segments.count > 1 ? familyIDs[segments[1].pattern] : -1,
+                bikes: connections.keys.reduce(0) { $0 | (1 << $1) })
             let riding = segments.map { segment in
                 return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
             }

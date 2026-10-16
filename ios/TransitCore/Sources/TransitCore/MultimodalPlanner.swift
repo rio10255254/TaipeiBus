@@ -280,6 +280,16 @@ public struct MultimodalPlanner: Sendable {
         // Three transfers cover bus–metro–metro–bus and cross-branch rail journeys.
         for round in 0..<4 {
             if Task.isCancelled { return [] }
+            // A completed itinerary is an upper bound. Continue to keep a generous
+            // convenience window, with a separate no-rental bound so a quick bicycle
+            // estimate can never eliminate every walk-to-transit alternative.
+            let allBest = min(bus.map(\.score).min() ?? .infinity, candidates.map(\.score).min() ?? .infinity)
+            let footBest = min(bus.filter { $0.bikeConnections.isEmpty }.map(\.score).min() ?? .infinity,
+                candidates.filter { $0.label.bikes.isEmpty && $0.bike == nil }.map(\.score).min() ?? .infinity)
+            func ceiling(_ label: Label) -> Double {
+                let best = label.bikes.isEmpty ? footBest : allBest
+                return best + max(1200, best * 0.35)
+            }
             var arrived: [String: [Label]] = [:]
             func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
                 var pool = values[id] ?? []
@@ -315,6 +325,8 @@ public struct MultimodalPlanner: Sendable {
                         let source = boarded.label, seconds: Double
                         let boardingDwell = boarded.index > 0 && pattern.dwell.indices.contains(boarded.index) ? pattern.dwell[boarded.index] : 0
                         seconds = pattern.cumulative[index] - pattern.cumulative[boarded.index] - boardingDwell
+                        let fixedCost = source.cost + seconds + (boarded.unknown ? 180 : 0) + (round > 0 ? preferences.effectiveTransferPenaltySeconds : 0)
+                        if fixedCost + boarded.wait * preferences.waitingWeight > ceiling(source) { continue }
                         // Short-turn trains that stop short of this stop do not help: wait for
                         // the sparser service that does reach it.
                         var wait = boarded.wait
@@ -323,10 +335,12 @@ public struct MultimodalPlanner: Sendable {
                            far > near { wait *= far / near }
                         let elapsed = source.elapsed + wait + seconds
                         guard elapsed.isFinite, elapsed < 4 * 3600 else { continue }
+                        let cost = fixedCost + wait * preferences.waitingWeight
+                        if cost > ceiling(source) { continue }
                         var label = Label(segments: source.segments + [Segment(pattern: pIndex, first: boarded.index, last: index)],
                             access: source.access, distances: source.distances, transferSeconds: source.transferSeconds,
                             elapsed: elapsed, walking: source.walking,
-                            cost: source.cost + wait * preferences.waitingWeight + seconds + (boarded.unknown ? 180 : 0) + (round > 0 ? preferences.effectiveTransferPenaltySeconds : 0),
+                            cost: cost,
                             lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus,
                             family: source.family + "|" + pattern.route.parentID)
                         label.bikes = source.bikes; label.supplyRisk = source.supplyRisk
@@ -405,13 +419,12 @@ public struct MultimodalPlanner: Sendable {
                 }
             }
             if round == 3 { break }
-            let bestCost = candidates.map(\.score).min() ?? .infinity
             var next: [String: [Label]] = [:]
             for (id, labels) in arrived {
-                guard labels.contains(where: { $0.cost <= bestCost + 900 }) else { continue }
+                guard labels.contains(where: { $0.cost <= ceiling($0) }) else { continue }
                 for (link, bike) in connections(from: id) {
                     for label in labels {
-                        if label.cost > bestCost + 900 { continue }
+                        if label.cost > ceiling(label) { continue }
                         if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
                            stationStops[link.id]?.mode == .bus, bike == nil { continue }
                         // Same platform changing trains still includes a short platform allowance.
