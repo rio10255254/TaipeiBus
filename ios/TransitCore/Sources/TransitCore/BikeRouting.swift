@@ -17,6 +17,14 @@ public struct BikeConnection: Sendable, Equatable {
     public let egressSeconds: Double
     public let handlingSeconds: Double
     public var totalSeconds: Double { accessSeconds + handlingSeconds + rideSeconds + egressSeconds }
+    public init(pickup: BikeStation, dropoff: BikeStation, bikes: Int, docks: Int,
+                accessMeters: Double, rideMeters: Double, egressMeters: Double,
+                accessSeconds: Double, rideSeconds: Double, egressSeconds: Double, handlingSeconds: Double) {
+        self.pickup = pickup; self.dropoff = dropoff; self.bikes = bikes; self.docks = docks
+        self.accessMeters = accessMeters; self.rideMeters = rideMeters; self.egressMeters = egressMeters
+        self.accessSeconds = accessSeconds; self.rideSeconds = rideSeconds; self.egressSeconds = egressSeconds
+        self.handlingSeconds = handlingSeconds
+    }
 }
 
 /// Walking and cycling both take the street, not the straight line between two points.

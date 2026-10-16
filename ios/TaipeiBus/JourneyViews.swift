@@ -88,7 +88,7 @@ struct JourneyPlanningView: View {
                         Label(AppText.text("開始導航"), systemImage: "location.fill")
                             .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
                     }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
-                        .disabled(planner.selected.map { !$0.verified || $0.walkIssue != nil || planner.unavailableBoarding($0) != nil } ?? true)
+                        .disabled(planner.selected.map { !planner.canUse($0) } ?? true)
                         .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
                 }
             }
@@ -963,7 +963,7 @@ struct JourneyOptionsView: View {
         }
     }
     private func usable(_ option: JourneyOption) -> Bool {
-        option.verified && option.walkIssue == nil && planner.unavailableBoarding(option) == nil
+        planner.canUse(option)
     }
     private func compactSummary(_ option: JourneyOption) -> some View {
         Button { planner.select(option); collapse() } label: {

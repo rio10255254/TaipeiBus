@@ -27,6 +27,11 @@ struct BikeLeg: Sendable {
     var ridingMinutes: Int { max(1, Int(ceil(rideSeconds / 60))) }
     var totalSeconds: Double { walkingSeconds + cyclingSeconds }
     var totalMeters: Double { walkingMeters + rideMeters }
+    var connection: BikeConnection {
+        BikeConnection(pickup: pickup, dropoff: dropoff, bikes: bikes, docks: docks,
+            accessMeters: toPickupMeters, rideMeters: rideMeters, egressMeters: fromDropoffMeters,
+            accessSeconds: toPickupSeconds, rideSeconds: rideSeconds, egressSeconds: fromDropoffSeconds, handlingSeconds: handlingSeconds)
+    }
     var coordinates: [Coordinate] { toPickup + ride + fromDropoff }
     /// Which part of the leg the rider is in, from how far along the leg they are.
     enum Phase { case toPickup, riding, fromDropoff }
@@ -62,6 +67,7 @@ struct WalkingLeg: Sendable {
     var streetDuration: Double? = nil
     /// Set when this leg is ridden rather than walked.
     var bike: BikeLeg? = nil
+    var plannedStartAfter: Double = 0
     var verified: Bool { duration != nil }
     var cyclingSeconds: Double { bike?.cyclingSeconds ?? 0 }
     /// Only the parts of this leg that are walked; a cycling leg keeps its ridden path apart.
@@ -145,7 +151,7 @@ final class JourneyPlannerModel: ObservableObject {
     private var selectionConfirmed = false
     private var forecast = VehicleArrivalForecast()
     private var verifiedPool: [JourneyOption] = []
-    private var walkingCache: [String: WalkingLeg] = [:]
+    private var walkingCache: [String: (leg: WalkingLeg, date: Date)] = [:]
     private var walkingRequests: [String: (id: UUID, task: Task<WalkingLeg, Error>)] = [:]
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var comparisonChanged = false
@@ -313,49 +319,50 @@ final class JourneyPlannerModel: ObservableObject {
         duration.cyclingHandlingSeconds = option.walks.compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
         return duration
     }
+    private func connectionStarts(_ option: JourneyOption, at date: Date) -> [Double] {
+        guard let trip = option.trip else { return [0] }
+        guard option.walks.count == trip.rides.count + 1 else { return Array(repeating: 0, count: option.walks.count) }
+        let rides = ridingEstimates(option, at: date).map(\.seconds)
+        let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
+            preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: rides)
+        var cursor = 0.0, starts: [Double] = []
+        for index in option.walks.indices {
+            starts.append(cursor)
+            cursor += option.walks[index].duration ?? trip.planningWalkSeconds[index]
+            if rides.indices.contains(index) { cursor += assessment.waits[index].seconds + rides[index] }
+        }
+        return starts
+    }
+    private func supplyRisk(_ option: JourneyOption, at date: Date) -> Double {
+        guard option.cycles else { return 0 }
+        let starts = connectionStarts(option, at: date)
+        return option.walks.enumerated().reduce(0) { result, item in
+            guard let bike = item.element.bike else { return result }
+            return result + BikeRouting.supplyPenalty(bike.connection, availability: bikeAvailability,
+                pickupAfter: starts.indices.contains(item.offset) ? starts[item.offset] : 0, at: date)
+        }
+    }
+    func canUse(_ option: JourneyOption) -> Bool {
+        guard option.verified, option.walkIssue == nil, unavailableBoarding(option) == nil else { return false }
+        return option.walks.compactMap(\.bike).allSatisfy {
+            BikeRouting.confirmed($0.pickup, availability: bikeAvailability, renting: true, minimum: 1) &&
+            BikeRouting.confirmed($0.dropoff, availability: bikeAvailability, renting: false, minimum: 1)
+        }
+    }
     private func recommendations(at date: Date) -> [JourneyOption] {
-        let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil }
-        let trips = valid.compactMap(\.trip)
-        let walks = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.map(\.duration)) })
-        let rides = Dictionary(uniqueKeysWithValues: valid.filter { !$0.walkingOnly }.map { option in
-            (option.id, ridingEstimates(option, at: date).map(\.seconds))
-        })
-        let ranked = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-            preferences: preferences, limit: max(12, trips.count), walkingDurations: walks, ridingDurations: rides,
-            cyclingDurations: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.cyclingSeconds) }),
-            rentalCounts: Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0.walks.filter { $0.bike != nil }.count) }),
-            choiceGroups: Dictionary(uniqueKeysWithValues: valid.compactMap { option -> (String, String)? in
-                guard let trip = option.trip else { return nil }
-                let legs = option.walks.indices.filter { option.walks[$0].bike != nil }.map(String.init).joined(separator: "-")
-                return (option.id, trip.familyID + "|bikes:" + legs)
-            }))
-        var result = ranked.compactMap { trip in valid.first { $0.id == trip.id } }
-        // Riding the whole way has to clearly beat the bus it would replace, but only modestly
-        // beat a walk: nobody is waiting for a walk. Either comparison can earn it a place, and
-        // with no transit at all it is simply the way to get there.
-        if let cycling = valid.first(where: \.bikeOnly), let riding = duration(cycling, at: date) {
-            let transitTiming = result.first.flatMap { duration($0, at: date) }
-            let transit = transitTiming?.totalSeconds
-            let walking = valid.first(where: \.walkingOnly).flatMap { duration($0, at: date)?.totalSeconds }
-            let beatsTransit = transit.map { riding.totalSeconds <= $0 - preferences.bikeMinimumGainSeconds } ?? true
-            let beatsWalking = walking.map { riding.totalSeconds <= $0 - preferences.bikeWalkGainSeconds } ?? false
-            if beatsTransit { result.insert(cycling, at: 0) }
-            else if beatsWalking || transitTiming.map({
-                riding.totalSeconds <= $0.totalSeconds + 900 &&
-                    (riding.totalSeconds <= $0.totalSeconds + 60 ||
-                     riding.walkingSeconds - riding.cyclingSeconds < $0.walkingSeconds - $0.cyclingSeconds - 120)
-            }) == true {
-                // A close alternative can be useful without forcing it ahead of the bus.
-                let position = result.firstIndex { (duration($0, at: date)?.totalSeconds ?? .infinity) > riding.totalSeconds } ?? result.count
-                result.insert(cycling, at: min(4, max(1, position)))
-            }
+        let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil && unavailableBoarding($0) == nil }
+        var metrics: [JourneyChoice] = []
+        for option in valid {
+            guard let timing = duration(option, at: date) else { continue }
+            let legs = option.walks.indices.filter { option.walks[$0].bike != nil }.map(String.init).joined(separator: "-")
+            let group = (option.trip?.familyID ?? (option.cycles ? "cycling" : "walking")) + "|bikes:" + legs
+            metrics.append(JourneyChoice(id: option.id, group: group, elapsed: timing.totalSeconds,
+                walking: max(0, timing.walkingSeconds - option.cyclingSeconds), waiting: timing.waitingSeconds,
+                transfers: max(0, option.rides.count - 1), rentals: option.walks.filter { $0.bike != nil }.count,
+                unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences))
         }
-        if let foot = valid.first(where: \.walkingOnly), let walking = duration(foot, at: date),
-           result.first.flatMap({ duration($0, at: date)?.totalSeconds }).map({ walking.totalSeconds <= $0 + 300 }) ?? true {
-            let comparable = result.first.flatMap { duration($0, at: date)?.totalSeconds }.map { walking.totalSeconds <= $0 + 60 } ?? true
-            result.insert(foot, at: comparable ? 0 : min(4, result.count))
-        }
-        return result
+        let byID = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0) })
+        return JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
     }
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
@@ -461,24 +468,33 @@ final class JourneyPlannerModel: ObservableObject {
     @Published var bikeStationUpdateMessage: String?
     func updateBikes(network: BikeNetwork, availability: BikeAvailability?) {
         bikeNetwork = network; bikeAvailability = availability
+        if !started, !verifiedPool.isEmpty { publishRecommendations() }
         discoverBikeConnections()
     }
     private var bikeRefinementTask: Task<Void, Never>?
     private var attemptedBikeConnections = Set<String>()
     private var connectionBases: [String: JourneyOption] = [:]
+    private var integratedSearchHasSupply = false
+    private var lastIntegratedBikeSearch = Date.distantPast
+    private func bikeChoiceKey(_ option: JourneyOption) -> String {
+        option.id + "|" + option.walks.enumerated().compactMap { index, leg in
+            leg.bike.map { "\(index):\($0.pickup.id):\($0.dropoff.id)" }
+        }.joined(separator: "|")
+    }
     /// Pull freshly possible bike choices between verification batches. A feed arriving
     /// mid-search must not wait for every ordinary boarding platform to finish first.
     private func takeBikeConnections(limit: Int) -> [JourneyOption] {
         guard preferences.bikeRouting, attemptedBikeConnections.count < limit else { return [] }
-        var choices = bikeConnections(for: Array(connectionBases.values), at: Date())
-        if !attemptedBikeConnections.contains("youbike"), let origin, let destination,
+        var choices = integratedSearchHasSupply ? [] : bikeConnections(for: Array(connectionBases.values), at: Date())
+        if let origin, let destination,
            let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
                network: bikeNetwork, availability: bikeAvailability, preferences: preferences) {
             var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate); leg.bike = BikeLeg(whole)
-            choices.append(JourneyOption(id: "youbike", trip: nil, walks: [leg]))
+            let choice = JourneyOption(id: "youbike", trip: nil, walks: [leg])
+            if !attemptedBikeConnections.contains(bikeChoiceKey(choice)) { choices.append(choice) }
         }
         let reserved = Array(choices.prefix(limit - attemptedBikeConnections.count))
-        attemptedBikeConnections.formUnion(reserved.map(\.id))
+        attemptedBikeConnections.formUnion(reserved.map(bikeChoiceKey))
         return reserved
     }
     /// One ordinary route and one cycling alternative share each batch. Later walking
@@ -539,7 +555,7 @@ final class JourneyPlannerModel: ObservableObject {
                 else if indices == [base.walks.count - 1] { name = "youbike-finish" }
                 else { name = "youbike-legs-" + indices.map(String.init).joined(separator: "-") }
                 let variant = trip.asVariant(name)
-                guard !attemptedBikeConnections.contains(variant.id), seen.insert(variant.id).inserted else { continue }
+                guard seen.insert(variant.id).inserted else { continue }
                 var walks = base.walks
                 var predicted = originalDurations
                 var cycling = 0.0, gain = 0.0
@@ -557,7 +573,9 @@ final class JourneyPlannerModel: ObservableObject {
                 // A short local saving can catch a departure that walking would miss.
                 guard !assessment.unavailable,
                       gain >= preferences.bikeWalkGainSeconds || assessment.elapsedSeconds <= original.elapsedSeconds - preferences.bikeWalkGainSeconds else { continue }
-                candidates.append((JourneyOption(id: variant.id, trip: variant, walks: walks), assessment.score, gain))
+                let choice = JourneyOption(id: variant.id, trip: variant, walks: walks)
+                guard !attemptedBikeConnections.contains(bikeChoiceKey(choice)) else { continue }
+                candidates.append((choice, assessment.score, gain))
             }
         }
         candidates.sort {
@@ -618,40 +636,39 @@ final class JourneyPlannerModel: ObservableObject {
     /// Late counts and new bike-reachable corridors are verified without clearing the
     /// inspected route. An explicitly started journey cancels all remaining work.
     private func discoverBikeConnections() {
-        guard !started, !planning, !checkingWalks, bikeRefinementTask == nil, attemptedBikeConnections.count < 24 else { return }
-        let probes = bikeGatewayProbes(at: Date())
+        guard !started, !planning, !checkingWalks, bikeRefinementTask == nil else { return }
+        let shouldSearch = bikeAvailability != nil && lastMetadata != nil && origin != nil && destination != nil &&
+            (!integratedSearchHasSupply || Date().timeIntervalSince(lastIntegratedBikeSearch) >= 60)
         let candidates = takeBikeConnections(limit: 12)
-        guard !candidates.isEmpty || !probes.isEmpty else { return }
-        if !probes.isEmpty { searchedBikeGateways = true }
+        guard !candidates.isEmpty || shouldSearch else { return }
         checkingWalks = true; message = nil
         let token = generation
         bikeRefinementTask = Task { [weak self] in
             guard let self else { return }
-            // Existing routes can usually use the counts immediately. Remote corridor
-            // searches are additional work, never a prerequisite for showing those routes.
             await self.verifyConnections([], cycling: candidates, token: token)
-            if let metadata = self.lastMetadata, let origin = self.origin, let destination = self.destination {
-                for (from, to) in probes {
-                    guard !Task.isCancelled, token == self.generation else { return }
-                    let routes = await self.network.options(metadata: metadata, from: from, to: to,
-                        preferences: self.preferences, estimates: self.latestSnapshot.estimates)
-                    guard !Task.isCancelled, token == self.generation else { return }
-                    var families = Set<String>()
-                    for trip in routes where families.insert(trip.familyID).inserted {
-                        let base = self.option(trip, metadata: metadata, origin: origin, destination: destination)
-                        if self.connectionBases[base.id] == nil { self.connectionBases[base.id] = base }
-                        if families.count == 4 { break }
-                    }
+            if shouldSearch, let metadata = self.lastMetadata, let origin = self.origin, let destination = self.destination {
+                self.lastIntegratedBikeSearch = Date()
+                let routes = await self.network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
+                    preferences: self.preferences, estimates: self.latestSnapshot.estimates,
+                    bikeNetwork: self.bikeNetwork, bikeAvailability: self.bikeAvailability)
+                guard !Task.isCancelled, token == self.generation else { return }
+                self.integratedSearchHasSupply = true
+                let budget = JourneySearchBudget(distance: origin.coordinate.distance(to: destination.coordinate), cycling: true)
+                let known = Set(self.verifiedPool.map(\.id))
+                let pending = routes.filter { !known.contains($0.id) }.prefix(budget.verification).map {
+                    self.option($0, metadata: metadata, origin: origin, destination: destination)
                 }
+                for choice in pending where self.connectionBases[choice.id] == nil { self.connectionBases[choice.id] = choice }
+                let cycling = pending.filter(\.cycles)
+                self.attemptedBikeConnections.formUnion(cycling.map(self.bikeChoiceKey))
+                await self.verifyConnections(pending.filter { !$0.cycles }, cycling: cycling,
+                    limit: budget.verification, token: token)
+            } else {
+                await self.verifyConnections([], limit: 24, token: token)
             }
-            // Reserve half of the street-query budget for newly reachable corridors and
-            // compare all probes before spending it, so the first corridor cannot crowd
-            // out a better later one. Existing cycling results are already visible.
-            await self.verifyConnections([], limit: 24, token: token)
             guard !Task.isCancelled, token == self.generation else { return }
             self.checkingWalks = false; self.bikeRefinementTask = nil
             self.publishRecommendations()
-            if self.options.isEmpty { self.message = "附近沒有合適公車" }
         }
     }
     /// A YouBike station this trip is counting on that can no longer be counted on, with the
@@ -712,7 +729,7 @@ final class JourneyPlannerModel: ObservableObject {
         pickupTask = Task { [weak self] in
             guard let self else { return }
             defer { if self.pickupGeneration == request { self.changingBikeStation = false } }
-            let updated = try? await self.cycle(leg)
+            let updated = try? await self.cycle(leg, compareStations: false)
             guard !Task.isCancelled, token == self.generation, request == self.pickupGeneration,
                   self.selectedID == id, self.stepIndex == step,
                   let slot = self.options.firstIndex(where: { $0.id == id }) else { return }
@@ -808,6 +825,9 @@ final class JourneyPlannerModel: ObservableObject {
         let lastExit = metadata.metro.nearestExit(stationID: last.alighting.stationID, to: destination.coordinate)
         walks.append(WalkingLeg(from: entrance(last.alighting, toward: destination.coordinate), to: destination.coordinate,
             stationSeconds: last.alightingAccessSeconds, stationInstruction: lastExit.map { AppText.text("從 %@ 出站", AppLanguage.current == .english ? $0.englishName : $0.name) }))
+        for (index, connection) in trip.bikeConnections where walks.indices.contains(index) && !walks[index].internalTransfer {
+            walks[index].bike = BikeLeg(connection)
+        }
         let aligned = trip.withEndpointDistances(access: walks[0].from.distance(to: walks[0].to),
             egress: walks.last!.from.distance(to: walks.last!.to))
         return JourneyOption(id: aligned.id, trip: aligned, walks: walks)
@@ -817,6 +837,7 @@ final class JourneyPlannerModel: ObservableObject {
         cancelRequests()
         verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil; comparisonChanged = false
         attemptedBikeConnections = []; connectionBases = [:]; searchedBikeGateways = false
+        integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
@@ -828,11 +849,15 @@ final class JourneyPlannerModel: ObservableObject {
         planning = true
         let token = generation
         let preferences = self.preferences
+        let supply = bikeAvailability, bikes = bikeNetwork
+        let budget = JourneySearchBudget(distance: origin.coordinate.distance(to: destination.coordinate), cycling: supply != nil)
         task = Task { [weak self] in
             guard let self else { return }
             let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
-                                              preferences: preferences, estimates: latestSnapshot.estimates)
+                                              preferences: preferences, estimates: latestSnapshot.estimates,
+                                              bikeNetwork: bikes, bikeAvailability: supply)
             guard !Task.isCancelled, token == generation else { return }
+            integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date()
             verifiedPool = []; optionLabels = [:]
             let date = Date()
             let initialRiding = Dictionary(uniqueKeysWithValues: trips.map { trip in
@@ -840,19 +865,19 @@ final class JourneyPlannerModel: ObservableObject {
                     walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
             })
             let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, limit: 36, ridingDurations: initialRiding, diverse: false)
+                preferences: preferences, limit: budget.candidates, ridingDurations: initialRiding, diverse: false)
             // Verify several families plus their alternative platforms, not just the three eventual rows.
             var selected: [TransitTrip] = []
             var families = Set<String>()
-            for trip in ordered where families.insert(trip.familyID).inserted {
-                selected.append(trip); if selected.count >= 6 { break }
+            for trip in ordered where families.insert(trip.familyID + "|" + trip.bikeConnections.keys.sorted().map(String.init).joined(separator: "-")).inserted {
+                selected.append(trip); if selected.count >= min(12, budget.verification) { break }
             }
             for trip in ordered where !selected.contains(where: { $0.id == trip.id }) {
-                selected.append(trip); if selected.count >= 18 { break }
+                selected.append(trip); if selected.count >= budget.verification { break }
             }
             var pending = selected.map { option($0, metadata: metadata, origin: origin, destination: destination) }
             connectionBases = Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })
-            if origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 1_500) {
+            if origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 2_000) {
                 pending.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
             }
@@ -861,7 +886,9 @@ final class JourneyPlannerModel: ObservableObject {
             guard !pending.isEmpty else {
                 message = "附近沒有合適公車"; checkingWalks = false; discoverBikeConnections(); return
             }
-            await verifyConnections(pending, token: token)
+            let cycling = pending.filter(\.cycles)
+            attemptedBikeConnections.formUnion(cycling.map(bikeChoiceKey))
+            await verifyConnections(pending.filter { !$0.cycles }, cycling: cycling, limit: budget.verification, token: token)
             guard token == generation, !Task.isCancelled else { return }
             checkingWalks = false
             publishRecommendations()
@@ -878,13 +905,16 @@ final class JourneyPlannerModel: ObservableObject {
         endWalkingGuidance()
         selectedID = option.id; started = false; stepIndex = 0; mapRevision += 1
     }
-    private func enrich(_ option: JourneyOption) async throws -> JourneyOption {
+    private func enrich(_ option: JourneyOption, compareStations: Bool = false) async throws -> JourneyOption {
         var result = option
         for index in option.walks.indices {
             try Task.checkCancellation()
             if option.walks[index].internalTransfer { continue }
             if option.walks[index].bike != nil {
-                result.walks[index] = try await cycle(option.walks[index])
+                var leg = option.walks[index]
+                let starts = connectionStarts(result, at: Date())
+                leg.plannedStartAfter = starts.indices.contains(index) ? starts[index] : 0
+                result.walks[index] = try await cycle(leg, compareStations: compareStations)
                 continue
             }
             result.walks[index] = try await walk(option.walks[index])
@@ -897,7 +927,7 @@ final class JourneyPlannerModel: ObservableObject {
             // On a cycling leg only the two walks count; the ride itself is meant to be long.
             if let bike = leg.bike { return max(bike.toPickupMeters, bike.fromDropoffMeters) > 900 }
             let transfer = index > 0 && index < result.walks.count - 1
-            return (leg.distance ?? 0) > (transfer ? 600 : 1_800)
+            return (leg.distance ?? 0) > (option.walkingOnly ? 3_500 : transfer ? 600 : 1_800)
         }
         if hasLongWalk { result.walkIssue = result.cycles ? "接駁步行過長" : "步行接駁過長" }
         if !result.verified { result.walkIssue = result.cycles ? "YouBike 路線待確認" : "步行接駁待確認" }
@@ -905,12 +935,34 @@ final class JourneyPlannerModel: ObservableObject {
     }
     /// Verifies a cycling leg: the walk to the station, the streets the bike will take, and the
     /// walk on from where it is returned. Never substitute pedestrian directions for cycling.
-    private func cycle(_ leg: WalkingLeg) async throws -> WalkingLeg {
+    private func cycle(_ leg: WalkingLeg, compareStations: Bool = true) async throws -> WalkingLeg {
 #if DEBUG
         if let testCycle { return try await testCycle(leg) }
 #endif
-        guard var bike = leg.bike else { return leg }
-        var result = leg
+        guard let original = leg.bike else { return leg }
+        var pairs = [original.connection]
+        if compareStations {
+            pairs += BikeRouting.connections(from: leg.from, to: leg.to, network: bikeNetwork,
+                availability: bikeAvailability, preferences: preferences, limit: 3)
+        }
+        var seen = Set<String>(), best: WalkingLeg?, bestCost = Double.infinity
+        for pair in pairs where seen.insert(BikeRouting.pairID(pair)).inserted {
+            try Task.checkCancellation()
+            // A direct test of the provider can omit live supply. Offered journeys cannot.
+            if !bikeNetwork.stations.isEmpty &&
+                (!BikeRouting.confirmed(pair.pickup, availability: bikeAvailability, renting: true) ||
+                 !BikeRouting.confirmed(pair.dropoff, availability: bikeAvailability, renting: false)) { continue }
+            guard let result = try? await verifyPair(leg, connection: pair), result.verified, let bike = result.bike else { continue }
+            let risk = bikeNetwork.stations.isEmpty ? 0 : BikeRouting.supplyPenalty(bike.connection,
+                availability: bikeAvailability, pickupAfter: leg.plannedStartAfter)
+            let cost = (result.duration ?? .infinity) + bike.walkingSeconds * max(0, preferences.walkingWeight - 1 + 0.35) + risk
+            if cost < bestCost { best = result; bestCost = cost }
+        }
+        if let best { return best }
+        var unresolved = leg; unresolved.duration = nil; return unresolved
+    }
+    private func verifyPair(_ leg: WalkingLeg, connection: BikeConnection) async throws -> WalkingLeg {
+        var bike = BikeLeg(connection), result = leg
         let access = try await walk(WalkingLeg(from: leg.from, to: bike.pickup.coordinate))
         let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate), transport: .cycling)
         let egress = try await walk(WalkingLeg(from: bike.dropoff.coordinate, to: leg.to))
@@ -918,28 +970,21 @@ final class JourneyPlannerModel: ObservableObject {
               let rideMeters = street.distance, let rideSeconds = street.duration, rideMeters > 0, rideSeconds > 0 else {
             result.duration = nil; return result
         }
-        bike.toPickup = access.coordinates
-        bike.toPickupMeters = access.distance ?? leg.from.distance(to: bike.pickup.coordinate)
-        bike.toPickupSeconds = accessSeconds
-        bike.ride = street.coordinates
-        bike.rideMeters = rideMeters
-        bike.rideSeconds = rideSeconds
-        bike.fromDropoff = egress.coordinates
-        bike.fromDropoffMeters = egress.distance ?? bike.dropoff.coordinate.distance(to: leg.to)
+        bike.toPickup = access.coordinates; bike.toPickupMeters = access.distance ?? leg.from.distance(to: bike.pickup.coordinate)
+        bike.toPickupSeconds = accessSeconds; bike.ride = street.coordinates
+        bike.rideMeters = rideMeters; bike.rideSeconds = rideSeconds
+        bike.fromDropoff = egress.coordinates; bike.fromDropoffMeters = egress.distance ?? bike.dropoff.coordinate.distance(to: leg.to)
         bike.fromDropoffSeconds = egressSeconds
-        result.bike = bike
-        result.coordinates = bike.coordinates
-        result.road = RouteLine(coordinates: result.coordinates)
-        result.distance = bike.totalMeters
-        result.streetDuration = bike.totalSeconds
-        result.duration = bike.totalSeconds + leg.stationSeconds
+        result.bike = bike; result.coordinates = bike.coordinates
+        result.road = RouteLine(coordinates: result.coordinates); result.distance = bike.totalMeters
+        result.streetDuration = bike.totalSeconds; result.duration = bike.totalSeconds + leg.stationSeconds
         result.instructions = access.instructions + street.instructions + egress.instructions
         return result
     }
     private func walk(_ leg: WalkingLeg, guidance: Bool = false, transport: MKDirectionsTransportType = .walking) async throws -> WalkingLeg {
         let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
-        if let cached = walkingCache[cacheKey] { return cached }
         if guidance { return try await calculateStreet(leg, guidance: true, transport: transport) }
+        if let cached = walkingCache[cacheKey], Date().timeIntervalSince(cached.date) < 900 { return cached.leg }
         if let request = walkingRequests[cacheKey] { return try await request.task.value }
         let id = UUID()
         let task = Task { try await self.calculateStreet(leg, guidance: false, transport: transport) }
@@ -947,7 +992,10 @@ final class JourneyPlannerModel: ObservableObject {
         defer { if walkingRequests[cacheKey]?.id == id { walkingRequests[cacheKey] = nil } }
         let result = try await task.value
         try Task.checkCancellation()
-        if result.verified { walkingCache[cacheKey] = result }
+        if result.verified {
+            if walkingCache.count >= 512, let oldest = walkingCache.min(by: { $0.value.date < $1.value.date }) { walkingCache[oldest.key] = nil }
+            walkingCache[cacheKey] = (result, Date())
+        }
         return result
     }
     private func calculateStreet(_ leg: WalkingLeg, guidance: Bool, transport: MKDirectionsTransportType) async throws -> WalkingLeg {
@@ -983,8 +1031,7 @@ final class JourneyPlannerModel: ObservableObject {
         return result
     }
     func begin() {
-        guard let option = selected, option.verified, option.walkIssue == nil else { return }
-        guard unavailableBoarding(option) == nil else { return }
+        guard let option = selected, canUse(option) else { return }
         cancelRequests()
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -1054,7 +1101,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard token == generation, !Task.isCancelled else { return }
         checkingWalks = false; publishRecommendations()
     }
-    func verifyCyclingLegForTest(_ leg: WalkingLeg) async throws -> WalkingLeg { try await cycle(leg) }
+    func verifyCyclingLegForTest(_ leg: WalkingLeg) async throws -> WalkingLeg { try await cycle(leg, compareStations: false) }
     /// Controlled inputs; tests still exercise production ranking and navigation methods.
     func auditLoadChoices(_ choices: [JourneyOption], from start: TravelPlace, to end: TravelPlace) {
         cancelRequests(); origin = start; destination = end; usingLocation = false
