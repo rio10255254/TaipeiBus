@@ -109,6 +109,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(dismiss.waitForExistence(timeout:120))
         let initial = readySuggestionState(), selected = initial["selected"] as? String
         XCTAssertEqual(initial["route_panel_open"] as? Bool,false)
+        XCTAssertLessThan(camera()["userFixAge"] as? Double ?? .infinity,12,"The stationary sensor fixture must keep sending fresh fixes")
         XCTAssertGreaterThanOrEqual(dismiss.frame.width,44);XCTAssertGreaterThanOrEqual(dismiss.frame.height,44)
         capture("journey-alternative-optional")
         dismiss.tap()

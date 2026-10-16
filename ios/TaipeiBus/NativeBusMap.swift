@@ -1179,6 +1179,8 @@ struct NativeBusMap: UIViewRepresentable {
                 state["fullyRendered"] = zoomProbeFullyRendered
                 state["language"] = model.language.rawValue
                 state["selectedJourney"] = model.planner.selectedID ?? ""
+                state["userFixAge"] = model.location.updatedAt.map { Date().timeIntervalSince($0) } ?? -1
+                state["userFixAccuracy"] = model.location.accuracy ?? -1
                 let open = mapView.bounds.inset(by: mapView.contentInset)
                 state["routeViewport"] = ["x":open.minX,"y":open.minY,"width":open.width,"height":open.height]
                 if model.planner.selected != nil, !model.planner.started {
