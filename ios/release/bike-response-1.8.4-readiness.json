@@ -1,0 +1,129 @@
+{
+  "version": "1.8.4",
+  "distribution": "testflight-only",
+  "formal_submission": "paused",
+  "status": "published_to_testflight",
+  "source": "ee549339d761cebd2b857f392b82ed5c91c39706",
+  "recommendation_policy": {
+    "recommended_position": 1,
+    "keep_inspected_route_selected": true,
+    "keep_inspected_map_camera": true,
+    "begin_navigation_only_on_explicit_action": true,
+    "featured_limit": 5,
+    "context": "Current reachable departures, complete elapsed/arrival time, on-foot effort, transfers, unknown waits, and rental count",
+    "rental_convenience_score_seconds_each": 120,
+    "rental_convenience_changes_displayed_time": false,
+    "dynamic_departure_regression": "A short walk is preferred if both options catch the same departure; cycling leads when it catches an earlier one."
+  },
+  "bike_time_display": {
+    "bicycle_chip": "Actual verified cycling time only, rounded up to a minute",
+    "total_includes": [
+      "walking",
+      "station access",
+      "unlocking and docking",
+      "cycling",
+      "transit",
+      "waiting"
+    ]
+  },
+  "counts_policy": {
+    "foreground_prefetch": true,
+    "recent_report_reused_across_launches": true,
+    "preserve_receipt_and_station_report_times": true,
+    "prefer_station_infoTime_over_city_publication_time": true,
+    "share_simultaneous_requests": true,
+    "success_refresh_seconds": 60,
+    "failed_request_backoff_seconds": 10,
+    "station_freshness_seconds": 900
+  },
+  "verification_queue": {
+    "maximum_concurrent_routes": 2,
+    "early_local_verification_budget": 12,
+    "total_verification_budget_including_additional_corridors": 24,
+    "all_additional_corridors_compared_before_spending_reserved_queries": true,
+    "ordinary_and_cycling_interleaved": true,
+    "late_counts_consumed_between_batches": true,
+    "existing_connections_before_additional_corridors": true,
+    "share_street_queries_by_mode_and_endpoints": true
+  },
+  "core_checks": {
+    "run": 38843305199,
+    "source": "6c144e0",
+    "total": 256,
+    "skipped_live_data_checks": 11,
+    "failures": 0,
+    "city_report_benchmark": {
+      "stations": 1819,
+      "seconds": 0.026231041666676447
+    }
+  },
+  "functional_checks": {
+    "run": 38843305199,
+    "source": "6c144e0",
+    "artifact": 12022866075,
+    "passed": 50,
+    "failures": 0,
+    "debug_and_release_app_builds": "passed",
+    "coverage": [
+      "early and late counts",
+      "cached counts and expiry",
+      "initial download failure and recovery",
+      "request sharing",
+      "recommendation first with preserved preview",
+      "waiting and travel-time accounting",
+      "real cycling routes",
+      "all supported rail line connectors",
+      "StoreKit"
+    ]
+  },
+  "representative_neihu_ntu_connection": {
+    "availability": "Explicitly controlled available bikes and docks; not a replay of historical availability",
+    "geometry_and_duration": "Live Apple cycling and walking directions",
+    "pickup": "捷運科技大樓站",
+    "dropoff": "臺大計資中心南側",
+    "cycling_meters": 1115.3919265239206,
+    "cycling_seconds": 301.1599387699339,
+    "walking_seconds": 15.749162889977079,
+    "handling_seconds": 150,
+    "station_seconds": 90,
+    "total_connector_seconds": 556.9091016599109,
+    "all_walking_connector_seconds": 909.6445531049948
+  },
+  "first_native_interaction_checks": {
+    "run": 38836908984,
+    "source": "c74d140",
+    "light_passed": 8,
+    "dark_passed": 4,
+    "dark_failures": 1,
+    "finding": "A single Steps tap in the paging collection was ignored; the action did not open the itinerary.",
+    "repair": "Go and Steps now live outside the paging collection while retaining the existing card appearance."
+  },
+  "native_action_regression_checks": {
+    "run": 38840758856,
+    "source": "6d344aa",
+    "status": "passed",
+    "light_passed": 3,
+    "dark_passed": 3,
+    "failures": 0,
+    "light_artifact": 12020694725,
+    "final_artifact": 12021114645,
+    "screenshots_visually_checked": true,
+    "coverage": [
+      "recommended first while preview remains selected",
+      "full-list selection and explicit Go",
+      "two-bike route and three single-tap Steps round trips per appearance"
+    ],
+    "subsequent_changes": "The contextual recommendation cost and candidate priority call were tested in the final core/hosted suite; UI files are unchanged. The final head adds beta notes only."
+  },
+  "publication": {
+    "run": 38844405457,
+    "source": "ee549339d761cebd2b857f392b82ed5c91c39706",
+    "pr": "https://github.com/rio10255254/TaipeiBus/pull/43",
+    "status": "internal_group_assigned",
+    "build_number": "136.1.0",
+    "build_id": "7b22da8e-b7ad-4319-8567-0681035c6666",
+    "uploaded_at": "2026-10-16T03:19:27.515168+00:00",
+    "upload_confirmed": true,
+    "symbols_zip_crc_verified": true
+  }
+}
