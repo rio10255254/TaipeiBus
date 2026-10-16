@@ -1162,7 +1162,7 @@ final class JourneyPlannerModel: ObservableObject {
         if guidance { walkingRequest = operation }
         defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
-            let priority: DirectionsRequestGate.Priority = guidance ? .navigation :
+            let priority: DirectionsRequestGate.Priority = guidance || changingBikeStation ? .navigation :
                 evaluatingRemainingJourney || !verifiedPool.isEmpty ? .alternatives : .firstChoice
             let response = try await DirectionsRequestGate.shared.calculate(operation, priority: priority)
             try Task.checkCancellation()
