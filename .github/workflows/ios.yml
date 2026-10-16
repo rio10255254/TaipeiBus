@@ -42,7 +42,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -62,6 +62,18 @@ env:
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
+  street_probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.usability_scope == 'street-probe'
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift ios/release/street-probe.swift | tee "$RUNNER_TEMP/street-probe.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: street-probe
+          path: ${{ runner.temp }}/street-probe.log
   bike_behavior:
     if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'route-reliability')
     runs-on: macos-15
@@ -96,7 +108,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
   simulator:
-    if: inputs.usability_scope != 'route-reliability'
+    if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe'
     runs-on: macos-15
     timeout-minutes: ${{ (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:

@@ -127,6 +127,7 @@ actor TransitService {
     private var metadata = TransitMetadata()
     private var snapshot = TransitSnapshot()
     private var refreshTask: Task<TransitSnapshot, Never>?
+    private var refreshGeneration = UUID()
     private var metadataLoadedAt: Date?
     private var bundledOfficial: OfficialTravelTimes?
     private var checkedBundledOfficial = false
@@ -134,14 +135,14 @@ actor TransitService {
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
 
-    init(bikeSession: URLSession = .shared, cacheDirectory: URL? = nil, bikeNow: @escaping @Sendable () -> Date = { Date() }) {
+    init(bikeSession: URLSession = .shared, feedSession: URLSession? = nil, cacheDirectory: URL? = nil, bikeNow: @escaping @Sendable () -> Date = { Date() }) {
         self.bikeSession = bikeSession; self.bikeNow = bikeNow
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 40
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
-        transport = ConditionalFeedTransport(session: URLSession(configuration: configuration),
+        transport = ConditionalFeedTransport(session: feedSession ?? URLSession(configuration: configuration),
             baseURL: URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/")!)
         self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
@@ -357,13 +358,14 @@ actor TransitService {
     }
 
     func refresh(onPartial: @escaping @Sendable (TransitSnapshot) async -> Void = { _ in }) async -> TransitSnapshot {
-        if let task = refreshTask {
+        if let task = refreshTask, !task.isCancelled {
             return await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
         }
+        let token = UUID(); refreshGeneration = token
         let task = Task { await self.performRefresh(onPartial: onPartial) }
         refreshTask = task
         let result = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
-        refreshTask = nil
+        if refreshGeneration == token { refreshTask = nil }
         return result
     }
 
@@ -377,7 +379,8 @@ actor TransitService {
         // Publish each independent feed immediately; ETA must not wait for GPS and road matching.
         await withTaskGroup(of: LiveResult.self) { group in
             group.addTask { .vehicles(try? await self.fetch("GetBusData")) }
-            if Date().timeIntervalSince(estimatesRequestedAt) >= estimateInterval {
+            if snapshot.estimates.updatedAt == nil || snapshot.estimates.error != nil ||
+                Date().timeIntervalSince(estimatesRequestedAt) >= estimateInterval {
                 estimatesRequestedAt = Date()
                 group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
             }

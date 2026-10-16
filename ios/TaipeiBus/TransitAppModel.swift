@@ -623,8 +623,11 @@ final class TransitAppModel: ObservableObject {
         }
         walkReturnSelection = nil; updateWalkingLocation()
     }
-    private let service = TransitService()
+    private let service: TransitService
     private var updateTask: Task<Void, Never>?
+    private var updateGeneration = UUID()
+    private var metadataTask: Task<Void, Never>?
+    private var metadataGeneration = UUID()
     private var settingsTask: Task<Void, Never>?
     private let liveService: LiveSettingsService
     private let stationLookup = StationLookup()
@@ -638,7 +641,8 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var previewNotice: String?
 #endif
 
-    init() {
+    init(service: TransitService = TransitService()) {
+        self.service = service
         let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
         var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
 #if DEBUG
@@ -717,6 +721,7 @@ final class TransitAppModel: ObservableObject {
             // A trip in progress keeps its refresh loop; it stops itself when the trip ends.
             if journeyInBackground { return }
             updateTask?.cancel(); updateTask = nil; settingsTask?.cancel(); settingsTask = nil
+            metadataTask?.cancel(); metadataTask = nil; metadataGeneration = UUID()
             platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
             bikeTask?.cancel(); bikeTask = nil; bikeGeneration = UUID()
             return
@@ -735,8 +740,10 @@ final class TransitAppModel: ObservableObject {
         }
         // Returning from the Lock Screen during a trip: the loop never stopped.
         guard updateTask == nil else { return }
+        let updateToken = UUID(); updateGeneration = updateToken
         updateTask = Task { [weak self] in
             guard let self else { return }
+            defer { if updateGeneration == updateToken { updateTask = nil } }
             do {
                 if bikeNetwork.stations.isEmpty {
                     bikeNetwork = await service.bikeNetwork()
@@ -752,13 +759,10 @@ final class TransitAppModel: ObservableObject {
 #if DEBUG
                 if ProcessInfo.processInfo.arguments.contains("--preview-metro-fixture") { applyPreviewSelection() }
 #endif
-                async let prepared = service.prepare()
-                if !metadata.routes.isEmpty {
-                    let current = await service.refresh(onPartial: { [weak self] value in await self?.receivePartialSnapshot(value) })
-                    guard !Task.isCancelled else { return }
-                    applySnapshot(current)
-                }
-                metadata = try await prepared
+                // A working bundled/cached network can plan immediately. Downloads of
+                // shapes, station catalogs and travel profiles must not hold live GPS/ETA.
+                if metadata.routes.isEmpty { metadata = try await service.prepare() }
+                else { prepareMetadataInBackground() }
                 openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
@@ -781,6 +785,7 @@ final class TransitAppModel: ObservableObject {
                         location.setBackgroundNavigation(false)
                         platformTask?.cancel(); platformTask = nil; platformGeneration = UUID()
                         bikeTask?.cancel(); bikeTask = nil; bikeGeneration = UUID()
+                        metadataTask?.cancel(); metadataTask = nil; metadataGeneration = UUID()
                         updateTask = nil; return
                     }
 #if DEBUG
@@ -794,12 +799,32 @@ final class TransitAppModel: ObservableObject {
                         if remaining <= 0.25 { try await Task.sleep(for: .seconds(0.25)); break }
                         try await Task.sleep(for: .seconds(min(remaining, 1)))
                     }
-                    // prepare() returns immediately while its daily metadata cache is fresh.
-                    metadata = try await service.prepare()
-                    metadataNotice = await service.metadataNotice
+                    prepareMetadataInBackground()
                 }
             } catch {
                 if !Task.isCancelled { loading = false; loadError = "無法取得路線與站牌，請檢查網路後重試" }
+            }
+        }
+    }
+
+    private func prepareMetadataInBackground() {
+        guard runsLiveWork, metadataTask == nil else { return }
+        let token = UUID(); metadataGeneration = token
+        metadataTask = Task { [weak self] in
+            guard let self else { return }
+            defer { if metadataGeneration == token { metadataTask = nil } }
+            do {
+                let prepared = try await service.prepare()
+                guard !Task.isCancelled, runsLiveWork, metadataGeneration == token else { return }
+                if prepared.revision != metadata.revision { metadata = prepared }
+                metadataNotice = await service.metadataNotice
+                openPendingSavedJourney()
+            } catch {
+                // Keep the usable network and independent live polling. A failed
+                // catalog refresh cannot permanently stop the city's GPS/ETA loop.
+                if !Task.isCancelled, metadataGeneration == token {
+                    metadataNotice = AppText.text("路線與站牌使用內建官方資料，等待更新")
+                }
             }
         }
     }
@@ -817,6 +842,7 @@ final class TransitAppModel: ObservableObject {
 #endif
     }
     func refresh() async {
+        if isActive, updateTask == nil { retry(); return }
         guard !loading, !refreshing else { return }
         refreshing = true
         defer { refreshing = false }

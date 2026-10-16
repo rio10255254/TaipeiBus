@@ -166,6 +166,9 @@ final class JourneyPlannerModel: ObservableObject {
     private var forecast = VehicleArrivalForecast()
     private var verifiedPool: [JourneyOption] = []
     private var walkingCache: [String: (leg: WalkingLeg, date: Date)] = [:]
+    // Briefly share unavailable endpoints across combinations, while allowing a
+    // transient failure to recover. A new explicit search always tries them again.
+    private var unavailableStreets: [String: (leg: WalkingLeg, date: Date)] = [:]
     private var walkingRequests: [String: (id: UUID, task: Task<WalkingLeg, Error>)] = [:]
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var comparisonChanged = false
@@ -1055,6 +1058,7 @@ final class JourneyPlannerModel: ObservableObject {
                 let starts = connectionStarts(result, at: Date())
                 leg.plannedStartAfter = starts.indices.contains(index) ? starts[index] : 0
                 result.walks[index] = try await cycle(leg, compareStations: compareStations)
+                if !result.walks[index].verified { break }
                 continue
             }
             result.walks[index] = try await walk(option.walks[index])
@@ -1062,6 +1066,7 @@ final class JourneyPlannerModel: ObservableObject {
             result.walks[index].stationSeconds = option.walks[index].stationSeconds
             result.walks[index].stationInstruction = option.walks[index].stationInstruction
             if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
+            if !result.walks[index].verified { break }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
             // On a cycling leg only the two walks count; the ride itself is meant to be long.
@@ -1125,6 +1130,7 @@ final class JourneyPlannerModel: ObservableObject {
         let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
         if guidance { return try await calculateStreet(leg, guidance: true, transport: transport) }
         if let cached = walkingCache[cacheKey], Date().timeIntervalSince(cached.date) < 900 { return cached.leg }
+        if let unavailable = unavailableStreets[cacheKey], Date().timeIntervalSince(unavailable.date) < 15 { return unavailable.leg }
         if let request = walkingRequests[cacheKey] { return try await request.task.value }
         let id = UUID()
         let task = Task { try await self.calculateStreet(leg, guidance: false, transport: transport) }
@@ -1135,7 +1141,7 @@ final class JourneyPlannerModel: ObservableObject {
         if result.verified {
             if walkingCache.count >= 512, let oldest = walkingCache.min(by: { $0.value.date < $1.value.date }) { walkingCache[oldest.key] = nil }
             walkingCache[cacheKey] = (result, Date())
-        }
+        } else { unavailableStreets[cacheKey] = (result, Date()) }
         return result
     }
     private func calculateStreet(_ leg: WalkingLeg, guidance: Bool, transport: MKDirectionsTransportType) async throws -> WalkingLeg {
@@ -1290,6 +1296,7 @@ final class JourneyPlannerModel: ObservableObject {
         changingBikeStation = false; bikeStationUpdateMessage = nil
         bikeRefinementTask?.cancel(); bikeRefinementTask = nil
         walkingRequests.values.forEach { $0.task.cancel() }; walkingRequests = [:]
+        unavailableStreets = [:]
         task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }

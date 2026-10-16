@@ -123,6 +123,19 @@ import MapKit
         p.auditAgeStreetCache(901)
         _ = try await p.auditStreet(leg);XCTAssertEqual(calls,3)
     }
+    func testUnavailableSharedAccessDoesNotExhaustRequestsForEveryRoute() async throws {
+        let p = JourneyPlannerModel(), option = transit()
+        var calls = 0
+        p.testStreet = { input,_ in calls += 1; return WalkingLeg(from:input.from,to:input.to) }
+        let unavailable = try await p.auditEnrich(option,metadata:TransitMetadata())
+        XCTAssertFalse(unavailable.verified)
+        XCTAssertEqual(calls,1,"Stop checking the rest of an unusable journey")
+        _ = try await p.auditEnrich(option,metadata:TransitMetadata())
+        XCTAssertEqual(calls,1,"The same unavailable connection must not be downloaded once per route")
+        p.finish()
+        _ = try await p.auditEnrich(option,metadata:TransitMetadata())
+        XCTAssertEqual(calls,2,"Starting a new search permits recovery")
+    }
     func testASecondDockPairCanWinAfterActualStreetVerificationWithoutChangingThePreview() async throws {
         var original = bicycle()
         original.walks[0].bike!.rideSeconds = 1000;original.walks[0].duration = 1150
