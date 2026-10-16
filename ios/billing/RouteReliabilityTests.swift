@@ -82,8 +82,9 @@ import MapKit
         let neihu = try XCTUnwrap(metadata.metro.stations.first { $0.code == "BR19" })
         let targets = [neihu.coordinate, Coordinate(latitude:25.0678,longitude:121.5303)]
         let origins = [campus, Coordinate(latitude:25.01967,longitude:121.53943),
-            Coordinate(latitude:25.0202,longitude:121.5397), Coordinate(latitude:25.0185,longitude:121.5385)]
-        for index in 0..<10 {
+            Coordinate(latitude:25.0202,longitude:121.5397), Coordinate(latitude:25.0185,longitude:121.5385),
+            Coordinate(latitude:25.0189833,longitude:121.5396361), Coordinate(latitude:25.0189833,longitude:121.5394361)]
+        for index in 0..<12 {
             let start = Date(), from = origins[index % origins.count], to = targets[index % targets.count]
             // Changing origin starts work for the old target; selecting the next
             // target immediately cancels it, just as two consecutive user edits do.
