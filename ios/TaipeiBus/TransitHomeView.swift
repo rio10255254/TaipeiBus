@@ -1501,7 +1501,7 @@ private struct AppInformationView: View {
                     Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
                     Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
                     Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
-                    Text(AppText.text("YouBike 站點內建於 App。開啟自行車路線比較時，會預先載入臺北市公開的車輛與空位資料，約每分鐘更新，並保留近期報告供再次開啟使用；實際借還以現場為準。目前不含新北市站點。"))
+                    Text(AppText.text("YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。"))
                     Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
                     Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
                 }
@@ -1556,7 +1556,7 @@ private struct PrivacyExplanationView: View {
             }
             Section(AppText.text("網路服務")) {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
-                Text(AppText.text("開啟自行車路線比較、顯示或查看 YouBike 站點時，App 會預先取得臺北市全市即時車位，並在手機保留近期報告。這個請求不包含你的位置、目的地或選取的站點。"))
+                Text(AppText.text("App 使用期間會預先取得臺北市全市即時車位，供自行車路線比較，並在手機保留近期報告。這個請求不包含你的位置、目的地或選取的站點。"))
                 Link(AppText.text("OpenFreeMap 隱私政策"), destination: URL(string: "https://openfreemap.org/privacy/")!)
             }
             Section(AppText.text("測試回饋")) {

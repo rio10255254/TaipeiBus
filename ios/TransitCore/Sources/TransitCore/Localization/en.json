@@ -85,6 +85,8 @@
   "確認接駁與其他方案": "Checking walking connections and alternatives",
   "更新推薦": "Refresh options",
   "查看推薦": "Show recommended route",
+  "YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。": "Stations ship with the app. While the app is in use, it preloads Taipei City's bike and dock counts for cycling comparisons and keeps recent reports for reopening. Counts update about once a minute; availability at the station takes precedence. New Taipei stations are not included yet.",
+  "App 使用期間會預先取得臺北市全市即時車位，供自行車路線比較，並在手機保留近期報告。這個請求不包含你的位置、目的地或選取的站點。": "While the app is in use, it preloads city-wide YouBike counts for cycling comparisons and keeps recent reports on your phone. This request carries neither your location, your destination nor the station you picked.",
   "騎車 %@ 分": "Ride %@ min",
   "全程已含取還車 %@ 分": "Includes %@ min to unlock and dock",
   " · 取還車 %@ 分": " · unlock and dock %@ min",

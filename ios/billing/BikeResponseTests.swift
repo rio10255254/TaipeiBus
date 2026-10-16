@@ -52,7 +52,7 @@ private final class BikeFeedProtocol: URLProtocol, @unchecked Sendable {
         addTeardownBlock { try? FileManager.default.removeItem(at:directory) }
         return directory
     }
-    func service(_ directory: URL, clock: BikeTestClock) -> TransitService {
+    private func service(_ directory: URL, clock: BikeTestClock) -> TransitService {
         let config=URLSessionConfiguration.ephemeral
         config.protocolClasses=[BikeFeedProtocol.self]
         let session=URLSession(configuration:config)
