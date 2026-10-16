@@ -499,14 +499,19 @@ final class TransitAppModel: ObservableObject {
         let network = bikeNetwork
         bikeTask = Task { [weak self] in
             guard let self else { return }
+            defer { if self.bikeGeneration == token { self.bikeTask = nil } }
             let packet = await self.service.bikeAvailability(network: network)
+#if DEBUG
+            // A download begun before the controlled UI scenario was installed
+            // must not replace its explicit station counts afterwards.
+            if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), self.previewNotice != nil { return }
+#endif
             if !Task.isCancelled, self.runsLiveWork, self.bikeGeneration == token,
                let packet, packet != self.bikeAvailability {
                 self.bikeAvailability = packet
                 self.planner.updateBikes(network: self.bikeNetwork, availability: packet)
                 self.considerJourneyAlternative(force: self.planner.bikeAlert != nil)
             }
-            if self.bikeGeneration == token { self.bikeTask = nil }
         }
     }
     @Published var selectedTrainID: String?
@@ -816,6 +821,9 @@ final class TransitAppModel: ObservableObject {
             do {
                 let prepared = try await service.prepare()
                 guard !Task.isCancelled, runsLiveWork, metadataGeneration == token else { return }
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil { return }
+#endif
                 if prepared.revision != metadata.revision { metadata = prepared }
                 metadataNotice = await service.metadataNotice
                 openPendingSavedJourney()

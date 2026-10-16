@@ -205,6 +205,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertTrue(chain.exists)
             if minutes.indices.contains(position) { XCTAssertEqual(chain.label,"Ride \(minutes[position]) min") }
         }
+        XCTAssertTrue(button("journey-steps-"+id).isEnabled)
         button("journey-steps-"+id).tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
         XCTAssertTrue(button("journey-bike-pickup-0").exists)
@@ -232,5 +233,20 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
             XCTAssertEqual(state()["started"] as? Bool,false)
         }
+    }
+    func testUnavailablePickupStillAllowsPreviewButCannotStartNavigation() {
+        launch(["--preview-youbike-planning","--preview-youbike-empty","--usability-fixture","--test-journey-selection","--test-language","en"])
+        guard requireRouteMenu() else { return }
+        let id = state()["selected"] as? String ?? ""
+        XCTAssertFalse(id.isEmpty)
+        XCTAssertFalse(button("journey-go-"+id).isEnabled)
+        let steps = button("journey-steps-"+id)
+        XCTAssertTrue(steps.isEnabled,"The rider must be able to inspect and adjust an unavailable pickup")
+        steps.tap()
+        XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
+        XCTAssertFalse(button("journey-start-navigation").isEnabled)
+        XCTAssertTrue(button("journey-bike-pickup-0").exists)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+        capture("mixed-empty-pickup-still-inspectable")
     }
 }

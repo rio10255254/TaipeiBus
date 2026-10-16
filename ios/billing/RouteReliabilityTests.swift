@@ -8,6 +8,39 @@ import MapKit
 @MainActor final class RouteReliabilityTests: XCTestCase {
     let campus = Coordinate(latitude: 25.01945, longitude: 121.53955)
 
+    private func verifyOtherJourney(from: Coordinate, to: Coordinate, name: String) async throws {
+        let service = TransitService(), p = JourneyPlannerModel()
+        defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        let bikes = await service.bikeNetwork(), counts = await service.bikeAvailability(network:bikes)
+        let snapshot = await service.refresh()
+        p.auditStreetDiagnostics = true
+        p.updateBikes(network:bikes,availability:counts); p.updateSnapshot(snapshot)
+        p.setDestination(TravelPlace(name:name,address:"",coordinate:to),metadata:metadata,currentLocation:from)
+        for _ in 0..<1500 {
+            if !p.planning, !p.checkingWalks { break }
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        let checked = p.options.filter { $0.verified && $0.walkIssue == nil }
+        print("GENERAL_JOURNEY name=\(name) checked=\(checked.count) message=\(p.message ?? "nil")")
+        for option in checked {
+            print("GENERAL_OPTION name=\(name) modes=\(option.rides.map { $0.route.mode.rawValue }) routes=\(option.rides.map { $0.route.name }) bikes=\(option.walks.filter { $0.bike != nil }.count) total=\(p.duration(option,at:Date())?.totalSeconds ?? -1)")
+        }
+        XCTAssertFalse(checked.isEmpty,"\(name) must work through the same production planner")
+        XCTAssertTrue(checked.contains { !$0.rides.isEmpty },"These cross-city journeys must retain a checked transit option")
+        XCTAssertNil(p.message)
+    }
+    func testNeihuToNTUUsesTheSameProductionFlowInReverse() async throws {
+        try await verifyOtherJourney(from:.init(latitude:25.083675,longitude:121.594363),to:campus,name:"Neihu_NTU")
+    }
+    func testNTUToXimenUsesTheSameProductionFlowAcrossDifferentLines() async throws {
+        try await verifyOtherJourney(from:campus,to:.init(latitude:25.0434,longitude:121.5062),name:"NTU_Ximen")
+    }
+    func testCityHallToMiramarUsesTheSameProductionFlowForALandmark() async throws {
+        try await verifyOtherJourney(from:.init(latitude:25.041171,longitude:121.565227),
+            to:.init(latitude:25.0835,longitude:121.5584),name:"CityHall_Miramar")
+    }
+
     func testCampusToNeihuProductionPlanningWithCurrentSupply() async throws {
         let service = TransitService()
         let loaded = await service.offlineMetroMetadata()

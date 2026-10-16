@@ -605,10 +605,7 @@ jobs:
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
@@ -785,10 +782,7 @@ jobs:
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
