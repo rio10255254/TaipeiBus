@@ -6,6 +6,12 @@ import MapKit
     var providerRequests = 0, deferred = 0, primaryConfirmed = 0, failures = 0
     let destination = CLLocationCoordinate2D(latitude:25.026154,longitude:121.543636)
     let normal = [
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0190833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0188833,longitude:121.5395361),
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5394361),
+        CLLocationCoordinate2D(latitude:25.0189833,longitude:121.5396361),
+        CLLocationCoordinate2D(latitude:25.0191833,longitude:121.5395361),
         CLLocationCoordinate2D(latitude:25.0192,longitude:121.5390),
         CLLocationCoordinate2D(latitude:25.01945,longitude:121.53955),
         CLLocationCoordinate2D(latitude:25.01965,longitude:121.53965),
