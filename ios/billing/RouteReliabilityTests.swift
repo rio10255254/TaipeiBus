@@ -8,6 +8,35 @@ import MapKit
 @MainActor final class RouteReliabilityTests: XCTestCase {
     let campus = Coordinate(latitude: 25.01945, longitude: 121.53955)
 
+    func testRepeatedProductionSearchWithMovingOriginAndCancelledComparisons() async throws {
+        let service = TransitService(), p = JourneyPlannerModel()
+        defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        let bikes = await service.bikeNetwork(), counts = await service.bikeAvailability(network:bikes)
+        p.updateBikes(network:bikes,availability:counts)
+        p.updateSnapshot(await service.refresh()); p.auditStreetDiagnostics = true
+        let neihu = try XCTUnwrap(metadata.metro.stations.first { $0.code == "BR19" })
+        let targets = [neihu.coordinate, Coordinate(latitude:25.0678,longitude:121.5303)]
+        let origins = [campus, Coordinate(latitude:25.01967,longitude:121.53943),
+            Coordinate(latitude:25.0202,longitude:121.5397), Coordinate(latitude:25.0185,longitude:121.5385)]
+        for index in 0..<10 {
+            let start = Date(), from = origins[index % origins.count], to = targets[index % targets.count]
+            // Changing origin starts work for the old target; selecting the next
+            // target immediately cancels it, just as two consecutive user edits do.
+            p.useLocation(from,metadata:metadata)
+            p.setDestination(TravelPlace(name:"Repeat-\(index)",address:"",coordinate:to),metadata:metadata,currentLocation:from)
+            for _ in 0..<1200 {
+                if p.options.contains(where: { $0.verified && $0.walkIssue == nil }) { break }
+                if !p.planning && !p.checkingWalks { break }
+                try await Task.sleep(for:.milliseconds(100))
+            }
+            let checked = p.options.filter { $0.verified && $0.walkIssue == nil }
+            print("REPEATED_PLAN index=\(index) from=\(from) to=\(to) seconds=\(Date().timeIntervalSince(start)) checked=\(checked.count) planning=\(p.planning) checking=\(p.checkingWalks) message=\(p.message ?? "nil")")
+            XCTAssertFalse(checked.isEmpty,"Repeated search \(index) must retain an actual verified street connection")
+            if checked.isEmpty { break }
+        }
+    }
+
     private func verifyOtherJourney(from: Coordinate, to: Coordinate, name: String) async throws {
         let service = TransitService(), p = JourneyPlannerModel()
         defer { p.finish() }

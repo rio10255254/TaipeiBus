@@ -14,6 +14,14 @@ import MapKit
         CLLocationCoordinate2D(latitude:25.01905,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01885,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01865,longitude:121.53975)
+        ,CLLocationCoordinate2D(latitude:25.0202,longitude:121.5397)
+        ,CLLocationCoordinate2D(latitude:25.0185,longitude:121.5385)
+        ,CLLocationCoordinate2D(latitude:25.0180,longitude:121.5385)
+        ,CLLocationCoordinate2D(latitude:25.0174,longitude:121.5360)
+        ,CLLocationCoordinate2D(latitude:25.0157,longitude:121.5380)
+        ,CLLocationCoordinate2D(latitude:25.0175,longitude:121.5405)
+        ,CLLocationCoordinate2D(latitude:25.0185,longitude:121.5415)
+        ,CLLocationCoordinate2D(latitude:25.0203,longitude:121.5413)
     ]
     // Two ordinary searches used to issue this many optional street requests in
     // a burst. Stop at the first provider limit, and never retry this probe.
