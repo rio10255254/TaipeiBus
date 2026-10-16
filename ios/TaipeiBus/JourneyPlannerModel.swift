@@ -325,12 +325,12 @@ final class JourneyPlannerModel: ObservableObject {
             RidingTimeEstimate(seconds: option.trip?.rideSeconds[index] ?? 0, evidence: .typical, observedVehicles: 0)
         }
     }
-    private func contextualTrip(_ option: JourneyOption, at date: Date) -> TransitTrip? {
+    private func contextualTrip(_ option: JourneyOption, at date: Date, riding: [Double]? = nil) -> TransitTrip? {
         guard let trip = option.trip else { return nil }
         guard option.walks.count == trip.rides.count + 1 else { return trip }
         return trip.replacingRides(contextualRides(trip.rides,
             walking: option.walks.enumerated().map { $0.element.duration ?? trip.planningWalkSeconds[$0.offset] },
-            riding: trip.rideSeconds, transferDistances: trip.transferDistances, at: date))
+            riding: riding ?? trip.rideSeconds, transferDistances: trip.transferDistances, at: date))
     }
     func contextualRides(_ source: [TransitRide], walking: [Double], riding: [Double],
                          transferDistances: [Double], at date: Date, onboardFirst: Bool = false) -> [TransitRide] {
@@ -358,7 +358,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard option.verified, option.walkIssue == nil else { return nil }
         let estimates = ridingEstimates(option, at: date)
         let riding = estimates.map(\.seconds)
-        if let trip = contextualTrip(option, at: date) {
+        if let trip = contextualTrip(option, at: date, riding: riding) {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding,
                 ridingSpreads: estimates.map(\.spreadSeconds))
@@ -989,12 +989,16 @@ final class JourneyPlannerModel: ObservableObject {
             integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date(); lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
             verifiedPool = []; optionLabels = [:]
             let date = Date()
-            let initialRiding = Dictionary(uniqueKeysWithValues: trips.map { trip in
-                (trip.id, forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
-                    walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
-            })
-            let ordered = TripRanking.recommended(trips, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, limit: budget.candidates, ridingDurations: initialRiding, diverse: false)
+            let observations = latestSnapshot.estimates, currentForecast = forecast
+            let ordered = await Task.detached(priority: .userInitiated) {
+                let initialRiding = Dictionary(uniqueKeysWithValues: trips.map { trip in
+                    (trip.id, currentForecast.plannedRidingEstimates(trip, metadata: metadata, estimates: observations,
+                        walkingDurations: [], preferences: preferences, at: date).map(\.seconds))
+                })
+                return TripRanking.recommended(trips, estimates: observations, at: date,
+                    preferences: preferences, limit: budget.candidates, ridingDurations: initialRiding, diverse: false)
+            }.value
+            guard !Task.isCancelled, token == generation else { return }
             // Verify several families plus their alternative platforms, not just the three eventual rows.
             var selected: [TransitTrip] = []
             var families = Set<String>()
@@ -1235,9 +1239,12 @@ final class JourneyPlannerModel: ObservableObject {
         }
         // Street verification may move the arrival at a platform past its last train.
         // Recheck every rail line at that platform's clock, rather than query time.
-        if let metadata = lastMetadata, let trip = contextualTrip(option, at: date) {
+        if let metadata = lastMetadata {
+            let estimates = ridingEstimates(option, at: date), riding = estimates.map(\.seconds)
+            guard let trip = contextualTrip(option, at: date, riding: riding) else { return nil }
             let timing = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
-                preferences: preferences, walkingDurations: option.walks.map(\.duration))
+                preferences: preferences, walkingDurations: option.walks.map(\.duration),
+                ridingDurations: riding, ridingSpreads: estimates.map(\.spreadSeconds))
             var cursor = 0.0
             for index in trip.rides.indices {
                 let ride = trip.rides[index]
@@ -1249,7 +1256,7 @@ final class JourneyPlannerModel: ObservableObject {
                        stationID: ride.boarding.stationID, at: date.addingTimeInterval(cursor)) {
                     return (ride.route.localizedName, -3)
                 }
-                cursor += trip.rideSeconds[index]
+                cursor += riding[index]
             }
         }
         return nil

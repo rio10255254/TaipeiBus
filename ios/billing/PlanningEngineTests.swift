@@ -146,6 +146,34 @@ import MapKit
             XCTAssertNil(p.unavailableBoarding(option,at:date),line.id)
             option.walks[0].duration = 1800
             XCTAssertNotNil(p.unavailableBoarding(option,at:date),line.id)
+            var live = TransitSnapshot()
+            live.estimates = EstimateFeed(seconds:[ride.route.parentID+":"+ride.boarding.id:2000],updatedAt:date)
+            p.updateSnapshot(live)
+            XCTAssertNil(p.unavailableBoarding(option,at:date),"A reachable official departure overrides the published window: "+line.id)
         }
+    }
+    func testRemainingJourneySearchRunsIndependentlyAndCancelsItsUnfinishedRequests() async throws {
+        let active = transit("active"), p = planner([active]);p.begin()
+        let alternative = transit("shadow",seconds:300), ride = alternative.rides[0]
+        var metadata = TransitMetadata();metadata.routes[ride.route.id] = ride.route
+        for stop in ride.stops {
+            metadata.stops[stop.id] = stop
+            metadata.paths[ride.route.id,default:[]].append(StopReference(stopID:stop.id,sequence:stop.sequence))
+            metadata.stations[stop.stationID] = Station(id:stop.stationID,name:stop.name,coordinate:stop.coordinate,address:"",bearing:"E",stopIDs:[stop.id])
+        }
+        metadata.rebuildRouteCatalog()
+        var snapshot = TransitSnapshot();snapshot.estimates = EstimateFeed(seconds:["shadow:shadowa":0],updatedAt:Date())
+        let independent = JourneyPlannerModel()
+        independent.testStreet = { input,_ in
+            var result = input;result.coordinates = [input.from,input.to];result.distance = input.from.distance(to:input.to)
+            result.duration = result.distance! / 1.2;result.road = RouteLine(coordinates:result.coordinates);return result
+        }
+        let result = await independent.resolveRemaining(metadata:metadata,
+            from:TravelPlace(name:"目前位置",address:"",coordinate:a),to:TravelPlace(name:"目的地",address:"",coordinate:b),
+            settings:LiveSettings(),snapshot:snapshot,forecast:VehicleArrivalForecast(),bikes:.empty,availability:nil,cacheFrom:p,maximumWait:5)
+        XCTAssertNotNil(result);XCTAssertEqual(result?.rides.first?.route.id,"shadow")
+        XCTAssertFalse(independent.planning);XCTAssertFalse(independent.checkingWalks)
+        XCTAssertEqual(p.selectedID,active.id);XCTAssertTrue(p.started);XCTAssertEqual(p.stepIndex,0)
+        XCTAssertEqual(p.destination?.coordinate,b);p.finish();independent.finish()
     }
 }
