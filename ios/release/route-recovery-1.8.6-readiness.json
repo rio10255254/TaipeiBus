@@ -1,0 +1,143 @@
+{
+  "version": "1.8.6",
+  "source_head": "2329537039e91efd0fa0238db6bd6eecd5b35e11",
+  "distribution": "testflight-only",
+  "production_submission_authorized": false,
+  "report": {
+    "origin": "NTU campus near the screenshot, approximate location",
+    "destination": "Neihu station BR19",
+    "physical_device_logs_available": false
+  },
+  "baseline": {
+    "official_feeds_check": "2026-10-16T07:17:55Z",
+    "gps_source": "2026-10-16T07:17:50Z",
+    "eta_source": "2026-10-16T07:17:50Z",
+    "native_run": 38866584959,
+    "native_head": "a8466b7",
+    "native_live_gps_age_seconds": 4.508,
+    "native_live_eta_age_seconds": 4.509,
+    "native_first_verified_debug_seconds": 50.844,
+    "native_result": "2 confirmed alternatives, no empty-result reproduction at that approximate point",
+    "campus_probe_run": 38868161465,
+    "campus_origins_checked": 8,
+    "unpaced_probe_run": 38868802939,
+    "first_service_failure_request": 51,
+    "error_domain": "MKErrorDomain",
+    "error_code": 1,
+    "provider_error_detail": "Unable to connect to geod / Connection interrupted; not evidence of a universally published numeric Apple quota"
+  },
+  "directions_policy": {
+    "window_seconds": 60,
+    "limits_navigation_initial_optional": [
+      40,
+      32,
+      18
+    ],
+    "maximum_parallel": 2,
+    "minimum_start_spacing_seconds": 0.35,
+    "optional_work": "defer before consuming the reserve; later fresh supply can resume comparison",
+    "cancelled_work": "release the slot before late provider callbacks",
+    "retry": "once after a provider interruption or explicit throttle; genuinely unavailable streets are not invented"
+  },
+  "verification": {
+    "gated_probe_run": 38870539343,
+    "gated_probe_source": "75a297a",
+    "attempted_comparisons": 54,
+    "provider_requests": 20,
+    "optional_deferred": 34,
+    "important_queries_confirmed": 4,
+    "provider_failures": 0,
+    "full_native_run": 38876218190,
+    "ui_run": 38880619989,
+    "ui_source": "c13d56c",
+    "pr_number": 45,
+    "native_source": "6bde875",
+    "native_tests": 78,
+    "native_failures": 0,
+    "native_duration_seconds": 585.929,
+    "core_tests": 267,
+    "core_live_skips": 12,
+    "core_failures": 0,
+    "ui_rerun": 38880619989,
+    "live_feeds": {
+      "gps_age_seconds": 5.732,
+      "eta_age_seconds": 5.732,
+      "gps_error": null,
+      "eta_error": null,
+      "vehicles": 1871,
+      "bike_stations": 1819
+    },
+    "general_journeys": {
+      "NTU_Neihu": 2,
+      "Neihu_NTU": 3,
+      "NTU_Ximen": 3,
+      "CityHall_Miramar": 3
+    },
+    "ui_completed_light": {
+      "run": 38873806602,
+      "source": "774f2a3",
+      "passed_cases": 7,
+      "pending_case": null,
+      "rerun_completed_by": 38880619989
+    },
+    "fixture_change": "Opt-in fixes alternate 26.69 m apart within 13.35 m of the origin to defeat the simulator distance filter. The actual app fix age was 3.046 s before the dismissal action. All app location-age, displacement, boarding and possession safety guards remain unchanged.",
+    "native_behavior_parity": "After 6bde875, only workflow/UI test code and two test-map diagnostic fields changed. Production routing/update behavior is unchanged. Merge tree matches c13d56c.",
+    "ui_unique_light_cases": 8,
+    "ui_unique_dark_cases": 8,
+    "ui_failures_remaining": 0,
+    "ui_final_rerun_light_tests": 2,
+    "ui_final_rerun_light_failures": 0,
+    "ui_final_dark_tests": 8,
+    "ui_final_dark_failures": 0,
+    "ui_final_light_artifact": 12038306634,
+    "ui_final_dark_artifact": 12039140169,
+    "confirmed_sensor_fix_age_seconds": 3.046,
+    "sensor_accuracy_meters": 5,
+    "visual_reviewed": [
+      "light: unavailable pickup itinerary and two-bike connection steps",
+      "dark: two-bike connection preview and unavailable pickup itinerary"
+    ],
+    "prior_ui_failures": "Steps inspection and pager hit areas were corrected. Intermittent optional-prompt checks were traced to stationary simulator fixes expiring; the harness now continuously refreshes bounded fixes and records their age. All unique light and dark cases are complete.",
+    "core_run": 38880619989,
+    "ui_light_fix_rerun": 38880619989,
+    "ui_dark_run": 38880619989,
+    "symbols": {
+      "archive": "testflight-dSYMs.zip",
+      "sha256": "b16cfa38e092909f7a4e29ce847c52fa5d8c527d52968ebacfc896c950e29bd2",
+      "crc_verified": true,
+      "app_dwarf": true,
+      "widget_dwarf": true
+    },
+    "distribution": {
+      "run": 38884063574,
+      "artifact": 12039356762,
+      "source_commit": "2329537039e91efd0fa0238db6bd6eecd5b35e11",
+      "internal_group_confirmed": true,
+      "app_store_submission": false
+    }
+  },
+  "limits": [
+    "Approximate screenshot origin, not an exported physical-device GPS trace.",
+    "Native app verification runs in iPhone simulators; no physical iPhone is attached.",
+    "Shared request pacing cannot guarantee availability during an actual provider or network outage.",
+    "No street geometry, cycling route or official departure is fabricated."
+  ],
+  "pull_request": "https://github.com/rio10255254/TaipeiBus/pull/45",
+  "beta_upload_run": 38884063574,
+  "status": "internal-beta-available",
+  "build_number": "138.1.0",
+  "completed_at": "2026-10-16T10:09:16.548836+00:00",
+  "testflight": {
+    "app_id": "6818475740",
+    "bundle_id": "com.rio10255254.TaipeiBus",
+    "version": "1.8.6",
+    "commit": "2329537039e91efd0fa0238db6bd6eecd5b35e11",
+    "run_url": "https://github.com/rio10255254/TaipeiBus/actions/runs/38884063574",
+    "status": "internal_group_assigned",
+    "build_number": "138.1.0",
+    "upload_confirmed": true,
+    "uploaded_at": "2026-10-16T10:04:00.250079+00:00",
+    "build_id": "2901dd4c-f958-473b-9219-df8dc5a4c50a",
+    "group_id": "4e48a355-f872-4b67-a260-51d343194c62"
+  }
+}
