@@ -53,19 +53,28 @@ public enum BikeRouting {
               from.isInServiceArea, to.isInServiceArea, limit > 0 else { return [] }
         let direct = from.distance(to: to)
         guard direct >= preferences.bikeMinimumRideMeters else { return [] }
+        return pairs(from: from, to: to, direct: direct,
+            pickupStations: network.stations(near: from, radius: preferences.bikeAccessMeters, limit: network.stations.count),
+            dropoffStations: network.stations(near: to, radius: preferences.bikeAccessMeters, limit: network.stations.count),
+            availability: availability, preferences: preferences, at: date, limit: limit)
+    }
+    fileprivate static func pairs(from: Coordinate, to: Coordinate, direct: Double,
+                                  pickupStations: [BikeStation], dropoffStations: [BikeStation],
+                                  availability: BikeAvailability, preferences: LiveSettings.Planning,
+                                  at date: Date, limit: Int) -> [BikeConnection] {
         func usable(_ station: BikeStation, renting: Bool) -> Int? {
             guard let dock = availability.dock(station.id, at: date), dock.active else { return nil }
             let count = renting ? dock.rentable : dock.returnable
             let needed = renting ? preferences.bikeMinimumBikes : preferences.bikeMinimumDocks
             return Double(count) >= needed ? count : nil
         }
-        let pickups = network.stations(near: from, radius: preferences.bikeAccessMeters, limit: network.stations.count)
+        let pickups = pickupStations
             .compactMap { station in usable(station, renting: true).map { (station: station, count: $0) } }.prefix(8)
         guard !pickups.isEmpty else { return [] }
-        let dropoffs = network.stations(near: to, radius: preferences.bikeAccessMeters, limit: network.stations.count)
+        let dropoffs = dropoffStations
             .compactMap { station in usable(station, renting: false).map { (station: station, count: $0) } }.prefix(8)
         guard !dropoffs.isEmpty else { return [] }
-        var candidates: [BikeConnection] = []
+        var candidates: [(connection: BikeConnection, cost: Double)] = []
         for pickup in pickups {
             let access = from.distance(to: pickup.station.coordinate)
             for dropoff in dropoffs where dropoff.station.id != pickup.station.id {
@@ -79,16 +88,14 @@ public enum BikeRouting {
                     bikes: pickup.count, docks: dropoff.count, accessMeters: access, rideMeters: ride, egressMeters: egress,
                     accessSeconds: walkingSeconds(access), rideSeconds: ride / preferences.bikeSpeed,
                     egressSeconds: walkingSeconds(egress), handlingSeconds: preferences.bikeHandlingSeconds)
-                candidates.append(candidate)
+                candidates.append((candidate,candidate.totalSeconds + supplyPenalty(candidate, availability: availability, at: date)))
             }
         }
         return Array(candidates.sorted {
-            let a = $0.totalSeconds + supplyPenalty($0, availability: availability, at: date)
-            let b = $1.totalSeconds + supplyPenalty($1, availability: availability, at: date)
-            if a != b { return a < b }
-            if $0.bikes != $1.bikes { return $0.bikes > $1.bikes }
-            return pairID($0) < pairID($1)
-        }.prefix(min(8, limit)))
+            if $0.cost != $1.cost { return $0.cost < $1.cost }
+            if $0.connection.bikes != $1.connection.bikes { return $0.connection.bikes > $1.connection.bikes }
+            return pairID($0.connection) < pairID($1.connection)
+        }.prefix(min(8, limit)).map(\.connection))
     }
 
     public static func pairID(_ connection: BikeConnection) -> String { connection.pickup.id + ":" + connection.dropoff.id }
@@ -167,5 +174,30 @@ public enum BikeRouting {
             let count = renting ? dock.rentable : dock.returnable
             return Double(count) >= (renting ? preferences.bikeMinimumBikes : preferences.bikeMinimumDocks)
         }
+    }
+}
+
+/// A single synchronous search reuses nearby dock lookups. It never carries counts
+/// across queries, so an updated availability snapshot always starts a fresh search.
+final class BikeConnectionSearch {
+    let network: BikeNetwork
+    let availability: BikeAvailability?
+    let preferences: LiveSettings.Planning
+    let date: Date
+    private var nearby: [Coordinate: [BikeStation]] = [:]
+    init(network: BikeNetwork, availability: BikeAvailability?, preferences: LiveSettings.Planning, at date: Date) {
+        self.network = network; self.availability = availability; self.preferences = preferences; self.date = date
+    }
+    func stations(near point: Coordinate) -> [BikeStation] {
+        if let cached = nearby[point] { return cached }
+        let value = network.stations(near: point, radius: preferences.bikeAccessMeters, limit: network.stations.count)
+        nearby[point] = value; return value
+    }
+    func connections(from: Coordinate, to: Coordinate, limit: Int = 1) -> [BikeConnection] {
+        let direct = from.distance(to: to)
+        guard preferences.bikeRouting, let availability, !network.stations.isEmpty, limit > 0,
+              direct >= preferences.bikeMinimumRideMeters, from.isInServiceArea, to.isInServiceArea else { return [] }
+        return BikeRouting.pairs(from: from, to: to, direct: direct, pickupStations: stations(near: from), dropoffStations: stations(near: to),
+            availability: availability, preferences: preferences, at: date, limit: limit)
     }
 }

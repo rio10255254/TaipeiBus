@@ -33,6 +33,20 @@ struct BikeLeg: Sendable {
             accessSeconds: toPickupSeconds, rideSeconds: rideSeconds, egressSeconds: fromDropoffSeconds, handlingSeconds: handlingSeconds)
     }
     var coordinates: [Coordinate] { toPickup + ride + fromDropoff }
+    func remaining(meters: Double) -> (total: Double, cycling: Double, handling: Double) {
+        guard meters.isFinite else { return (totalSeconds, cyclingSeconds, handlingSeconds) }
+        let distance = min(totalMeters, max(0, meters))
+        if distance > rideMeters + fromDropoffMeters {
+            let foot = toPickupSeconds * min(1, (distance - rideMeters - fromDropoffMeters) / max(1, toPickupMeters))
+            return (foot + cyclingSeconds + fromDropoffSeconds, cyclingSeconds, handlingSeconds)
+        }
+        if distance > fromDropoffMeters {
+            let ridden = rideSeconds * min(1, (distance - fromDropoffMeters) / max(1, rideMeters))
+            let docking = handlingSeconds / 2
+            return (ridden + docking + fromDropoffSeconds, ridden + docking, docking)
+        }
+        return (fromDropoffSeconds * min(1, distance / max(1, fromDropoffMeters)), 0, 0)
+    }
     /// Which part of the leg the rider is in, from how far along the leg they are.
     enum Phase { case toPickup, riding, fromDropoff }
     func phase(remainingMeters: Double) -> Phase {
@@ -254,6 +268,19 @@ final class JourneyPlannerModel: ObservableObject {
         guard let progress = walkingProgress, progress.locationConfirmed,
               let date = progress.lastFix, Date().timeIntervalSince(date) <= 20 else { return AppText.text("正在確認步行位置") }
         if progress.remainingDistance < 12 { return AppText.text("就在附近") }
+        if let option = selected, option.walks.indices.contains(index), let bike = option.walks[index].bike {
+            if bike.phase(remainingMeters: progress.remainingDistance) == .riding {
+                let meters = max(0, progress.remainingDistance - bike.fromDropoffMeters)
+                let seconds = bike.rideSeconds * min(1, meters / max(1, bike.rideMeters))
+                return AppText.text("騎乘剩餘 %@ · %@ 分", distanceLabel(meters), max(1, Int(ceil(seconds / 60))))
+            }
+            let remaining = bike.remaining(meters: progress.remainingDistance)
+            let meters = bike.phase(remainingMeters: progress.remainingDistance) == .toPickup
+                ? max(0, progress.remainingDistance - bike.rideMeters - bike.fromDropoffMeters) : progress.remainingDistance
+            let seconds = bike.phase(remainingMeters: progress.remainingDistance) == .toPickup
+                ? max(0, remaining.total - remaining.cycling - bike.fromDropoffSeconds) : remaining.total
+            return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(meters), max(1, Int(ceil(seconds / 60))))
+        }
         return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(progress.remainingDistance), max(1, Int(ceil(progress.remainingSeconds / 60))))
     }
 
@@ -290,7 +317,7 @@ final class JourneyPlannerModel: ObservableObject {
         return legs.compactMap { $0.bike }.map(\.ride).filter { $0.count >= 2 }
     }
     func ridingEstimates(_ option: JourneyOption, at date: Date) -> [RidingTimeEstimate] {
-        if let trip = option.trip, let metadata = lastMetadata {
+        if let trip = contextualTrip(option, at: date), let metadata = lastMetadata {
             return forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
                 walkingDurations: option.walks.map(\.duration), preferences: preferences, at: date)
         }
@@ -298,11 +325,40 @@ final class JourneyPlannerModel: ObservableObject {
             RidingTimeEstimate(seconds: option.trip?.rideSeconds[index] ?? 0, evidence: .typical, observedVehicles: 0)
         }
     }
+    private func contextualTrip(_ option: JourneyOption, at date: Date) -> TransitTrip? {
+        guard let trip = option.trip else { return nil }
+        guard option.walks.count == trip.rides.count + 1 else { return trip }
+        return trip.replacingRides(contextualRides(trip.rides,
+            walking: option.walks.enumerated().map { $0.element.duration ?? trip.planningWalkSeconds[$0.offset] },
+            riding: trip.rideSeconds, transferDistances: trip.transferDistances, at: date))
+    }
+    func contextualRides(_ source: [TransitRide], walking: [Double], riding: [Double],
+                         transferDistances: [Double], at date: Date, onboardFirst: Bool = false) -> [TransitRide] {
+        guard let metadata = lastMetadata, walking.count == source.count + 1, riding.count == source.count else { return source }
+        var rides = source, cursor = 0.0
+        for index in rides.indices {
+            if onboardFirst && index == 0 { cursor += riding[index]; continue }
+            cursor += walking[index]
+            if rides[index].route.mode != .bus {
+                rides[index].railService = metadata.metro.combinedService(routeID: rides[index].route.id, direction: rides[index].direction,
+                    from: rides[index].boarding.stationID, to: rides[index].alighting.stationID, at: date.addingTimeInterval(cursor))
+            }
+            var arrivals = rides.map { latestSnapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
+            if onboardFirst { arrivals[0] = 0 }
+            let timing = TripRanking.assess(riding: riding, walking: walking, arrivals: arrivals, preferences: preferences,
+                minimumServiceWaits: rides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
+                services: rides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
+                boardingOffsets: rides.map(\.boardingOffsetSeconds), at: date,
+                boardingBuffers: ConnectionTiming.buffers(rides: rides, walking: walking, transferDistances: transferDistances))
+            cursor += timing.waits[index].seconds + riding[index]
+        }
+        return rides
+    }
     func duration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
         guard option.verified, option.walkIssue == nil else { return nil }
         let estimates = ridingEstimates(option, at: date)
         let riding = estimates.map(\.seconds)
-        if let trip = option.trip {
+        if let trip = contextualTrip(option, at: date) {
             let assessment = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
                 preferences: preferences, walkingDurations: option.walks.map(\.duration), ridingDurations: riding,
                 ridingSpreads: estimates.map(\.spreadSeconds))
@@ -1132,6 +1188,8 @@ final class JourneyPlannerModel: ObservableObject {
     func adoptRemaining(_ option: JourneyOption, from start: TravelPlace) -> Bool {
         guard started, case .walk = currentStep, canUse(option),
               option.walks.count == option.rides.count + 1 else { return false }
+        if case .walk(let index) = currentStep, selected?.walks.indices.contains(index) == true,
+           selected?.walks[index].bike != nil, cyclingPhase(at: index) != .toPickup { return false }
         cancelRequests(); origin = start; usingLocation = true
         verifiedPool = [option]; connectionBases = [:]; attemptedBikeConnections = []; stationRefinements = [:]
         options = [option]; selectedID = option.id; selectionConfirmed = true
@@ -1166,10 +1224,29 @@ final class JourneyPlannerModel: ObservableObject {
         let source = origin?.mapItem ?? MKMapItem.forCurrentLocation()
         MKMapItem.openMaps(with: [source, destination.mapItem], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeTransit])
     }
-    func unavailableBoarding(_ option: JourneyOption) -> (route: String, status: Int)? {
+    func unavailableBoarding(_ option: JourneyOption, at date: Date = Date()) -> (route: String, status: Int)? {
         for ride in option.rides {
-            if let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: Date()),
+            if let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date),
                [-2, -3, -4].contains(eta) { return (ride.route.localizedName, eta) }
+        }
+        // Street verification may move the arrival at a platform past its last train.
+        // Recheck every rail line at that platform's clock, rather than query time.
+        if let metadata = lastMetadata, let trip = contextualTrip(option, at: date) {
+            let timing = TripRanking.assessment(trip, estimates: latestSnapshot.estimates, at: date,
+                preferences: preferences, walkingDurations: option.walks.map(\.duration))
+            var cursor = 0.0
+            for index in trip.rides.indices {
+                let ride = trip.rides[index]
+                cursor += option.walks.indices.contains(index) ? option.walks[index].duration ?? trip.planningWalkSeconds[index] : trip.planningWalkSeconds[index]
+                cursor += timing.waits[index].seconds
+                if ride.route.mode != .bus, timing.waits[index].evidence != .official,
+                   metadata.metro.pattern(ride.route.id, direction: ride.direction) != nil,
+                   !metadata.metro.isOperating(routeID: ride.route.id, direction: ride.direction,
+                       stationID: ride.boarding.stationID, at: date.addingTimeInterval(cursor)) {
+                    return (ride.route.localizedName, -3)
+                }
+                cursor += trip.rideSeconds[index]
+            }
         }
         return nil
     }
@@ -1186,6 +1263,11 @@ final class JourneyPlannerModel: ObservableObject {
 #if DEBUG
     var testCycle: ((WalkingLeg) async throws -> WalkingLeg)?
     var testStreet: ((WalkingLeg, MKDirectionsTransportType) async throws -> WalkingLeg)?
+    func auditAgeStreetCache(_ seconds: Double) {
+        walkingCache = walkingCache.mapValues { ($0.leg,$0.date.addingTimeInterval(-seconds)) }
+    }
+    func auditRefineStations() async { await refineLeadingStations(token: generation) }
+    func auditMetadata(_ metadata: TransitMetadata) { lastMetadata = metadata }
     func auditStreet(_ leg: WalkingLeg, cycling: Bool = false) async throws -> WalkingLeg {
         try await walk(leg, transport: cycling ? .cycling : .walking)
     }

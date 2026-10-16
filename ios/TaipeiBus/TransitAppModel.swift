@@ -355,7 +355,7 @@ final class TransitAppModel: ObservableObject {
             let first = step / 2
             let futureBikes = active.walks.dropFirst(first).compactMap(\.bike)
             let currentScore = JourneyPreferenceCost.score(elapsed: current.totalSeconds,
-                walking: max(0, current.walkingSeconds - futureBikes.reduce(0) { $0 + $1.cyclingSeconds }),
+                walking: max(0, current.walkingSeconds - current.cyclingSeconds),
                 waiting: current.waitingSeconds, transfers: max(0, active.rides.count - first - 1),
                 rentals: futureBikes.count, unknownWaits: current.unknownWaits, preferences: settings.planning)
             guard (!usable || timing.unknownWaits <= current.unknownWaits),
@@ -1091,16 +1091,24 @@ final class TransitAppModel: ObservableObject {
         case .walk(let i): index = i; onboard = false
         case nil: return planner.duration(option, at: date)
         }
-        let remainingRides = Array(option.rides.dropFirst(index))
+        var remainingRides = Array(option.rides.dropFirst(index))
         let rideEstimates = remainingRides.map { arrivalForecast.ridingEstimate($0, metadata: metadata, at: date) }
         var riding = rideEstimates.map(\.seconds)
         var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
+        guard walking.count == riding.count + 1 else { return nil }
+        var cycling = option.walks.dropFirst(index).compactMap(\.bike).reduce(0) { $0 + $1.cyclingSeconds }
+        var handling = option.walks.dropFirst(index).compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
            let progress = planner.walkingProgress, progress.locationConfirmed,
            let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
             let leg = option.walks[index]
             let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
-            walking[0] = progress.remainingSeconds + stationAllowance
+            if let bike = leg.bike {
+                let remaining = bike.remaining(meters: progress.remainingDistance)
+                walking[0] = remaining.total + stationAllowance
+                cycling += remaining.cycling - bike.cyclingSeconds
+                handling += remaining.handling - bike.handlingSeconds
+            } else { walking[0] = progress.remainingSeconds + stationAllowance }
         }
         var arrivals = remainingRides.map { snapshot.estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) }
         var positionUncertain = false
@@ -1137,15 +1145,25 @@ final class TransitAppModel: ObservableObject {
             if let last = onboardArrival, last.rideID == first.id, last.at != date {
                 riding[0] = min(riding[0], max(60, last.arrival.timeIntervalSince(last.at)))
             }
+            if let bike = option.walks[index].bike {
+                cycling -= bike.cyclingSeconds; handling -= bike.handlingSeconds
+            }
             walking[0] = 0; arrivals[0] = 0
+        }
+        let transfers = Array((option.trip?.transferDistances ?? []).dropFirst(index))
+        remainingRides = planner.contextualRides(remainingRides, walking: walking, riding: riding,
+            transferDistances: transfers, at: date, onboardFirst: onboard)
+        let spreads = zip(rideEstimates, riding).enumerated().map { offset, pair in
+            offset == 0 ? onboardSpread ?? pair.1 * pair.0.evidence.spreadFraction : pair.1 * pair.0.evidence.spreadFraction
         }
         var duration = JourneyDuration(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: remainingRides.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds) },
             services: remainingRides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds),
-            ridingSpreads: zip(rideEstimates, riding).enumerated().map { index, pair in
-                index == 0 ? onboardSpread ?? pair.1 * pair.0.evidence.spreadFraction : pair.1 * pair.0.evidence.spreadFraction
-            }, at: date)
+            ridingSpreads: spreads, at: date,
+            boardingBuffers: ConnectionTiming.buffers(rides: remainingRides, walking: walking,
+                transferDistances: transfers, ridingSpreads: spreads))
+        duration.cyclingSeconds = max(0,cycling); duration.cyclingHandlingSeconds = max(0,handling)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
@@ -1800,6 +1818,23 @@ final class TransitAppModel: ObservableObject {
         planner.prepareRouteChoicesPreview(choices,
             from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
             to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
+        if ProcessInfo.processInfo.arguments.contains("--preview-journey-suggestion"),
+           var active = planner.options.first, var alternative = planner.options.dropFirst().first {
+            let point = location.usableCoordinate ?? Coordinate(latitude:25.0377,longitude:121.56)
+            func access(_ leg: WalkingLeg, seconds: Double) -> WalkingLeg {
+                var result = WalkingLeg(from:point,to:leg.to,coordinates:[point,leg.to],distance:1500,duration:seconds)
+                result.road = RouteLine(coordinates:result.coordinates); return result
+            }
+            active.walks[0] = access(active.walks[0], seconds:1800)
+            alternative.walks[0] = access(alternative.walks[0], seconds:300)
+            let origin = TravelPlace(name:"目前位置",address:"",coordinate:point,englishName:"Current location")
+            let destination = TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName)
+            planner.auditLoadChoices([active,alternative],from:origin,to:destination)
+            planner.select(active); planner.begin()
+            journeySuggestion = JourneySuggestion(option:alternative,origin:origin,activeID:active.id,activeStep:0,
+                createdAt:Date(),savedSeconds:300)
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--preview-late-recommendation"),
            var inspected = planner.options.first {
             // Deliberately slow first result, followed by real alternative transit chains.

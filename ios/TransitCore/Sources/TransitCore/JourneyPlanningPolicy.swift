@@ -85,11 +85,14 @@ public enum ConnectionTiming {
         return base + uncertainty
     }
     public static func buffers(for trip: TransitTrip, walking: [Double], ridingSpreads: [Double] = []) -> [Double] {
-        trip.rides.indices.map { index in
-            let previous = index > 0 ? trip.rides[index - 1] : nil
-            let ride = trip.rides[index]
+        buffers(rides: trip.rides, walking: walking, transferDistances: trip.transferDistances, ridingSpreads: ridingSpreads)
+    }
+    public static func buffers(rides: [TransitRide], walking: [Double], transferDistances: [Double], ridingSpreads: [Double] = []) -> [Double] {
+        rides.indices.map { index in
+            let previous = index > 0 ? rides[index - 1] : nil
+            let ride = rides[index]
             let internalWalk = index > 0 && previous?.route.mode != .bus && ride.route.mode != .bus &&
-                trip.transferDistances.indices.contains(index - 1) && trip.transferDistances[index - 1] < 1
+                transferDistances.indices.contains(index - 1) && transferDistances[index - 1] < 1
             return buffer(first: index == 0, walking: walking.indices.contains(index) ? walking[index] : 0,
                 from: previous?.route.mode, to: ride.route.mode, internalTransfer: internalWalk,
                 samePlatform: previous?.alighting.stationID == ride.boarding.stationID,

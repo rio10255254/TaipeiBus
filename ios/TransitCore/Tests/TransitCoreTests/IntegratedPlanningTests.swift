@@ -44,6 +44,34 @@ final class IntegratedPlanningTests: XCTestCase {
                 bikeNetwork:bikes,bikeAvailability:availability).isEmpty)
         }
     }
+    func testIndexedTwoBusJourneyRetainsCyclingAtBothEnds() throws {
+        var (metadata,bikes,counts) = fixture()
+        let mid = Coordinate(latitude:25.05,longitude:121.57)
+        let firstID = "stop-1"
+        metadata.stops[firstID] = BusStop(id:firstID,routeID:"bus",stationID:"station-1",name:"轉車",direction:"0",sequence:1,coordinate:mid)
+        metadata.stations["station-1"] = Station(id:"station-1",name:"轉車",coordinate:mid,address:"",bearing:"E",stopIDs:[firstID])
+        let route = BusRoute(id:"second",parentID:"second",name:"第二班",variantName:"",departure:"轉車",destination:"下車")
+        metadata.routes[route.id] = route
+        for (index,point) in [mid,c].enumerated() {
+            let id = "second-\(index)", station = "second-station-\(index)"
+            metadata.stops[id] = BusStop(id:id,routeID:route.id,stationID:station,name:id,direction:"0",sequence:index,coordinate:point)
+            metadata.paths[route.id,default:[]].append(StopReference(stopID:id,sequence:index))
+            metadata.stations[station] = Station(id:station,name:station,coordinate:point,address:"",bearing:"E",stopIDs:[id])
+        }
+        metadata.rebuildRouteCatalog()
+        let trips = MultimodalPlanner(metadata:metadata).plan(from:a,to:d,maximumWalk:100,limit:54,at:date,bikeNetwork:bikes,bikeAvailability:counts)
+        let connected = try XCTUnwrap(trips.first { $0.rides.count == 2 && $0.bikeConnections[0] != nil && $0.bikeConnections[2] != nil })
+        XCTAssertEqual(connected.rides.map { $0.route.id },["bus","second"])
+        XCTAssertEqual(connected.planningWalkSeconds.count,3)
+    }
+    func testPerQueryDockLookupCachePreservesAllStationPairResults() {
+        let (_,network,counts) = fixture(), preferences = LiveSettings.Planning()
+        let cached = BikeConnectionSearch(network:network,availability:counts,preferences:preferences,at:date)
+        for (start,end) in [(a,b),(c,d),(a,d),(a,b)] {
+            let plain = BikeRouting.connections(from:start,to:end,network:network,availability:counts,preferences:preferences,at:date,limit:3)
+            XCTAssertEqual(cached.connections(from:start,to:end,limit:3),plain)
+        }
+    }
     func testSeveralDockPairsSurviveUntilActualStreetVerification() {
         let (_,original,counts) = fixture()
         let extra = BikeStation(id:"alternative",name:"另一站",coordinate:Coordinate(latitude:a.latitude,longitude:a.longitude+0.001),capacity:30)

@@ -1327,6 +1327,32 @@ struct JourneyArrivalView: View {
     }
 }
 
+struct JourneyAlternativePrompt: View {
+    @ObservedObject var model: TransitAppModel
+    let suggestion: TransitAppModel.JourneySuggestion
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(suggestion.savedSeconds.map { AppText.text("預計可省約 %@ 分", max(1,Int($0 / 60))) }
+                    ?? AppText.text("有另一條可行路線"))
+                    .liveFont(.subheadline, weight: .semibold).foregroundStyle(.primary)
+                JourneyRouteChain(option: suggestion.option)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Button { model.acceptJourneySuggestion() } label: {
+                Text(AppText.text("改走")).liveFont(.subheadline, weight: .semibold)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
+            }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-alternative-accept")
+            Button { model.dismissJourneySuggestion() } label: {
+                Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 44, height: 44)
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityLabel(AppText.text("保留目前路線"))
+                .accessibilityIdentifier("journey-alternative-dismiss")
+        }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
+            .phoneGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .accessibilityIdentifier("journey-alternative-prompt")
+    }
+}
+
 struct JourneyGuideCard: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel

@@ -89,10 +89,10 @@ public struct JourneyDuration: Equatable, Sendable {
 
     public init(riding: [Double], walking: [Double], arrivals: [Int?], minimumServiceWaits: [Double] = [],
                 services: [BusDayService?] = [], boardingOffsets: [Double] = [], ridingSpreads: [Double] = [],
-                at date: Date = Date()) {
+                at date: Date = Date(), boardingBuffers: [Double] = []) {
         let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: minimumServiceWaits, services: services, boardingOffsets: boardingOffsets,
-            ridingSpreads: ridingSpreads, at: date)
+            ridingSpreads: ridingSpreads, at: date, boardingBuffers: boardingBuffers)
         self.init(assessment: assessment, riding: riding)
     }
     public init(assessment: TripAssessment, riding: [Double]) {

@@ -84,6 +84,44 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     func testMixedRoutesShareOneMenuAndFillTheMap() { verifyMenu(english:false) }
     func testEnglishMixedRoutesKeepTheSameFlow() { verifyMenu(english:true) }
+    func testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute() {
+        launch(["--preview-mixed-planning","--preview-journey-suggestion","--usability-fixture","--test-journey-selection","--test-map-controls"])
+        let dismiss = button("journey-alternative-dismiss")
+        XCTAssertTrue(dismiss.waitForExistence(timeout:120))
+        let selected = state()["selected"] as? String
+        XCTAssertEqual(state()["started"] as? Bool,true)
+        XCTAssertEqual(state()["route_panel_open"] as? Bool,false)
+        XCTAssertFalse((state()["suggestion"] as? String ?? "").isEmpty)
+        capture("journey-alternative-optional")
+        dismiss.tap()
+        waitFor("Dismiss keeps navigation and the selected route") {
+            self.state()["suggestion"] as? String == "" && self.state()["selected"] as? String == selected &&
+                self.state()["started"] as? Bool == true
+        }
+        XCTAssertFalse(button("journey-alternative-accept").exists)
+        XCTAssertTrue(button("journey-board").isHittable);button("journey-board").tap()
+        waitFor("Boarding proceeds with the original route") {
+            self.state()["step"] as? Int == 1 && self.state()["selected"] as? String == selected
+        }
+        capture("journey-alternative-dismissed-boarded")
+    }
+    func testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped() {
+        launch(["--preview-mixed-planning","--preview-journey-suggestion","--usability-fixture","--test-journey-selection","--test-language","en"])
+        let accept = button("journey-alternative-accept")
+        XCTAssertTrue(accept.waitForExistence(timeout:120))
+        let initial = state(), proposed = initial["suggestion"] as? String ?? ""
+        XCTAssertFalse(proposed.isEmpty);XCTAssertNotEqual(initial["selected"] as? String,proposed)
+        XCTAssertEqual(accept.label,"Switch");XCTAssertTrue(accept.isHittable)
+        capture("journey-alternative-en-before-switch")
+        accept.tap()
+        waitFor("Only an explicit tap replaces the remaining trip") {
+            self.state()["selected"] as? String == proposed && self.state()["started"] as? Bool == true &&
+                self.state()["suggestion"] as? String == "" && self.state()["step"] as? Int == 0
+        }
+        XCTAssertEqual(state()["route_panel_open"] as? Bool,false)
+        XCTAssertFalse(button("journey-alternative-accept").exists)
+        capture("journey-alternative-en-after-switch")
+    }
     func testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected() {
         launch(["--preview-mixed-planning","--preview-late-recommendation","--usability-fixture","--test-journey-selection","--test-map-controls"])
         guard requireRouteMenu() else { return }

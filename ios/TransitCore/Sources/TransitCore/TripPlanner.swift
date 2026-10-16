@@ -125,6 +125,12 @@ public struct TripPlanner: Sendable {
         let walking: Double
         let riding: Double
     }
+    private struct BoardingOrigin {
+        let index: Int
+        let cost: Double
+        let walking: Double
+        let ready: Double
+    }
     private struct Cell: Hashable {
         let x: Int; let y: Int
         init(_ coordinate: Coordinate) {
@@ -290,6 +296,42 @@ public struct TripPlanner: Sendable {
             pattern.route.minimumServiceWait(direction: pattern.direction, at: date,
                 fullRouteSeconds: routeTimes[index].last ?? 0)
         }
+        // A long route may pass dozens of platforms inside the same access area.
+        // Keep independent boarding tradeoffs once per pattern before expanding its
+        // transfer combinations. This preserves every service, early boarding for
+        // short trips, the nearest walk and the best downstream arrival.
+        var allowedBoards: [Int: Set<Int>] = [:]
+        if preservePlatforms {
+            var originGroups: [Int: [BoardingOrigin]] = [:]
+            for start in origins { for board in occurrences[start.id] ?? [] {
+                let walk = start.distance * 1.25 / 1.2
+                func boardingCost(seconds: Double, cycling: Double, rentals: Int, risk: Double) -> Double {
+                    let wait = BoardingTime.wait(official: arrivals[board.pattern][board.index], readyAt: seconds,
+                        buffer: ConnectionTiming.buffer(first: true, walking: seconds), service: services[board.pattern],
+                        secondsOfDay: timeOfDay, boardingOffset: routeTimes[board.pattern][board.index],
+                        minimumServiceWait: serviceWaits[board.pattern])
+                    return JourneyPreferenceCost.score(elapsed: seconds + wait.seconds, walking: max(0,seconds-cycling),
+                        waiting: wait.seconds, transfers: 0, rentals: rentals, unknownWaits: wait.evidence == .unknown ? 1 : 0,
+                        supplyRisk: risk, preferences: preferences)
+                }
+                let footCost = start.distance <= maximumWalk ? boardingCost(seconds: walk, cycling: 0, rentals: 0, risk: 0) : .infinity
+                let bike = accessConnections[start.id]
+                let bikeCost = bike.map { boardingCost(seconds: $0.totalSeconds, cycling: $0.rideSeconds + $0.handlingSeconds,
+                    rentals: 1, risk: BikeRouting.supplyPenalty($0, availability: bikeAvailability, at: date)) } ?? .infinity
+                originGroups[board.pattern, default: []].append(BoardingOrigin(index: board.index,
+                    cost: min(footCost,bikeCost) - routeTimes[board.pattern][board.index],
+                    walking: min(start.distance <= maximumWalk ? walk : .infinity, bike.map { $0.accessSeconds + $0.egressSeconds } ?? .infinity),
+                    ready: min(start.distance <= maximumWalk ? walk : .infinity, bike?.totalSeconds ?? .infinity)))
+            } }
+            for (pattern,pool) in originGroups {
+                let ordered = pool.sorted { $0.cost == $1.cost ? $0.index < $1.index : $0.cost < $1.cost }
+                var kept = Set(ordered.prefix(3).map(\.index))
+                for candidate in [pool.min(by: { $0.walking < $1.walking }), pool.min(by: { $0.ready < $1.ready }),
+                                  pool.min(by: { $0.index < $1.index })].compactMap({ $0 }) { kept.insert(candidate.index) }
+                for candidate in ordered where kept.count < (limit > 54 ? 8 : 6) { kept.insert(candidate.index) }
+                allowedBoards[pattern] = kept
+            }
+        }
         var candidates: [String: [Candidate]] = [:]
         var familyBounds: [String: FamilyBound] = [:]
         let hasBikes = !accessConnections.isEmpty || !egressConnections.isEmpty
@@ -400,6 +442,7 @@ public struct TripPlanner: Sendable {
         for start in origins {
             if Task.isCancelled { return [] }
             for board in occurrences[start.id] ?? [] {
+                if preservePlatforms, allowedBoards[board.pattern]?.contains(board.index) != true { continue }
                 let first = patterns[board.pattern]
                 guard board.index < first.stops.count - 1 else { continue }
                 for exit in bestExits[board.pattern][board.index].prefix(preservePlatforms ? 3 : 1) {

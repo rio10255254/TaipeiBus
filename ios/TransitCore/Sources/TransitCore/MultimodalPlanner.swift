@@ -154,18 +154,17 @@ public struct MultimodalPlanner: Sendable {
             return (metadata.metro.nearestExit(stationID: stop.stationID, to: c)?.coordinate ?? stop.coordinate).distance(to: c)
         }
         var accessBikes: [String: [BikeConnection]] = [:], egressBikes: [String: [BikeConnection]] = [:]
+        let bikeSearch = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date)
         if cycling {
             for (id, stop) in stationStops {
                 let access = streetDistance(stop, to: origin), egress = streetDistance(stop, to: destination)
                 if access >= preferences.bikeMinimumRideMeters, access <= bikeRadius {
                     let entry = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: origin)?.coordinate ?? stop.coordinate
-                    accessBikes[id] = BikeRouting.connections(from: origin, to: entry, network: bikeNetwork,
-                        availability: bikeAvailability, preferences: preferences, at: date, limit: 1)
+                    accessBikes[id] = bikeSearch.connections(from: origin, to: entry)
                 }
                 if egress >= preferences.bikeMinimumRideMeters, egress <= bikeRadius {
                     let exit = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
-                    egressBikes[id] = BikeRouting.connections(from: exit, to: destination, network: bikeNetwork,
-                        availability: bikeAvailability, preferences: preferences, at: date, limit: 1)
+                    egressBikes[id] = bikeSearch.connections(from: exit, to: destination)
                 }
             }
         }
@@ -231,7 +230,7 @@ public struct MultimodalPlanner: Sendable {
             var result = (links[id] ?? []).map { ($0, Optional<BikeConnection>.none) }
             guard cycling, let stop = stationStops[id] else { streetLinks[id] = result; return result }
             let start = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
-            guard bikeNetwork.stations(near: start, radius: preferences.bikeAccessMeters, limit: 20).contains(where: {
+            guard bikeSearch.stations(near: start).contains(where: {
                 BikeRouting.confirmed($0, availability: bikeAvailability, renting: true, at: date)
             }) else { streetLinks[id] = result; return result }
             var targets: [BusStop] = []
@@ -262,8 +261,7 @@ public struct MultimodalPlanner: Sendable {
                 let end = other.mode == .bus ? other.coordinate : metadata.metro.nearestExit(stationID: other.stationID, to: start)?.coordinate ?? other.coordinate
                 let distance = start.distance(to: end)
                 let station = (stop.mode == .bus ? 0.0 : 90) + (other.mode == .bus ? 0.0 : 120)
-                for bike in BikeRouting.connections(from: start, to: end, network: bikeNetwork,
-                    availability: bikeAvailability, preferences: preferences, at: date, limit: 1) {
+                for bike in bikeSearch.connections(from: start, to: end) {
                     result.append((Link(id: other.stationID, distance: distance, seconds: bike.totalSeconds + station, internalWalk: false), bike))
                 }
             }
