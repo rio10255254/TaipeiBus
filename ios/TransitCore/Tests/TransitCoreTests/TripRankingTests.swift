@@ -2,6 +2,40 @@ import XCTest
 @testable import TransitCore
 
 final class TripRankingTests: XCTestCase {
+    func testSmallCyclingSavingDoesNotOutweighAnotherRentalButAClearSavingDoes() {
+        let simpler=TripRanking.assess(riding:[900],walking:[1500,0],arrivals:[nil],cyclingSeconds:900,rentalCount:1)
+        let smallSaving=TripRanking.assess(riding:[900],walking:[1440,0],arrivals:[nil],cyclingSeconds:900,rentalCount:2)
+        let clearSaving=TripRanking.assess(riding:[900],walking:[1200,0],arrivals:[nil],cyclingSeconds:900,rentalCount:2)
+        XCTAssertLessThan(smallSaving.elapsedSeconds,simpler.elapsedSeconds)
+        XCTAssertGreaterThan(smallSaving.score,simpler.score)
+        XCTAssertLessThan(clearSaving.score,simpler.score)
+    }
+    func testRentalConvenienceNeverAddsFakeMinutesToTheJourney() {
+        let one=TripRanking.assess(riding:[600],walking:[900,900],arrivals:[3000],cyclingSeconds:1500,rentalCount:1)
+        let two=TripRanking.assess(riding:[600],walking:[900,900],arrivals:[3000],cyclingSeconds:1500,rentalCount:2)
+        XCTAssertEqual(one.elapsedSeconds,two.elapsedSeconds)
+        XCTAssertEqual(one.lowerSeconds,two.lowerSeconds)
+        XCTAssertEqual(one.upperSeconds,two.upperSeconds)
+        XCTAssertEqual(two.score-one.score,TripRanking.rentalConvenienceSeconds,accuracy:0.001)
+    }
+    func testCurrentDepartureCanSwitchRecommendationBetweenWalkingAndCyclingOnTheSameRoute() {
+        let a=Coordinate(latitude:25.02,longitude:121.54), b=Coordinate(latitude:25.04,longitude:121.51)
+        var route=BusRoute(id:"rail",parentID:"rail",name:"捷運",variantName:"",departure:"上車",destination:"下車")
+        route.mode = .metro;route.lineCode="G"
+        let stops=[BusStop(id:"rail-a",routeID:"rail",stationID:"rail-a",name:"上車",direction:"0",sequence:1,coordinate:a),
+                   BusStop(id:"rail-b",routeID:"rail",stationID:"rail-b",name:"下車",direction:"0",sequence:2,coordinate:b)]
+        let ride=TransitRide(route:route,direction:"0",stops:stops,coordinates:[a,b])
+        let walking=TransitTrip(rides:[ride],accessDistance:300,egressDistance:0,transferDistance:0,score:0,rideSeconds:[900])
+        let bike=walking.asVariant("bike"), now=Date()
+        let connections:[String:[Double?]]=[walking.id:[300,0],bike.id:[250,0]]
+        func recommend(arrival: Int) -> [TransitTrip] {
+            TripRanking.recommended([walking,bike],estimates:EstimateFeed(seconds:["rail:rail-a":arrival],updatedAt:now),
+                at:now,limit:2,walkingDurations:connections,diverse:false,
+                cyclingDurations:[bike.id:250],rentalCounts:[bike.id:1])
+        }
+        XCTAssertEqual(recommend(arrival:330).first?.id,bike.id,"Cycling is worthwhile when it catches a departure walking would miss")
+        XCTAssertEqual(recommend(arrival:900).first?.id,walking.id,"If both catch the same departure, a short walk avoids an unnecessary rental")
+    }
     func testExplicitFewerTransferPreferenceChangesRankingWithoutAddingTravelTime() throws {
         let baseline = LiveSettings.Planning()
         var personal = baseline; personal.personalTransferPenaltySeconds = 900

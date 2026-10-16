@@ -16,6 +16,7 @@ public struct JourneyDuration: Equatable, Sendable {
     public var positionUncertain = false
     /// Part of `walkingSeconds` that is spent riding a YouBike, including unlocking and docking.
     public var cyclingSeconds: Double = 0
+    public var cyclingHandlingSeconds: Double = 0
     public var ridingEvidence: RidingTimeEstimate.Evidence = .typical
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
     public var travelSeconds: Double { walkingSeconds + ridingSeconds }
@@ -44,8 +45,11 @@ public struct JourneyDuration: Equatable, Sendable {
     public var breakdownLabel: String {
         if cyclingSeconds > 0 {
             let onFoot = max(0, walkingSeconds - cyclingSeconds)
-            if ridingSeconds <= 0 { return AppText.text("步行 %@ 分 · 騎車 %@ 分", minutes(onFoot), minutes(cyclingSeconds)) }
-            return AppText.text("步行 %@ 分 · 騎車 %@ 分 · 搭車 %@ 分", minutes(onFoot), minutes(cyclingSeconds), minutes(ridingSeconds))
+            let riding = max(0, cyclingSeconds - cyclingHandlingSeconds)
+            let breakdown = ridingSeconds <= 0
+                ? AppText.text("步行 %@ 分 · 騎車 %@ 分", minutes(onFoot), minutes(riding))
+                : AppText.text("步行 %@ 分 · 騎車 %@ 分 · 搭車 %@ 分", minutes(onFoot), minutes(riding), minutes(ridingSeconds))
+            return cyclingHandlingSeconds > 0 ? breakdown + AppText.text(" · 取還車 %@ 分", minutes(cyclingHandlingSeconds)) : breakdown
         }
         return AppText.text("步行 %@ 分 · 搭車 %@ 分", minutes(walkingSeconds), minutes(ridingSeconds))
     }

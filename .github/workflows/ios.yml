@@ -573,6 +573,7 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
               '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
@@ -746,6 +747,7 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
               '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
           fi
           if [ '${{ inputs.usability_scope }}' = 'metro' ]; then

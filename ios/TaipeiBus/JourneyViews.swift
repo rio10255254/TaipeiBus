@@ -844,12 +844,21 @@ private struct JourneyRouteChain: View {
                 HStack(spacing: 5) {
                 if let duration = option.walks[index].duration, duration >= 30 {
                     if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-                    HStack(spacing: 1) {
-                        Image(systemName: option.walks[index].bike == nil ? "figure.walk" : "bicycle")
-                        Text("\(max(1, Int(ceil(duration / 60))))")
+                    if let bike = option.walks[index].bike {
+                        if bike.toPickupSeconds >= 30 {
+                            time(bike.toPickupSeconds, symbol: "figure.walk")
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        time(bike.rideSeconds, symbol: "bicycle")
+                            .accessibilityLabel(AppText.text("騎車 %@ 分", bike.ridingMinutes))
+                            .accessibilityIdentifier("journey-chain-bike-\(index)")
+                        if bike.fromDropoffSeconds >= 30 {
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            time(bike.fromDropoffSeconds, symbol: "figure.walk")
+                        }
+                    } else {
+                        time(duration, symbol: "figure.walk")
                     }
-                    .liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
-                    .accessibilityElement(children: .combine)
                 }
                 if option.rides.indices.contains(index) {
                     if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
@@ -864,6 +873,13 @@ private struct JourneyRouteChain: View {
                 }
             }
         }.lineLimit(1)
+    }
+    private func time(_ seconds: Double, symbol: String) -> some View {
+        HStack(spacing: 1) {
+            Image(systemName: symbol)
+            Text("\(max(1, Int(ceil(seconds / 60))))")
+        }.liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
+            .accessibilityElement(children: .combine)
     }
 }
 
@@ -884,15 +900,23 @@ struct JourneyOptionsView: View {
             }
             if let message = planner.message { Text(live.text(message)).liveFont(.subheadline).foregroundStyle(.secondary) }
             if compact, !planner.options.isEmpty {
+                // Keep the actions outside the paging collection. Its gesture handling and
+                // recycled pages must never swallow a Steps/Go tap during a clock update.
+                HStack(spacing: 12) {
                 TabView(selection: Binding(get: { planner.selectedID ?? planner.options.first?.id ?? "" }, set: { id in
                     if id != planner.selectedID, let option = planner.options.first(where: { $0.id == id }) { planner.select(option) }
                 })) {
-                    ForEach(planner.featuredOptions) { option in compactCard(option).tag(option.id) }
+                    ForEach(planner.featuredOptions) { option in compactSummary(option).tag(option.id) }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
-                .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)))
                 .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
                 .accessibilityIdentifier("journey-preview-pages")
+                if let option = planner.selected ?? planner.featuredOptions.first { compactActions(option) }
+                }
+                .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)) - 28)
+                .padding(14)
+                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .padding(.horizontal, 1)
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
                         ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
@@ -912,11 +936,11 @@ struct JourneyOptionsView: View {
                         .accessibilityLabel(AppText.text("全部路線"))
                         .accessibilityValue("\(planner.options.count)")
                         .accessibilityIdentifier("journey-all-options")
-                    // Live times reordered the options: offer the new order without moving rows under a finger.
+                    // Return to the first recommendation without replacing the inspected map automatically.
                     if planner.comparisonChanged, !planner.checkingWalks {
                         Button { planner.refreshRecommendations() } label: {
                             Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
-                        }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
+                        }.accessibilityLabel(AppText.text("查看推薦")).accessibilityIdentifier("journey-refresh-options")
                             .transition(.opacity)
                     }
                     Spacer(minLength: 4)
@@ -933,7 +957,7 @@ struct JourneyOptionsView: View {
             if planner.checkingWalks { ProgressView().padding(.vertical, 8).accessibilityLabel(AppText.text("確認接駁與其他方案")) }
             if planner.comparisonChanged, !planner.checkingWalks, !compact {
                 Button { planner.refreshRecommendations() } label: {
-                    Label(AppText.text("更新推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
+                    Label(AppText.text("查看推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-refresh-options")
             }
         }
@@ -941,15 +965,16 @@ struct JourneyOptionsView: View {
     private func usable(_ option: JourneyOption) -> Bool {
         option.verified && option.walkIssue == nil && planner.unavailableBoarding(option) == nil
     }
-    private func compactCard(_ option: JourneyOption) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            Button { planner.select(option); collapse() } label: {
+    private func compactSummary(_ option: JourneyOption) -> some View {
+        Button { planner.select(option); collapse() } label: {
                 TimelineView(.periodic(from: .now, by: 15)) { timeline in
-                    summary(option, at: timeline.date, compact: true).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                    summary(option, at: timeline.date, compact: true).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading).contentShape(Rectangle())
                 }
             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("journey-option-" + option.id)
-            VStack(spacing: 6) {
+    }
+    private func compactActions(_ option: JourneyOption) -> some View {
+        VStack(spacing: 6) {
                 Button { go(option) } label: {
                     Text(AppText.text("出發")).liveFont(.body, weight: .bold).frame(width: 66, height: 62)
                 }.buttonStyle(MapTileStyle(prominent: true, tint: MapChrome.go))
@@ -969,11 +994,7 @@ struct JourneyOptionsView: View {
                     .disabled(!usable(option))
                     .accessibilityLabel(AppText.text("查看搭乘步驟"))
                     .accessibilityIdentifier("journey-steps-" + option.id)
-            }.frame(width: 66)
-
-        }.padding(14).frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
-            .padding(.horizontal, 1)
+        }.frame(width: 66)
     }
     private func optionRow(_ option: JourneyOption) -> some View {
         Button { planner.select(option); collapse() } label: {
@@ -1137,8 +1158,13 @@ private struct JourneyCyclingStep: View {
                     JourneyBikeStations(model: model, bike: bike, index: index)
                     Text(done ? AppText.text("已完成")
                          : AppText.text("步行 %@ 分 · 騎 %@ · %@ 分", max(1, Int(ceil(bike.walkingSeconds / 60))),
-                                        distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
+                                        distanceLabel(bike.rideMeters), bike.ridingMinutes))
                         .liveFont(.subheadline).foregroundStyle(.secondary)
+                    if !done, bike.handlingSeconds > 0 {
+                        Text(AppText.text("全程已含取還車 %@ 分", max(1, Int(ceil(bike.handlingSeconds / 60)))))
+                            .liveFont(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("journey-bike-handling-\(index)")
+                    }
                     if !done {
                         if let instruction = leg.stationInstruction {
                             Text(instruction).liveFont(.caption).foregroundStyle(.secondary)

@@ -22,13 +22,17 @@ public struct TripAssessment: Sendable {
 }
 
 public enum TripRanking {
+    /// A convenience preference only, never added to the displayed travel or arrival time.
+    /// A second rental is another decision and another station to depend on.
+    public static let rentalConvenienceSeconds = 120.0
     /// Missing headways must carry a waiting cost instead of making a connection free.
     /// These fallback seconds are used for comparison only and never shown as official ETAs.
     public static func assess(riding: [Double], walking: [Double], arrivals: [Int?],
                               preferences: LiveSettings.Planning = .init(), minimumServiceWaits: [Double] = [],
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
                               ridingSpreads: [Double] = [],
-                              at date: Date = Date(), serviceTimeOfDay: Double? = nil, cyclingSeconds: Double = 0) -> TripAssessment {
+                              at date: Date = Date(), serviceTimeOfDay: Double? = nil, cyclingSeconds: Double = 0,
+                              rentalCount: Int = 0) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false, spread = 0.0
@@ -82,7 +86,8 @@ public enum TripRanking {
         let score = elapsed + (walkingSeconds - cycled) * (preferences.walkingWeight - 1 + 0.35) +
             waiting * (preferences.waitingWeight - 1) +
             Double(max(0, riding.count - 1)) * preferences.effectiveTransferPenaltySeconds +
-            Double(waits.filter { $0.evidence == .unknown }.count) * 180
+            Double(waits.filter { $0.evidence == .unknown }.count) * 180 +
+            Double(max(0, rentalCount)) * rentalConvenienceSeconds
         return TripAssessment(score: unavailable ? .infinity : score, elapsedSeconds: elapsed,
             walkingSeconds: walkingSeconds, waitingSeconds: waiting, missedFirstArrival: missed,
             uncertainWaits: unknown, unavailable: unavailable, waits: waits,
@@ -93,7 +98,8 @@ public enum TripRanking {
     public static func assessment(_ trip: TransitTrip, estimates: EstimateFeed, at date: Date,
                                   preferences: LiveSettings.Planning = .init(),
                                   walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil,
-                                  ridingSpreads: [Double]? = nil, cyclingSeconds: Double = 0) -> TripAssessment {
+                                  ridingSpreads: [Double]? = nil, cyclingSeconds: Double = 0,
+                                  rentalCount: Int = 0) -> TripAssessment {
         let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
             return seconds
@@ -106,7 +112,7 @@ public enum TripRanking {
             boardingOffsets: trip.rides.map(\.boardingOffsetSeconds),
             ridingSpreads: ridingSpreads ?? zip(trip.rides, ridingDurations ?? trip.rideSeconds).map { ride, seconds in
                 seconds * (ride.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
-            }, at: date, cyclingSeconds: cyclingSeconds)
+            }, at: date, cyclingSeconds: cyclingSeconds, rentalCount: rentalCount)
     }
 
     /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
@@ -120,7 +126,8 @@ public enum TripRanking {
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
                 walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id],
-                cyclingSeconds: cyclingDurations[trip.id] ?? 0))
+                cyclingSeconds: cyclingDurations[trip.id] ?? 0,
+                rentalCount: rentalCounts[trip.id] ?? ((cyclingDurations[trip.id] ?? 0) > 0 ? 1 : 0)))
         })
         // Connector durations include cycling so departure feasibility and arrival clocks
         // remain correct. Only the preference cost and walking comparison exclude riding.

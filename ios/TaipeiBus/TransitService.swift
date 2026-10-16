@@ -60,27 +60,65 @@ actor TransitService {
         return network
     }
     private var bikeFetchedAt = Date.distantPast
+    private var bikeRetryAt = Date.distantPast
     private var bikeTag: String?
     private var bikePacket: BikeAvailability?
+    private var bikeRequest: Task<BikeAvailability?, Never>?
+    private var checkedBikeCache = false
+    private let bikeSession: URLSession
+    private let bikeNow: @Sendable () -> Date
     private static let bikeFeedURL = URL(string: "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json")!
+    /// Reuse a recent official report across launches, keeping its original receipt and
+    /// station report times. Loading a file never makes old counts current again.
+    func cachedBikeAvailability(network: BikeNetwork) -> BikeAvailability? {
+        guard !network.stations.isEmpty else { return nil }
+        if checkedBikeCache { return bikePacket }
+        checkedBikeCache = true
+        let file = cacheDirectory.appendingPathComponent("YouBikeImmediate.json"), now = bikeNow()
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+              let received = attributes[.modificationDate] as? Date,
+              (0..<BikeDock.freshnessSeconds).contains(now.timeIntervalSince(received)),
+              ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 8 * 1_024 * 1_024,
+              let bytes = try? Data(contentsOf: file),
+              let packet = try? BikeAvailability(data: bytes, network: network, at: received),
+              packet.docks.values.contains(where: { $0.isFresh(at: now) }) else { return nil }
+        bikePacket = packet; bikeFetchedAt = received
+        return packet
+    }
     /// Taipei's public YouBike 2.0 feed is one file for the whole city, rewritten about once a
-    /// minute and served uncompressed. It is only fetched while bike stations are on screen,
-    /// at most once a minute, and a conditional request costs no body between rewrites.
+    /// minute. Load a recent cache first, share concurrent requests, and retry a failed first
+    /// download promptly rather than treating it as a successful one-minute cache.
     func bikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
         guard !network.stations.isEmpty else { return nil }
-        if Date().timeIntervalSince(bikeFetchedAt) < 60 { return bikePacket }
-        bikeFetchedAt = Date()
+        _ = cachedBikeAvailability(network: network)
+        if bikeNow().timeIntervalSince(bikeFetchedAt) < 60 { return bikePacket }
+        if let bikeRequest { return await bikeRequest.value }
+        guard bikeNow() >= bikeRetryAt else { return bikePacket }
+        let request = Task { await self.fetchBikeAvailability(network: network) }
+        bikeRequest = request
+        let packet = await request.value
+        bikeRequest = nil
+        return packet
+    }
+    private func fetchBikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
+        bikeRetryAt = bikeNow().addingTimeInterval(10)
         var request = URLRequest(url: Self.bikeFeedURL)
         request.timeoutInterval = 12; request.cachePolicy = .reloadIgnoringLocalCacheData
         if let bikeTag, bikePacket != nil { request.setValue(bikeTag, forHTTPHeaderField: "If-None-Match") }
         do {
-            let (bytes, response) = try await URLSession.shared.data(for: request)
+            let (bytes, response) = try await bikeSession.data(for: request)
             guard let http = response as? HTTPURLResponse else { return bikePacket }
-            if http.statusCode == 304 { return bikePacket }
+            if http.statusCode == 304 { bikeFetchedAt = bikeNow(); return bikePacket }
             guard http.statusCode == 200 else { return bikePacket }
-            let packet = try BikeAvailability(data: bytes, network: network, at: Date())
+            let received = bikeNow()
+            let packet = try BikeAvailability(data: bytes, network: network, at: received)
             bikeTag = http.value(forHTTPHeaderField: "ETag")
-            bikePacket = packet
+            bikePacket = packet; bikeFetchedAt = received
+            try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
+            let file = cacheDirectory.appendingPathComponent("YouBikeImmediate.json")
+            if (try? bytes.write(to: file, options: .atomic)) != nil {
+                try? FileManager.default.setAttributes([.modificationDate: received], ofItemAtPath: file.path)
+            }
             return packet
         } catch { return bikePacket }
     }
@@ -96,7 +134,8 @@ actor TransitService {
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
 
-    init() {
+    init(bikeSession: URLSession = .shared, cacheDirectory: URL? = nil, bikeNow: @escaping @Sendable () -> Date = { Date() }) {
+        self.bikeSession = bikeSession; self.bikeNow = bikeNow
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 40
@@ -104,7 +143,7 @@ actor TransitService {
         configuration.waitsForConnectivity = false
         transport = ConditionalFeedTransport(session: URLSession(configuration: configuration),
             baseURL: URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/")!)
-        cacheDirectory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }

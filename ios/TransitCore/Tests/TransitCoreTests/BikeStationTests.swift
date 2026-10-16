@@ -127,4 +127,28 @@ final class BikeStationTests: XCTestCase {
         XCTAssertFalse(dock(rentable: 9, age: 1_800).isFresh(at: now))
         XCTAssertTrue(dock(rentable: 9, age: 240).isFresh(at: now))
     }
+    func testCityPublicationCannotReviveAnOldStationReport() throws {
+        let now=Date(), network=sampleNetwork()
+        let bytes=try feed([["sno":"500101001","available_rent_bikes":8,"available_return_bikes":8,
+            "infoTime":stamp(now.addingTimeInterval(-1800)),"srcUpdateTime":stamp(now),"updateTime":stamp(now)]])
+        let packet=try BikeAvailability(data:bytes,network:network,at:now)
+        let dock=try XCTUnwrap(packet.dock("500101001"))
+        XCTAssertFalse(dock.isFresh(at:now))
+        XCTAssertEqual(BikeSupply.level(dock,at:now),.unknown)
+    }
+    func testWholeCityCountsDecodePromptlyWithRepeatedAndFallbackTimestamps() throws {
+        let now=Date(), network=try bundledNetwork(), old=stamp(now.addingTimeInterval(-60)), current=stamp(now)
+        let rows=network.stations.enumerated().map { index,station -> [String:Any] in
+            ["sno":station.id,"available_rent_bikes":8,"available_return_bikes":8,
+             "infoTime":index % 2 == 0 ? old : "unavailable","srcUpdateTime":current,"updateTime":current,"mday":"bad"]
+        }
+        let bytes=try feed(rows), started=ProcessInfo.processInfo.systemUptime
+        let packet=try BikeAvailability(data:bytes,network:network,at:now)
+        let elapsed=ProcessInfo.processInfo.systemUptime-started
+        XCTAssertEqual(packet.docks.count,network.stations.count)
+        XCTAssertEqual(packet.dock(network.stations[0].id)?.observedAt,FeedDecoder.taipeiDate(old))
+        XCTAssertEqual(packet.dock(network.stations[1].id)?.observedAt,FeedDecoder.taipeiDate(current))
+        XCTAssertLessThan(elapsed,2,"A whole-city report must not spend seconds re-parsing duplicate timestamps")
+        print("BIKE_CITY_DECODE stations=\(network.stations.count) seconds=\(elapsed)")
+    }
 }
