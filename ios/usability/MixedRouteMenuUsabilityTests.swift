@@ -84,6 +84,28 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     func testMixedRoutesShareOneMenuAndFillTheMap() { verifyMenu(english:false) }
     func testEnglishMixedRoutesKeepTheSameFlow() { verifyMenu(english:true) }
+    func testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected() {
+        launch(["--preview-mixed-planning","--preview-late-recommendation","--usability-fixture","--test-journey-selection","--test-map-controls"])
+        guard requireRouteMenu() else { return }
+        let inspected=state()["selected"] as? String ?? ""
+        XCTAssertFalse(inspected.isEmpty)
+        waitFor("Later recommendation belongs first in the comparison") {
+            let choices=self.state()["options"] as? [[String:Any]] ?? []
+            return choices.count > 1 && choices.first?["label"] as? String == "推薦"
+                && choices.first?["id"] as? String != inspected
+        }
+        let choices=state()["options"] as? [[String:Any]] ?? []
+        let recommended=choices.first?["id"] as? String ?? ""
+        XCTAssertEqual(state()["selected"] as? String,inspected)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+        XCTAssertTrue(button("journey-go-"+inspected).isHittable,"Reordering cannot switch the visible card under the reader")
+        capture("mixed-late-recommendation-keeps-preview")
+        button("journey-page-0").tap()
+        waitFor("First page selects the recommendation") { self.state()["selected"] as? String == recommended }
+        XCTAssertTrue(button("journey-go-"+recommended).isHittable)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+        capture("mixed-late-recommendation-first")
+    }
     func testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel() {
         launch(["--preview-mixed-planning","--preview-many-options","--usability-fixture","--test-journey-selection"])
         guard requireRouteMenu() else { return }
@@ -121,6 +143,14 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             return Date().timeIntervalSince(readySince!) >= 1
         }
         capture("mixed-two-bike-connections-compact")
+        let record=(state()["options"] as? [[String:Any]])?.first { $0["id"] as? String == id }
+        let legs=record?["bike_legs"] as? [Int] ?? []
+        let minutes=record?["bike_ride_minutes"] as? [Int] ?? []
+        for (position,index) in legs.enumerated() {
+            let chain=app.descendants(matching:.any).matching(identifier:"journey-chain-bike-\(index)").firstMatch
+            XCTAssertTrue(chain.exists)
+            if minutes.indices.contains(position) { XCTAssertEqual(chain.label,"Ride \(minutes[position]) min") }
+        }
         button("journey-steps-"+id).tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
         XCTAssertTrue(button("journey-bike-pickup-0").exists)

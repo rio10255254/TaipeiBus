@@ -386,7 +386,7 @@ final class TransitAppModel: ObservableObject {
     /// is showing stations: the rider has to know if their station has run out.
     private var needsBikeCounts: Bool {
         showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan ||
-            (liveSettings.planning.bikeRouting && planner.destination != nil && !planner.started)
+            (liveSettings.planning.bikeRouting && !planner.started)
     }
     private func pollBikesInBackground() {
 #if DEBUG
@@ -638,6 +638,10 @@ final class TransitAppModel: ObservableObject {
                 if bikeNetwork.stations.isEmpty {
                     bikeNetwork = await service.bikeNetwork()
                     planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
+                }
+                if let cached = await service.cachedBikeAvailability(network: bikeNetwork) {
+                    bikeAvailability = cached
+                    planner.updateBikes(network: bikeNetwork, availability: cached)
                 }
                 pollBikesInBackground()
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
@@ -1697,6 +1701,18 @@ final class TransitAppModel: ObservableObject {
         planner.prepareRouteChoicesPreview(choices,
             from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate,englishName:startStation.englishName),
             to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate,englishName:endStation.englishName))
+        if ProcessInfo.processInfo.arguments.contains("--preview-late-recommendation"),
+           var inspected = planner.options.first {
+            // Deliberately slow first result, followed by real alternative transit chains.
+            // These fixed interface timings do not claim to be current official departures.
+            inspected.walks[0].duration = (inspected.walks[0].duration ?? 0) + 1800
+            let later = Array(planner.options.dropFirst())
+            planner.auditLoadChoices([inspected],
+                from:TravelPlace(name:startStation.name,address:"",coordinate:startStation.coordinate),
+                to:TravelPlace(name:endStation.name,address:"",coordinate:endStation.coordinate))
+            planner.select(inspected)
+            planner.auditVerifyAdditionalChoices(later, delay:8)
+        }
     }
 
     /// A cycling trip built from the bundled stations with explicitly simulated counts, so the

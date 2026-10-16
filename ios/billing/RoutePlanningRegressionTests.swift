@@ -34,6 +34,8 @@ import XCTest
         XCTAssertTrue(p.options.contains { $0.id==green.id })
         XCTAssertTrue(p.options.contains { $0.id==bus.id })
         XCTAssertEqual(p.optionLabels[green.id],"推薦")
+        XCTAssertEqual(p.options.first?.id,green.id,"A new recommendation belongs first even while another route is being inspected")
+        XCTAssertEqual(p.featuredOptions.first?.id,green.id)
         p.refreshRecommendations()
         XCTAssertEqual(p.selectedID,green.id)
     }
@@ -42,6 +44,22 @@ import XCTest
         let p=planner([bus]);p.auditVerifyAdditionalChoices([green])
         await waitForChoices(p)
         XCTAssertEqual(p.selectedID,green.id)
+        XCTAssertFalse(p.started)
+    }
+    func testOfficialArrivalUpdateKeepsRecommendationFirstWithoutMovingTheInspectedRoute() throws {
+        let one=choice("one",rideSeconds:900),two=choice("two",rideSeconds:900)
+        let p=planner([one,two]), now=Date()
+        var initial=TransitSnapshot()
+        initial.estimates=EstimateFeed(seconds:["one:one-a":120,"two:two-a":600],updatedAt:now)
+        p.updateSnapshot(initial);p.select(one)
+        XCTAssertEqual(p.options.first?.id,one.id)
+        let revision=p.mapRevision
+        var next=TransitSnapshot()
+        next.estimates=EstimateFeed(seconds:["one:one-a":600,"two:two-a":120],updatedAt:now)
+        p.updateSnapshot(next)
+        XCTAssertEqual(p.options.first?.id,two.id)
+        XCTAssertEqual(p.optionLabels[two.id],"推薦")
+        XCTAssertEqual(p.selectedID,one.id);XCTAssertEqual(p.mapRevision,revision)
         XCTAssertFalse(p.started)
     }
     func testStartingNavigationStopsLaterCandidatesFromChangingTheTrip() async {
@@ -109,6 +127,34 @@ import XCTest
         let cycledTiming = try XCTUnwrap(p.duration(cycled, at: date))
         XCTAssertLessThan(cycledTiming.totalSeconds, timing.totalSeconds)
         print("GONGGUAN_CYCLING controlled_counts=true pickup=\(bike.pickup.name) dropoff=\(bike.dropoff.name) access_seconds=\(cycled.walks[0].duration ?? -1) bike_seconds=\(bike.rideSeconds) total_minutes=\(cycledTiming.totalSeconds/60) saved_minutes=\((timing.totalSeconds-cycledTiming.totalSeconds)/60)")
+    }
+    func testNeihuToNTUUsesRealCyclingTimeAndIncludesAccessAndHandling() async throws {
+        let service=TransitService(), loaded=await service.offlineMetroMetadata()
+        let metadata=try XCTUnwrap(loaded), bikes=await service.bikeNetwork(), now=Date()
+        let neihu=try XCTUnwrap(metadata.metro.stations.first { $0.code == "BR19" })
+        let target=try XCTUnwrap(bikes.station("500119071"))
+        let date=try XCTUnwrap(ISO8601DateFormatter().date(from:"2026-10-16T01:23:00Z"))
+        let trips=MultimodalPlanner(metadata:metadata).plan(from:neihu.coordinate,to:target.coordinate,maximumWalk:1200,limit:36,at:date)
+        let trip=try XCTUnwrap(trips.first { $0.rides.count == 1 && $0.rides[0].boarding.stationID == neihu.id && $0.rides[0].alighting.stationID == "metro:TRTC:BR08" })
+        let ride=trip.rides[0]
+        let entry=try XCTUnwrap(metadata.metro.nearestExit(stationID:ride.boarding.stationID,to:neihu.coordinate))
+        let exit=try XCTUnwrap(metadata.metro.nearestExit(stationID:ride.alighting.stationID,to:target.coordinate))
+        let base=JourneyOption(id:trip.id,trip:trip,walks:[
+            WalkingLeg(from:neihu.coordinate,to:entry.coordinate,stationSeconds:ride.boardingAccessSeconds),
+            WalkingLeg(from:exit.coordinate,to:target.coordinate,stationSeconds:ride.alightingAccessSeconds)])
+        let p=JourneyPlannerModel(), walked=try await p.auditEnrich(base,metadata:metadata)
+        XCTAssertTrue(walked.verified);XCTAssertNil(walked.walkIssue)
+        let counts=BikeAvailability(docks:Dictionary(uniqueKeysWithValues:bikes.stations.map {
+            ($0.id,BikeDock(stationID:$0.id,rentable:8,returnable:8,capacity:$0.capacity,active:true,observedAt:now))
+        }),receivedAt:now)
+        p.updateBikes(network:bikes,availability:counts)
+        let connector=try XCTUnwrap(BikeRouting.connection(from:exit.coordinate,to:target.coordinate,network:bikes,availability:counts,at:now))
+        var input=base.walks[1];input.bike=BikeLeg(connector)
+        let result=try await p.verifyCyclingLegForTest(input), bike=try XCTUnwrap(result.bike)
+        XCTAssertTrue(result.verified);XCTAssertGreaterThan(bike.ride.count,2)
+        XCTAssertLessThan(bike.rideSeconds,try XCTUnwrap(walked.walks[1].streetDuration))
+        XCTAssertEqual(try XCTUnwrap(result.duration),bike.rideSeconds+bike.walkingSeconds+bike.handlingSeconds+input.stationSeconds,accuracy:0.001)
+        print("NEIHU_NTU controlled_counts=true pickup=\(bike.pickup.name) dropoff=\(bike.dropoff.name) ride_meters=\(bike.rideMeters) pure_riding_seconds=\(bike.rideSeconds) on_foot_seconds=\(bike.walkingSeconds) handling_seconds=\(bike.handlingSeconds) station_seconds=\(input.stationSeconds) connector_seconds=\(result.duration ?? -1) all_walking_seconds=\(walked.walks[1].duration ?? -1)")
     }
 
 }

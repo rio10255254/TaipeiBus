@@ -844,12 +844,21 @@ private struct JourneyRouteChain: View {
                 HStack(spacing: 5) {
                 if let duration = option.walks[index].duration, duration >= 30 {
                     if index > 0 { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-                    HStack(spacing: 1) {
-                        Image(systemName: option.walks[index].bike == nil ? "figure.walk" : "bicycle")
-                        Text("\(max(1, Int(ceil(duration / 60))))")
+                    if let bike = option.walks[index].bike {
+                        if bike.toPickupSeconds >= 30 {
+                            time(bike.toPickupSeconds, symbol: "figure.walk")
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                        }
+                        time(bike.rideSeconds, symbol: "bicycle")
+                            .accessibilityLabel(AppText.text("騎車 %@ 分", bike.ridingMinutes))
+                            .accessibilityIdentifier("journey-chain-bike-\(index)")
+                        if bike.fromDropoffSeconds >= 30 {
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary)
+                            time(bike.fromDropoffSeconds, symbol: "figure.walk")
+                        }
+                    } else {
+                        time(duration, symbol: "figure.walk")
                     }
-                    .liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
-                    .accessibilityElement(children: .combine)
                 }
                 if option.rides.indices.contains(index) {
                     if index > 0 || (option.walks[index].duration ?? 0) >= 30 {
@@ -864,6 +873,13 @@ private struct JourneyRouteChain: View {
                 }
             }
         }.lineLimit(1)
+    }
+    private func time(_ seconds: Double, symbol: String) -> some View {
+        HStack(spacing: 1) {
+            Image(systemName: symbol)
+            Text("\(max(1, Int(ceil(seconds / 60))))")
+        }.liveFont(.subheadline, weight: .semibold).foregroundStyle(.secondary).monospacedDigit()
+            .accessibilityElement(children: .combine)
     }
 }
 
@@ -912,11 +928,11 @@ struct JourneyOptionsView: View {
                         .accessibilityLabel(AppText.text("全部路線"))
                         .accessibilityValue("\(planner.options.count)")
                         .accessibilityIdentifier("journey-all-options")
-                    // Live times reordered the options: offer the new order without moving rows under a finger.
+                    // Return to the first recommendation without replacing the inspected map automatically.
                     if planner.comparisonChanged, !planner.checkingWalks {
                         Button { planner.refreshRecommendations() } label: {
                             Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
-                        }.accessibilityLabel(AppText.text("更新推薦")).accessibilityIdentifier("journey-refresh-options")
+                        }.accessibilityLabel(AppText.text("查看推薦")).accessibilityIdentifier("journey-refresh-options")
                             .transition(.opacity)
                     }
                     Spacer(minLength: 4)
@@ -933,7 +949,7 @@ struct JourneyOptionsView: View {
             if planner.checkingWalks { ProgressView().padding(.vertical, 8).accessibilityLabel(AppText.text("確認接駁與其他方案")) }
             if planner.comparisonChanged, !planner.checkingWalks, !compact {
                 Button { planner.refreshRecommendations() } label: {
-                    Label(AppText.text("更新推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
+                    Label(AppText.text("查看推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-refresh-options")
             }
         }
@@ -1137,8 +1153,13 @@ private struct JourneyCyclingStep: View {
                     JourneyBikeStations(model: model, bike: bike, index: index)
                     Text(done ? AppText.text("已完成")
                          : AppText.text("步行 %@ 分 · 騎 %@ · %@ 分", max(1, Int(ceil(bike.walkingSeconds / 60))),
-                                        distanceLabel(bike.rideMeters), max(1, Int(ceil(bike.cyclingSeconds / 60)))))
+                                        distanceLabel(bike.rideMeters), bike.ridingMinutes))
                         .liveFont(.subheadline).foregroundStyle(.secondary)
+                    if !done, bike.handlingSeconds > 0 {
+                        Text(AppText.text("全程已含取還車 %@ 分", max(1, Int(ceil(bike.handlingSeconds / 60)))))
+                            .liveFont(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("journey-bike-handling-\(index)")
+                    }
                     if !done {
                         if let instruction = leg.stationInstruction {
                             Text(instruction).liveFont(.caption).foregroundStyle(.secondary)
