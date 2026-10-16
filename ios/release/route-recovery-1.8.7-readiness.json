@@ -1,0 +1,123 @@
+{
+  "version": "1.8.7",
+  "distribution": "testflight-only",
+  "production_submission_authorized": false,
+  "source_head": "bc93d52583ebdb4a126d630b98f765ea38ac44a9",
+  "report": {
+    "origin": "NTU Zhihong Hall, approximate public building location",
+    "destinations": [
+      "Neihu station BR19",
+      "Niu Si, Jilin Road 422"
+    ],
+    "physical_device_logs_available": false
+  },
+  "baseline": {
+    "native_run": 38886770492,
+    "source_head": "fb253a5",
+    "reported_origin_latitude": 25.0189833,
+    "reported_origin_longitude": 121.5396361,
+    "walking_response_kind": 2,
+    "rejected_start_gap_meters": 54.35718121791351,
+    "neihu_checked_options": 0,
+    "message": "步行接駁暫時無法確認，請稍後重試或查看其他交通方式。",
+    "separate_poi_search_unavailable": true,
+    "note": "The old indoor street test and full Neihu plan failed with real returned walking routes; the unrelated live POI lookup did not locate the shop, so the final routing test uses its published shop coordinate."
+  },
+  "walking_policy": {
+    "walking_access_maximum_meters": 100,
+    "cycling_access_maximum_meters": 50,
+    "keeps_provider_geometry": true,
+    "local_access_time_included": true,
+    "no_fabricated_unavailable_route": true,
+    "temporary_failure_not_cached_as_unreachable": true,
+    "outage_initial_batch_maximum_routes": 2,
+    "recovery_pass_maximum_routes": 4,
+    "one_recovery_pass": true
+  },
+  "map_policy": {
+    "unrelated_nearby_station_layer_hidden_during_journey": true,
+    "stale_nearby_source_cleared": true,
+    "intermediate_symbols_allow_overlap": false,
+    "intermediate_icon_scale_changes_with_zoom": true
+  },
+  "bicycle_policy": {
+    "preferred_rentals_maximum": 1,
+    "preferred_actual_ride_maximum_seconds": 600,
+    "preferred_actual_ride_maximum_meters": 2000,
+    "requires_transit_leg": true,
+    "actual_cycling_not_dominant_over_transit_with_short_local_allowance_seconds": 300,
+    "candidate_search_straight_maximum_meters": 2500,
+    "candidate_detour_maximum_meters": 3000,
+    "candidate_duration_maximum_seconds": 900,
+    "secondary_useful_options_retained": true,
+    "preference_never_changes_displayed_arrival_time": true,
+    "short_local_cycling_can_lead_when_no_transit_available": true
+  },
+  "verification": {
+    "core_run": 38890123453,
+    "core_tests": 272,
+    "core_skipped_optional_live_tests": 12,
+    "core_failures": 0,
+    "english_templates": 711,
+    "native_run": 38890332908,
+    "native_status": "11 live walking/recovery cases and 73 feature regressions passed in separate runs",
+    "ui_run": 38893445523,
+    "ui_status": "success",
+    "physical_device_validation": "not performed",
+    "walking_run": 38890332908,
+    "walking_source": "878ebb8",
+    "walking_tests": 11,
+    "walking_failures": 0,
+    "repeated_actual_searches": 12,
+    "repeated_actual_search_failures": 0,
+    "repeated_first_confirmed_seconds_min": 5.3984,
+    "repeated_first_confirmed_seconds_max": 7.3365,
+    "reported_destinations_checked_options": {
+      "Zhihong_Neihu": 2,
+      "Zhihong_NiuSi": 2
+    },
+    "initial_feature_assertion_failures": 30,
+    "initial_feature_failed_methods": 8,
+    "feature_recheck_run": 38893441992,
+    "feature_recheck_source": "5301285",
+    "ui_initial_run": 38890336184,
+    "ui_initial_chinese_passed": true,
+    "ui_initial_english_issue": "Cold debug preview did not reach the route menu before an accessibility snapshot timed out. UI rerun uses the same optimization level as the distributed app, keeping DEBUG fixtures enabled.",
+    "ui_source": "5301285",
+    "feature_recheck_status": "success",
+    "feature_tests": 73,
+    "feature_failures": 0,
+    "feature_duration_seconds": 112.301,
+    "feature_artifact": 12044120798,
+    "walking_parity": "No walking request, anchor, recovery, generation or cancellation code changed after 878ebb8. The later production change allows short local cycling only when no transit choice exists; the reported and other live cross-city cases include transit.",
+    "ui_initial_inspected_images": [
+      "8F4AA4D4-5DE5-42BB-921B-139D0FA893F8.png",
+      "E59B9D57-5CF9-4D60-B9B3-08C8D9230E2D.png"
+    ],
+    "ui_tests": 2,
+    "ui_failures": 0,
+    "ui_duration_seconds": 218.791,
+    "ui_artifact": 12043643518,
+    "ui_inspected_images": [
+      "2CF460D5-0C8B-4BA7-A96B-19B833405888.png",
+      "64DA5050-991E-4074-9D20-90B6338EC2D0.png"
+    ],
+    "compile_and_release_checks_run": 38893447382,
+    "compile_and_release_checks_status": "success",
+    "verified_code_head": "53012857f3b9fe75875ea45720fbfc22f9b66fbd",
+    "merge_tree_matches_verified_code": true,
+    "pull_request": 46
+  },
+  "shop_coordinate_source": "https://ifoodie.tw/post/5de601b72261391d9ad1a3cc",
+  "last_checked_at": "2026-10-16T12:09:48.678588+00:00",
+  "release_run": 38896768135,
+  "release_status": "internal_group_assigned",
+  "build_number": "139.1.0",
+  "build_id": "d2a0f2b5-0406-4593-a147-cc5f14f0651c",
+  "uploaded_at": "2026-10-16T11:58:54.239911+00:00",
+  "symbols": {
+    "crc_verified": true,
+    "sha256": "ed6df347fa72aca1eb1e7265b075f983754d02d989672c61f30763e485e410cf",
+    "archive": "D:/TaipeiBus-release-1.8.7/release/testflight-dSYMs.zip"
+  }
+}
