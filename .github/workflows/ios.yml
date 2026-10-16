@@ -26,6 +26,14 @@ on:
         description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
         type: boolean
         default: false
+      street_repeat:
+        description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
+        type: boolean
+        default: false
+      street_gated:
+        description: 'Use the production shared request budget in the street probe'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -35,6 +43,16 @@ on:
         type: choice
         options: ['all', 'routes', 'journeys', 'journey-layout', 'navigation', 'live-settings', 'usability']
         default: 'all'
+      usability_first_pass:
+        description: 'Mixed-menu first pass: all checks, or recheck suggestion interactions before the complete dark pass'
+        type: choice
+        options: ['all', 'suggestions']
+        default: 'all'
+      usability_appearance:
+        description: 'Check both system appearances, or resume one appearance without repeating the completed one'
+        type: choice
+        options: ['both', 'light', 'dark']
+        default: 'both'
       content_revision_before:
         description: 'For live-settings verification: current live content revision'
         type: string
@@ -42,7 +60,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -62,8 +80,27 @@ env:
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
 
 jobs:
+  street_probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.usability_scope == 'street-probe'
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          set -euo pipefail
+          args=('--ordinary')
+          if [ '${{ inputs.street_repeat }}' = 'true' ]; then args=('--repeat'); fi
+          if [ '${{ inputs.street_gated }}' = 'true' ]; then args+=('--gated'); fi
+          cp ios/release/street-probe.swift "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -O ios/TaipeiBus/DirectionsRequestGate.swift "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/street-probe"
+          "$RUNNER_TEMP/street-probe" "${args[@]}" | tee "$RUNNER_TEMP/street-probe.log"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: street-probe
+          path: ${{ runner.temp }}/street-probe.log
   bike_behavior:
-    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine')
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'route-reliability')
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -78,10 +115,11 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+          selection=('-parallel-testing-enabled' 'NO')
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
-            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO "${selection[@]}" test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -92,8 +130,9 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
   simulator:
+    if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe'
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
+    timeout-minutes: ${{ inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -195,7 +234,9 @@ jobs:
           set -euo pipefail
           BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
-          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_args=("$BUS_SIM_DEVICE")
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] || [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then location_args+=('--jitter'); fi
+          python3 ios/usability/fresh-location.py "${location_args[@]}" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
@@ -555,7 +596,9 @@ jobs:
             BUS_PLACE_TILE_FIXTURE="$RUNNER_TEMP/place-fixture.pbf" swift test --package-path ios/TransitCore \
               --filter MapPlaceTileTests.testActualPublishedPoiTileMatchesIndependentCount
           fi
-          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_args=("$BUS_SIM_DEVICE")
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] || [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then location_args+=('--jitter'); fi
+          python3 ios/usability/fresh-location.py "${location_args[@]}" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           gem install xcodeproj -v 1.27.0 --no-document --user-install
@@ -576,10 +619,7 @@ jobs:
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
@@ -713,6 +753,16 @@ jobs:
           fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'suggestions' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped')
+          fi
+          if [ '${{ inputs.usability_appearance }}' = 'dark' ]; then
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
+            export TEST_RUNNER_BUS_TEST_DARK=true
+          elif [ '${{ inputs.usability_appearance }}' = 'light' ]; then
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
+          fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
@@ -740,11 +790,13 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify system dark appearance with native journeys
-        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
+        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_appearance != 'light' && inputs.usability_appearance != 'dark' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
-          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_args=("$BUS_SIM_DEVICE")
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] || [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then location_args+=('--jitter'); fi
+          python3 ios/usability/fresh-location.py "${location_args[@]}" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           export TEST_RUNNER_BUS_TEST_DARK=true
@@ -756,10 +808,7 @@ jobs:
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
-            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
-              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
@@ -822,7 +871,9 @@ jobs:
       - name: Verify appearance switches without resetting the active bus
         if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
         run: |
-          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_args=("$BUS_SIM_DEVICE")
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] || [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then location_args+=('--jitter'); fi
+          python3 ios/usability/fresh-location.py "${location_args[@]}" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           python3 ios/usability/verify-appearance.py

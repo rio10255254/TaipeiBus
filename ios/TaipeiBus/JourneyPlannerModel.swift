@@ -166,6 +166,9 @@ final class JourneyPlannerModel: ObservableObject {
     private var forecast = VehicleArrivalForecast()
     private var verifiedPool: [JourneyOption] = []
     private var walkingCache: [String: (leg: WalkingLeg, date: Date)] = [:]
+    // Briefly share unavailable endpoints across combinations, while allowing a
+    // transient failure to recover. A new explicit search always tries them again.
+    private var unavailableStreets: [String: (leg: WalkingLeg, date: Date)] = [:]
     private var walkingRequests: [String: (id: UUID, task: Task<WalkingLeg, Error>)] = [:]
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var comparisonChanged = false
@@ -175,6 +178,7 @@ final class JourneyPlannerModel: ObservableObject {
         Date().timeIntervalSince(alternativeTransitUpdatedAt) <= 120 ? alternativeTransitSeconds : nil
     }
     private var alternativeTask: Task<Void, Never>?
+    private var evaluatingRemainingJourney = false
     @Published private(set) var walkingProgress: WalkingProgress?
     @Published private(set) var walkingLegIndex: Int?
     @Published private(set) var walkingRecalculating = false
@@ -498,7 +502,7 @@ final class JourneyPlannerModel: ObservableObject {
             let requestedAt = Date()
             let operation = MKDirections(request: request); directions.append(operation)
             defer { directions.removeAll { $0 === operation } }
-            if let response = try? await operation.calculateETA(), !Task.isCancelled, token == generation,
+            if let response = try? await DirectionsRequestGate.shared.calculateETA(operation, priority: .alternatives), !Task.isCancelled, token == generation,
                response.transportType == .transit, response.expectedTravelTime.isFinite, response.expectedTravelTime > 0 {
                 alternativeTransitSeconds = max(response.expectedTravelTime, response.expectedArrivalDate.timeIntervalSince(requestedAt))
                 alternativeTransitUpdatedAt = Date()
@@ -1055,6 +1059,7 @@ final class JourneyPlannerModel: ObservableObject {
                 let starts = connectionStarts(result, at: Date())
                 leg.plannedStartAfter = starts.indices.contains(index) ? starts[index] : 0
                 result.walks[index] = try await cycle(leg, compareStations: compareStations)
+                if !result.walks[index].verified { break }
                 continue
             }
             result.walks[index] = try await walk(option.walks[index])
@@ -1062,6 +1067,7 @@ final class JourneyPlannerModel: ObservableObject {
             result.walks[index].stationSeconds = option.walks[index].stationSeconds
             result.walks[index].stationInstruction = option.walks[index].stationInstruction
             if let seconds = result.walks[index].duration { result.walks[index].duration = max(option.walks[index].minimumDuration, seconds + option.walks[index].stationSeconds) }
+            if !result.walks[index].verified { break }
         }
         let hasLongWalk = result.walks.enumerated().contains { index, leg in
             // On a cycling leg only the two walks count; the ride itself is meant to be long.
@@ -1125,7 +1131,10 @@ final class JourneyPlannerModel: ObservableObject {
         let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
         if guidance { return try await calculateStreet(leg, guidance: true, transport: transport) }
         if let cached = walkingCache[cacheKey], Date().timeIntervalSince(cached.date) < 900 { return cached.leg }
-        if let request = walkingRequests[cacheKey] { return try await request.task.value }
+        if !changingBikeStation, let unavailable = unavailableStreets[cacheKey], Date().timeIntervalSince(unavailable.date) < 15 { return unavailable.leg }
+        // A deliberate dock change has its own navigation reserve; it must not
+        // inherit a background comparison that was deferred or briefly unavailable.
+        if !changingBikeStation, let request = walkingRequests[cacheKey] { return try await request.task.value }
         let id = UUID()
         let task = Task { try await self.calculateStreet(leg, guidance: false, transport: transport) }
         walkingRequests[cacheKey] = (id, task)
@@ -1135,7 +1144,7 @@ final class JourneyPlannerModel: ObservableObject {
         if result.verified {
             if walkingCache.count >= 512, let oldest = walkingCache.min(by: { $0.value.date < $1.value.date }) { walkingCache[oldest.key] = nil }
             walkingCache[cacheKey] = (result, Date())
-        }
+        } else { unavailableStreets[cacheKey] = (result, Date()) }
         return result
     }
     private func calculateStreet(_ leg: WalkingLeg, guidance: Bool, transport: MKDirectionsTransportType) async throws -> WalkingLeg {
@@ -1155,8 +1164,22 @@ final class JourneyPlannerModel: ObservableObject {
         if guidance { walkingRequest = operation }
         defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
-            let response = try await operation.calculate()
+            let ready = options.contains { canUse($0) }
+            let priority: DirectionsRequestGate.Priority = guidance || changingBikeStation ? .navigation :
+                evaluatingRemainingJourney || ready ? .alternatives : .firstChoice
+            let response = try await DirectionsRequestGate.shared.calculate(operation, priority: priority)
             try Task.checkCancellation()
+#if DEBUG
+            if auditStreetDiagnostics {
+                for route in response.routes where route.polyline.pointCount > 0 {
+                    let first = route.polyline.points()[0].coordinate
+                    let last = route.polyline.points()[max(0, route.polyline.pointCount - 1)].coordinate
+                    let startGap = leg.from.distance(to: Coordinate(latitude: first.latitude, longitude: first.longitude))
+                    let endGap = leg.to.distance(to: Coordinate(latitude: last.latitude, longitude: last.longitude))
+                    print("STREET_RESPONSE mode=\(transport.rawValue) kind=\(route.transportType.rawValue) meters=\(route.distance) seconds=\(route.expectedTravelTime) startGap=\(startGap) endGap=\(endGap) anchored=\(PedestrianPath.leg(route, from: leg.from, to: leg.to) != nil)")
+                }
+            }
+#endif
             // MapKit currently labels cycling responses/steps as automobile even when their
             // geometry, notices and ETA are bicycle-specific (verified against driving and
             // walking queries on the same station pair). The single-mode request is the source
@@ -1166,6 +1189,11 @@ final class JourneyPlannerModel: ObservableObject {
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()
+            // Local comparison budgeting is not evidence that a street is absent.
+            if error is DirectionsRequestGate.Deferred { throw error }
+#if DEBUG
+            if auditStreetDiagnostics { print("STREET_ERROR mode=\(transport.rawValue) error=\(error)") }
+#endif
             // No straight-line walking polyline or fabricated time when Apple cannot confirm a route.
         }
         return result
@@ -1186,8 +1214,9 @@ final class JourneyPlannerModel: ObservableObject {
         preferences = settings.planning; latestSnapshot = snapshot; self.forecast = forecast
         bikeNetwork = bikes; bikeAvailability = availability
         walkingCache.merge(cacheFrom.walkingCache) { a, b in a.date > b.date ? a : b }
+        evaluatingRemainingJourney = true
         plan(metadata: metadata)
-        defer { cancelRequests() }
+        defer { cancelRequests(); evaluatingRemainingJourney = false }
         let began = ProcessInfo.processInfo.systemUptime
         while !Task.isCancelled {
             let elapsed = ProcessInfo.processInfo.systemUptime - began
@@ -1276,11 +1305,13 @@ final class JourneyPlannerModel: ObservableObject {
         changingBikeStation = false; bikeStationUpdateMessage = nil
         bikeRefinementTask?.cancel(); bikeRefinementTask = nil
         walkingRequests.values.forEach { $0.task.cancel() }; walkingRequests = [:]
+        unavailableStreets = [:]
         task?.cancel(); task = nil; alternativeTask?.cancel(); alternativeTask = nil; directions.forEach { $0.cancel() }; directions = []
         generation = UUID(); planning = false; checkingWalks = false
     }
 
 #if DEBUG
+    var auditStreetDiagnostics = false
     var testCycle: ((WalkingLeg) async throws -> WalkingLeg)?
     var testStreet: ((WalkingLeg, MKDirectionsTransportType) async throws -> WalkingLeg)?
     func auditAgeStreetCache(_ seconds: Double) {

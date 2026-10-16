@@ -98,7 +98,7 @@ struct TransitHomeView: View {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
                         let records: [[String: Any]] = planner.options.map { option in
                             let timing = model.journeyDuration(option, at: timeline.date)
-                            return ["id": option.id, "verified": option.verified, "label": planner.optionLabels[option.id] ?? "",
+                            return ["id": option.id, "verified": option.verified, "can_start": planner.canUse(option), "label": planner.optionLabels[option.id] ?? "",
                                 "transfers": max(0, option.rides.count - 1),
                                 "bike_legs": option.walks.indices.filter { option.walks[$0].bike != nil },
                                 "bike_ride_minutes": option.walks.compactMap { $0.bike?.ridingMinutes },

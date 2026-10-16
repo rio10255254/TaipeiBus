@@ -909,9 +909,10 @@ struct JourneyOptionsView: View {
                     ForEach(planner.featuredOptions) { option in compactSummary(option).tag(option.id) }
                 }
                 .tabViewStyle(.page(indexDisplayMode: .never))
+                .clipped().contentShape(Rectangle())
                 .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : .smooth(duration: 0.25), value: planner.selectedID)
                 .accessibilityIdentifier("journey-preview-pages")
-                if let option = planner.selected ?? planner.featuredOptions.first { compactActions(option) }
+                if let option = planner.selected ?? planner.featuredOptions.first { compactActions(option).zIndex(1) }
                 }
                 .frame(height: (live.language == .english ? 182 : 160) * CGFloat(max(1, live.appearance.textScale)) - 28)
                 .padding(14)
@@ -991,7 +992,8 @@ struct JourneyOptionsView: View {
                         Text(AppText.text("步驟")); Image(systemName: "chevron.right")
                     }.liveFont(.caption, weight: .semibold).frame(width: 66, height: 44)
                 }.buttonStyle(MapActionStyle())
-                    .disabled(!usable(option))
+                    // Preview remains available when current supply prevents Go.
+                    .disabled(!option.verified)
                     .accessibilityLabel(AppText.text("查看搭乘步驟"))
                     .accessibilityIdentifier("journey-steps-" + option.id)
         }.frame(width: 66)

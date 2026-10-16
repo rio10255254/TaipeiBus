@@ -26,19 +26,26 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     private func waitFor(_ description: String, _ condition: @escaping () -> Bool) {
         let item = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in condition() }, object:nil)
-        XCTAssertEqual(XCTWaiter.wait(for:[item],timeout:30),.completed,description)
+        let result = XCTWaiter.wait(for:[item],timeout:30)
+        if result != .completed { print("JOURNEY_WAIT_STATE \(state())"); capture("mixed-state-wait-timeout") }
+        XCTAssertEqual(result,.completed,description)
     }
     private func readySuggestionState() -> [String:Any] {
         // The debug timeline can still show the preceding frame when the new button
         // first becomes accessible. Read one coherent, started journey before saving IDs.
-        var ready: [String:Any] = [:]
-        waitFor("The proposed and active routes are both ready") {
+        var last: [String:Any] = [:]
+        let deadline = Date().addingTimeInterval(30)
+        repeat {
             let value = self.state()
-            guard value["started"] as? Bool == true, !(value["selected"] as? String ?? "").isEmpty,
-                  !(value["suggestion"] as? String ?? "").isEmpty else { return false }
-            ready = value; return true
-        }
-        return ready
+            last = value
+            if value["started"] as? Bool == true, !(value["selected"] as? String ?? "").isEmpty,
+               !(value["suggestion"] as? String ?? "").isEmpty { return value }
+            RunLoop.current.run(until:Date().addingTimeInterval(0.2))
+        } while Date() < deadline
+        print("JOURNEY_SUGGESTION_STATE \(last)")
+        capture("mixed-suggestion-state-timeout")
+        XCTFail("The proposed and active routes are both ready; last state: \(last)")
+        return last
     }
     private func verifyMenu(english: Bool) {
         var args = ["--preview-mixed-planning","--usability-fixture","--test-map-controls","--test-journey-selection"]
@@ -102,6 +109,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(dismiss.waitForExistence(timeout:120))
         let initial = readySuggestionState(), selected = initial["selected"] as? String
         XCTAssertEqual(initial["route_panel_open"] as? Bool,false)
+        XCTAssertLessThan(camera()["userFixAge"] as? Double ?? .infinity,12,"The stationary sensor fixture must keep sending fresh fixes")
         XCTAssertGreaterThanOrEqual(dismiss.frame.width,44);XCTAssertGreaterThanOrEqual(dismiss.frame.height,44)
         capture("journey-alternative-optional")
         dismiss.tap()
@@ -205,6 +213,7 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertTrue(chain.exists)
             if minutes.indices.contains(position) { XCTAssertEqual(chain.label,"Ride \(minutes[position]) min") }
         }
+        XCTAssertTrue(button("journey-steps-"+id).isEnabled)
         button("journey-steps-"+id).tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
         XCTAssertTrue(button("journey-bike-pickup-0").exists)
@@ -232,5 +241,20 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
             XCTAssertEqual(state()["started"] as? Bool,false)
         }
+    }
+    func testUnavailablePickupStillAllowsPreviewButCannotStartNavigation() {
+        launch(["--preview-youbike-planning","--preview-youbike-empty","--usability-fixture","--test-journey-selection","--test-language","en"])
+        guard requireRouteMenu() else { return }
+        let id = state()["selected"] as? String ?? ""
+        XCTAssertFalse(id.isEmpty)
+        XCTAssertFalse(button("journey-go-"+id).isEnabled)
+        let steps = button("journey-steps-"+id)
+        XCTAssertTrue(steps.isEnabled,"The rider must be able to inspect and adjust an unavailable pickup")
+        steps.tap()
+        XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout:10))
+        XCTAssertFalse(button("journey-start-navigation").isEnabled)
+        XCTAssertTrue(button("journey-bike-pickup-0").exists)
+        XCTAssertEqual(state()["started"] as? Bool,false)
+        capture("mixed-empty-pickup-still-inspectable")
     }
 }
