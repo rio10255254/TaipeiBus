@@ -178,6 +178,7 @@ final class JourneyPlannerModel: ObservableObject {
         Date().timeIntervalSince(alternativeTransitUpdatedAt) <= 120 ? alternativeTransitSeconds : nil
     }
     private var alternativeTask: Task<Void, Never>?
+    private var evaluatingRemainingJourney = false
     @Published private(set) var walkingProgress: WalkingProgress?
     @Published private(set) var walkingLegIndex: Int?
     @Published private(set) var walkingRecalculating = false
@@ -501,7 +502,7 @@ final class JourneyPlannerModel: ObservableObject {
             let requestedAt = Date()
             let operation = MKDirections(request: request); directions.append(operation)
             defer { directions.removeAll { $0 === operation } }
-            if let response = try? await operation.calculateETA(), !Task.isCancelled, token == generation,
+            if let response = try? await DirectionsRequestGate.shared.calculateETA(operation, priority: .alternatives), !Task.isCancelled, token == generation,
                response.transportType == .transit, response.expectedTravelTime.isFinite, response.expectedTravelTime > 0 {
                 alternativeTransitSeconds = max(response.expectedTravelTime, response.expectedArrivalDate.timeIntervalSince(requestedAt))
                 alternativeTransitUpdatedAt = Date()
@@ -1161,7 +1162,9 @@ final class JourneyPlannerModel: ObservableObject {
         if guidance { walkingRequest = operation }
         defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
-            let response = try await operation.calculate()
+            let priority: DirectionsRequestGate.Priority = guidance ? .navigation :
+                evaluatingRemainingJourney || !verifiedPool.isEmpty ? .alternatives : .firstChoice
+            let response = try await DirectionsRequestGate.shared.calculate(operation, priority: priority)
             try Task.checkCancellation()
 #if DEBUG
             if auditStreetDiagnostics {
@@ -1206,8 +1209,9 @@ final class JourneyPlannerModel: ObservableObject {
         preferences = settings.planning; latestSnapshot = snapshot; self.forecast = forecast
         bikeNetwork = bikes; bikeAvailability = availability
         walkingCache.merge(cacheFrom.walkingCache) { a, b in a.date > b.date ? a : b }
+        evaluatingRemainingJourney = true
         plan(metadata: metadata)
-        defer { cancelRequests() }
+        defer { cancelRequests(); evaluatingRemainingJourney = false }
         let began = ProcessInfo.processInfo.systemUptime
         while !Task.isCancelled {
             let elapsed = ProcessInfo.processInfo.systemUptime - began

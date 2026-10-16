@@ -85,7 +85,7 @@ final class StationWalkingNavigation: ObservableObject {
         task = Task { [weak self] in
             guard let self else { return }
             do {
-                let response = try await operation.calculate()
+                let response = try await DirectionsRequestGate.shared.calculate(operation, priority: .navigation)
                 guard !Task.isCancelled, generation == token, target?.id == station.id else { return }
                 let usable = response.routes.compactMap { route -> (MKRoute, WalkingLeg)? in
                     PedestrianPath.leg(route, from: from, to: station.coordinate).map { (route, $0) }

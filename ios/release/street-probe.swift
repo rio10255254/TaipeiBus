@@ -3,7 +3,7 @@ import MapKit
 
 @MainActor func probe() async {
     let destination = CLLocationCoordinate2D(latitude:25.026154,longitude:121.543636)
-    for start in [
+    let normal = [
         CLLocationCoordinate2D(latitude:25.0192,longitude:121.5390),
         CLLocationCoordinate2D(latitude:25.01945,longitude:121.53955),
         CLLocationCoordinate2D(latitude:25.01965,longitude:121.53965),
@@ -12,7 +12,13 @@ import MapKit
         CLLocationCoordinate2D(latitude:25.01905,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01885,longitude:121.53975),
         CLLocationCoordinate2D(latitude:25.01865,longitude:121.53975)
-    ] {
+    ]
+    // Two ordinary searches used to issue this many optional street requests in
+    // a burst. Stop at the first provider limit, and never retry this probe.
+    let points = CommandLine.arguments.contains("--repeat") ? (0..<54).map {
+        CLLocationCoordinate2D(latitude:25.01945 + Double($0)*0.000004,longitude:121.53955)
+    } : normal
+    for (index,start) in points.enumerated() {
         let request = MKDirections.Request()
         request.source = MKMapItem(placemark:MKPlacemark(coordinate:start))
         request.destination = MKMapItem(placemark:MKPlacemark(coordinate:destination))
@@ -27,7 +33,11 @@ import MapKit
                 let to = CLLocation(latitude:destination.latitude,longitude:destination.longitude)
                 print("PROBE from=\(start.latitude),\(start.longitude) elapsed=\(Date().timeIntervalSince(clock)) meters=\(route.distance) startGap=\(from.distance(from:CLLocation(latitude:first.latitude,longitude:first.longitude))) endGap=\(to.distance(from:CLLocation(latitude:last.latitude,longitude:last.longitude)))")
             }
-        } catch { print("PROBE_ERROR from=\(start.latitude),\(start.longitude) error=\(error)") }
+        } catch {
+            let value = error as NSError
+            print("PROBE_ERROR count=\(index+1) from=\(start.latitude),\(start.longitude) domain=\(value.domain) code=\(value.code) error=\(error)")
+            if value.domain == MKErrorDomain, value.code == MKError.Code.loadingThrottled.rawValue { break }
+        }
     }
 }
 await probe()

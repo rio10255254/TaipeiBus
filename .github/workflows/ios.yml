@@ -26,6 +26,10 @@ on:
         description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
         type: boolean
         default: false
+      street_repeat:
+        description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -68,7 +72,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - run: swift ios/release/street-probe.swift | tee "$RUNNER_TEMP/street-probe.log"
+      - run: |
+          set -euo pipefail
+          args=()
+          if [ '${{ inputs.street_repeat }}' = 'true' ]; then args=('--repeat'); fi
+          swift ios/release/street-probe.swift "${args[@]}" | tee "$RUNNER_TEMP/street-probe.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
