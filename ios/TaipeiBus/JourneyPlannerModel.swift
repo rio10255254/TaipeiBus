@@ -1131,8 +1131,10 @@ final class JourneyPlannerModel: ObservableObject {
         let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
         if guidance { return try await calculateStreet(leg, guidance: true, transport: transport) }
         if let cached = walkingCache[cacheKey], Date().timeIntervalSince(cached.date) < 900 { return cached.leg }
-        if let unavailable = unavailableStreets[cacheKey], Date().timeIntervalSince(unavailable.date) < 15 { return unavailable.leg }
-        if let request = walkingRequests[cacheKey] { return try await request.task.value }
+        if !changingBikeStation, let unavailable = unavailableStreets[cacheKey], Date().timeIntervalSince(unavailable.date) < 15 { return unavailable.leg }
+        // A deliberate dock change has its own navigation reserve; it must not
+        // inherit a background comparison that was deferred or briefly unavailable.
+        if !changingBikeStation, let request = walkingRequests[cacheKey] { return try await request.task.value }
         let id = UUID()
         let task = Task { try await self.calculateStreet(leg, guidance: false, transport: transport) }
         walkingRequests[cacheKey] = (id, task)
@@ -1162,8 +1164,9 @@ final class JourneyPlannerModel: ObservableObject {
         if guidance { walkingRequest = operation }
         defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
+            let ready = options.contains { canUse($0) }
             let priority: DirectionsRequestGate.Priority = guidance || changingBikeStation ? .navigation :
-                evaluatingRemainingJourney || !verifiedPool.isEmpty ? .alternatives : .firstChoice
+                evaluatingRemainingJourney || ready ? .alternatives : .firstChoice
             let response = try await DirectionsRequestGate.shared.calculate(operation, priority: priority)
             try Task.checkCancellation()
 #if DEBUG
@@ -1186,6 +1189,8 @@ final class JourneyPlannerModel: ObservableObject {
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()
+            // Local comparison budgeting is not evidence that a street is absent.
+            if error is DirectionsRequestGate.Deferred { throw error }
 #if DEBUG
             if auditStreetDiagnostics { print("STREET_ERROR mode=\(transport.rawValue) error=\(error)") }
 #endif
