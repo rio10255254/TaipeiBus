@@ -629,10 +629,11 @@ final class JourneyPlannerModel: ObservableObject {
     }
     /// One ordinary route and one cycling alternative share each batch. Later walking
     /// platforms cannot monopolize the queue; at most two routes are verified at once.
-    private func verifyConnections(_ ordinary: [JourneyOption], cycling initial: [JourneyOption] = [], limit: Int = 12, token: UUID) async {
+    private func verifyConnections(_ ordinary: [JourneyOption], cycling initial: [JourneyOption] = [], limit: Int = 12,
+                                   discoverBikes: Bool = true, token: UUID) async {
         var walking = ordinary, cycling = initial
         while !Task.isCancelled, token == generation {
-            cycling.append(contentsOf: takeBikeConnections(limit: limit))
+            if discoverBikes { cycling.append(contentsOf: takeBikeConnections(limit: limit)) }
             var batch: [JourneyOption] = []
             if !walking.isEmpty { batch.append(walking.removeFirst()) }
             if !cycling.isEmpty { batch.append(cycling.removeFirst()) }
@@ -1038,7 +1039,7 @@ final class JourneyPlannerModel: ObservableObject {
                 do { try await Task.sleep(for:.seconds(2)) } catch { return }
                 guard token == generation, !Task.isCancelled else { return }
                 await verifyConnections(Array(pending.filter { !$0.cycles }.prefix(3)),
-                    cycling:Array(cycling.prefix(1)),limit:budget.verification,token:token)
+                    cycling:Array(cycling.prefix(1)),limit:budget.verification,discoverBikes:false,token:token)
                 guard token == generation, !Task.isCancelled else { return }
             }
             await refineLeadingStations(token: token)
