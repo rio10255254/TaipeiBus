@@ -5,14 +5,21 @@ import Foundation
 public enum TransitBikePolicy {
     public static let maximumFeederMeters = 2_000.0
     public static let maximumFeederRideSeconds = 600.0
+    /// Candidate distances are conservative detours. Keep some room until real
+    /// cycling directions replace them; only verified legs decide recommendation.
+    public static let maximumFeederSearchMeters = 2_500.0
     public static func feederPreferences(_ source: LiveSettings.Planning) -> LiveSettings.Planning {
         var value = source
-        value.bikeMaximumRideMeters = min(value.bikeMaximumRideMeters,maximumFeederMeters)
+        value.bikeMaximumRideMeters = min(value.bikeMaximumRideMeters,maximumFeederSearchMeters)
         return value
     }
     public static func isLocalFeeder(_ connection: BikeConnection) -> Bool {
         connection.rideMeters.isFinite && connection.rideSeconds.isFinite &&
             connection.rideMeters <= maximumFeederMeters && connection.rideSeconds <= maximumFeederRideSeconds
+    }
+    public static func isFeederCandidate(_ connection: BikeConnection) -> Bool {
+        connection.rideMeters.isFinite && connection.rideSeconds.isFinite &&
+            connection.rideMeters <= 3_000 && connection.rideSeconds <= 900
     }
     public static func isTransitLed(transitSeconds: Double, rideSeconds: [Double], rideMeters: [Double]) -> Bool {
         if rideSeconds.isEmpty { return true }

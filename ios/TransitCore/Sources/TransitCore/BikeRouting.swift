@@ -105,7 +105,7 @@ public enum BikeRouting {
                                          at date: Date = Date(), limit: Int = 3) -> [BikeConnection] {
         Array(connections(from:from,to:to,network:network,availability:availability,
             preferences:TransitBikePolicy.feederPreferences(preferences),at:date,limit:8)
-            .filter(TransitBikePolicy.isLocalFeeder).prefix(max(0,limit)))
+            .filter(TransitBikePolicy.isFeederCandidate).prefix(max(0,limit)))
     }
 
     public static func confirmed(_ station: BikeStation, availability: BikeAvailability?, renting: Bool,
@@ -211,6 +211,6 @@ final class BikeConnectionSearch {
               direct >= preferences.bikeMinimumRideMeters, from.isInServiceArea, to.isInServiceArea else { return [] }
         let pairs = BikeRouting.pairs(from: from, to: to, direct: direct, pickupStations: stations(near: from), dropoffStations: stations(near: to),
             availability: availability, preferences: preferences, at: date, limit: feederOnly ? 8 : limit)
-        return feederOnly ? Array(pairs.filter(TransitBikePolicy.isLocalFeeder).prefix(limit)) : pairs
+        return feederOnly ? Array(pairs.filter(TransitBikePolicy.isFeederCandidate).prefix(limit)) : pairs
     }
 }

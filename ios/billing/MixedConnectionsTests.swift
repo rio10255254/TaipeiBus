@@ -52,6 +52,10 @@ import XCTest
             guard var bike = leg.bike else { return result }
             bike.toPickup = [leg.from,bike.pickup.coordinate]
             bike.ride = [bike.pickup.coordinate,bike.dropoff.coordinate]
+            // This controlled fixture has a direct street. Replace the rough
+            // candidate detour exactly as a successful cycling response would.
+            bike.rideMeters = bike.pickup.coordinate.distance(to:bike.dropoff.coordinate)
+            bike.rideSeconds = bike.rideMeters / 3.3
             bike.fromDropoff = [bike.dropoff.coordinate,leg.to]
             result.bike = bike; result.duration = bike.totalSeconds + leg.stationSeconds
             result.coordinates = bike.coordinates; result.distance = bike.totalMeters
