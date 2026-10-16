@@ -349,27 +349,31 @@ final class TransitAppModel: ObservableObject {
             self.alternativeJourneyTask = nil
             guard self.canConsiderJourneyAlternative, self.planner.selectedID == active.id, self.planner.stepIndex == step,
                   let option, self.planner.canUse(option), let currentPoint = self.location.usableCoordinate,
-                  currentPoint.distance(to: point) < 120,
-                  let timing = self.alternativePlanner.duration(option, at: Date()),
-                  let current = self.journeyDuration(active, at: Date()) else { return }
+                  currentPoint.distance(to: point) < 120, self.effectivePlanning == settings.planning else { return }
             if let dismissed = self.dismissedJourneySuggestions[option.id], Date().timeIntervalSince(dismissed) < 300 { return }
-            let usable = self.planner.canContinueSelected()
-            let first = step / 2
-            let futureBikes = active.walks.dropFirst(first).compactMap(\.bike)
-            let currentScore = JourneyPreferenceCost.score(elapsed: current.totalSeconds,
-                walking: max(0, current.walkingSeconds - current.cyclingSeconds),
-                waiting: current.waitingSeconds, transfers: max(0, active.rides.count - first - 1),
-                rentals: futureBikes.count, unknownWaits: current.unknownWaits, preferences: settings.planning)
-            guard (!usable || timing.unknownWaits <= current.unknownWaits),
-                  (!usable || self.alternativePlanner.preferenceScore(option, at: Date()) < currentScore - 60),
-                  JourneyRevisionPolicy.shouldOffer(current: current.totalSeconds, alternative: timing.totalSeconds, currentUsable: usable) else { return }
-            self.journeySuggestion = JourneySuggestion(option: option, origin: start, activeID: active.id, activeStep: step,
-                createdAt: Date(), savedSeconds: usable && current.unknownWaits == 0 && timing.unknownWaits == 0 ? max(0, current.totalSeconds - timing.totalSeconds) : nil)
+            self.journeySuggestion = self.assessedAlternative(option, from: start, at: Date())
         }
+    }
+    private func assessedAlternative(_ option: JourneyOption, from start: TravelPlace, at date: Date) -> JourneySuggestion? {
+        guard let active = planner.selected, planner.canUse(option), let timing = planner.duration(option, at: date),
+              let current = journeyDuration(active, at: date) else { return nil }
+        let usable = planner.canContinueSelected(), first = planner.stepIndex / 2
+        let futureBikes = active.walks.dropFirst(first).compactMap(\.bike)
+        let currentScore = JourneyPreferenceCost.score(elapsed: current.totalSeconds,
+            walking: max(0,current.walkingSeconds-current.cyclingSeconds), waiting: current.waitingSeconds,
+            transfers: max(0,active.rides.count-first-1), rentals: futureBikes.count,
+            unknownWaits: current.unknownWaits, preferences: effectivePlanning)
+        let candidateScore = planner.preferenceScore(option, at: date)
+        guard candidateScore.isFinite, (!usable || timing.unknownWaits <= current.unknownWaits),
+              (!usable || candidateScore < currentScore - 60),
+              JourneyRevisionPolicy.shouldOffer(current: current.totalSeconds, alternative: timing.totalSeconds, currentUsable: usable) else { return nil }
+        return JourneySuggestion(option: option, origin: start, activeID: active.id, activeStep: planner.stepIndex, createdAt: date,
+            savedSeconds: usable && current.unknownWaits == 0 && timing.unknownWaits == 0 ? max(0,current.totalSeconds-timing.totalSeconds) : nil)
     }
     func acceptJourneySuggestion() {
         guard let suggestion = visibleJourneySuggestion, let point = location.usableCoordinate,
-              point.distance(to: suggestion.origin.coordinate) < 100, planner.canUse(suggestion.option) else {
+              point.distance(to: suggestion.origin.coordinate) < 100,
+              assessedAlternative(suggestion.option, from: suggestion.origin, at: Date()) != nil else {
             clearJourneySuggestion(); alternativeCheckedAt = .distantPast; considerJourneyAlternative(force: true); return
         }
         guard planner.adoptRemaining(suggestion.option, from: suggestion.origin) else { return }
@@ -1522,6 +1526,11 @@ final class TransitAppModel: ObservableObject {
     }
 
 #if DEBUG
+    func auditAlternative(_ option: JourneyOption, snapshot: TransitSnapshot) -> Bool {
+        self.snapshot = snapshot; planner.updateSnapshot(snapshot)
+        guard let origin = planner.origin else { return false }
+        return assessedAlternative(option, from: origin, at: Date()) != nil
+    }
     private func markLiveSettingsPreview() {
         let arguments = ProcessInfo.processInfo.arguments
         guard arguments.contains("--preview-live-update"), !metadata.stations.isEmpty, liveSettings.revision >= 1,

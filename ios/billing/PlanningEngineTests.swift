@@ -184,4 +184,21 @@ import MapKit
         XCTAssertEqual(p.selectedID,active.id);XCTAssertTrue(p.started);XCTAssertEqual(p.stepIndex,0)
         XCTAssertEqual(p.destination?.coordinate,b);p.finish();independent.finish()
     }
+    func testAnAlternativeIsReassessedWhenTheOriginalBusArrivesOrTheBikeStationRunsDry() {
+        let model = TransitAppModel(), active = transit(), p = model.planner
+        var alternative = bicycle()
+        alternative.walks[0].bike!.rideSeconds = 300;alternative.walks[0].duration = 450
+        let stations = alternative.walks.compactMap(\.bike).flatMap { [$0.pickup,$0.dropoff] }
+        p.updateBikes(network:BikeNetwork(stations:stations),availability:counts(stations))
+        p.auditLoadChoices([active],from:TravelPlace(name:"出發",address:"",coordinate:a),to:TravelPlace(name:"目的地",address:"",coordinate:b))
+        p.begin();XCTAssertTrue(p.started)
+        func snapshot(_ seconds: Int) -> TransitSnapshot {
+            var result = TransitSnapshot();result.estimates = EstimateFeed(seconds:["bus:busa":seconds],updatedAt:Date());return result
+        }
+        XCTAssertTrue(model.auditAlternative(alternative,snapshot:snapshot(700)))
+        XCTAssertFalse(model.auditAlternative(alternative,snapshot:snapshot(0)),"The now-arriving bus is preferable to the old cycling suggestion")
+        p.updateBikes(network:BikeNetwork(stations:stations),availability:counts(stations,empty:["pickup"]))
+        XCTAssertFalse(model.auditAlternative(alternative,snapshot:snapshot(700)),"A once-valid proposal cannot ignore updated station counts")
+        XCTAssertEqual(p.selectedID,active.id);XCTAssertTrue(p.started);p.finish()
+    }
 }
