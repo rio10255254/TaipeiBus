@@ -11,6 +11,7 @@ tests.source_build_phase.add_file_reference(group.new_file('BikePlannerTests.swi
 tests.source_build_phase.add_file_reference(group.new_file('MixedConnectionsTests.swift')) unless existing.include?('MixedConnectionsTests.swift')
 tests.source_build_phase.add_file_reference(group.new_file('RoutePlanningRegressionTests.swift')) unless existing.include?('RoutePlanningRegressionTests.swift')
 tests.source_build_phase.add_file_reference(group.new_file('BikeResponseTests.swift')) unless existing.include?('BikeResponseTests.swift')
+tests.source_build_phase.add_file_reference(group.new_file('PlanningEngineTests.swift')) unless existing.include?('PlanningEngineTests.swift')
 resources = tests.resources_build_phase.files.map { |value| value.file_ref&.path }
 tests.resources_build_phase.add_file_reference(group.new_file('ProProducts.storekit')) unless resources.include?('ProProducts.storekit')
 tests.build_configurations.each do |config|

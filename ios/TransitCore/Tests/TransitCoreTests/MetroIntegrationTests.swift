@@ -111,7 +111,10 @@ final class MetroIntegrationTests: XCTestCase {
         let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
         let a = try XCTUnwrap(metro.stations.first { $0.code == "BR19" }), b = try XCTUnwrap(metro.stations.first { $0.code == "BR10" })
         let origin = Coordinate(latitude:a.coordinate.latitude+0.015,longitude:a.coordinate.longitude)
-        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude)
+        // Due south lands almost exactly on BR08, making the last bus an unnecessary
+        // detour. Keep this fixture outside rail access so it really requires both feeders.
+        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude+0.015)
+        XCTAssertTrue(metro.stations.allSatisfy { $0.coordinate.distance(to:destination) > 100 })
         for (name,points) in [("feeder-in",[origin,a.coordinate]),("feeder-out",[b.coordinate,destination])] {
             metadata.routes[name] = BusRoute(id:name,parentID:name,name:name,variantName:name,departure:"A",destination:"B")
             for (index,coordinate) in points.enumerated() {
@@ -130,7 +133,8 @@ final class MetroIntegrationTests: XCTestCase {
         let metro = try network(); var metadata = TransitMetadata(); metro.attach(to:&metadata)
         let a = try XCTUnwrap(metro.stations.first { $0.code == "BR19" }), b = try XCTUnwrap(metro.stations.first { $0.code == "BR10" })
         let origin = Coordinate(latitude:a.coordinate.latitude+0.015,longitude:a.coordinate.longitude)
-        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude)
+        let destination = Coordinate(latitude:b.coordinate.latitude-0.015,longitude:b.coordinate.longitude+0.015)
+        XCTAssertTrue(metro.stations.allSatisfy { $0.coordinate.distance(to:destination) > 100 })
         for (name,points) in [("feeder-in",[origin,a.coordinate]),("feeder-out",[b.coordinate,destination])] {
             metadata.routes[name] = BusRoute(id:name,parentID:name,name:name,variantName:name,departure:"A",destination:"B")
             for (index,coordinate) in points.enumerated() {

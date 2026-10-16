@@ -28,6 +28,18 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         let item = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in condition() }, object:nil)
         XCTAssertEqual(XCTWaiter.wait(for:[item],timeout:30),.completed,description)
     }
+    private func readySuggestionState() -> [String:Any] {
+        // The debug timeline can still show the preceding frame when the new button
+        // first becomes accessible. Read one coherent, started journey before saving IDs.
+        var ready: [String:Any] = [:]
+        waitFor("The proposed and active routes are both ready") {
+            let value = self.state()
+            guard value["started"] as? Bool == true, !(value["selected"] as? String ?? "").isEmpty,
+                  !(value["suggestion"] as? String ?? "").isEmpty else { return false }
+            ready = value; return true
+        }
+        return ready
+    }
     private func verifyMenu(english: Bool) {
         var args = ["--preview-mixed-planning","--usability-fixture","--test-map-controls","--test-journey-selection"]
         if english { args += ["--test-language","en"] }
@@ -84,6 +96,45 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
     }
     func testMixedRoutesShareOneMenuAndFillTheMap() { verifyMenu(english:false) }
     func testEnglishMixedRoutesKeepTheSameFlow() { verifyMenu(english:true) }
+    func testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute() {
+        launch(["--preview-mixed-planning","--preview-journey-suggestion","--usability-fixture","--test-journey-selection","--test-map-controls"])
+        let dismiss = button("journey-alternative-dismiss")
+        XCTAssertTrue(dismiss.waitForExistence(timeout:120))
+        let initial = readySuggestionState(), selected = initial["selected"] as? String
+        XCTAssertEqual(initial["route_panel_open"] as? Bool,false)
+        XCTAssertGreaterThanOrEqual(dismiss.frame.width,44);XCTAssertGreaterThanOrEqual(dismiss.frame.height,44)
+        capture("journey-alternative-optional")
+        dismiss.tap()
+        waitFor("Dismiss keeps navigation and the selected route") {
+            let value = self.state()
+            return value["suggestion"] as? String == "" && value["selected"] as? String == selected &&
+                value["started"] as? Bool == true
+        }
+        XCTAssertFalse(button("journey-alternative-accept").exists)
+        XCTAssertTrue(button("journey-board").isHittable);button("journey-board").tap()
+        waitFor("Boarding proceeds with the original route") {
+            self.state()["step"] as? Int == 1 && self.state()["selected"] as? String == selected
+        }
+        capture("journey-alternative-dismissed-boarded")
+    }
+    func testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped() {
+        launch(["--preview-mixed-planning","--preview-journey-suggestion","--usability-fixture","--test-journey-selection","--test-language","en"])
+        let accept = button("journey-alternative-accept")
+        XCTAssertTrue(accept.waitForExistence(timeout:120))
+        let initial = readySuggestionState(), proposed = initial["suggestion"] as? String ?? ""
+        XCTAssertFalse(proposed.isEmpty);XCTAssertNotEqual(initial["selected"] as? String,proposed)
+        XCTAssertEqual(accept.label,"Switch");XCTAssertTrue(accept.isHittable)
+        capture("journey-alternative-en-before-switch")
+        accept.tap()
+        waitFor("Only an explicit tap replaces the remaining trip") {
+            let value = self.state()
+            return value["selected"] as? String == proposed && value["started"] as? Bool == true &&
+                value["suggestion"] as? String == "" && value["step"] as? Int == 0
+        }
+        XCTAssertEqual(state()["route_panel_open"] as? Bool,false)
+        XCTAssertFalse(button("journey-alternative-accept").exists)
+        capture("journey-alternative-en-after-switch")
+    }
     func testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected() {
         launch(["--preview-mixed-planning","--preview-late-recommendation","--usability-fixture","--test-journey-selection","--test-map-controls"])
         guard requireRouteMenu() else { return }

@@ -110,7 +110,7 @@ struct TransitHomeView: View {
                                 "duration_label": timing?.label ?? "", "waiting_label": timing?.waitingLabel ?? "",
                                 "arrival_label": timing?.arrivalLabel ?? ""]
                         }
-                        let value: [String: Any] = ["itinerary": showJourneyItinerary, "route_panel_open": showJourney, "checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "comparison_changed": planner.comparisonChanged, "options": records]
+                        let value: [String: Any] = ["itinerary": showJourneyItinerary, "route_panel_open": showJourney, "checking": planner.checkingWalks, "selected": planner.selectedID ?? "", "started": planner.started, "step": planner.stepIndex, "suggestion": model.journeySuggestion?.id ?? "", "comparison_changed": planner.comparisonChanged, "options": records]
                         let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
                         Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
                             .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
@@ -229,11 +229,16 @@ struct TransitHomeView: View {
         if stationWalk.isActive {
             StationWalkingDock(model: model, navigation: stationWalk)
         } else if planner.started {
+            if let suggestion = model.visibleJourneySuggestion {
+                JourneyAlternativePrompt(model: model, suggestion: suggestion)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
         }
         }
         .smoothChanges(planner.currentStep)
         .smoothChanges(planner.started)
+        .smoothChanges(model.journeySuggestion?.id)
         .smoothChanges(planner.selectedID)
         .smoothChanges(model.language)
         if let bike = model.selectedBikeStation, !hasSelection {

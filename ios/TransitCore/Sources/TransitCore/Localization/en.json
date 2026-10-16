@@ -700,5 +700,10 @@
   "已含候車 · 即將可搭": "Wait included · Boarding soon",
   "含候車約 %@–%@ 分": "Includes about %@–%@ min waiting",
   "含候車約 %@ 分": "Includes about %@ min waiting",
-  "免騎車": "No cycling"
+  "免騎車": "No cycling",
+  "騎乘剩餘 %@ · %@ 分": "%@ to ride · %@ min",
+  "預計可省約 %@ 分": "About %@ min faster",
+  "有另一條可行路線": "Another route is available",
+  "改走": "Switch",
+  "保留目前路線": "Keep current route"
 }

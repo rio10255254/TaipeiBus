@@ -32,7 +32,7 @@ public enum TripRanking {
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
                               ridingSpreads: [Double] = [],
                               at date: Date = Date(), serviceTimeOfDay: Double? = nil, cyclingSeconds: Double = 0,
-                              rentalCount: Int = 0) -> TripAssessment {
+                              rentalCount: Int = 0, boardingBuffers: [Double] = [], supplyRisk: Double = 0) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false, spread = 0.0
@@ -43,7 +43,8 @@ public enum TripRanking {
             elapsed += walks[index]
             lower += walks[index]; upper += walks[index]
             let arrival = arrivals[index]
-            let buffer = index == 0 ? (walks[index] >= 30 ? 60.0 : 0) : 90.0
+            let buffer = boardingBuffers.indices.contains(index) ? max(0, boardingBuffers[index]) :
+                ConnectionTiming.buffer(first: index == 0, walking: walks[index])
             let ready = index > 0 && upper - lower > 120 ? upper : elapsed
             let result = BoardingTime.wait(official: arrival, readyAt: ready, buffer: buffer,
                 service: services.indices.contains(index) ? services[index] : nil,
@@ -83,11 +84,9 @@ public enum TripRanking {
         lower += walks.last ?? 0; upper += walks.last ?? 0
         let walkingSeconds = walks.reduce(0, +)
         let cycled = cyclingSeconds.isFinite ? min(walkingSeconds, max(0, cyclingSeconds)) : 0
-        let score = elapsed + (walkingSeconds - cycled) * (preferences.walkingWeight - 1 + 0.35) +
-            waiting * (preferences.waitingWeight - 1) +
-            Double(max(0, riding.count - 1)) * preferences.effectiveTransferPenaltySeconds +
-            Double(waits.filter { $0.evidence == .unknown }.count) * 180 +
-            Double(max(0, rentalCount)) * rentalConvenienceSeconds
+        let score = JourneyPreferenceCost.score(elapsed: elapsed, walking: walkingSeconds - cycled, waiting: waiting,
+            transfers: max(0, riding.count - 1), rentals: rentalCount,
+            unknownWaits: waits.filter { $0.evidence == .unknown }.count, supplyRisk: supplyRisk, preferences: preferences)
         return TripAssessment(score: unavailable ? .infinity : score, elapsedSeconds: elapsed,
             walkingSeconds: walkingSeconds, waitingSeconds: waiting, missedFirstArrival: missed,
             uncertainWaits: unknown, unavailable: unavailable, waits: waits,
@@ -98,11 +97,14 @@ public enum TripRanking {
     public static func assessment(_ trip: TransitTrip, estimates: EstimateFeed, at date: Date,
                                   preferences: LiveSettings.Planning = .init(),
                                   walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil,
-                                  ridingSpreads: [Double]? = nil, cyclingSeconds: Double = 0,
-                                  rentalCount: Int = 0) -> TripAssessment {
+                                  ridingSpreads: [Double]? = nil, cyclingSeconds: Double? = nil,
+                                  rentalCount: Int? = nil, supplyRisk: Double? = nil) -> TripAssessment {
         let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
             return seconds
+        }
+        let spreads = ridingSpreads ?? zip(trip.rides, ridingDurations ?? trip.rideSeconds).map { ride, seconds in
+            seconds * (ride.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
         }
         return assess(riding: ridingDurations ?? trip.rideSeconds, walking: walking,
             arrivals: trip.rides.map { estimates.value(routeID: $0.route.parentID, stopID: $0.boarding.id, at: date) },
@@ -110,9 +112,10 @@ public enum TripRanking {
                 $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.fullRouteSeconds)
             }, services: trip.rides.map { $0.railService ?? $0.route.servicePlans[$0.direction]?.service(at: date) },
             boardingOffsets: trip.rides.map(\.boardingOffsetSeconds),
-            ridingSpreads: ridingSpreads ?? zip(trip.rides, ridingDurations ?? trip.rideSeconds).map { ride, seconds in
-                seconds * (ride.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
-            }, at: date, cyclingSeconds: cyclingSeconds, rentalCount: rentalCount)
+            ridingSpreads: spreads, at: date, cyclingSeconds: cyclingSeconds ?? trip.planningCyclingSeconds,
+            rentalCount: rentalCount ?? trip.bikeConnections.count,
+            boardingBuffers: ConnectionTiming.buffers(for: trip, walking: walking, ridingSpreads: spreads),
+            supplyRisk: supplyRisk ?? trip.planningSupplyRisk)
     }
 
     /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
@@ -123,16 +126,17 @@ public enum TripRanking {
                                    cyclingDurations: [String: Double] = [:], rentalCounts: [String: Int] = [:],
                                    choiceGroups: [String: String] = [:]) -> [TransitTrip] {
         guard limit > 0 else { return [] }
+        let byID = Dictionary(uniqueKeysWithValues: trips.map { ($0.id, $0) })
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
                 walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id],
-                cyclingSeconds: cyclingDurations[trip.id] ?? 0,
-                rentalCount: rentalCounts[trip.id] ?? ((cyclingDurations[trip.id] ?? 0) > 0 ? 1 : 0)))
+                cyclingSeconds: cyclingDurations[trip.id],
+                rentalCount: rentalCounts[trip.id] ?? (trip.bikeConnections.isEmpty ? ((cyclingDurations[trip.id] ?? 0) > 0 ? 1 : 0) : trip.bikeConnections.count)))
         })
         // Connector durations include cycling so departure feasibility and arrival clocks
         // remain correct. Only the preference cost and walking comparison exclude riding.
         func cycling(_ id: String) -> Double {
-            let seconds = cyclingDurations[id] ?? 0
+            let seconds = cyclingDurations[id] ?? byID[id]?.planningCyclingSeconds ?? 0
             return seconds.isFinite ? min(scores[id]!.walkingSeconds, max(0, seconds)) : 0
         }
         func walking(_ id: String) -> Double { scores[id]!.walkingSeconds - cycling(id) }
@@ -143,7 +147,11 @@ public enum TripRanking {
             return $0.id < $1.id
         }
         guard diverse, !ordered.isEmpty else { return Array(ordered.prefix(limit)) }
-        func rentals(_ id: String) -> Int { max(0, rentalCounts[id] ?? (cycling(id) > 0 ? 1 : 0)) }
+        func rentals(_ id: String) -> Int {
+            if let count = rentalCounts[id] { return max(0, count) }
+            if let count = byID[id]?.bikeConnections.count, count > 0 { return count }
+            return cycling(id) > 0 ? 1 : 0
+        }
         func group(_ trip: TransitTrip) -> String { choiceGroups[trip.id] ?? trip.familyID }
         // Keep useful trade-offs, then collapse the same bus chain only after walking is verified.
         let frontier = ordered.filter { candidate in

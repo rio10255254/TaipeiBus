@@ -42,7 +42,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -63,7 +63,7 @@ env:
 
 jobs:
   bike_behavior:
-    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu')
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine')
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -93,7 +93,7 @@ jobs:
           retention-days: 14
   simulator:
     runs-on: macos-15
-    timeout-minutes: ${{ (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
+    timeout-minutes: ${{ (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -113,6 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/bundled-official-catalog"
+          export BUS_PLANNING_PROFILE=1
           python3 - <<'PY'
           import gzip,json,os
           from pathlib import Path
@@ -123,8 +124,11 @@ jobs:
               (root/(name+'.json')).write_bytes(data)
           print('Source: exact bundled official metadata; live observations are not substituted.')
           PY
-          swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log"
-          swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log"
+          audit_failed=0
+          swift test --package-path ios/TransitCore --filter MetroIntegrationTests | tee "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          swift test -c release --package-path ios/TransitCore --filter MetroIntegrationTests.testLiveCityCatalogHasUsefulMetroAlternativesWithoutExcessiveSearchTime | tee -a "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          swift test -c release --package-path ios/TransitCore --filter IntegratedPlanningTests.testFrozenFullCityPlanningIncludesBikeCorridorsWithinInteractiveTime | tee -a "$RUNNER_TEMP/routing-audit.log" || audit_failed=1
+          exit "$audit_failed"
       - name: Preserve routing comparison evidence before the UI build
         if: always() && inputs.bundled_catalog_audit
         uses: actions/upload-artifact@v4
@@ -159,7 +163,7 @@ jobs:
         env:
           BUS_LIVE_CYCLING_TEST: "1"
         id: billing_transactions
-        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
         timeout-minutes: 22
         run: |
           set -euo pipefail
@@ -176,7 +180,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - name: Preserve StoreKit verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
         uses: actions/upload-artifact@v4
         with:
           name: billing-tests
@@ -185,7 +189,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
-        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
+        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
         timeout-minutes: 24
         run: |
           set -euo pipefail
@@ -209,7 +213,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/pro-ui-dark.log"
       - name: Preserve native Pro screenshots and verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
         run: |
           for mode in pro-ui pro-ui-dark; do
             if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
@@ -217,7 +221,7 @@ jobs:
             fi
           done
       - name: Save native Pro walkthrough
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
         uses: actions/upload-artifact@v4
         with:
           name: pro-walkthrough
@@ -571,6 +575,12 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testTransferShowsTheNextBus')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'
               '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
@@ -730,7 +740,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify system dark appearance with native journeys
-        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
+        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -744,6 +754,12 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testLateRecommendationMovesFirstWhileTheInspectedPageAndMapRemainSelected'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testTwoBikeConnectionsHaveSeparateInspectableStations')
           fi
           if [ '${{ inputs.usability_scope }}' = 'mixed-route-additions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testOtherReasonableRoutesRemainAvailableBeyondTheCompactCarousel'

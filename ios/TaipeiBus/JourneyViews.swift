@@ -88,7 +88,7 @@ struct JourneyPlanningView: View {
                         Label(AppText.text("開始導航"), systemImage: "location.fill")
                             .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
                     }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
-                        .disabled(planner.selected.map { !$0.verified || $0.walkIssue != nil || planner.unavailableBoarding($0) != nil } ?? true)
+                        .disabled(planner.selected.map { !planner.canUse($0) } ?? true)
                         .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
                 }
             }
@@ -963,7 +963,7 @@ struct JourneyOptionsView: View {
         }
     }
     private func usable(_ option: JourneyOption) -> Bool {
-        option.verified && option.walkIssue == nil && planner.unavailableBoarding(option) == nil
+        planner.canUse(option)
     }
     private func compactSummary(_ option: JourneyOption) -> some View {
         Button { planner.select(option); collapse() } label: {
@@ -1324,6 +1324,51 @@ struct JourneyArrivalView: View {
                 }
             }
         }
+    }
+}
+
+struct JourneyAlternativePrompt: View {
+    @ObservedObject var model: TransitAppModel
+    let suggestion: TransitAppModel.JourneySuggestion
+    var body: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(suggestion.savedSeconds.map { AppText.text("預計可省約 %@ 分", max(1,Int($0 / 60))) }
+                    ?? AppText.text("有另一條可行路線"))
+                    .liveFont(.subheadline, weight: .semibold).foregroundStyle(.primary)
+                HStack(spacing: 4) {
+                    if suggestion.option.walkingOnly { Label(AppText.text("步行"), systemImage: "figure.walk") }
+                    ForEach(suggestion.option.walks.indices, id: \.self) { index in
+                        if index > 0 && (suggestion.option.walks[index].bike != nil || suggestion.option.rides.indices.contains(index)) {
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        if suggestion.option.walks[index].bike != nil {
+                            Image(systemName: "bicycle")
+                            if suggestion.option.bikeOnly { Text("YouBike") }
+                            if suggestion.option.rides.indices.contains(index) {
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        if suggestion.option.rides.indices.contains(index) {
+                            let ride = suggestion.option.rides[index]
+                            RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode,
+                                tintName: ride.route.name, compact: true)
+                        }
+                    }
+                }.liveFont(.caption, weight: .semibold).lineLimit(1)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+            Button { model.acceptJourneySuggestion() } label: {
+                Text(AppText.text("改走")).liveFont(.subheadline, weight: .semibold)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
+            }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-alternative-accept")
+            Button { model.dismissJourneySuggestion() } label: {
+                Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
+            }.buttonStyle(.plain).foregroundStyle(.secondary)
+                .accessibilityLabel(AppText.text("保留目前路線"))
+                .accessibilityIdentifier("journey-alternative-dismiss")
+        }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
+            .phoneGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 
