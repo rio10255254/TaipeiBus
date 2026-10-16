@@ -1336,7 +1336,26 @@ struct JourneyAlternativePrompt: View {
                 Text(suggestion.savedSeconds.map { AppText.text("預計可省約 %@ 分", max(1,Int($0 / 60))) }
                     ?? AppText.text("有另一條可行路線"))
                     .liveFont(.subheadline, weight: .semibold).foregroundStyle(.primary)
-                JourneyRouteChain(option: suggestion.option)
+                HStack(spacing: 4) {
+                    if suggestion.option.walkingOnly { Label(AppText.text("步行"), systemImage: "figure.walk") }
+                    ForEach(suggestion.option.walks.indices, id: \.self) { index in
+                        if index > 0 && (suggestion.option.walks[index].bike != nil || suggestion.option.rides.indices.contains(index)) {
+                            Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        if suggestion.option.walks[index].bike != nil {
+                            Image(systemName: "bicycle")
+                            if suggestion.option.bikeOnly { Text("YouBike") }
+                            if suggestion.option.rides.indices.contains(index) {
+                                Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+                            }
+                        }
+                        if suggestion.option.rides.indices.contains(index) {
+                            let ride = suggestion.option.rides[index]
+                            RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode,
+                                tintName: ride.route.name, compact: true)
+                        }
+                    }
+                }.liveFont(.caption, weight: .semibold).lineLimit(1)
             }.frame(maxWidth: .infinity, alignment: .leading)
             Button { model.acceptJourneySuggestion() } label: {
                 Text(AppText.text("改走")).liveFont(.subheadline, weight: .semibold)
@@ -1349,7 +1368,6 @@ struct JourneyAlternativePrompt: View {
                 .accessibilityIdentifier("journey-alternative-dismiss")
         }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
             .phoneGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-            .accessibilityIdentifier("journey-alternative-prompt")
     }
 }
 
