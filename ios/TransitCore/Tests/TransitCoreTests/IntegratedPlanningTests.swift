@@ -131,20 +131,32 @@ final class IntegratedPlanningTests: XCTestCase {
         var metadata = try FeedDecoder.metadata(feeds:feeds)
         let metro = try MetroNetwork(data:Data(contentsOf:root.appendingPathComponent("TaipeiBus/MetroNetwork.json")))
         metro.attach(to:&metadata)
+        metadata.officialTravelTimes = try OfficialTravelTimes(data:Data(contentsOf:root.appendingPathComponent("TaipeiBus/OfficialTravelTimes.json")))
         let bikes = try BikeNetwork(data:Data(contentsOf:root.appendingPathComponent("TaipeiBus/BikeNetwork.json")))
         let counts = BikeAvailability(docks:Dictionary(uniqueKeysWithValues:bikes.stations.map {
             ($0.id,BikeDock(stationID:$0.id,rentable:8,returnable:8,capacity:$0.capacity,active:true,observedAt:date))
         }),receivedAt:date)
         let planner = MultimodalPlanner(metadata:metadata)
-        for (start,end) in [(Coordinate(latitude:25.083,longitude:121.594),Coordinate(latitude:25.02036,longitude:121.53992)),
-                            (Coordinate(latitude:25.0192,longitude:121.539),Coordinate(latitude:25.0434,longitude:121.5062))] {
+        var cases = [(Coordinate(latitude:25.083,longitude:121.594),Coordinate(latitude:25.02036,longitude:121.53992)),
+                     (Coordinate(latitude:25.0192,longitude:121.539),Coordinate(latitude:25.0434,longitude:121.5062))]
+        let north = try XCTUnwrap(metro.stations.first { $0.code == "R22A" })
+        let south = try XCTUnwrap(metro.stations.first { $0.code == "G03A" })
+        cases.append((north.coordinate,south.coordinate))
+        for (index,points) in cases.enumerated() {
+            let (start,end) = points
             let started = ProcessInfo.processInfo.systemUptime
             let result = planner.plan(from:start,to:end,maximumWalk:1200,limit:54,at:date,bikeNetwork:bikes,bikeAvailability:counts)
             let elapsed = ProcessInfo.processInfo.systemUptime-started
             XCTAssertFalse(result.isEmpty)
             XCTAssertTrue(result.contains { !$0.bikeConnections.isEmpty })
+            XCTAssertTrue(result.contains { $0.bikeConnections.isEmpty && $0.rides.allSatisfy { $0.route.mode != .bus } },
+                "A reasonable rail route without a rental must remain available")
+            if index == 1 {
+                XCTAssertTrue(result.contains { $0.bikeConnections.isEmpty && $0.rides.count == 1 &&
+                    $0.rides[0].boarding.stationID == "metro:TRTC:G07" && $0.rides[0].alighting.stationID == "metro:TRTC:G12" })
+            }
             XCTAssertTrue(result.allSatisfy { $0.planningWalkSeconds.count == $0.rides.count+1 })
-            print("INTEGRATED_CITY controlled_supply=true routes=\(metadata.routes.count) choices=\(result.count) cycling=\(result.filter { !$0.bikeConnections.isEmpty }.count) seconds=\(elapsed)")
+            print("INTEGRATED_CITY case=\(index) controlled_supply=true official_profiles=true routes=\(metadata.routes.count) choices=\(result.count) cycling=\(result.filter { !$0.bikeConnections.isEmpty }.count) seconds=\(elapsed)")
 #if !DEBUG
             XCTAssertLessThan(elapsed,8,"A city-wide search must remain interactive")
 #endif

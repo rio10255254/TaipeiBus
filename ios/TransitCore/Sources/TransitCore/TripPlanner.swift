@@ -412,7 +412,7 @@ public struct TripPlanner: Sendable {
                 pool = retained
             }
             candidates[key] = pool
-            if pool.count >= 6 {
+            if pool.count >= 3 {
                 familyBounds[key] = FamilyBound(score: pool.map(\.score).sorted()[2],
                     access: pool.map(\.access).min()!, egress: pool.map(\.egress).min()!,
                     walking: pool.map { $0.access + $0.egress + $0.transfer }.min()!,

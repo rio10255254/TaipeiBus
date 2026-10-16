@@ -301,6 +301,8 @@ final class TransitAppModel: ObservableObject {
         guard let suggestion = journeySuggestion, canConsiderJourneyAlternative,
               suggestion.activeID == planner.selectedID, suggestion.activeStep == planner.stepIndex,
               Date().timeIntervalSince(suggestion.createdAt) < 120,
+              let fix = location.updatedAt, Date().timeIntervalSince(fix) < 20,
+              let accuracy = location.accuracy, accuracy <= 35,
               let point = location.usableCoordinate, point.distance(to: suggestion.origin.coordinate) < 120 else { return nil }
         return suggestion
     }

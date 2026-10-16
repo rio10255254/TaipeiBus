@@ -556,6 +556,7 @@ final class JourneyPlannerModel: ObservableObject {
     private var connectionBases: [String: JourneyOption] = [:]
     private var integratedSearchHasSupply = false
     private var lastIntegratedBikeSearch = Date.distantPast
+    private var lastIntegratedSupplyAt = Date.distantPast
     private var stationRefinements: [String: Date] = [:]
     private func bikeChoiceKey(_ option: JourneyOption) -> String {
         option.id + "|" + option.walks.enumerated().compactMap { index, leg in
@@ -761,7 +762,8 @@ final class JourneyPlannerModel: ObservableObject {
     private func discoverBikeConnections() {
         guard !started, !planning, !checkingWalks, bikeRefinementTask == nil else { return }
         let shouldSearch = bikeAvailability != nil && lastMetadata != nil && origin != nil && destination != nil &&
-            (!integratedSearchHasSupply || Date().timeIntervalSince(lastIntegratedBikeSearch) >= 60)
+            (!integratedSearchHasSupply || (bikeAvailability?.receivedAt ?? .distantPast) > lastIntegratedSupplyAt ||
+                Date().timeIntervalSince(lastIntegratedBikeSearch) >= 60)
         let candidates = takeBikeConnections(limit: 12)
         guard !candidates.isEmpty || shouldSearch else { return }
         checkingWalks = true; message = nil
@@ -771,9 +773,11 @@ final class JourneyPlannerModel: ObservableObject {
             await self.verifyConnections([], cycling: candidates, token: token)
             if shouldSearch, let metadata = self.lastMetadata, let origin = self.origin, let destination = self.destination {
                 self.lastIntegratedBikeSearch = Date()
+                let supply = self.bikeAvailability
+                self.lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
                 let routes = await self.network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
                     preferences: self.preferences, estimates: self.latestSnapshot.estimates,
-                    bikeNetwork: self.bikeNetwork, bikeAvailability: self.bikeAvailability)
+                    bikeNetwork: self.bikeNetwork, bikeAvailability: supply)
                 guard !Task.isCancelled, token == self.generation else { return }
                 self.integratedSearchHasSupply = true
                 let budget = JourneySearchBudget(distance: origin.coordinate.distance(to: destination.coordinate), cycling: true)
@@ -962,7 +966,7 @@ final class JourneyPlannerModel: ObservableObject {
         cancelRequests()
         verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil; comparisonChanged = false
         attemptedBikeConnections = []; connectionBases = [:]; searchedBikeGateways = false
-        integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast
+        integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast
         options = []; selectedID = nil; started = false; stepIndex = 0; message = nil; mapRevision += 1
         guard let origin, let destination else {
             message = "選擇出發地，才能找附近可搭的站牌。"; return
@@ -982,7 +986,7 @@ final class JourneyPlannerModel: ObservableObject {
                                               preferences: preferences, estimates: latestSnapshot.estimates,
                                               bikeNetwork: bikes, bikeAvailability: supply)
             guard !Task.isCancelled, token == generation else { return }
-            integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date()
+            integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date(); lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
             verifiedPool = []; optionLabels = [:]
             let date = Date()
             let initialRiding = Dictionary(uniqueKeysWithValues: trips.map { trip in
@@ -1217,7 +1221,7 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
-        integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; stationRefinements = [:]
+        integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]
     }
     func openAppleTransit() {
         guard let destination else { return }

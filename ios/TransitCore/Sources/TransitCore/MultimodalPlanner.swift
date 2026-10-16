@@ -49,6 +49,7 @@ public struct MultimodalPlanner: Sendable {
         var internalWalk = false
         var previousSpread: Double = 0
         var unknownWaits = 0
+        var bikeMask: Int { bikes.keys.reduce(0) { $0 | (1 << $1) } }
     }
     private struct Candidate {
         let label: Label
@@ -273,14 +274,6 @@ public struct MultimodalPlanner: Sendable {
             var arrived: [String: [Label]] = [:]
             func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
                 var pool = values[id] ?? []
-                let bikeMask = label.bikes.keys.sorted()
-                let family = pool.filter { $0.family == label.family && $0.bikes.keys.sorted() == bikeMask }
-                // Keep time and convenience representatives of a service chain, rather
-                // than every boarding platform which produces almost the same journey.
-                if family.contains(where: { abs($0.elapsed - label.elapsed) < 30 && abs($0.walking - label.walking) < 30 && $0.cost <= label.cost }) { return }
-                if family.count >= 2, let fastest = family.map(\.elapsed).min(), let cheapest = family.map(\.cost).min(),
-                   let leastWalking = family.map(\.walking).min(), label.elapsed >= fastest,
-                   label.cost >= cheapest, label.walking >= leastWalking { return }
                 // A cheaper but later label must not erase a path which can catch an
                 // earlier connection. Rental count and remaining boarding time both matter.
                 if pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
@@ -289,12 +282,18 @@ public struct MultimodalPlanner: Sendable {
                 pool.removeAll { label.cost <= $0.cost && label.elapsed <= $0.elapsed && label.walking <= $0.walking &&
                     label.bikes.count <= $0.bikes.count && label.hasRail == $0.hasRail && label.previousSpread <= $0.previousSpread &&
                     label.unknownWaits <= $0.unknownWaits }
-                pool.append(label); pool.sort { $0.cost == $1.cost ? $0.elapsed < $1.elapsed : $0.cost < $1.cost }
-                // Retain the fastest label explicitly before filling the preference slots.
+                pool.append(label)
+                guard pool.count > budget.labels else { values[id] = pool; return }
+                pool.sort { $0.cost == $1.cost ? $0.elapsed < $1.elapsed : $0.cost < $1.cost }
+                // Preserve the earliest connection and least walking, not a rectangle
+                // made from several different labels which can erase a useful tradeoff.
                 let fastest = pool.min { $0.elapsed < $1.elapsed }!
-                var kept = Array(pool.prefix(budget.labels))
-                if !kept.contains(where: { $0.elapsed == fastest.elapsed && $0.family == fastest.family && $0.bikes.count == fastest.bikes.count }) {
-                    kept.removeLast(); kept.append(fastest)
+                let leastWalk = pool.min { $0.walking < $1.walking }!
+                var kept: [Label] = []
+                for candidate in [pool[0],fastest,leastWalk] + pool {
+                    if kept.count == budget.labels { break }
+                    if !kept.contains(where: { $0.elapsed == candidate.elapsed && $0.walking == candidate.walking &&
+                        $0.cost == candidate.cost && $0.family == candidate.family && $0.bikeMask == candidate.bikeMask }) { kept.append(candidate) }
                 }
                 values[id] = kept
             }
