@@ -21,9 +21,10 @@ import XCTest
         return JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:a,to:b,distance:1500,duration:1500),WalkingLeg(from:c,to:d,distance:1500,duration:1500)])
     }
     func transfer(internalWalk: Bool) -> JourneyOption {
-        let rides = [route("bus",a,b,mode:.bus), route("R",c,d,mode:.metro)]
-        let trip = TransitTrip(rides:rides,accessDistance:0,egressDistance:0,transferDistance:b.distance(to:c),score:0,rideSeconds:[600,600])
-        var middle = WalkingLeg(from:b,to:c,distance:2500,duration:2500)
+        let railStart = Coordinate(latitude:b.latitude+0.004,longitude:b.longitude+0.008)
+        let rides = [route("bus",a,b,mode:.bus), route("R",railStart,d,mode:.metro)]
+        let trip = TransitTrip(rides:rides,accessDistance:0,egressDistance:0,transferDistance:b.distance(to:railStart),score:0,rideSeconds:[600,600])
+        var middle = WalkingLeg(from:b,to:railStart,distance:1000,duration:1000)
         middle.internalTransfer = internalWalk
         return JourneyOption(id:trip.id,trip:trip,walks:[WalkingLeg(from:a,to:a,distance:0,duration:0),middle,WalkingLeg(from:d,to:d,distance:0,duration:0)])
     }
@@ -47,6 +48,13 @@ import XCTest
         p.updateBikes(network:bikes,availability:availability ?? counts(bikes))
         p.auditLoadChoices([option],from:TravelPlace(name:"出發",address:"",coordinate:option.walks[0].from),
                           to:TravelPlace(name:"目的地",address:"",coordinate:option.walks.last!.to))
+        // Ordinary walks belong to this controlled fixture, not the live provider.
+        p.testStreet = { leg,_ in
+            var checked = leg
+            checked.distance = leg.distance ?? leg.from.distance(to:leg.to)
+            checked.duration = leg.duration ?? (checked.distance ?? 0)/1.2
+            checked.coordinates = [leg.from,leg.to]; return checked
+        }
         p.testCycle = { leg in
             var result = leg
             guard var bike = leg.bike else { return result }
@@ -157,6 +165,8 @@ import XCTest
     func testSecondRentalChecksItsOwnStationsAfterTheFirstRentalIsFinished() async throws {
         let original = base(), p = planner(original), bikes = network(original)
         p.updateBikes(network:bikes,availability:counts(bikes)); await settle(p)
+        let dual = try XCTUnwrap(p.options.first { $0.walks.filter { $0.bike != nil }.count == 2 })
+        p.select(dual)
         let before = try XCTUnwrap(p.selected)
         XCTAssertEqual(p.plannedPickupStations.count,2)
         p.begin();p.advance();p.advance()

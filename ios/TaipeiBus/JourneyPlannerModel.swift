@@ -439,6 +439,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func recommendations(at date: Date) -> [JourneyOption] {
         let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil && unavailableBoarding($0) == nil }
+        let hasTransit = valid.contains { !$0.rides.isEmpty }
         var metrics: [JourneyChoice] = []
         for option in valid {
             guard let timing = duration(option, at: date) else { continue }
@@ -448,13 +449,16 @@ final class JourneyPlannerModel: ObservableObject {
                 walking: max(0, timing.walkingSeconds - option.cyclingSeconds), waiting: timing.waitingSeconds,
                 transfers: max(0, option.rides.count - 1), rentals: option.walks.filter { $0.bike != nil }.count,
                 unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences,
-                transitLed: isTransitLed(option,timing:timing)))
+                transitLed: isTransitLed(option,timing:timing,hasTransit:hasTransit)))
         }
         let byID = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0) })
         return JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
     }
-    private func isTransitLed(_ option: JourneyOption, timing: JourneyDuration) -> Bool {
+    private func isTransitLed(_ option: JourneyOption, timing: JourneyDuration, hasTransit: Bool = true) -> Bool {
         let bikes = option.walks.compactMap(\.bike)
+        // With no transit leg available, a short local ride can still beat a long walk.
+        if !hasTransit, option.bikeOnly, bikes.count == 1,
+           TransitBikePolicy.isLocalFeeder(bikes[0].connection) { return true }
         return TransitBikePolicy.isTransitLed(transitSeconds:timing.ridingSeconds,
             rideSeconds:bikes.map(\.rideSeconds),rideMeters:bikes.map(\.rideMeters))
     }
@@ -462,7 +466,7 @@ final class JourneyPlannerModel: ObservableObject {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
         var labels: [String: String] = [:]
         for option in result {
-            if option.cycles, let timing = duration(option,at:date), !isTransitLed(option,timing:timing) {
+            if option.cycles, let timing = duration(option,at:date), !isTransitLed(option,timing:timing,hasTransit:result.contains { !$0.rides.isEmpty }) {
                 labels[option.id] = option.bikeOnly ? "騎 YouBike" : option.walks.filter({ $0.bike != nil }).count > 1 ? "多次借還" : "騎乘較多"
                 continue
             }

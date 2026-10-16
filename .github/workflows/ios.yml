@@ -26,6 +26,11 @@ on:
         description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
         type: boolean
         default: false
+      native_suite:
+        description: 'All hosted checks, or feature regressions after the live walking suite has passed'
+        type: choice
+        options: ['all', 'features']
+        default: 'all'
       street_repeat:
         description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
         type: boolean
@@ -119,6 +124,9 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'route-reliability' ]; then
             selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
+          if [ '${{ inputs.native_suite }}' = 'features' ]; then
+            selection+=('-skip-testing:TaipeiBusBillingTests/RouteReliabilityTests')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
@@ -182,11 +190,15 @@ jobs:
         if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
           set -euo pipefail
+          build_options=('ONLY_ACTIVE_ARCH=YES')
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
+            build_options+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Debug -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
-            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
+            "${build_options[@]}" CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-build.log"
       - name: Package simulator app for requested preview
         if: github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
         run: |
@@ -773,6 +785,9 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
+            selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
+          fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \

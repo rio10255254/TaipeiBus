@@ -224,8 +224,9 @@ private final class BikeFeedProtocol: URLProtocol, @unchecked Sendable {
             transferDistance:0,score:0,rideSeconds:[30])
         gateway=JourneyOption(id:trip.id,trip:trip,walks:gateway.walks)
         await p.auditVerifyAdditionalCorridors([gateway])
-        XCTAssertEqual(p.selected?.rides.first?.route.id,"gateway")
-        XCTAssertTrue(try XCTUnwrap(p.selected).cycles,"A large initial candidate pool must not exhaust every cycling query before additional corridors are compared")
+        XCTAssertTrue(p.options.contains { $0.rides.first?.route.id == "gateway" && $0.cycles },
+            "A large initial pool must retain the faster bike-heavy corridor as an alternative")
+        XCTAssertEqual(p.selected?.rides.first?.route.id,"local-0","A near-zero transit leg with long rentals is not the default transit journey")
         XCTAssertEqual(p.options.first?.id,p.selectedID)
         XCTAssertFalse(p.started)
     }
