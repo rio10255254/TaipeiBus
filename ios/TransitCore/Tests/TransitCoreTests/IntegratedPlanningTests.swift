@@ -2,6 +2,31 @@ import XCTest
 @testable import TransitCore
 
 final class IntegratedPlanningTests: XCTestCase {
+    func testBicycleIsAShortTransitFeederRatherThanTheMainLeg() {
+        XCTAssertTrue(TransitBikePolicy.isTransitLed(transitSeconds:1200,rideSeconds:[240],rideMeters:[900]))
+        XCTAssertFalse(TransitBikePolicy.isTransitLed(transitSeconds:300,rideSeconds:[720],rideMeters:[2400]))
+        XCTAssertFalse(TransitBikePolicy.isTransitLed(transitSeconds:1200,rideSeconds:[180,180],rideMeters:[700,700]))
+        XCTAssertFalse(TransitBikePolicy.isTransitLed(transitSeconds:0,rideSeconds:[300],rideMeters:[1200]))
+    }
+    func testPracticalTransitLeadsWhileFasterMultipleRentalsRemainAvailable() {
+        let bus = JourneyChoice(id:"bus",group:"bus",elapsed:2580,walking:600,waiting:300,transfers:0,rentals:0,unknownWaits:0)
+        let heavy = JourneyChoice(id:"double-rental",group:"O-bikes",elapsed:2040,walking:300,waiting:120,
+            transfers:0,rentals:2,unknownWaits:0,transitLed:false)
+        let short = JourneyChoice(id:"short-feeder",group:"BR-bike",elapsed:2100,walking:180,waiting:120,
+            transfers:0,rentals:1,unknownWaits:0,transitLed:true)
+        XCTAssertEqual(JourneyChoiceRanking.recommended([heavy,bus]).first,"bus")
+        XCTAssertTrue(JourneyChoiceRanking.recommended([heavy,bus]).contains("double-rental"))
+        XCTAssertEqual(JourneyChoiceRanking.recommended([bus,short]).first,"short-feeder")
+        XCTAssertEqual(JourneyChoiceRanking.recommended([heavy]),["double-rental"])
+    }
+    func testTransitFeederLookupDoesNotOfferTheLongRideAllowedForStandaloneCycling() {
+        let (_,bikes,counts) = fixture(), preferences = LiveSettings.Planning()
+        let general = BikeRouting.connections(from:a,to:c,network:bikes,availability:counts,preferences:preferences,at:date)
+        let feeder = BikeRouting.feederConnections(from:a,to:c,network:bikes,availability:counts,preferences:preferences,at:date)
+        XCTAssertFalse(general.isEmpty)
+        XCTAssertTrue(feeder.isEmpty)
+        XCTAssertFalse(BikeRouting.feederConnections(from:a,to:b,network:bikes,availability:counts,preferences:preferences,at:date).isEmpty)
+    }
     let a = Coordinate(latitude:25.04,longitude:121.54)
     let b = Coordinate(latitude:25.04,longitude:121.555)
     let c = Coordinate(latitude:25.06,longitude:121.58)

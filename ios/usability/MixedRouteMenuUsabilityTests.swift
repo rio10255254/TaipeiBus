@@ -70,6 +70,10 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
                     max(frame["widthUsage"] as? Double ?? 0, frame["heightUsage"] as? Double ?? 0) > 0.72
             }
             XCTAssertEqual(state()["started"] as? Bool,false)
+            XCTAssertEqual(camera()["nearbyStationsVisible"] as? Bool,false,
+                "Unrelated nearby station markers must not cover the inspected journey")
+            XCTAssertEqual(camera()["waypointOverlapAllowed"] as? Bool,false,
+                "Intermediate stops must avoid overlapping at overview zoom")
             XCTAssertTrue(button("journey-go-"+id).isHittable)
             XCTAssertTrue(button("journey-steps-"+id).isHittable)
             XCTAssertLessThan(button("journey-go-"+id).frame.maxY, button("journey-all-options").frame.minY,

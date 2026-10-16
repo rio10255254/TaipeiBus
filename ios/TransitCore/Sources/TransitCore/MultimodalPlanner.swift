@@ -149,13 +149,13 @@ public struct MultimodalPlanner: Sendable {
         }
         let patterns = timedPatterns(at: date)
         let budget = JourneySearchBudget(distance: origin.distance(to: destination), cycling: cycling)
-        let bikeRadius = min(preferences.bikeMaximumRideMeters, max(1_500, origin.distance(to: destination) * 0.5))
+        let bikeRadius = min(TransitBikePolicy.maximumFeederMeters,preferences.bikeMaximumRideMeters, max(1_500, origin.distance(to: destination) * 0.5))
         func streetDistance(_ stop: BusStop, to c: Coordinate) -> Double {
             if stop.mode == .bus { return stop.coordinate.distance(to: c) }
             return (metadata.metro.nearestExit(stationID: stop.stationID, to: c)?.coordinate ?? stop.coordinate).distance(to: c)
         }
         var accessBikes: [String: [BikeConnection]] = [:], egressBikes: [String: [BikeConnection]] = [:]
-        let bikeSearch = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date)
+        let bikeSearch = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date, feederOnly:true)
         if cycling {
             for (id, stop) in stationStops {
                 let access = streetDistance(stop, to: origin), egress = streetDistance(stop, to: destination)

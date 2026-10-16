@@ -67,14 +67,16 @@ import XCTest
         }
         XCTFail("Connector verification did not finish")
     }
-    func testFasterTwoEndedBikeConnectionIsAutomaticallyRecommendedOnEverySupportedLine() async throws {
+    func testSingleFeederLeadsAndTwoEndedRentalRemainsInspectableOnEverySupportedLine() async throws {
         for code in ["bus","BR","R","G","O","BL","Y","LB","lightRail"] {
             let mode: TransportMode = code == "bus" ? .bus : code == "lightRail" ? .lightRail : .metro
             let original = base(code,mode:mode), p = planner(original), bikes = network(original)
             p.updateBikes(network:bikes,availability:counts(bikes))
             await settle(p)
             let selected = try XCTUnwrap(p.selected, code)
-            XCTAssertEqual(selected.walks.filter { $0.bike != nil }.count,2,code)
+            XCTAssertEqual(selected.walks.filter { $0.bike != nil }.count,1,code)
+            XCTAssertTrue(p.options.contains { $0.walks.filter { $0.bike != nil }.count == 2 },
+                "A faster two-rental choice remains available without becoming the default: "+code)
             XCTAssertLessThan(try XCTUnwrap(p.duration(selected,at:Date())).totalSeconds,
                               try XCTUnwrap(p.duration(original,at:Date())).totalSeconds,code)
             XCTAssertFalse(p.started,"Recommendation must still wait for Go: "+code)

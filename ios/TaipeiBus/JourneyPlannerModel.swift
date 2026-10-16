@@ -447,15 +447,25 @@ final class JourneyPlannerModel: ObservableObject {
             metrics.append(JourneyChoice(id: option.id, group: group, elapsed: timing.totalSeconds,
                 walking: max(0, timing.walkingSeconds - option.cyclingSeconds), waiting: timing.waitingSeconds,
                 transfers: max(0, option.rides.count - 1), rentals: option.walks.filter { $0.bike != nil }.count,
-                unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences))
+                unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences,
+                transitLed: isTransitLed(option,timing:timing)))
         }
         let byID = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0) })
         return JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
+    }
+    private func isTransitLed(_ option: JourneyOption, timing: JourneyDuration) -> Bool {
+        let bikes = option.walks.compactMap(\.bike)
+        return TransitBikePolicy.isTransitLed(transitSeconds:timing.ridingSeconds,
+            rideSeconds:bikes.map(\.rideSeconds),rideMeters:bikes.map(\.rideMeters))
     }
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
         var labels: [String: String] = [:]
         for option in result {
+            if option.cycles, let timing = duration(option,at:date), !isTransitLed(option,timing:timing) {
+                labels[option.id] = option.bikeOnly ? "騎 YouBike" : option.walks.filter({ $0.bike != nil }).count > 1 ? "多次借還" : "騎乘較多"
+                continue
+            }
             if option.id == recommendedOption?.id {
                 labels[option.id] = option.bikeOnly ? "騎 YouBike" : option.walkingOnly ? "步行即可" : "推薦"
                 continue
@@ -584,8 +594,9 @@ final class JourneyPlannerModel: ObservableObject {
             var variants = [original]
             for index in original.walks.indices where original.walks[index].bike != nil {
                 let leg = original.walks[index]
-                let pairs = BikeRouting.connections(from: leg.from, to: leg.to, network: bikeNetwork,
-                    availability: bikeAvailability, preferences: preferences, limit: 3)
+                let pairs = original.trip == nil
+                    ? BikeRouting.connections(from:leg.from,to:leg.to,network:bikeNetwork,availability:bikeAvailability,preferences:preferences,limit:3)
+                    : BikeRouting.feederConnections(from:leg.from,to:leg.to,network:bikeNetwork,availability:bikeAvailability,preferences:preferences,limit:3)
                 var checked: [WalkingLeg] = [leg]
                 for pair in pairs where BikeRouting.pairID(pair) != leg.bike.map({ BikeRouting.pairID($0.connection) }) {
                     guard !Task.isCancelled, token == generation, !started else { return }
@@ -676,8 +687,8 @@ final class JourneyPlannerModel: ObservableObject {
             var links: [(index: Int, connection: BikeConnection, gain: Double)] = []
             for index in base.walks.indices where !base.walks[index].internalTransfer {
                 let leg = base.walks[index]
-                guard let connection = BikeRouting.connection(from: leg.from, to: leg.to, network: bikeNetwork,
-                    availability: bikeAvailability, preferences: preferences, at: date) else { continue }
+                guard let connection = BikeRouting.feederConnections(from: leg.from, to: leg.to, network: bikeNetwork,
+                    availability: bikeAvailability, preferences: preferences, at: date, limit:1).first else { continue }
                 let walk = leg.duration.map { max(0, $0 - leg.stationSeconds) } ?? BikeRouting.walkingSeconds(leg.from.distance(to: leg.to))
                 let gain = walk - connection.totalSeconds
                 guard gain > 0 else { continue }
@@ -743,10 +754,10 @@ final class JourneyPlannerModel: ObservableObject {
             for station in metadata.metro.stations {
                 let entrance = metadata.metro.nearestExit(stationID: station.id, to: point)?.coordinate ?? station.coordinate
                 let distance = point.distance(to: entrance)
-                guard distance > preferences.expandedWalkMeters, distance <= min(3_000, preferences.bikeMaximumRideMeters) else { continue }
+                guard distance > preferences.expandedWalkMeters, distance <= min(TransitBikePolicy.maximumFeederMeters, preferences.bikeMaximumRideMeters) else { continue }
                 let from = access ? point : entrance, to = access ? entrance : point
-                guard let connection = BikeRouting.connection(from: from, to: to, network: bikeNetwork,
-                    availability: bikeAvailability, preferences: preferences, at: date) else { continue }
+                guard let connection = BikeRouting.feederConnections(from: from, to: to, network: bikeNetwork,
+                    availability: bikeAvailability, preferences: preferences, at: date,limit:1).first else { continue }
                 let corridor = metadata.metro.lines.first { station.code.hasPrefix($0.code) }?.id ?? station.id
                 candidates.append((entrance, corridor, connection.totalSeconds + entrance.distance(to: other) / 8))
             }
@@ -758,9 +769,9 @@ final class JourneyPlannerModel: ObservableObject {
             // Preserve the bus-only gateway when no rail corridor is reachable by bike.
             if result.isEmpty, access,
                let station = BikeRouting.gateway(from: point, to: other, network: bikeNetwork,
-                   availability: bikeAvailability, preferences: preferences, at: date),
-               BikeRouting.connection(from: point, to: station.coordinate, network: bikeNetwork,
-                   availability: bikeAvailability, preferences: preferences, at: date) != nil {
+                   availability: bikeAvailability, preferences: TransitBikePolicy.feederPreferences(preferences), at: date),
+               !BikeRouting.feederConnections(from: point, to: station.coordinate, network: bikeNetwork,
+                   availability: bikeAvailability, preferences: preferences, at: date,limit:1).isEmpty {
                 result.append(station.coordinate)
             }
             return result

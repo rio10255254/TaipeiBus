@@ -82,14 +82,9 @@ import MapKit
     func testZhihongToBothReportedDestinationsThroughProductionPlanner() async throws {
         let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
         try await verifyOtherJourney(from:from,to:.init(latitude:25.083675,longitude:121.594363),name:"Zhihong_Neihu")
-        let request = MKLocalSearch.Request()
-        request.naturalLanguageQuery = "牛肆 吉林路"
-        request.region = PlaceSearch.region
-        let search = try await MKLocalSearch(request:request).start()
-        let shop = try XCTUnwrap(search.mapItems.first { $0.name?.contains("牛肆") == true })
-        let point = shop.placemark.coordinate
-        print("REPORTED_SHOP name=\(shop.name ?? "") latitude=\(point.latitude) longitude=\(point.longitude)")
-        try await verifyOtherJourney(from:from,to:.init(latitude:point.latitude,longitude:point.longitude),name:"Zhihong_NiuSi")
+        // Published shop pin for 牛肆, 吉林路422號. Street planning must not
+        // depend on a separate live POI-name search returning the shop today.
+        try await verifyOtherJourney(from:from,to:.init(latitude:25.0660056,longitude:121.5302137),name:"Zhihong_NiuSi")
     }
 
     func testRepeatedProductionSearchWithMovingOriginAndCancelledComparisons() async throws {
@@ -100,7 +95,7 @@ import MapKit
         p.updateBikes(network:bikes,availability:counts)
         p.updateSnapshot(await service.refresh()); p.auditStreetDiagnostics = true
         let neihu = try XCTUnwrap(metadata.metro.stations.first { $0.code == "BR19" })
-        let targets = [neihu.coordinate, Coordinate(latitude:25.0678,longitude:121.5303)]
+        let targets = [neihu.coordinate, Coordinate(latitude:25.0660056,longitude:121.5302137)]
         let origins = [campus, Coordinate(latitude:25.01967,longitude:121.53943),
             Coordinate(latitude:25.0202,longitude:121.5397), Coordinate(latitude:25.0185,longitude:121.5385),
             Coordinate(latitude:25.0189833,longitude:121.5396361), Coordinate(latitude:25.0189833,longitude:121.5394361)]

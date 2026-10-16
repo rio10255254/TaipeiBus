@@ -46,7 +46,7 @@ on:
       usability_first_pass:
         description: 'Mixed-menu first pass: all checks, or recheck suggestion interactions before the complete dark pass'
         type: choice
-        options: ['all', 'suggestions']
+        options: ['all', 'suggestions', 'route-map']
         default: 'all'
       usability_appearance:
         description: 'Check both system appearances, or resume one appearance without repeating the completed one'
@@ -759,6 +759,10 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'suggestions' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testJourneyAlternativeIsOptionalAndBoardingKeepsTheChosenRoute'
               '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishJourneyAlternativeChangesOnlyAfterSwitchIsTapped')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'route-map' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testMixedRoutesShareOneMenuAndFillTheMap'
+              '-only-testing:TaipeiBusUsabilityTests/MixedRouteMenuUsabilityTests/testEnglishMixedRoutesKeepTheSameFlow')
           fi
           if [ '${{ inputs.usability_appearance }}' = 'dark' ]; then
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark

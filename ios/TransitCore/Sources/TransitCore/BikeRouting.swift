@@ -100,6 +100,14 @@ public enum BikeRouting {
 
     public static func pairID(_ connection: BikeConnection) -> String { connection.pickup.id + ":" + connection.dropoff.id }
 
+    public static func feederConnections(from: Coordinate, to: Coordinate, network: BikeNetwork,
+                                         availability: BikeAvailability?, preferences: LiveSettings.Planning = .init(),
+                                         at date: Date = Date(), limit: Int = 3) -> [BikeConnection] {
+        Array(connections(from:from,to:to,network:network,availability:availability,
+            preferences:TransitBikePolicy.feederPreferences(preferences),at:date,limit:8)
+            .filter(TransitBikePolicy.isLocalFeeder).prefix(max(0,limit)))
+    }
+
     public static func confirmed(_ station: BikeStation, availability: BikeAvailability?, renting: Bool,
                                  minimum: Int = 2, at date: Date = Date()) -> Bool {
         guard let dock = availability?.dock(station.id, at: date), dock.active else { return false }
@@ -184,9 +192,13 @@ final class BikeConnectionSearch {
     let availability: BikeAvailability?
     let preferences: LiveSettings.Planning
     let date: Date
+    private let feederOnly: Bool
     private var nearby: [Coordinate: [BikeStation]] = [:]
-    init(network: BikeNetwork, availability: BikeAvailability?, preferences: LiveSettings.Planning, at date: Date) {
-        self.network = network; self.availability = availability; self.preferences = preferences; self.date = date
+    init(network: BikeNetwork, availability: BikeAvailability?, preferences: LiveSettings.Planning, at date: Date,
+         feederOnly: Bool = false) {
+        self.network = network; self.availability = availability
+        self.preferences = feederOnly ? TransitBikePolicy.feederPreferences(preferences) : preferences
+        self.date = date; self.feederOnly = feederOnly
     }
     func stations(near point: Coordinate) -> [BikeStation] {
         if let cached = nearby[point] { return cached }
@@ -197,7 +209,8 @@ final class BikeConnectionSearch {
         let direct = from.distance(to: to)
         guard preferences.bikeRouting, let availability, !network.stations.isEmpty, limit > 0,
               direct >= preferences.bikeMinimumRideMeters, from.isInServiceArea, to.isInServiceArea else { return [] }
-        return BikeRouting.pairs(from: from, to: to, direct: direct, pickupStations: stations(near: from), dropoffStations: stations(near: to),
-            availability: availability, preferences: preferences, at: date, limit: limit)
+        let pairs = BikeRouting.pairs(from: from, to: to, direct: direct, pickupStations: stations(near: from), dropoffStations: stations(near: to),
+            availability: availability, preferences: preferences, at: date, limit: feederOnly ? 8 : limit)
+        return feederOnly ? Array(pairs.filter(TransitBikePolicy.isLocalFeeder).prefix(limit)) : pairs
     }
 }
