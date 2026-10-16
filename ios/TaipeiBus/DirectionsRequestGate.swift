@@ -58,7 +58,7 @@ import MapKit
             do {
                 let result = try await withTaskCancellationHandler {
                     try await operation()
-                } onCancel: { Task { @MainActor in cancel() } }
+                } onCancel: { Task { @MainActor in cancel(); self.release(id) } }
                 release(id); try Task.checkCancellation(); return result
             } catch {
                 let throttled = report(error)

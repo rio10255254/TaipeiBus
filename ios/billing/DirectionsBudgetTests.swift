@@ -64,4 +64,25 @@ import MapKit
         XCTAssertFalse(gate.report(NSError(domain:MKErrorDomain,code:Int(MKError.Code.directionsNotFound.rawValue))),
             "An actual unreachable road is different from a temporarily unavailable service")
     }
+    func testAnOldProviderCallbackCannotHoldTheNextDestinationsSlot() async throws {
+        let gate = DirectionsRequestGate(window:0.1,limits:[8,8,8],concurrency:1,spacing:0)
+        var entered = false, completed = false
+        let old = Task { try await gate.execute(.alternatives) {
+            entered = true
+            let result = await withCheckedContinuation { (continuation: CheckedContinuation<Int,Never>) in
+                Task { try? await Task.sleep(for:.milliseconds(350)); continuation.resume(returning:1) }
+            }
+            completed = true; return result
+        } }
+        for _ in 0..<50 {
+            if entered { break }
+            try await Task.sleep(for:.milliseconds(2))
+        }
+        XCTAssertTrue(entered); old.cancel()
+        let next = try await gate.execute(.firstChoice) { 7 }
+        XCTAssertEqual(next,7)
+        XCTAssertFalse(completed,"A late cancelled callback must not block a new destination")
+        do { _ = try await old.value; XCTFail("The old callback cannot revive a cancelled search") }
+        catch is CancellationError {} catch { XCTFail("Unexpected \(error)") }
+    }
 }
