@@ -33,10 +33,18 @@ public enum BikeRouting {
     public static func connection(from: Coordinate, to: Coordinate, network: BikeNetwork,
                                   availability: BikeAvailability?, preferences: LiveSettings.Planning = .init(),
                                   at date: Date = Date()) -> BikeConnection? {
+        connections(from: from, to: to, network: network, availability: availability,
+            preferences: preferences, at: date, limit: 1).first
+    }
+
+    /// Keep distinct station pairs until the app can compare their real streets.
+    public static func connections(from: Coordinate, to: Coordinate, network: BikeNetwork,
+                                   availability: BikeAvailability?, preferences: LiveSettings.Planning = .init(),
+                                   at date: Date = Date(), limit: Int = 3) -> [BikeConnection] {
         guard preferences.bikeRouting, let availability, !network.stations.isEmpty,
-              from.isInServiceArea, to.isInServiceArea else { return nil }
+              from.isInServiceArea, to.isInServiceArea, limit > 0 else { return [] }
         let direct = from.distance(to: to)
-        guard direct >= preferences.bikeMinimumRideMeters else { return nil }
+        guard direct >= preferences.bikeMinimumRideMeters else { return [] }
         func usable(_ station: BikeStation, renting: Bool) -> Int? {
             guard let dock = availability.dock(station.id, at: date), dock.active else { return nil }
             let count = renting ? dock.rentable : dock.returnable
@@ -45,11 +53,11 @@ public enum BikeRouting {
         }
         let pickups = network.stations(near: from, radius: preferences.bikeAccessMeters, limit: network.stations.count)
             .compactMap { station in usable(station, renting: true).map { (station: station, count: $0) } }.prefix(8)
-        guard !pickups.isEmpty else { return nil }
+        guard !pickups.isEmpty else { return [] }
         let dropoffs = network.stations(near: to, radius: preferences.bikeAccessMeters, limit: network.stations.count)
             .compactMap { station in usable(station, renting: false).map { (station: station, count: $0) } }.prefix(8)
-        guard !dropoffs.isEmpty else { return nil }
-        var best: BikeConnection?
+        guard !dropoffs.isEmpty else { return [] }
+        var candidates: [BikeConnection] = []
         for pickup in pickups {
             let access = from.distance(to: pickup.station.coordinate)
             for dropoff in dropoffs where dropoff.station.id != pickup.station.id {
@@ -63,15 +71,42 @@ public enum BikeRouting {
                     bikes: pickup.count, docks: dropoff.count, accessMeters: access, rideMeters: ride, egressMeters: egress,
                     accessSeconds: walkingSeconds(access), rideSeconds: ride / preferences.bikeSpeed,
                     egressSeconds: walkingSeconds(egress), handlingSeconds: preferences.bikeHandlingSeconds)
-                if let current = best {
-                    // Equal times go to the station holding more bikes: it is the one still
-                    // likely to have one when the rider actually arrives.
-                    if candidate.totalSeconds < current.totalSeconds ||
-                        (candidate.totalSeconds == current.totalSeconds && candidate.bikes > current.bikes) { best = candidate }
-                } else { best = candidate }
+                candidates.append(candidate)
             }
         }
-        return best
+        return Array(candidates.sorted {
+            let a = $0.totalSeconds + supplyPenalty($0, availability: availability, at: date)
+            let b = $1.totalSeconds + supplyPenalty($1, availability: availability, at: date)
+            if a != b { return a < b }
+            if $0.bikes != $1.bikes { return $0.bikes > $1.bikes }
+            return pairID($0) < pairID($1)
+        }.prefix(min(8, limit)))
+    }
+
+    public static func pairID(_ connection: BikeConnection) -> String { connection.pickup.id + ":" + connection.dropoff.id }
+
+    public static func confirmed(_ station: BikeStation, availability: BikeAvailability?, renting: Bool,
+                                 minimum: Int = 2, at date: Date = Date()) -> Bool {
+        guard let dock = availability?.dock(station.id, at: date), dock.active else { return false }
+        return (renting ? dock.rentable : dock.returnable) >= minimum
+    }
+
+    /// An availability preference, not a probability or extra travel time. Sparse or old
+    /// reports matter more when the station will only be used later in the journey.
+    public static func supplyPenalty(_ connection: BikeConnection, availability: BikeAvailability?,
+                                     pickupAfter: Double = 0, dropoffAfter: Double = 0,
+                                     at date: Date = Date()) -> Double {
+        func cost(_ station: BikeStation, renting: Bool, after: Double) -> Double {
+            guard let dock = availability?.dock(station.id, at: date), dock.active else { return .infinity }
+            let count = renting ? dock.rentable : dock.returnable
+            guard count >= 2 else { return .infinity }
+            let low: Double = count <= 2 ? 120 : count <= 5 ? 60 : 0
+            let later = count <= 5 ? min(180, max(0, after - 300) / 5) : 0
+            let age = min(180, max(0, date.timeIntervalSince(dock.observedAt) - 120) / 3)
+            return low + later + age
+        }
+        return cost(connection.pickup, renting: true, after: pickupAfter) +
+            cost(connection.dropoff, renting: false, after: max(pickupAfter + connection.totalSeconds, dropoffAfter))
     }
 
     /// Cycling replaces a walk only when it saves real time. What counts as real depends on

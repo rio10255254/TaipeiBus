@@ -37,6 +37,18 @@ public struct TransitTrip: Identifiable, Sendable {
     public let rideSeconds: [Double]
     public var transferDistances: [Double] = []
     public var transferSeconds: [Double] = []
+    /// First-class street connections considered during the transit search, indexed like
+    /// walkingDistances (access = 0, egress = rides.count).
+    public var bikeConnections: [Int: BikeConnection] = [:]
+    public var planningSupplyRisk: Double = 0
+    public var planningCyclingSeconds: Double { bikeConnections.values.reduce(0) { $0 + $1.rideSeconds + $1.handlingSeconds } }
+    public func withBikeConnections(_ connections: [Int: BikeConnection], supplyRisk: Double = 0) -> TransitTrip {
+        var result = self; result.bikeConnections = connections; result.planningSupplyRisk = supplyRisk
+        if !connections.isEmpty {
+            result.variant = "bikes-" + connections.keys.sorted().map { "\($0)-\(BikeRouting.pairID(connections[$0]!))" }.joined(separator: "-")
+        }
+        return result
+    }
     public var walkingDistances: [Double] {
         [accessDistance] + (rides.count > 1 ? (transferDistances.count == rides.count - 1 ? transferDistances :
             Array(repeating: transferDistance / Double(rides.count - 1), count: rides.count - 1)) : []) + [egressDistance]
@@ -51,6 +63,12 @@ public struct TransitTrip: Identifiable, Sendable {
                 result[index + 1] = transferSeconds[index]
             } else { result[index + 1] += rides[index].alightingAccessSeconds + rides[index + 1].boardingAccessSeconds }
         }
+        for (index, connection) in bikeConnections where result.indices.contains(index) {
+            let access = index == 0 ? rides[0].boardingAccessSeconds :
+                index == rides.count ? rides.last!.alightingAccessSeconds :
+                rides[index - 1].alightingAccessSeconds + rides[index].boardingAccessSeconds
+            result[index] = connection.totalSeconds + access
+        }
         return result
     }
     public var transfers: Int { max(0, rides.count - 1) }
@@ -62,6 +80,8 @@ public struct TransitTrip: Identifiable, Sendable {
             transferDistance: transferDistance, score: score, rideSeconds: rideSeconds,
             transferDistances: transferDistances, transferSeconds: transferSeconds)
         result.variant = variant
+        result.bikeConnections = bikeConnections
+        result.planningSupplyRisk = planningSupplyRisk
         return result
     }
     public var familyID: String { rides.map { "\($0.route.parentID):\($0.direction)" }.joined(separator: "|") }
