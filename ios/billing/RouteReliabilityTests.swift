@@ -8,6 +8,28 @@ import MapKit
 @MainActor final class RouteReliabilityTests: XCTestCase {
     let campus = Coordinate(latitude: 25.01945, longitude: 121.53955)
 
+    func testZhihongIndoorFixRetainsTheProviderWalkingRoute() async throws {
+        let p = JourneyPlannerModel(); p.auditStreetDiagnostics = true
+        defer { p.finish() }
+        let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
+        let entrance = Coordinate(latitude:25.026154,longitude:121.543636)
+        let leg = try await p.auditStreet(WalkingLeg(from:from,to:entrance))
+        XCTAssertTrue(leg.verified,"The provider has a real walking route; an ordinary building-access offset must not delete it")
+    }
+
+    func testZhihongToBothReportedDestinationsThroughProductionPlanner() async throws {
+        let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
+        try await verifyOtherJourney(from:from,to:.init(latitude:25.083675,longitude:121.594363),name:"Zhihong_Neihu")
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = "牛肆 吉林路"
+        request.region = PlaceSearch.region
+        let search = try await MKLocalSearch(request:request).start()
+        let shop = try XCTUnwrap(search.mapItems.first { $0.name?.contains("牛肆") == true })
+        let point = shop.placemark.coordinate
+        print("REPORTED_SHOP name=\(shop.name ?? "") latitude=\(point.latitude) longitude=\(point.longitude)")
+        try await verifyOtherJourney(from:from,to:.init(latitude:point.latitude,longitude:point.longitude),name:"Zhihong_NiuSi")
+    }
+
     func testRepeatedProductionSearchWithMovingOriginAndCancelledComparisons() async throws {
         let service = TransitService(), p = JourneyPlannerModel()
         defer { p.finish() }
