@@ -12,7 +12,7 @@ public enum FeedDecoder {
         taipeiDate(value, formatter: makeTaipeiFormatter())
     }
 
-    private static func makeTaipeiFormatter() -> DateFormatter {
+    static func makeTaipeiFormatter() -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -22,7 +22,7 @@ public enum FeedDecoder {
         return formatter
     }
 
-    private static func taipeiDate(_ value: String, formatter: DateFormatter) -> Date? {
+    static func taipeiDate(_ value: String, formatter: DateFormatter) -> Date? {
         let text = value.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/", with: "-")
         if let date = formatter.date(from: text) { return date }
         let iso = ISO8601DateFormatter()

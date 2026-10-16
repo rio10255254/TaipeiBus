@@ -60,6 +60,19 @@ public struct BikeAvailability: Sendable, Equatable {
         guard let rows = try JSONSerialization.jsonObject(with: bytes) as? [[String: Any]],
               !rows.isEmpty, rows.count <= 20_000 else { throw FeedError.invalid("YouBike 即時資料") }
         var result: [String: BikeDock] = [:]
+        // Most stations share the same few timestamp strings. Parse each once using one
+        // formatter, rather than rebuilding several formatters for every station.
+        let formatter = FeedDecoder.makeTaipeiFormatter()
+        var dates: [String: Date] = [:], invalidDates = Set<String>()
+        func timestamp(_ value: Any?) -> Date? {
+            let text = FeedDecoder.text(value)
+            guard !text.isEmpty, !invalidDates.contains(text) else { return nil }
+            if let date = dates[text] { return date }
+            guard let parsed = FeedDecoder.taipeiDate(text, formatter: formatter) else {
+                invalidDates.insert(text); return nil
+            }
+            dates[text] = parsed; return parsed
+        }
         for row in rows {
             let id = FeedDecoder.text(row["sno"])
             guard !id.isEmpty, let station = network.station(id) else { continue }
@@ -67,8 +80,10 @@ public struct BikeAvailability: Sendable, Equatable {
                   let returnable = FeedDecoder.number(row["available_return_bikes"]) else { continue }
             let capacity = FeedDecoder.number(row["Quantity"]) ?? Double(station.capacity)
             guard (0...500).contains(rentable), (0...500).contains(returnable), (0...500).contains(capacity) else { continue }
+            // infoTime belongs to this station; a newer city-wide publication timestamp
+            // must not revive a station that stopped reporting.
             let reported = ["infoTime", "srcUpdateTime", "updateTime", "mday"]
-                .compactMap { FeedDecoder.taipeiDate(FeedDecoder.text(row[$0])) }.max()
+                .lazy.compactMap { timestamp(row[$0]) }.first
             guard let reported, reported.timeIntervalSince(date) < 600 else { continue }
             result[id] = BikeDock(stationID: id, rentable: Int(rentable), returnable: Int(returnable),
                                   capacity: Int(capacity), active: FeedDecoder.text(row["act"]) != "0",
