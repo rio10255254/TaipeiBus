@@ -30,6 +30,10 @@ on:
         description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
         type: boolean
         default: false
+      street_gated:
+        description: 'Use the production shared request budget in the street probe'
+        type: boolean
+        default: false
       official_times_audit:
         description: 'Also require the published shared official time catalog and verify every route'
         type: boolean
@@ -76,7 +80,10 @@ jobs:
           set -euo pipefail
           args=()
           if [ '${{ inputs.street_repeat }}' = 'true' ]; then args=('--repeat'); fi
-          swift ios/release/street-probe.swift "${args[@]}" | tee "$RUNNER_TEMP/street-probe.log"
+          if [ '${{ inputs.street_gated }}' = 'true' ]; then args+=('--gated'); fi
+          cp ios/release/street-probe.swift "$RUNNER_TEMP/main.swift"
+          swiftc -swift-version 5 -O ios/TaipeiBus/DirectionsRequestGate.swift "$RUNNER_TEMP/main.swift" -o "$RUNNER_TEMP/street-probe"
+          "$RUNNER_TEMP/street-probe" "${args[@]}" | tee "$RUNNER_TEMP/street-probe.log"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

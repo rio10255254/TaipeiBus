@@ -95,6 +95,7 @@ private actor PartialFeedRecorder {
         configuration.protocolClasses = [RecoveryFeedProtocol.self]
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let service = TransitService(feedSession: URLSession(configuration:configuration),cacheDirectory:folder)
+        _ = await service.offlineMetroMetadata()
         let model = TransitAppModel(service:service)
         model.setActive(true)
         defer { model.setActive(false) }

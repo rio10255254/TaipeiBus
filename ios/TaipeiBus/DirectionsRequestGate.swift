@@ -5,6 +5,7 @@ import MapKit
 /// even while many optional street/dock combinations are being compared.
 @MainActor final class DirectionsRequestGate {
     enum Priority: Int { case navigation, firstChoice, alternatives }
+    enum Deferred: Error { case optionalComparison }
     static let shared = DirectionsRequestGate()
     private struct Waiter {
         let id: UUID
@@ -27,6 +28,11 @@ import MapKit
     }
     func acquire(_ priority: Priority) async throws -> UUID {
         try Task.checkCancellation()
+        let now = ProcessInfo.processInfo.systemUptime
+        if priority == .alternatives,
+           blockedUntil > now || recent.filter({ now-$0 < window }).count >= limits[priority.rawValue] {
+            throw Deferred.optionalComparison
+        }
         let id = UUID()
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
@@ -67,12 +73,17 @@ import MapKit
         guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
         waiting.remove(at:index).continuation.resume(throwing:CancellationError()); drain()
     }
-    /// The provider may already be throttling requests made before this queue was
-    /// reached. Wait and retry once; do not turn every candidate into a missing route.
+    /// Public MapKit errors include both explicit throttling and a temporarily
+    /// unavailable service. Neither proves that a walking connection does not exist.
     @discardableResult func report(_ error: Error) -> Bool {
         let value = error as NSError
-        guard value.domain == MKErrorDomain, value.code == MKError.Code.loadingThrottled.rawValue else { return false }
-        blockedUntil = max(blockedUntil,ProcessInfo.processInfo.systemUptime + window)
+        let throttle = value.domain == MKErrorDomain && value.code == MKError.Code.loadingThrottled.rawValue
+        let interrupted = value.domain == MKErrorDomain &&
+            [MKError.Code.unknown.rawValue,MKError.Code.serverFailure.rawValue].contains(value.code)
+        let network = value.domain == NSURLErrorDomain &&
+            [NSURLErrorTimedOut,NSURLErrorNetworkConnectionLost,NSURLErrorCannotConnectToHost].contains(value.code)
+        guard throttle || interrupted || network else { return false }
+        blockedUntil = max(blockedUntil,ProcessInfo.processInfo.systemUptime + (throttle ? window : min(2,window)))
         drain(); return true
     }
     private func drain() {
@@ -85,6 +96,9 @@ import MapKit
         var delay = max(0, blockedUntil - now)
         if let last = recent.last { delay = max(delay,spacing - (now-last)) }
         let limit = limits[waiter.priority.rawValue]
+        if waiter.priority == .alternatives, blockedUntil > now || recent.count >= limit {
+            waiting.remove(at:index).continuation.resume(throwing:Deferred.optionalComparison); drain(); return
+        }
         if recent.count >= limit { delay = max(delay,(recent[recent.count-limit] + window) - now) }
         if delay > 0 {
             wake = Task { [weak self] in

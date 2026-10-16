@@ -2,6 +2,8 @@ import Foundation
 import MapKit
 
 @MainActor func probe() async {
+    let gated = CommandLine.arguments.contains("--gated"), gate = DirectionsRequestGate()
+    var providerRequests = 0, deferred = 0, primaryConfirmed = 0, failures = 0
     let destination = CLLocationCoordinate2D(latitude:25.026154,longitude:121.543636)
     let normal = [
         CLLocationCoordinate2D(latitude:25.0192,longitude:121.5390),
@@ -25,7 +27,15 @@ import MapKit
         request.transportType = .walking; request.requestsAlternateRoutes = true
         let clock = Date()
         do {
-            let result = try await MKDirections(request:request).calculate()
+            let operation = MKDirections(request:request)
+            let primary = [0,1,24,25].contains(index)
+            let result: MKDirections.Response
+            if gated {
+                result = try await gate.execute(primary ? .firstChoice : .alternatives, cancel: { operation.cancel() }) {
+                    providerRequests += 1; return try await operation.calculate()
+                }
+            } else { providerRequests += 1; result = try await operation.calculate() }
+            if primary, !result.routes.isEmpty { primaryConfirmed += 1 }
             for route in result.routes where route.polyline.pointCount > 0 {
                 let first = route.polyline.points()[0].coordinate
                 let last = route.polyline.points()[route.polyline.pointCount-1].coordinate
@@ -33,11 +43,15 @@ import MapKit
                 let to = CLLocation(latitude:destination.latitude,longitude:destination.longitude)
                 print("PROBE from=\(start.latitude),\(start.longitude) elapsed=\(Date().timeIntervalSince(clock)) meters=\(route.distance) startGap=\(from.distance(from:CLLocation(latitude:first.latitude,longitude:first.longitude))) endGap=\(to.distance(from:CLLocation(latitude:last.latitude,longitude:last.longitude)))")
             }
+        } catch is DirectionsRequestGate.Deferred { deferred += 1
         } catch {
+            failures += 1
             let value = error as NSError
             print("PROBE_ERROR count=\(index+1) from=\(start.latitude),\(start.longitude) domain=\(value.domain) code=\(value.code) error=\(error)")
-            if value.domain == MKErrorDomain, value.code == MKError.Code.loadingThrottled.rawValue { break }
+            if value.domain == MKErrorDomain { break }
         }
     }
+    print("PROBE_SUMMARY gated=\(gated) attempted=\(points.count) providerRequests=\(providerRequests) deferred=\(deferred) primaryConfirmed=\(primaryConfirmed) failures=\(failures)")
+    if gated, primaryConfirmed != 4 || failures > 0 { exit(1) }
 }
 await probe()
