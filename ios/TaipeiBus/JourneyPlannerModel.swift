@@ -1157,6 +1157,17 @@ final class JourneyPlannerModel: ObservableObject {
         do {
             let response = try await operation.calculate()
             try Task.checkCancellation()
+#if DEBUG
+            if auditStreetDiagnostics {
+                for route in response.routes where route.polyline.pointCount > 0 {
+                    let first = route.polyline.points()[0].coordinate
+                    let last = route.polyline.points()[max(0, route.polyline.pointCount - 1)].coordinate
+                    let startGap = leg.from.distance(to: Coordinate(latitude: first.latitude, longitude: first.longitude))
+                    let endGap = leg.to.distance(to: Coordinate(latitude: last.latitude, longitude: last.longitude))
+                    print("STREET_RESPONSE mode=\(transport.rawValue) kind=\(route.transportType.rawValue) meters=\(route.distance) seconds=\(route.expectedTravelTime) startGap=\(startGap) endGap=\(endGap) anchored=\(PedestrianPath.leg(route, from: leg.from, to: leg.to) != nil)")
+                }
+            }
+#endif
             // MapKit currently labels cycling responses/steps as automobile even when their
             // geometry, notices and ETA are bicycle-specific (verified against driving and
             // walking queries on the same station pair). The single-mode request is the source
@@ -1166,6 +1177,9 @@ final class JourneyPlannerModel: ObservableObject {
                 .min(by: { ($0.duration ?? .infinity) < ($1.duration ?? .infinity) }) { result = path }
         } catch {
             try Task.checkCancellation()
+#if DEBUG
+            if auditStreetDiagnostics { print("STREET_ERROR mode=\(transport.rawValue) error=\(error)") }
+#endif
             // No straight-line walking polyline or fabricated time when Apple cannot confirm a route.
         }
         return result
@@ -1281,6 +1295,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
 
 #if DEBUG
+    var auditStreetDiagnostics = false
     var testCycle: ((WalkingLeg) async throws -> WalkingLeg)?
     var testStreet: ((WalkingLeg, MKDirectionsTransportType) async throws -> WalkingLeg)?
     func auditAgeStreetCache(_ seconds: Double) {

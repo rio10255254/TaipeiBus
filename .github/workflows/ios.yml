@@ -42,7 +42,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -63,7 +63,7 @@ env:
 
 jobs:
   bike_behavior:
-    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine')
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'route-reliability')
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -78,10 +78,14 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+          selection=()
+          if [ '${{ inputs.usability_scope }}' = 'route-reliability' ]; then
+            selection=('-only-testing:TaipeiBusBillingTests/RouteReliabilityTests')
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/billing.xcresult" \
-            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO "${selection[@]}" test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - uses: actions/upload-artifact@v4
         if: always()
@@ -92,6 +96,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
   simulator:
+    if: inputs.usability_scope != 'route-reliability'
     runs-on: macos-15
     timeout-minutes: ${{ (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
