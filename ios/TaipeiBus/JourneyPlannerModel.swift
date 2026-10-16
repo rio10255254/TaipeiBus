@@ -551,7 +551,8 @@ final class JourneyPlannerModel: ObservableObject {
                     cycling += item.connection.rideSeconds + item.connection.handlingSeconds; gain += item.gain
                 }
                 let assessment = TripRanking.assessment(variant, estimates: latestSnapshot.estimates, at: date,
-                    preferences: preferences, walkingDurations: predicted.map { Optional($0) }, cyclingSeconds: cycling)
+                    preferences: preferences, walkingDurations: predicted.map { Optional($0) }, cyclingSeconds: cycling,
+                    rentalCount: chosen.count)
                 // A short local saving can catch a departure that walking would miss.
                 guard !assessment.unavailable,
                       gain >= preferences.bikeWalkGainSeconds || assessment.elapsedSeconds <= original.elapsedSeconds - preferences.bikeWalkGainSeconds else { continue }
