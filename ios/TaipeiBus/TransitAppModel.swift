@@ -282,6 +282,99 @@ final class TransitAppModel: ObservableObject {
         purchases.hasPro ? (tripPreference ?? commutes.preference) : .balanced
     }
     private var effectivePlanning = LiveSettings.Planning()
+    struct JourneySuggestion: Identifiable {
+        let option: JourneyOption
+        let origin: TravelPlace
+        let activeID: String
+        let activeStep: Int
+        let createdAt: Date
+        let savedSeconds: Double?
+        var id: String { option.id }
+    }
+    @Published private(set) var journeySuggestion: JourneySuggestion?
+    private let alternativePlanner = JourneyPlannerModel()
+    private var alternativeJourneyTask: Task<Void, Never>?
+    private var alternativeJourneyGeneration = UUID()
+    private var alternativeCheckedAt = Date.distantPast
+    private var dismissedJourneySuggestions: [String: Date] = [:]
+    var visibleJourneySuggestion: JourneySuggestion? {
+        guard let suggestion = journeySuggestion, canConsiderJourneyAlternative,
+              suggestion.activeID == planner.selectedID, suggestion.activeStep == planner.stepIndex,
+              Date().timeIntervalSince(suggestion.createdAt) < 120,
+              let point = location.usableCoordinate, point.distance(to: suggestion.origin.coordinate) < 120 else { return nil }
+        return suggestion
+    }
+    private var canConsiderJourneyAlternative: Bool {
+        guard isActive, planner.started, !planner.arrived, case .walk(let index) = planner.currentStep,
+              let option = planner.selected, option.walks.indices.contains(index) else { return false }
+        if let bike = option.walks[index].bike {
+            // Near a dock or already riding, the rider may be holding a rented bicycle.
+            // Preserve that commitment; the existing station-replacement flow handles it.
+            guard planner.cyclingPhase(at: index) == .toPickup,
+                  let point = location.usableCoordinate, point.distance(to: bike.pickup.coordinate) > 85 else { return false }
+        }
+        return true
+    }
+    func clearJourneySuggestion() {
+        alternativeJourneyTask?.cancel(); alternativeJourneyTask = nil
+        alternativeJourneyGeneration = UUID(); alternativePlanner.finish(); journeySuggestion = nil
+    }
+    func dismissJourneySuggestion() {
+        if let suggestion = journeySuggestion { dismissedJourneySuggestions[suggestion.id] = Date() }
+        journeySuggestion = nil
+    }
+    private func considerJourneyAlternative(force: Bool = false) {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil { return }
+#endif
+        guard canConsiderJourneyAlternative else { if alternativeJourneyTask != nil || journeySuggestion != nil { clearJourneySuggestion() }; return }
+        guard alternativeJourneyTask == nil, force || Date().timeIntervalSince(alternativeCheckedAt) >= 60,
+              let point = location.usableCoordinate, let accuracy = location.accuracy, accuracy <= 35,
+              let fix = location.updatedAt, Date().timeIntervalSince(fix) < 20,
+              let active = planner.selected, let destination = planner.destination else { return }
+        let date = Date(), step = planner.stepIndex
+        guard journeyDuration(active, at: date) != nil else { return }
+        alternativeCheckedAt = date
+        let generation = UUID(); alternativeJourneyGeneration = generation
+        let start = TravelPlace(name: "目前位置", address: "", coordinate: point, englishName: "Current location")
+        var settings = liveSettings; settings.planning = effectivePlanning
+        alternativeJourneyTask = Task { [weak self] in
+            guard let self else { return }
+            let option = await self.alternativePlanner.resolveRemaining(metadata: self.metadata, from: start, to: destination,
+                settings: settings, snapshot: self.snapshot, forecast: self.arrivalForecast,
+                bikes: self.bikeNetwork, availability: self.bikeAvailability, cacheFrom: self.planner)
+            guard !Task.isCancelled, generation == self.alternativeJourneyGeneration else { return }
+            self.alternativeJourneyTask = nil
+            guard self.canConsiderJourneyAlternative, self.planner.selectedID == active.id, self.planner.stepIndex == step,
+                  let option, self.planner.canUse(option), let currentPoint = self.location.usableCoordinate,
+                  currentPoint.distance(to: point) < 120,
+                  let timing = self.alternativePlanner.duration(option, at: Date()),
+                  let current = self.journeyDuration(active, at: Date()) else { return }
+            if let dismissed = self.dismissedJourneySuggestions[option.id], Date().timeIntervalSince(dismissed) < 300 { return }
+            let usable = self.planner.canContinueSelected()
+            let first = step / 2
+            let futureBikes = active.walks.dropFirst(first).compactMap(\.bike)
+            let currentScore = JourneyPreferenceCost.score(elapsed: current.totalSeconds,
+                walking: max(0, current.walkingSeconds - futureBikes.reduce(0) { $0 + $1.cyclingSeconds }),
+                waiting: current.waitingSeconds, transfers: max(0, active.rides.count - first - 1),
+                rentals: futureBikes.count, unknownWaits: current.unknownWaits, preferences: settings.planning)
+            guard (!usable || timing.unknownWaits <= current.unknownWaits),
+                  (!usable || self.alternativePlanner.preferenceScore(option, at: Date()) < currentScore - 60),
+                  JourneyRevisionPolicy.shouldOffer(current: current.totalSeconds, alternative: timing.totalSeconds, currentUsable: usable) else { return }
+            self.journeySuggestion = JourneySuggestion(option: option, origin: start, activeID: active.id, activeStep: step,
+                createdAt: Date(), savedSeconds: usable && current.unknownWaits == 0 && timing.unknownWaits == 0 ? max(0, current.totalSeconds - timing.totalSeconds) : nil)
+        }
+    }
+    func acceptJourneySuggestion() {
+        guard let suggestion = visibleJourneySuggestion, let point = location.usableCoordinate,
+              point.distance(to: suggestion.origin.coordinate) < 100, planner.canUse(suggestion.option) else {
+            clearJourneySuggestion(); alternativeCheckedAt = .distantPast; considerJourneyAlternative(force: true); return
+        }
+        guard planner.adoptRemaining(suggestion.option, from: suggestion.origin) else { return }
+        clearJourneySuggestion(); activeSavedJourneyID = nil
+        alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false
+        clearSelection(); anchorBoardedVehicle(); updateLiveSurfaces()
+    }
     func applyPersonalPreferences() {
         var settings = liveSettings
         settings.planning = activeRoutePreference.applying(to: settings.planning)
@@ -403,6 +496,7 @@ final class TransitAppModel: ObservableObject {
                let packet, packet != self.bikeAvailability {
                 self.bikeAvailability = packet
                 self.planner.updateBikes(network: self.bikeNetwork, availability: packet)
+                self.considerJourneyAlternative(force: self.planner.bikeAlert != nil)
             }
             if self.bikeGeneration == token { self.bikeTask = nil }
         }
@@ -609,6 +703,7 @@ final class TransitAppModel: ObservableObject {
         if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
         if !active {
+            clearJourneySuggestion(); alternativeCheckedAt = .distantPast
             updateLiveSurfaces()
             settingsTask?.cancel(); settingsTask = nil
             // A trip in progress keeps its refresh loop; it stops itself when the trip ends.
@@ -738,6 +833,7 @@ final class TransitAppModel: ObservableObject {
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
         anchorBoardedVehicle(publish: false)
         planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        considerJourneyAlternative()
 #if DEBUG
         markLiveSettingsPreview()
 #endif
@@ -1058,6 +1154,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     func boardCurrentRide() {
+        clearJourneySuggestion()
         guard let ride = planner.activeRide else { return }
         clearWalkingMap()
 #if DEBUG
@@ -1134,6 +1231,7 @@ final class TransitAppModel: ObservableObject {
         guard publish else { return }
         anchorRevision += 1
         planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        considerJourneyAlternative()
     }
 
     /// True while the boarded bus is drawn from the rider's own fix rather than the delayed feed.
@@ -1354,8 +1452,8 @@ final class TransitAppModel: ObservableObject {
         boardedVehicle = nil; planner.returnToWaiting()
         boardedAt = nil; anchorBoardedVehicle()
     }
-    func alight() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
+    func alight() { clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
+    func finishJourney() { clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {
@@ -1667,6 +1765,7 @@ final class TransitAppModel: ObservableObject {
         metroRealtime = packet; metroRevision += 1
         snapshot.estimates = packet.applying(to: snapshot.estimates, network: metadata.metro, at: now)
         planner.updateSnapshot(snapshot, forecast: arrivalForecast)
+        considerJourneyAlternative()
         planner.prepareBoardingPreview(trip, started: !ProcessInfo.processInfo.arguments.contains("--preview-route-only"))
         selectedTrainID = "QA-TRAIN-01"
         previewNotice = "介面驗證用資料 · 非即時列車"

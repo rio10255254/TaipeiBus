@@ -105,7 +105,7 @@ public struct JourneySearchBudget: Sendable {
     public init(distance: Double, cycling: Bool) {
         candidates = distance > 10_000 ? 72 : distance > 3_000 || cycling ? 54 : 36
         verification = distance > 10_000 ? 30 : distance > 3_000 || cycling ? 24 : 18
-        labels = cycling ? 8 : 6
+        labels = cycling ? 6 : 4
     }
 }
 

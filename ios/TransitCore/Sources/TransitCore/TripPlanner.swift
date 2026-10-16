@@ -107,6 +107,8 @@ public struct TripPlanner: Sendable {
         let transfer: Double
         let score: Double
         let identity: String
+        var bikes: [Int: BikeConnection] = [:]
+        var supplyRisk: Double = 0
     }
     private struct Cell: Hashable {
         let x: Int; let y: Int
@@ -176,18 +178,34 @@ public struct TripPlanner: Sendable {
     public func plan(from origin: Coordinate, to destination: Coordinate,
                      maximumWalk: Double = 1_000, limit: Int = 6,
                      preferences: LiveSettings.Planning = LiveSettings.Planning(),
-                     estimates: EstimateFeed? = nil, at date: Date = Date(), preservePlatforms: Bool = false) -> [TransitTrip] {
+                     estimates: EstimateFeed? = nil, at date: Date = Date(), preservePlatforms: Bool = false,
+                     accessConnections: [String: BikeConnection] = [:], egressConnections: [String: BikeConnection] = [:],
+                     bikeAvailability: BikeAvailability? = nil) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
-        func nearby(_ point: Coordinate) -> [(id: String, distance: Double)] {
+        func nearby(_ point: Coordinate, connections: [String: BikeConnection]) -> [(id: String, distance: Double)] {
             var matches: [(id: String, distance: Double)] = []
+            var cycling: [(id: String, distance: Double)] = []
             for station in stations.values {
                 let distance = station.coordinate.distance(to: point)
                 if distance <= maximumWalk { matches.append((station.id, distance)) }
+                else if connections[station.id] != nil { cycling.append((station.id, distance)) }
+            }
+            cycling.sort {
+                let a = connections[$0.id]!.totalSeconds, b = connections[$1.id]!.totalSeconds
+                return a == b ? $0.id < $1.id : a < b
+            }
+            var corridors = Set<String>()
+            for candidate in cycling {
+                let routes = (occurrences[candidate.id] ?? []).map { patterns[$0.pattern].route.parentID + ":" + patterns[$0.pattern].direction }
+                if routes.contains(where: { !corridors.contains($0) }) {
+                    matches.append(candidate); corridors.formUnion(routes)
+                }
+                if corridors.count >= 40 { break }
             }
             matches.sort { a, b in a.distance == b.distance ? a.id < b.id : a.distance < b.distance }
             return matches
         }
-        let origins = nearby(origin), destinations = nearby(destination)
+        let origins = nearby(origin, connections: accessConnections), destinations = nearby(destination, connections: egressConnections)
         guard !origins.isEmpty, !destinations.isEmpty else { return [] }
         var exits: [Int: [Exit]] = [:]
         for station in destinations {
@@ -217,7 +235,14 @@ public struct TripPlanner: Sendable {
         let bestExits: [[[Exit]]] = patterns.enumerated().map { patternIndex, pattern in
             let byIndex = Dictionary(grouping: exits[patternIndex] ?? [], by: \.index)
             func exitCost(_ exit: Exit) -> Double {
-                routeTimes[patternIndex][exit.index] + exit.walk * 1.25 / 1.2 * preferences.walkingWeight
+                let walk = exit.walk <= maximumWalk ? exit.walk * 1.25 / 1.2 * (preferences.walkingWeight + 0.35) : .infinity
+                let id = pattern.stops[exit.index].stationID
+                let bike = egressConnections[id].map {
+                    JourneyPreferenceCost.score(elapsed: $0.totalSeconds, walking: $0.accessSeconds + $0.egressSeconds,
+                        waiting: 0, transfers: 0, rentals: 1, unknownWaits: 0,
+                        supplyRisk: BikeRouting.supplyPenalty($0, availability: bikeAvailability, at: date), preferences: preferences)
+                } ?? .infinity
+                return routeTimes[patternIndex][exit.index] + min(walk, bike)
             }
             var best: [Exit] = []
             var result = Array(repeating: [Exit](), count: pattern.stops.count)
@@ -251,7 +276,7 @@ public struct TripPlanner: Sendable {
                 fullRouteSeconds: routeTimes[index].last ?? 0)
         }
         var candidates: [String: [Candidate]] = [:]
-        func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
+        func addVariant(_ segments: [Segment], access: Double, egress: Double, transfer: Double, connections: [Int: BikeConnection]) {
             // Apply availability before ranking and limiting candidates: many cheap closed
             // routes must not crowd all usable alternatives out of the result window.
             for segment in segments {
@@ -259,28 +284,39 @@ public struct TripPlanner: Sendable {
             }
             // Bound each family's work without collapsing different boarding/alighting
             // platforms before pedestrian routing can reveal barriers and detours.
-            let key = segments.map { families[$0.pattern] }.joined(separator: "|")
+            let bikeKey = connections.keys.sorted().map { "\($0):\(BikeRouting.pairID(connections[$0]!))" }.joined(separator: "|")
+            let key = segments.map { families[$0.pattern] }.joined(separator: "|") + "|bikes:" + connections.keys.sorted().map(String.init).joined(separator: "-")
             let riding = segments.map { segment in
                 return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
             }
-            let walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
+            var walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
+            for (index, bike) in connections { walking[index] = bike.totalSeconds }
+            let cycling = connections.values.reduce(0) { $0 + $1.rideSeconds + $1.handlingSeconds }
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
-            let score = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
+            let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
                 minimumServiceWaits: segments.map { serviceWaits[$0.pattern] },
                 services: segments.map { services[$0.pattern] },
                 boardingOffsets: segments.map { routeTimes[$0.pattern][$0.board] }, at: date,
-                serviceTimeOfDay: timeOfDay).score
+                serviceTimeOfDay: timeOfDay, cyclingSeconds: cycling, rentalCount: connections.count)
+            var cursor = 0.0, risk = 0.0
+            for index in walking.indices {
+                if let bike = connections[index] { risk += BikeRouting.supplyPenalty(bike, availability: bikeAvailability, pickupAfter: cursor, at: date) }
+                cursor += walking[index]
+                if riding.indices.contains(index) { cursor += assessment.waits[index].seconds + riding[index] }
+            }
+            let score = assessment.score + risk
+            guard score.isFinite else { return }
             if !preservePlatforms {
                 if let best = candidates[key]?.first, best.score <= score { return }
                 candidates[key] = [Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score,
-                    identity: segments.map { "\($0.pattern):\($0.board):\($0.alight)" }.joined(separator: "|"))]
+                    identity: segments.map { "\($0.pattern):\($0.board):\($0.alight)" }.joined(separator: "|") + bikeKey, bikes: connections, supplyRisk: risk)]
                 return
             }
             let fingerprint = segments.map { segment in
                     let p = patterns[segment.pattern]
                     return "\(p.stops[segment.board].stationID)>\(p.stops[segment.alight].stationID):\(p.fingerprint)"
-                }.joined(separator: "|")
-            let value = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score, identity: fingerprint)
+                }.joined(separator: "|") + bikeKey
+            let value = Candidate(segments: segments, access: access, egress: egress, transfer: transfer, score: score, identity: fingerprint, bikes: connections, supplyRisk: risk)
             var pool = candidates[key] ?? []
             if let index = pool.firstIndex(where: { $0.identity == fingerprint }) {
                 if pool[index].score <= score { return }; pool.remove(at: index)
@@ -302,6 +338,21 @@ public struct TripPlanner: Sendable {
                 pool = retained
             }
             candidates[key] = pool
+        }
+        func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
+            guard let first = segments.first, let last = segments.last else { return }
+            let startID = patterns[first.pattern].stops[first.board].stationID
+            let endID = patterns[last.pattern].stops[last.alight].stationID
+            var starts: [BikeConnection?] = access <= maximumWalk ? [nil] : []
+            var ends: [BikeConnection?] = egress <= maximumWalk ? [nil] : []
+            if let bike = accessConnections[startID] { starts.append(bike) }
+            if let bike = egressConnections[endID] { ends.append(bike) }
+            for start in starts { for end in ends {
+                var connections: [Int: BikeConnection] = [:]
+                if let start { connections[0] = start }
+                if let end { connections[segments.count] = end }
+                addVariant(segments, access: access, egress: egress, transfer: transfer, connections: connections)
+            } }
         }
         for start in origins {
             if Task.isCancelled { return [] }
@@ -362,7 +413,7 @@ public struct TripPlanner: Sendable {
                 transferDistance: candidate.transfer, score: candidate.score,
                 rideSeconds: candidate.segments.map { segment in
                     return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
-                })
+                }).withBikeConnections(candidate.bikes, supplyRisk: candidate.supplyRisk)
         }
     }
 }

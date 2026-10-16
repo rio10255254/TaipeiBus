@@ -139,10 +139,13 @@ public struct MultimodalPlanner: Sendable {
                      preferences: LiveSettings.Planning = .init(), estimates: EstimateFeed = .init(), at date: Date = Date(),
                      bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
-        let bus = busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
-            preferences: preferences, estimates: estimates, at: date, preservePlatforms: true)
+        let profile = ProcessInfo.processInfo.environment["BUS_PLANNING_PROFILE"] == "1"
+        let began = ProcessInfo.processInfo.systemUptime
         let cycling = preferences.bikeRouting && !bikeNetwork.stations.isEmpty && bikeAvailability != nil
-        guard !metadata.metro.patterns.isEmpty || cycling else { return bus }
+        guard !metadata.metro.patterns.isEmpty || cycling else {
+            return busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
+                preferences: preferences, estimates: estimates, at: date, preservePlatforms: true)
+        }
         let patterns = timedPatterns(at: date)
         let budget = JourneySearchBudget(distance: origin.distance(to: destination), cycling: cycling)
         let bikeRadius = min(preferences.bikeMaximumRideMeters, max(1_500, origin.distance(to: destination) * 0.5))
@@ -157,15 +160,20 @@ public struct MultimodalPlanner: Sendable {
                 if access >= preferences.bikeMinimumRideMeters, access <= bikeRadius {
                     let entry = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: origin)?.coordinate ?? stop.coordinate
                     accessBikes[id] = BikeRouting.connections(from: origin, to: entry, network: bikeNetwork,
-                        availability: bikeAvailability, preferences: preferences, at: date, limit: 2)
+                        availability: bikeAvailability, preferences: preferences, at: date, limit: 1)
                 }
                 if egress >= preferences.bikeMinimumRideMeters, egress <= bikeRadius {
                     let exit = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
                     egressBikes[id] = BikeRouting.connections(from: exit, to: destination, network: bikeNetwork,
-                        availability: bikeAvailability, preferences: preferences, at: date, limit: 2)
+                        availability: bikeAvailability, preferences: preferences, at: date, limit: 1)
                 }
             }
         }
+        let bus = busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
+            preferences: preferences, estimates: estimates, at: date, preservePlatforms: true,
+            accessConnections: accessBikes.compactMapValues(\.first), egressConnections: egressBikes.compactMapValues(\.first),
+            bikeAvailability: bikeAvailability)
+        if profile { print("PLANNING_PHASE endpoints_bus seconds=\(ProcessInfo.processInfo.systemUptime - began) access=\(accessBikes.count) egress=\(egressBikes.count) bus=\(bus.count)") }
         var previous: [String: [Label]] = [:]
         for (id, stop) in stationStops {
             let distance = streetDistance(stop, to: origin)
@@ -267,6 +275,14 @@ public struct MultimodalPlanner: Sendable {
             var arrived: [String: [Label]] = [:]
             func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
                 var pool = values[id] ?? []
+                let bikeMask = label.bikes.keys.sorted()
+                let family = pool.filter { $0.family == label.family && $0.bikes.keys.sorted() == bikeMask }
+                // Keep time and convenience representatives of a service chain, rather
+                // than every boarding platform which produces almost the same journey.
+                if family.contains(where: { abs($0.elapsed - label.elapsed) < 30 && abs($0.walking - label.walking) < 30 && $0.cost <= label.cost }) { return }
+                if family.count >= 2, let fastest = family.map(\.elapsed).min(), let cheapest = family.map(\.cost).min(),
+                   let leastWalking = family.map(\.walking).min(), label.elapsed >= fastest,
+                   label.cost >= cheapest, label.walking >= leastWalking { return }
                 // A cheaper but later label must not erase a path which can catch an
                 // earlier connection. Rental count and remaining boarding time both matter.
                 if pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
@@ -320,8 +336,11 @@ public struct MultimodalPlanner: Sendable {
                             // Bus-only chains are already handled by the indexed bus planner.
                             // A mixed search must not expand the entire city's bus–bus graph
                             // before it has entered rail; one feeder on each side is retained.
-                            if previousRoute.mode == .bus && pattern.route.mode == .bus && source.segments.count >= 2 &&
-                                !source.hasRail && source.bikes.isEmpty { continue }
+                            // The indexed bus planner covers ordinary bus-bus changes.
+                            // The round search adds bus-bus links when a real bicycle
+                            // connection between them makes a new boarding point reachable.
+                            if previousRoute.mode == .bus && pattern.route.mode == .bus &&
+                                source.bikes[source.segments.count] == nil { continue }
                             if previousRoute.mode == .bus && pattern.route.mode == .bus && previousRoute.parentID == pattern.route.parentID { continue }
                             if patterns[last.pattern].stops[last.first].stationID == stop.stationID { continue }
                         }
@@ -350,9 +369,9 @@ public struct MultimodalPlanner: Sendable {
                                          wait.evidence == .unknown))
                     }
                     // Keep independent arrival/walking tradeoffs without a combinatorial explosion.
-                    if boarding.count > budget.labels * 2 {
+                    if boarding.count > 8 {
                         boarding.sort { ($0.label.cost + $0.wait - pattern.cumulative[$0.index]) < ($1.label.cost + $1.wait - pattern.cumulative[$1.index]) }
-                        boarding = Array(boarding.prefix(budget.labels * 2))
+                        boarding = Array(boarding.prefix(8))
                     }
                 }
             }
@@ -380,13 +399,15 @@ public struct MultimodalPlanner: Sendable {
                 }
             }
             if round == 3 { break }
+            let bestCost = candidates.map(\.score).min() ?? .infinity
             var next: [String: [Label]] = [:]
             for (id, labels) in arrived {
+                guard labels.contains(where: { $0.cost <= bestCost + 900 }) else { continue }
                 for (link, bike) in connections(from: id) {
                     for label in labels {
+                        if label.cost > bestCost + 900 { continue }
                         if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
-                           stationStops[link.id]?.mode == .bus, label.segments.count >= 2,
-                           !label.hasRail, label.bikes.isEmpty, bike == nil { continue }
+                           stationStops[link.id]?.mode == .bus, bike == nil { continue }
                         // Same platform changing trains still includes a short platform allowance.
                         let duration = link.seconds
                         let foot = bike.map { max(0, duration - $0.rideSeconds - $0.handlingSeconds) } ?? duration
@@ -407,6 +428,7 @@ public struct MultimodalPlanner: Sendable {
                 }
             }
             previous = next
+            if profile { print("PLANNING_PHASE round=\(round) seconds=\(ProcessInfo.processInfo.systemUptime - began) nodes=\(previous.count) candidates=\(candidates.count) transfer_nodes=\(streetLinks.count)") }
         }
         // Construct road slices only for useful candidates, after the complete graph
         // search. Thousands of dominated trips do not need expensive map geometry.
@@ -447,6 +469,7 @@ public struct MultimodalPlanner: Sendable {
             return trip
         }
         let unique = Dictionary((bus + results).map { ($0.id, $0) }, uniquingKeysWith: { a, b in a.score < b.score ? a : b })
+        if profile { print("PLANNING_PHASE complete seconds=\(ProcessInfo.processInfo.systemUptime - began) materialized=\(unique.count)") }
         return TripRanking.recommended(Array(unique.values), estimates: estimates, at: date, preferences: preferences, limit: limit, diverse: false)
     }
 }

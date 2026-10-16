@@ -113,6 +113,7 @@ jobs:
         run: |
           set -euo pipefail
           export BUS_LIVE_FEEDS_DIRECTORY="$RUNNER_TEMP/bundled-official-catalog"
+          export BUS_PLANNING_PROFILE=1
           python3 - <<'PY'
           import gzip,json,os
           from pathlib import Path
