@@ -238,6 +238,7 @@ struct TransitHomeView: View {
         }
         .smoothChanges(planner.currentStep)
         .smoothChanges(planner.started)
+        .smoothChanges(model.journeySuggestion?.id)
         .smoothChanges(planner.selectedID)
         .smoothChanges(model.language)
         if let bike = model.selectedBikeStation, !hasSelection {

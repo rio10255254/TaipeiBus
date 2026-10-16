@@ -1363,6 +1363,7 @@ struct JourneyAlternativePrompt: View {
             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-alternative-accept")
             Button { model.dismissJourneySuggestion() } label: {
                 Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }.buttonStyle(.plain).foregroundStyle(.secondary)
                 .accessibilityLabel(AppText.text("保留目前路線"))
                 .accessibilityIdentifier("journey-alternative-dismiss")
