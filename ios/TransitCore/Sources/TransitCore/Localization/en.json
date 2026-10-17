@@ -1,4 +1,7 @@
 {
+  "前往 %@ 月台": "Go to the %@ platform",
+  "步行至 %@": "Walk to %@",
+  "接著搭 %@ · 往 %@": "Next: %@ toward %@",
   "選擇出發地，才能找附近可搭的站牌。": "Choose a start to find nearby bus stops.",
   "此地超出公車規劃範圍": "Outside the bus planning area",
   "路線資料載入後即可規劃。": "Routes will be available after loading.",

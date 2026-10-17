@@ -13,6 +13,8 @@ public struct JourneyDuration: Equatable, Sendable {
     /// Arrival bounds that also include ride-time variability; used only for arrival clocks.
     public let earliestTotalSeconds: Double
     public let latestTotalSeconds: Double
+    /// Position is estimated, but a known ride duration may still support an
+    /// approximate arrival clock. Unknown departures remain a separate guard.
     public var positionUncertain = false
     /// Part of `walkingSeconds` that is spent riding a YouBike, including unlocking and docking.
     public var cyclingSeconds: Double = 0
@@ -33,7 +35,7 @@ public struct JourneyDuration: Equatable, Sendable {
         unknownWaits > 0 ? AppText.text("時間待確認") : AppText.text("約 %@ 分鐘", minutes(totalSeconds))
     }
     public var arrivalClockLabel: String {
-        if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
+        if unknownWaits > 0 { return AppText.text("抵達待確認") }
         if latestTotalSeconds - earliestTotalSeconds >= 120 {
             return clock(referenceDate.addingTimeInterval(earliestTotalSeconds)) + "–" + clock(referenceDate.addingTimeInterval(latestTotalSeconds))
         }
@@ -73,7 +75,7 @@ public struct JourneyDuration: Equatable, Sendable {
     }
     public var missedNext: Bool { waits.first?.missedNext == true }
     public var arrivalLabel: String {
-        if unknownWaits > 0 || positionUncertain { return AppText.text("抵達待確認") }
+        if unknownWaits > 0 { return AppText.text("抵達待確認") }
         if latestTotalSeconds - earliestTotalSeconds >= 120 {
             return AppText.text("約 %@–%@ 抵達", clock(referenceDate.addingTimeInterval(earliestTotalSeconds)), clock(referenceDate.addingTimeInterval(latestTotalSeconds)))
         }
@@ -82,7 +84,7 @@ public struct JourneyDuration: Equatable, Sendable {
     /// The central estimate is the first thing to read; detailed bounds remain
     /// available in the journey's timing explanation.
     public var expectedArrivalLabel: String {
-        if unknownWaits > 0 || positionUncertain { return arrivalLabel }
+        if unknownWaits > 0 { return arrivalLabel }
         return AppText.text("約 %@ 抵達", clock(referenceDate.addingTimeInterval(totalSeconds)))
     }
     public var expectedWaitingLabel: String {

@@ -271,7 +271,7 @@ final class JourneyPlannerModel: ObservableObject {
     /// Which part of a cycling leg the rider is in now, from how far along the leg they are.
     func cyclingPhase(at index: Int) -> BikeLeg.Phase? {
         guard let option = selected, option.walks.indices.contains(index), let bike = option.walks[index].bike else { return nil }
-        guard walkingLegIndex == index, let progress = walkingProgress, progress.locationConfirmed else { return .toPickup }
+        guard walkingLegIndex == index, let progress = walkingProgress, progress.hasConfirmedProgress else { return .toPickup }
         return bike.phase(remainingMeters: progress.remainingDistance)
     }
     /// What to do right now on a cycling leg: fetch the bike, ride it, or walk on after docking.
@@ -296,8 +296,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard walkingLegIndex == index else { return nil }
         if walkingRecalculating { return AppText.text("重新規劃步行中") }
         if walkingRouteUnavailable { return AppText.text("步行路線暫時無法更新") }
-        guard let progress = walkingProgress, progress.locationConfirmed,
-              let date = progress.lastFix, Date().timeIntervalSince(date) <= 20 else { return AppText.text("正在確認步行位置") }
+        guard let progress = walkingProgress, progress.hasConfirmedProgress else { return AppText.text("正在確認步行位置") }
         if progress.remainingDistance < 12 { return AppText.text("就在附近") }
         if let option = selected, option.walks.indices.contains(index), let bike = option.walks[index].bike {
             if bike.phase(remainingMeters: progress.remainingDistance) == .riding {
@@ -313,6 +312,25 @@ final class JourneyPlannerModel: ObservableObject {
             return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(meters), max(1, Int(ceil(seconds / 60))))
         }
         return AppText.text("步行剩餘 %@ · %@ 分", distanceLabel(progress.remainingDistance), max(1, Int(ceil(progress.remainingSeconds / 60))))
+    }
+
+    /// The access walk and train-platform directions share the existing map;
+    /// boarding still happens only after the rider explicitly confirms it.
+    func accessInstruction(at index: Int, date: Date) -> String? {
+        guard started, currentStep == .walk(index), let option = selected,
+              option.walks.indices.contains(index), option.rides.indices.contains(index) else { return nil }
+        let leg = option.walks[index], ride = option.rides[index]
+        if leg.bike != nil { return cyclingInstruction(at: index) }
+        if leg.internalTransfer { return leg.stationInstruction ?? AppText.text("前往 %@ 月台", ride.route.localizedName) }
+        if (leg.distance ?? .infinity) <= 30, (leg.streetDuration ?? leg.duration ?? .infinity) <= 45 {
+            return ride.route.mode == .bus ? nil : leg.stationInstruction
+        }
+        if walkingLegIndex == index, let progress = walkingProgress, progress.hasConfirmedProgress,
+           progress.remainingDistance <= 30 {
+            if ride.route.mode != .bus { return leg.stationInstruction ?? AppText.text("前往 %@ 月台", ride.route.localizedName) }
+            return nil
+        }
+        return AppText.text("步行至 %@", ride.boarding.localizedName)
     }
 
 
@@ -1763,6 +1781,12 @@ final class JourneyPlannerModel: ObservableObject {
             walks.append(WalkingLeg(from: from, to: to, distance: distance, duration: distance / 1.2))
         }
         walks.append(WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0))
+        if ProcessInfo.processInfo.arguments.contains("--preview-access-walk") {
+            let board = first.boarding.coordinate
+            let start = Coordinate(latitude:board.latitude-0.003,longitude:board.longitude)
+            walks[0] = WalkingLeg(from:start,to:board,coordinates:[start,board],distance:start.distance(to:board),duration:300)
+            origin = TravelPlace(name:"目前位置",address:"",coordinate:start,englishName:"Current location")
+        }
         options = [JourneyOption(id: trip.id, trip: trip, walks: walks)]
         selectedID = trip.id; message = nil; mapRevision += 1
     }

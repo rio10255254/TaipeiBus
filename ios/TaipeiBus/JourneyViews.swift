@@ -557,10 +557,10 @@ private struct OnboardSummary: View {
         VStack(alignment: .leading, spacing: 6) {
             if ride.route.mode != .bus {
                 MetroOnboardSummary(model: model, ride: ride, date: date)
-            } else if let bus = model.onboardVehicle(for: ride) {
-                let journey = model.metadata.journey(routeID: bus.routeID, direction: bus.direction)
-                let next = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil
-                    ? model.onboardStops(for: ride, at: date).first : nil
+            } else {
+                let bus = model.onboardVehicle(for: ride)
+                let journey = bus.flatMap { model.metadata.journey(routeID:$0.routeID,direction:$0.direction) }
+                let next = model.onboardStops(for: ride, at: date).first
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(next.map { AppText.text("下一站 · ") + $0.localizedName } ?? AppText.text("位置更新中")).lineLimit(2)
@@ -569,12 +569,12 @@ private struct OnboardSummary: View {
                     Spacer()
                     if let next {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(model.onboardEstimateLabel(bus, stopID: next.id, at: date)).lineLimit(2).minimumScaleFactor(0.75)
+                            Text(model.onboardStopTimeLabel(ride, stopID: next.id, at: date)).lineLimit(2).minimumScaleFactor(0.75)
                             Text(AppText.remainingStops(1)).liveFont(.caption)
                         }.monospacedDigit().frame(width: live.language == .english ? 115 : 110, alignment: .trailing)
                     }
                 }.liveFont(.subheadline).foregroundStyle(.secondary).accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")
-                let progress = journey?.progress(stopID: ride.alighting.id, vehicle: bus, at: date)
+                let progress = bus.flatMap { journey?.progress(stopID:ride.alighting.id,vehicle:$0,at:date) }
                 HStack(alignment: .firstTextBaseline) {
                     VStack(alignment: .leading, spacing: 2) {
                         Text((progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : AppText.text("在「%@」下車", ride.alighting.localizedName))
@@ -583,7 +583,7 @@ private struct OnboardSummary: View {
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date))
+                        Text(model.onboardStopTimeLabel(ride, stopID: ride.alighting.id, at: date))
                             .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.75)
                             .frame(maxWidth: live.language == .english ? 115 : 110, alignment: .trailing)
                         if let count = model.onboardStops(for: ride, at: date).firstIndex(where: { $0.id == ride.alighting.id }) {
@@ -591,11 +591,6 @@ private struct OnboardSummary: View {
                         }
                     }
                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
-            } else {
-                Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).liveFont(.title3, weight: .bold).lineLimit(2)
-                if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(.secondary) }
-                Text(model.onboardPlate(for: ride) == nil ? AppText.text("選擇車牌即可看沿途時間") : AppText.text("車輛位置更新中"))
-                    .liveFont(.caption).foregroundStyle(.secondary)
             }
         }
     }
@@ -609,7 +604,6 @@ private struct OnboardStopsView: View {
     var body: some View {
         NavigationStack {
             TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                let bus = model.onboardVehicle(for: ride)
                 let stops = ride.route.mode == .bus ? model.onboardStops(for: ride, at: timeline.date) : model.metroRemaining(ride, at: timeline.date).stops
                 List {
                     Section {
@@ -617,8 +611,8 @@ private struct OnboardStopsView: View {
                             Text(AppText.text("依站間車程估計 · 到站請確認站名")).foregroundStyle(.secondary)
                         } else if let plate = model.onboardPlate(for: ride) {
                             Text(plate).monospaced().bold().accessibilityIdentifier("onboard-confirmed-plate")
-                            if bus?.hasReliablePosition(at: timeline.date) != true { Text(AppText.text("車輛位置更新中")).foregroundStyle(.secondary) }
-                        } else { Text(AppText.text("請先在搭車畫面選擇車牌")).foregroundStyle(.secondary) }
+                            Text(model.onboardPositionSource(ride,at:timeline.date)).foregroundStyle(.secondary)
+                        } else { Text(model.onboardPositionSource(ride,at:timeline.date)).foregroundStyle(.secondary) }
                     } header: { Text(ride.route.localizedName + AppText.text(" · 往 ") + ride.route.localizedDestination(direction: ride.direction)) }
                     Section {
                         ForEach(Array(stops.enumerated()), id: \.element.id) { index, stop in
@@ -632,15 +626,14 @@ private struct OnboardStopsView: View {
                                 }
                                 Spacer(minLength: 4)
                                 VStack(alignment: .trailing, spacing: 2) {
-                                    Text(ride.route.mode != .bus ? model.metroStopLabel(ride, stop: stop, at: timeline.date) : bus.map { model.onboardEstimateLabel($0, stopID: stop.id, at: timeline.date) } ?? live.text("時間待確認"))
+                                    Text(ride.route.mode != .bus ? model.metroStopLabel(ride, stop: stop, at: timeline.date) : model.onboardStopTimeLabel(ride, stopID:stop.id,at:timeline.date))
                                         .liveFont(.subheadline, weight: .semibold).monospacedDigit().lineLimit(2)
                                     Text(AppText.remainingStops(index + 1)).liveFont(.caption).foregroundStyle(.secondary)
                                 }.frame(maxWidth: live.language == .english ? 115 : 110, alignment: .trailing)
                             }.frame(minHeight: 40).accessibilityIdentifier("onboard-stop-" + stop.id)
                         }
                     } header: { Text(AppText.text("這輛車的沿途預估")) } footer: {
-                        Text(ride.route.mode != .bus ? AppText.text("依官方捷運站間車程") : bus.map { model.arrivalDisplay($0, stopID: ride.alighting.id, at: timeline.date, onboard: true).explanation }
-                             ?? AppText.text("時間依行駛情況更新，塞車與停靠可能影響預估。"))
+                        Text(ride.route.mode != .bus ? AppText.text("依官方捷運站間車程") : AppText.text("時間依行駛情況更新，塞車與停靠可能影響預估。"))
                     }
                 }.listStyle(.insetGrouped)
             }
@@ -1547,6 +1540,7 @@ private struct WaitingBannerContent: View {
     var body: some View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
         let boarding = model.boardingInformation(ride, at: date)
+        let access = model.planner.accessInstruction(at: model.planner.boardingRideIndex ?? 0, date: date)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
@@ -1554,7 +1548,8 @@ private struct WaitingBannerContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
-                    BannerTitle(text: live.text("上車 · ") + ride.boarding.localizedName)
+                    BannerTitle(text: access ?? (live.text("上車 · ") + ride.boarding.localizedName))
+                        .accessibilityIdentifier("journey-current-instruction")
                     if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                     if ride.route.displayName != ride.route.name,
                        model.metadata.routeIDs(serving: ride).filter({ model.metadata.routes[$0] != nil }).count <= 1 {
@@ -1568,14 +1563,15 @@ private struct WaitingBannerContent: View {
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("boarding-official-arrival")
                     Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : boarding.source)
-                        .liveFont(.caption, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
+                        .liveFont(.caption, weight: .semibold).lineLimit(2).minimumScaleFactor(0.9)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
-                }.layoutPriority(1)
+                }.frame(width: live.language == .english ? 112 : 98, alignment: .trailing)
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             BannerStrip {
                 Image(systemName: "arrow.down").font(.caption.weight(.bold))
-                Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).lineLimit(1)
+                Text(access == nil ? AppText.text("在「%@」下車", ride.alighting.localizedName)
+                    : AppText.text("接著搭 %@ · 往 %@", ride.route.localizedName, ride.route.localizedDestination(direction:ride.direction))).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(model.plannedRideTime(ride, at: date).seconds / 60)))))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
@@ -1589,13 +1585,8 @@ private struct WaitingBannerContent: View {
 private struct BannerTitle: View {
     let text: String
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            Text(text).liveFont(.title3, weight: .bold).lineLimit(1)
-            Text(text).liveFont(.headline, weight: .bold).lineLimit(1)
-            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1)
-            // Beside the badge and the stop count there is only ~155 pt; shrink rather than wrap.
-            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1).minimumScaleFactor(0.7)
-        }
+        Text(text).liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.9)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
@@ -1632,8 +1623,8 @@ private struct RidingBannerContent: View {
         let bus = model.onboardVehicle(for: ride)
         let journey = bus.flatMap { model.metadata.journey(routeID: $0.routeID, direction: $0.direction) }
         let progress = bus.flatMap { vehicle in journey?.progress(stopID: ride.alighting.id, vehicle: vehicle, at: date) }
-        let stops = bus == nil ? [] : model.onboardStops(for: ride, at: date)
-        let next = progress != nil ? stops.first : nil
+        let stops = model.onboardStops(for: ride, at: date)
+        let next = stops.first
         let alightNext = next?.id == ride.alighting.id
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
@@ -1646,27 +1637,21 @@ private struct RidingBannerContent: View {
                     if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                 }
                 Spacer(minLength: 4)
-                if let bus {
-                    let timed = model.arrivalDisplay(bus, stopID: ride.alighting.id, at: date, onboard: true).prediction?.hasUsableTime == true
-                    let remaining = stops.firstIndex(where: { $0.id == ride.alighting.id }).map { AppText.remainingStops($0 + 1) }
-                    VStack(alignment: .trailing, spacing: 2) {
-                        // A far stop has no dependable time yet; lead with the stop count rather than a large "pending".
-                        Text(timed ? model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date) : remaining ?? model.onboardEstimateLabel(bus, stopID: ride.alighting.id, at: date))
-                            .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.7)
-                            .multilineTextAlignment(.trailing)
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(model.onboardStopTimeLabel(ride, stopID:ride.alighting.id,at:date))
+                        .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.7)
+                        .multilineTextAlignment(.trailing).contentTransition(.numericText())
+                    if let count = stops.firstIndex(where: { $0.id == ride.alighting.id }) {
+                        Text(AppText.remainingStops(count+1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                             .contentTransition(.numericText())
-                        if let remaining {
-                            Text(timed ? remaining : AppText.text("時間待確認")).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
-                                .contentTransition(.numericText())
-                        }
-                    }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)
-                }
+                    }
+                }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             BannerStrip {
-                if let bus {
-                    if model.isRiderAnchored(bus) {
+                if let next {
+                    if (model.onboardProgress?.isFresh(at:date) == true && model.onboardProgress?.source == .phone) || bus.map({ model.isRiderAnchored($0) }) == true {
                         // The bus follows the rider's own fix, so its position is live rather than delayed.
                         Image(systemName: "location.fill").font(.caption2.weight(.bold)).foregroundStyle(Color(liveHex: "#6EA8FF"))
                             .frame(width: 12).accessibilityLabel(AppText.text("依你的定位即時更新"))
@@ -1674,19 +1659,17 @@ private struct RidingBannerContent: View {
                         Circle().fill(Color(liveHex: "#6EA8FF")).frame(width: 8, height: 8).frame(width: 12)
                     }
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(next.map { ($0.id == ride.alighting.id ? AppText.text("下一站下車 · ") : AppText.text("下一站 · ")) + $0.localizedName } ?? AppText.text("位置更新中")).lineLimit(1)
+                        Text((next.id == ride.alighting.id ? AppText.text("下一站下車 · ") : AppText.text("下一站 · ")) + next.localizedName).lineLimit(1)
                             .fontWeight(alightNext ? .semibold : nil)
                             .foregroundStyle(alightNext ? Color(liveHex: "#FFD60A") : Color.white.opacity(0.8))
-                        if live.language == .english, let next { Text(next.name).liveFont(.caption) }
+                        if live.language == .english { Text(next.name).liveFont(.caption) }
                     }
                     Spacer(minLength: 4)
-                    if let next {
-                        Text(model.onboardEstimateLabel(bus, stopID: next.id, at: date) + " · " + AppText.remainingStops(1))
-                            .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
-                    }
+                    Text(model.onboardStopTimeLabel(ride, stopID:next.id,at:date) + " · " + AppText.remainingStops(1))
+                        .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
                 } else {
                     Image(systemName: "bus").font(.caption.weight(.semibold))
-                    Text(model.onboardPlate(for: ride) == nil ? AppText.text("選擇車牌即可看沿途時間") : AppText.text("車輛位置更新中")).lineLimit(2)
+                    Text(AppText.text("準備下車")).lineLimit(2)
                 }
             }
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-next-stop")

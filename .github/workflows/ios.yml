@@ -704,6 +704,8 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'navigation-onboard' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
+              '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testChineseAccessAndBackgroundResumeKeepTheConfirmedStep'
+              '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testEnglishAccessAndBackgroundResumeKeepTheConfirmedStep'
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance light
           fi
@@ -858,6 +860,8 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'navigation-onboard' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testBoardingUsesRemainingTravelAndPreservesTheConfirmedPlate'
+              '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testChineseAccessAndBackgroundResumeKeepTheConfirmedStep'
+              '-only-testing:TaipeiBusUsabilityTests/NavigationOptimizationUsabilityTests/testEnglishAccessAndBackgroundResumeKeepTheConfirmedStep'
               '-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests/testInterchangeableVehicleTrackingAndOnboardFlow')
           fi
           if [ '${{ inputs.usability_scope }}' = 'english-mode' ] || [ '${{ inputs.usability_scope }}' = 'english-final' ] || [ '${{ inputs.usability_scope }}' = 'english-motion' ]; then

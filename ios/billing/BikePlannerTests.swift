@@ -77,6 +77,16 @@ final class BikePlannerTests: XCTestCase {
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts(dropoff:0))
         guard case .noDocks? = p.bikeAlert else { return XCTFail("A full upcoming return station must still warn") }
     }
+    func testPoorPhoneFixDoesNotAskAnExistingRiderToBorrowAgain() {
+        let p=planner([cycling()]);p.begin()
+        let now=Date();p.updateWalking(index:0,coordinate:Coordinate(latitude:25.04,longitude:121.548),accuracy:4,timestamp:now,now:now)
+        p.updateWalking(index:0,coordinate:start,accuracy:180,timestamp:now.addingTimeInterval(5),now:now.addingTimeInterval(5))
+        guard case .riding? = p.cyclingPhase(at:0) else { return XCTFail("Keep the confirmed riding phase during a weak fix") }
+        p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts(pickup:0))
+        XCTAssertNil(p.bikeAlert)
+        XCTAssertEqual(p.cyclingInstruction(at:0),AppText.text("騎到 %@ 還車",dropoff.localizedName))
+        p.finish()
+    }
     func testCompletedDockingDoesNotWarnAboutOldBikeStations() throws {
         let p=planner([cycling()]);p.begin()
         let now=Date();p.updateWalking(index:0,coordinate:Coordinate(latitude:25.04,longitude:121.5547),accuracy:4,timestamp:now,now:now)

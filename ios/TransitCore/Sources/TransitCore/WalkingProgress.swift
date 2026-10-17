@@ -8,6 +8,9 @@ public struct WalkingProgress: Sendable {
     public let routeSeconds: Double
     public private(set) var match: LineMatch?
     public private(set) var lastFix: Date?
+    /// The last fix actually matched to this route. A rejected fix must not erase
+    /// distance already covered, or prevent reacquisition after a long gap.
+    public private(set) var confirmedAt: Date?
     public private(set) var locationConfirmed = false
     private var lastAccuracy = 0.0
     private var outsideSince: Date?
@@ -21,6 +24,10 @@ public struct WalkingProgress: Sendable {
         self.learnsWalkingPace = learnsWalkingPace
     }
     public var needsReroute: Bool { outsideCount >= 3 }
+    public var hasConfirmedProgress: Bool { match != nil && confirmedAt != nil }
+    public func isFresh(at date: Date) -> Bool {
+        locationConfirmed && confirmedAt.map { (-2...20).contains(date.timeIntervalSince($0)) } == true
+    }
     public var remainingDistance: Double {
         guard let match, line.length > 0 else { return routeDistance }
         return max(0, routeDistance * (1 - match.along / line.length))
@@ -44,13 +51,15 @@ public struct WalkingProgress: Sendable {
         }
         guard lastFix.map({ timestamp > $0 }) ?? true else { return false }
         if line.length < 1, let end = line.coordinates.last, coordinate.distance(to: end) <= max(10, accuracy) {
-            lastFix = timestamp; lastAccuracy = accuracy; locationConfirmed = true; outsideSince = nil; outsideCount = 0
+            lastFix = timestamp; confirmedAt = timestamp; lastAccuracy = accuracy; locationConfirmed = true; outsideSince = nil; outsideCount = 0
             match = LineMatch(coordinate: end, segment: 0, along: 0, distance: coordinate.distance(to: end))
             return true
         }
-        let elapsed = lastFix.map { timestamp.timeIntervalSince($0) } ?? 0
+        let elapsed = confirmedAt.map { max(0,timestamp.timeIntervalSince($0)) } ?? 0
         let candidates = line.candidates(coordinate, maximumDistance: max(20, accuracy * 1.5))
-        let limit = max(45, min(180, elapsed * 3 + accuracy + lastAccuracy))
+        // Cycling can advance hundreds of metres between fixes. Bound a return
+        // by elapsed time and plausible speed, rather than a permanent 180 m cap.
+        let limit = max(45, elapsed * (learnsWalkingPace ? 3 : 12) + accuracy + lastAccuracy)
         let nearby = candidates.filter { candidate in
             match.map { abs(candidate.along - $0.along) <= limit } ?? true
         }
@@ -80,7 +89,7 @@ public struct WalkingProgress: Sendable {
                     }
                 }
             }
-            match = best; locationConfirmed = true; outsideSince = nil; outsideCount = 0
+            match = best; confirmedAt = timestamp; locationConfirmed = true; outsideSince = nil; outsideCount = 0
             return true
         }
         locationConfirmed = false
