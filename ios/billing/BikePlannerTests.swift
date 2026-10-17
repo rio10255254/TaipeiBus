@@ -84,7 +84,7 @@ final class BikePlannerTests: XCTestCase {
         guard case .riding? = p.cyclingPhase(at:0) else { return XCTFail("Keep the confirmed riding phase during a weak fix") }
         p.updateBikes(network:BikeNetwork(stations:[pickup,dropoff]),availability:counts(pickup:0))
         XCTAssertNil(p.bikeAlert)
-        XCTAssertTrue(p.cyclingInstruction(at:0)?.contains("還車") == true)
+        XCTAssertEqual(p.cyclingInstruction(at:0),AppText.text("騎到 %@ 還車",dropoff.localizedName))
         p.finish()
     }
     func testCompletedDockingDoesNotWarnAboutOldBikeStations() throws {

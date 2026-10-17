@@ -1165,7 +1165,7 @@ final class TransitAppModel: ObservableObject {
         if let progress = onboardProgress, progress.rideID == ride.id,
            progress.hasConfirmedProgress, progress.isFresh(at: date), progress.source == .phone {
             let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds
-            onboardArrival = (ride.id,progress.confirmedAt!.addingTimeInterval(seconds),progress.confirmedAt!)
+            onboardArrival = (ride.id,date.addingTimeInterval(seconds),date)
             return (seconds,false)
         }
         if let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
@@ -1174,7 +1174,7 @@ final class TransitAppModel: ObservableObject {
             if progress.distance < -20 { return (0,false) }
             if let prediction = arrivalForecast.prediction(bus, stopID: ride.alighting.id, metadata: metadata,
                     at: date, allowTypicalWhenStopped: true) {
-                onboardArrival = (ride.id,date.addingTimeInterval(prediction.seconds),bus.observedAt)
+                onboardArrival = (ride.id,date.addingTimeInterval(prediction.seconds),date)
                 return (prediction.seconds,false)
             }
         }

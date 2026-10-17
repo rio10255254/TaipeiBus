@@ -56,8 +56,8 @@ import XCTest
         let duration = try XCTUnwrap(model.journeyDuration(option,at:moved))
         XCTAssertEqual(try XCTUnwrap(model.onboardSecondsToAlight(ride,at:moved)),duration.ridingSeconds,accuracy:0.01)
         XCTAssertTrue(duration.expectedArrivalLabel.contains(":"))
-        XCTAssertTrue(model.onboardStopTimeLabel(ride,stopID:"s3",at:moved).contains("分"))
-        XCTAssertTrue(model.onboardPositionSource(ride,at:moved).contains("你的定位"))
+        XCTAssertNotNil(model.onboardStopTimeLabel(ride,stopID:"s3",at:moved).first(where:{ $0.isNumber }))
+        XCTAssertEqual(model.onboardPositionSource(ride,at:moved),AppText.text("依你的定位即時更新"))
         let shortGap = try XCTUnwrap(model.onboardSecondsToAlight(ride,at:moved.addingTimeInterval(120)))
         let outage = moved.addingTimeInterval(400)
         XCTAssertEqual(try XCTUnwrap(model.onboardSecondsToAlight(ride,at:outage)),shortGap,accuracy:0.01,
@@ -92,7 +92,7 @@ import XCTest
     }
     func testAccessPromptChangesNearThePlatformAndNeverBoardsByItself() {
         let date = Date(), (model,_,option) = makeModel(at:date)
-        XCTAssertEqual(model.planner.accessInstruction(at:0,date:date),"步行至 站0")
+        XCTAssertEqual(model.planner.accessInstruction(at:0,date:date),AppText.text("步行至 %@","站0"))
         model.planner.updateWalking(index:0,coordinate:point(-10),accuracy:5,timestamp:date,now:date)
         XCTAssertNil(model.planner.accessInstruction(at:0,date:date))
         XCTAssertEqual(model.planner.currentStep,.walk(0))
@@ -107,5 +107,21 @@ import XCTest
         XCTAssertNotNil(model.onboardProgress?.confirmedAt)
         XCTAssertEqual(model.onboardStops(for:option.rides[0],at:Date()).map(\.id),["s3","s4","s5"])
         model.finishJourney()
+    }
+    func testProviderExpiryDoesNotJumpTheDisplayedRemainingTime() throws {
+        let date = Date(), boardedAt = date.addingTimeInterval(-120)
+        let (model,metadata,option) = makeModel(at:boardedAt), ride = option.rides[0]
+        model.boardCurrentRide(at:boardedAt)
+        let raw = BusVehicle(id:"physical",plate:"TEST-01",routeID:"route",parentRouteID:"family",routeName:"284",direction:"0",
+            destination:"終點",coordinate:point(900),rawCoordinate:point(900),heading:90,speed:20,observedAt:date,status:"0",lowFloor:true,provider:nil)
+        let bus = VehicleTracker.accept(raw,previous:nil,metadata:metadata,now:date)
+        model.auditNavigation(metadata:metadata,snapshot:TransitSnapshot(vehicles:[bus]),at:date)
+        model.confirmBoardedVehicle(bus,ride:ride); model.anchorBoardedVehicle(at:date)
+        let before = try XCTUnwrap(model.onboardSecondsToAlight(ride,at:date.addingTimeInterval(89)))
+        let after = try XCTUnwrap(model.onboardSecondsToAlight(ride,at:date.addingTimeInterval(91)))
+        XCTAssertLessThanOrEqual(abs(after-before),5)
+        XCTAssertEqual(try XCTUnwrap(model.onboardSecondsToAlight(ride,at:date.addingTimeInterval(400))),
+            max(60,before-30),accuracy:0.01)
+        XCTAssertEqual(model.planner.currentStep,.ride(0)); model.finishJourney()
     }
 }
