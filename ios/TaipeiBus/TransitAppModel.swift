@@ -1127,7 +1127,7 @@ final class TransitAppModel: ObservableObject {
             departures: arrivalForecast.departures(for: ride, metadata: metadata, snapshot: snapshot, at: date))
         guard wait.evidence != .unknown else { return (AppText.text("查看班次"), AppText.text("班次資訊"), nil) }
         let seconds = wait.departureSeconds ?? (ready + wait.seconds)
-        let label = seconds <= 30 ? AppText.text("即將到站") : (wait.evidence == .official ? AppText.minutes(max(1, Int(ceil(seconds / 60)))) : AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60)))))
+        let label = wait.arrivalLabel(readyAt:ready)
         let source: String
         switch wait.evidence {
         case .official: source = AppText.text("官方下一班")

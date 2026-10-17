@@ -75,6 +75,13 @@ public struct BoardingWait: Equatable, Sendable {
     public let missedNext: Bool
     public var departureSeconds: Double? = nil
     public var isEstimated: Bool { evidence == .headway || evidence == .unknown }
+    public func arrivalLabel(readyAt: Double) -> String {
+        let remaining = departureSeconds ?? max(0,readyAt)+seconds
+        if evidence == .official {
+            return remaining <= 60 ? AppText.text("即將到站") : AppText.minutes(max(1,Int(remaining/60)))
+        }
+        return remaining <= 30 ? AppText.text("即將到站") : AppText.text("約 %@ 分",max(1,Int(ceil(remaining/60))))
+    }
     public var label: String {
         if evidence == .unknown { return AppText.text("候車待確認") }
         let lower = max(1, Int(ceil(lowerSeconds / 60))), upper = max(lower, Int(ceil(upperSeconds / 60)))

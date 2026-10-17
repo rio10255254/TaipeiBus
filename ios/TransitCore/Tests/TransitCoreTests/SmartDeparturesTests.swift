@@ -2,6 +2,15 @@ import XCTest
 @testable import TransitCore
 
 final class SmartDeparturesTests: XCTestCase {
+    func testOfficialMinuteDisplayStaysConsistentWithStopCountdowns() {
+        for seconds in [60,61,119,120,121,179,180,181] {
+            let wait = BoardingTime.wait(official:seconds,readyAt:0,buffer:0)
+            let expected = seconds <= 60 ? "即將到站" : AppText.minutes(seconds/60)
+            XCTAssertEqual(wait.arrivalLabel(readyAt:0),expected)
+        }
+        let gps = BoardingTime.wait(official:nil,readyAt:0,buffer:0,departures:[.init(seconds:121,spread:30)])
+        XCTAssertEqual(gps.arrivalLabel(readyAt:0),"約 3 分")
+    }
     func testOfficialFirstThenCatchablePhysicalBusBeforeHeadway() throws {
         let buses = [BoardingDeparture(seconds:120,spread:30),.init(seconds:480,spread:40),.init(seconds:900,spread:60)]
         let reachable = BoardingTime.wait(official:420,readyAt:300,buffer:60,departures:buses)
