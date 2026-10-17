@@ -723,5 +723,7 @@
   "快約 %@ 分": "About %@ min faster",
   "官方到站": "Official arrival",
   "依時刻表": "Scheduled service",
-  "班距估算": "Headway estimate"
+  "班距估算": "Headway estimate",
+  "多花 %@ 分，少一次轉乘": "%@ min longer · one fewer transfer",
+  "少一次轉乘": "One fewer transfer"
 }

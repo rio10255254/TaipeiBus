@@ -180,6 +180,8 @@ final class JourneyPlannerModel: ObservableObject {
         let walks: [Double?]
         let from: [Coordinate]
         let to: [Coordinate]
+        let riding: [Double]
+        let cycling: Double
         let value: JourneyDuration
     }
     private var durationCache: [String: CachedDuration] = [:]
@@ -227,7 +229,8 @@ final class JourneyPlannerModel: ObservableObject {
         let first = walkingLegIndex != index
         if first {
             endWalkingGuidance(); walkingLegIndex = index
-            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0, seconds: leg.streetDuration ?? leg.duration ?? 0)
+            walkingProgress = WalkingProgress(coordinates: leg.coordinates, distance: leg.distance ?? 0,
+                seconds: leg.streetDuration ?? leg.duration ?? 0, learnsWalkingPace: leg.bike == nil)
         }
         guard var progress = walkingProgress else { return }
         let firstReliable = progress.lastFix == nil
@@ -392,10 +395,12 @@ final class JourneyPlannerModel: ObservableObject {
         let bucket = Int(floor(date.timeIntervalSince1970 / 5))
         let walks = option.walks.map(\.duration), from = option.walks.map(\.from), to = option.walks.map(\.to)
         if let cached = durationCache[option.id], cached.bucket == bucket,
-           cached.walks == walks, cached.from == from, cached.to == to { return cached.value }
+           cached.walks == walks, cached.from == from, cached.to == to,
+           cached.riding == option.trip?.rideSeconds ?? [], cached.cycling == option.cyclingSeconds { return cached.value }
         guard let value = calculateDuration(option, at: date) else { return nil }
         if durationCache.count >= 100 { durationCache.removeAll(keepingCapacity: true) }
-        durationCache[option.id] = CachedDuration(bucket: bucket, walks: walks, from: from, to: to, value: value)
+        durationCache[option.id] = CachedDuration(bucket: bucket, walks: walks, from: from, to: to,
+            riding: option.trip?.rideSeconds ?? [], cycling: option.cyclingSeconds, value: value)
         return value
     }
     private func calculateDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
@@ -1139,7 +1144,7 @@ final class JourneyPlannerModel: ObservableObject {
                 selected.append(trip); if selected.count >= budget.verification { break }
             }
             if !complete { selected = Array(selected.filter { $0.bikeConnections.isEmpty }.prefix(1)) }
-            if selected.isEmpty, !complete { selected = Array(ordered.prefix(1)) }
+            if selected.isEmpty, !complete { selected = Array(ordered.filter { $0.bikeConnections.count <= 1 }.prefix(1)) }
             var pending = selected.filter { trip in !verifiedPool.contains { $0.id == trip.id } }
                 .map { option($0, metadata: metadata, origin: origin, destination: destination) }
             connectionBases.merge(Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })) { _, new in new }
@@ -1156,8 +1161,10 @@ final class JourneyPlannerModel: ObservableObject {
             await verifyConnections(pending.filter { !$0.cycles }, cycling: cycling, limit: budget.verification, discoverBikes: complete, token: token)
             guard token == generation, !Task.isCancelled else { return }
             }
+            guard token == generation, !Task.isCancelled else { return }
             planning = false
-            let pending = recoveryCandidates
+            var recoveryIDs = Set<String>()
+            let pending = recoveryCandidates.filter { recoveryIDs.insert($0.id).inserted }
             let cycling = pending.filter(\.cycles)
             startAlternativeTransit(from: origin.coordinate, to: destination.coordinate, token: token)
             // A provider interruption is not a proof that every street connection

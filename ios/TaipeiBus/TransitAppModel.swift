@@ -1108,7 +1108,7 @@ final class TransitAppModel: ObservableObject {
     /// actually reach, rather than a bus leaving before the access walk finishes.
     func boardingInformation(_ ride: TransitRide, at date: Date) -> (label: String, source: String, seconds: Double?) {
         let official = snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date)
-        if let official, official < 0 { return (EstimateFeed.label(official), AppText.text("官方到站"), nil) }
+        if let official, [-2,-3,-4].contains(official) { return (EstimateFeed.label(official), AppText.text("官方到站"), nil) }
         var ready = 0.0
         if let option = planner.selected, let index = option.rides.firstIndex(where: { $0.id == ride.id }), option.walks.indices.contains(index) {
             let leg = option.walks[index]

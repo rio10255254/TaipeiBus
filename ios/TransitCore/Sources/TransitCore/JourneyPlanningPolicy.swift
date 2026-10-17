@@ -73,8 +73,12 @@ public enum JourneyChoiceRanking {
         let extra = choice.elapsed - other.elapsed
         if choice.transfers < other.transfers {
             if extra > 90, extra <= 300 {
+                if AppLanguage.current == .english, other.transfers-choice.transfers == 1 {
+                    return AppText.text("多花 %@ 分，少一次轉乘", Int(ceil(extra/60)))
+                }
                 return AppText.text("多花 %@ 分，少轉乘 %@ 次", Int(ceil(extra / 60)), other.transfers - choice.transfers)
             }
+            if AppLanguage.current == .english, other.transfers-choice.transfers == 1 { return AppText.text("少一次轉乘") }
             return AppText.text("少轉乘 %@ 次", other.transfers - choice.transfers)
         }
         if choice.rentals == 1, other.rentals > 1 { return AppText.text("只需借還一次") }

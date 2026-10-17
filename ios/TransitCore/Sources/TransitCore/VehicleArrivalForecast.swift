@@ -136,8 +136,9 @@ public struct VehicleArrivalForecast: Sendable {
         // public prediction still requires a fresh GPS report from this vehicle.
         var current = history.filter { $0.value.last.map { (-5...90).contains(date.timeIntervalSince($0.date)) } ?? false }
         var currentCrossings = crossings.filter { current[$0.key] != nil }
-        for bus in vehicles where bus.hasReliablePosition(at: date) {
-            guard bus.aligned, let match = bus.roadMatch,
+        for bus in vehicles {
+            current[bus.id] = nil; currentCrossings[bus.id] = nil
+            guard bus.hasReliablePosition(at: date), ["0", "3"].contains(bus.status), bus.aligned, let match = bus.roadMatch,
                   let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction) else { continue }
             var samples = (history[bus.id] ?? []).filter {
                 $0.route == bus.routeID && $0.direction == bus.direction &&
@@ -283,7 +284,7 @@ public struct VehicleArrivalForecast: Sendable {
         // One fresh moving GPS report can provide a short-range estimate before
         // history matures. Never extend a terminal layover or a 50-minute crawl
         // across the route, and never use a straight-line distance to the stop.
-        let localGPS = inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
+        let localGPS = age <= 15 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
             seconds <= 600 && progress.distance <= 2_500
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
             fallback == 0 && profiled > 0 ? .officialProfile :
@@ -325,7 +326,8 @@ public struct VehicleArrivalForecast: Sendable {
                 explanation: AppText.text("尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。") + officialAdvice, prediction: nil)
         }
         if let official = officialSeconds, official >= 0,
-           result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) {
+           (result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) ||
+            (result.evidence == .routeProgress && abs(result.seconds - Double(official)) > 60)) {
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。"), prediction: nil)
         }
