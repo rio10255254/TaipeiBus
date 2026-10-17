@@ -881,7 +881,7 @@ final class TransitAppModel: ObservableObject {
         markLiveSettingsPreview()
 #endif
         guard let id = selectedVehicleID else { return }
-        guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
+        guard let bus = snapshot.vehicles.first(where: { $0.id == id }) else { following = false; return }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
         if selectedRouteID != bus.routeID { selectedRouteID = bus.routeID }
         allRouteVariants = false
@@ -1672,6 +1672,10 @@ final class TransitAppModel: ObservableObject {
     }
 
 #if DEBUG
+    func auditReceiveSnapshot(_ value: TransitSnapshot) {
+        var next = value; next.revision = snapshot.revision+1
+        applySnapshot(next)
+    }
     func auditNavigation(metadata: TransitMetadata, snapshot: TransitSnapshot, at date: Date) {
         self.metadata = metadata; self.snapshot = snapshot
         arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date)
