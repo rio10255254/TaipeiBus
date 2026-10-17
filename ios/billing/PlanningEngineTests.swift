@@ -188,12 +188,12 @@ import MapKit
         p.testStreet = { input,_ in calls += 1; return WalkingLeg(from:input.from,to:input.to) }
         let unavailable = try await p.auditEnrich(option,metadata:TransitMetadata())
         XCTAssertFalse(unavailable.verified)
-        XCTAssertEqual(calls,1,"Stop checking the rest of an unusable journey")
+        XCTAssertEqual(calls,2,"At most the leading choice's two parallel walking checks are sent")
         _ = try await p.auditEnrich(option,metadata:TransitMetadata())
-        XCTAssertEqual(calls,1,"The same unavailable connection must not be downloaded once per route")
+        XCTAssertEqual(calls,2,"The same unavailable connections must not be downloaded once per route")
         p.finish()
         _ = try await p.auditEnrich(option,metadata:TransitMetadata())
-        XCTAssertEqual(calls,2,"Starting a new search permits recovery")
+        XCTAssertEqual(calls,4,"Starting a new search permits both endpoints to recover")
     }
     func testASecondDockPairCanWinAfterActualStreetVerificationWithoutChangingThePreview() async throws {
         var original = bicycle()

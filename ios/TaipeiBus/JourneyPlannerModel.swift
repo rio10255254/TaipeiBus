@@ -710,10 +710,11 @@ final class JourneyPlannerModel: ObservableObject {
         while !Task.isCancelled, token == generation {
             if discoverBikes { cycling.append(contentsOf: takeBikeConnections(limit: limit)) }
             var batch: [JourneyOption] = []
+            let batchLimit = verifiedPool.isEmpty ? 1 : 2
             if !walking.isEmpty { batch.append(walking.removeFirst()) }
-            if !cycling.isEmpty { batch.append(cycling.removeFirst()) }
-            while batch.count < 2, !walking.isEmpty { batch.append(walking.removeFirst()) }
-            while batch.count < 2, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
+            if batch.count < batchLimit, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
+            while batch.count < batchLimit, !walking.isEmpty { batch.append(walking.removeFirst()) }
+            while batch.count < batchLimit, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
             guard !batch.isEmpty else { return }
             var serviceInterrupted = false
             await withTaskGroup(of: JourneyOption?.self) { group in
@@ -1155,7 +1156,7 @@ final class JourneyPlannerModel: ObservableObject {
             if options.isEmpty { options = Array(pending.prefix(3)); selectedID = nil }
             planning = false; checkingWalks = true
             recoveryCandidates.append(contentsOf: pending)
-            if pending.isEmpty { continue }
+            if pending.isEmpty || hadTemporaryStreetFailure { continue }
             let cycling = pending.filter(\.cycles)
             attemptedBikeConnections.formUnion(cycling.map(bikeChoiceKey))
             await verifyConnections(pending.filter { !$0.cycles }, cycling: cycling, limit: budget.verification, discoverBikes: complete, token: token)
@@ -1208,7 +1209,7 @@ final class JourneyPlannerModel: ObservableObject {
         // option no longer delays its first usable door-to-door result.
         if !option.cycles, verifiedPool.isEmpty {
             try await withThrowingTaskGroup(of: (Int, WalkingLeg).self) { group in
-                for index in option.walks.indices where !option.walks[index].internalTransfer {
+                for index in option.walks.indices.filter({ !option.walks[$0].internalTransfer }).prefix(2) {
                     group.addTask { [self] in (index, try await checkedWalk(option.walks[index])) }
                 }
                 for try await (index, leg) in group { checked[index] = leg }
