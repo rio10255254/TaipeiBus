@@ -1188,12 +1188,14 @@ final class JourneyPlannerModel: ObservableObject {
             startAlternativeTransit(from: origin.coordinate, to: destination.coordinate, token: token)
             // A provider interruption is not a proof that every street connection
             // is absent. Retain confirmed legs and retry a small leading set once.
-            if verifiedPool.isEmpty, hadTemporaryStreetFailure {
+            if hadTemporaryStreetFailure {
                 JourneyDiagnostics.shared.record("plan_recover_temporary_service")
                 do { try await Task.sleep(for:.seconds(2)) } catch { return }
                 guard token == generation, !Task.isCancelled else { return }
-                await verifyConnections(Array(pending.filter { !$0.cycles }.prefix(3)),
-                    cycling:Array(cycling.prefix(1)),limit:budget.verification,discoverBikes:false,token:token)
+                let recovery = primaryContenders(pending.filter { candidate in !verifiedPool.contains { $0.id == candidate.id } })
+                recovery.forEach(reserveStreets)
+                await verifyConnections(recovery.filter { !$0.cycles }, cycling:recovery.filter(\.cycles),
+                    limit:budget.verification,discoverBikes:false,token:token)
                 guard token == generation, !Task.isCancelled else { return }
             }
             await refineLeadingEntrances(token: token)

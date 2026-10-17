@@ -78,6 +78,34 @@ import MapKit
         let leg = try await p.auditStreet(WalkingLeg(from:from,to:entrance))
         XCTAssertTrue(leg.verified,"The provider has a real walking route; an ordinary building-access offset must not delete it")
     }
+    func testComparisonRecoversEvenWhenAnEarlyCheckedRouteRemainsUsable() async throws {
+        let service = TransitService(), p = JourneyPlannerModel(); defer { p.finish() }
+        let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
+        var calls = 0, successes = 0, failures = 0, failedAt: Date?
+        p.testStreet = { value, _ in
+            calls += 1
+            if calls >= 3, failedAt == nil { failedAt = Date() }
+            if let failedAt, Date().timeIntervalSince(failedAt) < 1.5 {
+                failures += 1
+                throw NSError(domain:MKErrorDomain,code:Int(MKError.Code.serverFailure.rawValue))
+            }
+            successes += 1
+            var result = value
+            result.distance = value.from.distance(to:value.to)*1.2
+            result.duration = (result.distance ?? 0)/1.25
+            result.coordinates = [value.from,value.to]; return result
+        }
+        p.setDestination(TravelPlace(name:"內湖站",address:"",coordinate:.init(latitude:25.083675,longitude:121.594363)),
+            metadata:metadata,currentLocation:campus)
+        for _ in 0..<1200 {
+            if !p.planning, !p.checkingWalks { break }
+            try await Task.sleep(for:.milliseconds(100))
+        }
+        XCTAssertGreaterThan(failures,0)
+        XCTAssertGreaterThanOrEqual(successes,4,"The temporary outage must not freeze the first usable route as the only recommendation")
+        XCTAssertTrue(p.options.contains { $0.verified && $0.rides.contains { $0.route.mode != .bus } })
+        XCTAssertNil(p.message)
+    }
 
     func testZhihongToBothReportedDestinationsThroughProductionPlanner() async throws {
         let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
