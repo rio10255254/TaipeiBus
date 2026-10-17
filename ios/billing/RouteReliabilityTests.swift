@@ -81,7 +81,7 @@ import MapKit
 
     func testZhihongToBothReportedDestinationsThroughProductionPlanner() async throws {
         let from = Coordinate(latitude:25.0189833,longitude:121.5396361)
-        try await verifyOtherJourney(from:from,to:.init(latitude:25.083675,longitude:121.594363),name:"Zhihong_Neihu")
+        try await verifyOtherJourney(from:from,to:.init(latitude:25.083675,longitude:121.594363),name:"Zhihong_Neihu",requireRail:true)
         // Published shop pin for 牛肆, 吉林路422號. Street planning must not
         // depend on a separate live POI-name search returning the shop today.
         try await verifyOtherJourney(from:from,to:.init(latitude:25.0660056,longitude:121.5302137),name:"Zhihong_NiuSi")
@@ -117,7 +117,7 @@ import MapKit
         }
     }
 
-    private func verifyOtherJourney(from: Coordinate, to: Coordinate, name: String) async throws {
+    private func verifyOtherJourney(from: Coordinate, to: Coordinate, name: String, requireRail: Bool = false) async throws {
         let service = TransitService(), p = JourneyPlannerModel()
         defer { p.finish() }
         let loaded = await service.offlineMetroMetadata(), metadata = try XCTUnwrap(loaded)
@@ -137,10 +137,16 @@ import MapKit
         }
         XCTAssertFalse(checked.isEmpty,"\(name) must work through the same production planner")
         XCTAssertTrue(checked.contains { !$0.rides.isEmpty },"These cross-city journeys must retain a checked transit option")
+        if requireRail {
+            XCTAssertTrue(checked.contains { option in
+                option.rides.contains { $0.route.mode != .bus } &&
+                    (p.duration(option,at:Date())?.totalSeconds ?? .infinity) < 3_900
+            },"A quick provisional bus cannot crowd out a reasonable checked MRT alternative")
+        }
         XCTAssertNil(p.message)
     }
     func testNeihuToNTUUsesTheSameProductionFlowInReverse() async throws {
-        try await verifyOtherJourney(from:.init(latitude:25.083675,longitude:121.594363),to:campus,name:"Neihu_NTU")
+        try await verifyOtherJourney(from:.init(latitude:25.083675,longitude:121.594363),to:campus,name:"Neihu_NTU",requireRail:true)
     }
     func testNTUToXimenUsesTheSameProductionFlowAcrossDifferentLines() async throws {
         try await verifyOtherJourney(from:campus,to:.init(latitude:25.0434,longitude:121.5062),name:"NTU_Ximen")

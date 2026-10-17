@@ -191,6 +191,7 @@ final class JourneyPlannerModel: ObservableObject {
     // transient failure to recover. A new explicit search always tries them again.
     private var unavailableStreets: [String: (leg: WalkingLeg, date: Date)] = [:]
     private var walkingRequests: [String: (id: UUID, task: Task<WalkingLeg, Error>)] = [:]
+    private var primaryStreetKeys = Set<String>()
     private var hadTemporaryStreetFailure = false
     private var planBegan = 0.0
     private var recordedFirstChoice = false
@@ -1159,7 +1160,24 @@ final class JourneyPlannerModel: ObservableObject {
             if pending.isEmpty || hadTemporaryStreetFailure { continue }
             let cycling = pending.filter(\.cycles)
             attemptedBikeConnections.formUnion(cycling.map(bikeChoiceKey))
-            await verifyConnections(pending.filter { !$0.cycles }, cycling: cycling, limit: budget.verification, discoverBikes: complete, token: token)
+            if complete {
+                // A quickly checked provisional bus must not spend the comparison
+                // reserve before a much better rail or rail+cycling trip is checked.
+                let contenders = primaryContenders(pending)
+                contenders.forEach(reserveStreets)
+                let ids = Set(contenders.map(\.id))
+                await verifyConnections(contenders.filter { !$0.cycles }, cycling: contenders.filter(\.cycles),
+                    limit: budget.verification, discoverBikes: false, token: token)
+                guard token == generation, !Task.isCancelled else { return }
+                if !hadTemporaryStreetFailure {
+                    let remaining = pending.filter { !ids.contains($0.id) }
+                    await verifyConnections(remaining.filter { !$0.cycles }, cycling: remaining.filter(\.cycles),
+                        limit: budget.verification, token: token)
+                }
+            } else {
+                await verifyConnections(pending.filter { !$0.cycles }, cycling: cycling,
+                    limit: budget.verification, discoverBikes: false, token: token)
+            }
             guard token == generation, !Task.isCancelled else { return }
             }
             guard token == generation, !Task.isCancelled else { return }
@@ -1341,8 +1359,39 @@ final class JourneyPlannerModel: ObservableObject {
         result.instructions = access.instructions + street.instructions + egress.instructions
         return result
     }
+    /// Comparison remains integrated in one menu. These distinct contenders only
+    /// decide which real streets to check first, before optional platform variants.
+    private func primaryContenders(_ choices: [JourneyOption]) -> [JourneyOption] {
+        let rail = choices.filter { $0.rides.contains { $0.route.mode != .bus } }
+        var ids = Set<String>(), result: [JourneyOption] = []
+        for choice in [choices.first, rail.first(where: { !$0.cycles }), rail.first(where: \.cycles),
+                       choices.first(where: { !$0.rides.isEmpty && $0.rides.allSatisfy { $0.route.mode == .bus } })] {
+            if let choice, ids.insert(choice.id).inserted { result.append(choice) }
+            if result.count == 3 { break }
+        }
+        return result
+    }
+    private func streetKey(_ leg: WalkingLeg, transport: MKDirectionsTransportType) -> String {
+        "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
+    }
+    private func reserveStreets(_ choice: JourneyOption) {
+        guard !evaluatingRemainingJourney else { return }
+        func reserve(_ from: Coordinate, _ to: Coordinate, _ mode: MKDirectionsTransportType = .walking) {
+            primaryStreetKeys.insert(streetKey(WalkingLeg(from:from,to:to),transport:mode))
+        }
+        for leg in choice.walks where !leg.internalTransfer {
+            if let bike = leg.bike {
+                reserve(leg.from,bike.pickup.coordinate)
+                reserve(bike.pickup.coordinate,bike.dropoff.coordinate,.cycling)
+                reserve(bike.dropoff.coordinate,leg.to)
+            } else {
+                reserve(leg.from,leg.to)
+                for entrance in leg.entranceAlternatives { reserve(entrance.from,entrance.to) }
+            }
+        }
+    }
     private func walk(_ leg: WalkingLeg, guidance: Bool = false, transport: MKDirectionsTransportType = .walking) async throws -> WalkingLeg {
-        let cacheKey = "\(transport.rawValue):\(leg.from.latitude):\(leg.from.longitude):\(leg.to.latitude):\(leg.to.longitude):\(AppLanguage.current.rawValue)"
+        let cacheKey = streetKey(leg, transport: transport)
         if guidance { return try await calculateStreet(leg, guidance: true, transport: transport) }
         if let cached = walkingCache[cacheKey], Date().timeIntervalSince(cached.date) < 900 { return cached.leg }
         if !changingBikeStation, let unavailable = unavailableStreets[cacheKey], Date().timeIntervalSince(unavailable.date) < 15 { return unavailable.leg }
@@ -1383,8 +1432,9 @@ final class JourneyPlannerModel: ObservableObject {
         defer { directions.removeAll { $0 === operation }; if walkingRequest === operation { walkingRequest = nil } }
         do {
             let ready = options.contains { canUse($0) }
+            let primary = !evaluatingRemainingJourney && primaryStreetKeys.contains(streetKey(leg, transport: transport))
             let priority: DirectionsRequestGate.Priority = guidance || changingBikeStation ? .navigation :
-                evaluatingRemainingJourney || ready ? .alternatives : .firstChoice
+                primary ? .firstChoice : evaluatingRemainingJourney || ready ? .alternatives : .firstChoice
             let response = try await DirectionsRequestGate.shared.calculate(operation, priority: priority)
             try Task.checkCancellation()
             for route in response.routes where route.polyline.pointCount > 0 {
@@ -1537,6 +1587,7 @@ final class JourneyPlannerModel: ObservableObject {
         return nil
     }
     private func cancelRequests() {
+        primaryStreetKeys = []
         endWalkingGuidance()
         pickupTask?.cancel(); pickupTask = nil; pickupGeneration = UUID()
         changingBikeStation = false; bikeStationUpdateMessage = nil
