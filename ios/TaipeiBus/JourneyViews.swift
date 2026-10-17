@@ -1547,6 +1547,7 @@ private struct WaitingBannerContent: View {
     var body: some View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
         let boarding = model.boardingInformation(ride, at: date)
+        let access = model.planner.accessInstruction(at: model.planner.boardingRideIndex ?? 0, date: date)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
@@ -1554,7 +1555,7 @@ private struct WaitingBannerContent: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
-                    BannerTitle(text: live.text("上車 · ") + ride.boarding.localizedName)
+                    BannerTitle(text: access ?? (live.text("上車 · ") + ride.boarding.localizedName))
                     if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                     if ride.route.displayName != ride.route.name,
                        model.metadata.routeIDs(serving: ride).filter({ model.metadata.routes[$0] != nil }).count <= 1 {
@@ -1575,7 +1576,8 @@ private struct WaitingBannerContent: View {
             .padding(.horizontal, 16).padding(.vertical, 13)
             BannerStrip {
                 Image(systemName: "arrow.down").font(.caption.weight(.bold))
-                Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).lineLimit(1)
+                Text(access == nil ? AppText.text("在「%@」下車", ride.alighting.localizedName)
+                    : AppText.text("接著搭 %@ · 往 %@", ride.route.localizedName, ride.route.localizedDestination(direction:ride.direction))).lineLimit(1)
                 Spacer(minLength: 4)
                 Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(model.plannedRideTime(ride, at: date).seconds / 60)))))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)

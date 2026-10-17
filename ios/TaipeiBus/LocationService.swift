@@ -62,8 +62,22 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private(set) var firstUsableMilliseconds: Double?
 #endif
     private var authorized: Bool {
-        manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways
+#if DEBUG
+        if auditLocationEnabled { return true }
+#endif
+        return manager.authorizationStatus == .authorizedWhenInUse || manager.authorizationStatus == .authorizedAlways
     }
+    func navigationSample(at date: Date) -> LocationSample? {
+        guard authorized, let sample, sample.canPlan(at:date) else { return nil }
+        return sample
+    }
+#if DEBUG
+    private var auditLocationEnabled = false
+    func auditLocation(_ value: LocationSample) {
+        auditLocationEnabled = true; sample = value
+        coordinate = value.coordinate; accuracy = value.accuracy; updatedAt = value.timestamp; revision += 1
+    }
+#endif
     var displayCoordinate: Coordinate? {
         guard authorized, let sample, sample.canDisplay(at: Date()) else { return nil }
         return sample.coordinate

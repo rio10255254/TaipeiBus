@@ -70,10 +70,8 @@ final class TransitAppModel: ObservableObject {
     /// Seconds until the rider reaches the alighting stop of the ride they are on.
     func onboardSecondsToAlight(_ ride: TransitRide, at date: Date) -> Double? {
         if ride.route.mode != .bus { return metroRemaining(ride, at: date).seconds }
-        if let last = onboardArrival, last.rideID == ride.id { return max(0, last.arrival.timeIntervalSince(date)) }
-        guard let boardedAt else { return nil }
-        let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt).seconds
-        return max(0, planned - date.timeIntervalSince(boardedAt))
+        guard boardedAt != nil else { return nil }
+        return busRemaining(ride, at: date).seconds
     }
     private func updateAlightReminder() {
         guard alightReminderActive, boardedAt != nil, case .ride(let index) = planner.currentStep,
@@ -922,8 +920,9 @@ final class TransitAppModel: ObservableObject {
         planner.updateWalking(index: index, coordinate: position, accuracy: accuracy, timestamp: timestamp, now: Date())
     }
     func clearWalkingMap() {
-        walkingMapIndex = nil; planner.endWalkingGuidance(); location.setWalkingNavigation(false)
+        walkingMapIndex = nil
         if planner.started, case .walk = planner.currentStep { updateWalkingLocation() }
+        else { planner.endWalkingGuidance(); location.setWalkingNavigation(false) }
     }
     func focusMap(_ target: MapFocus) {
         if case .userLocation = target {} else { stopUserTracking() }
@@ -1114,7 +1113,7 @@ final class TransitAppModel: ObservableObject {
             let leg = option.walks[index]
             ready = leg.duration ?? 0
             if planner.walkingLegIndex == index, let progress = planner.walkingProgress,
-               progress.locationConfirmed, let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
+               progress.hasConfirmedProgress {
                 let allowance = max(0, (leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
                 ready = (leg.bike.map { $0.remaining(meters: progress.remainingDistance).total } ?? progress.remainingSeconds) + allowance
             }
@@ -1142,10 +1141,40 @@ final class TransitAppModel: ObservableObject {
     /// The last movement-based arrival while on board. A momentarily stale feed report must not
     /// swap the remaining time for the much more conservative planned ride time and back again.
     private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
+    @Published private(set) var onboardProgress: OnboardProgress?
+    private var boardedReport: BusVehicle?
     private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
         guard let onboardArrival, onboardArrival.rideID == ride.id,
               (0...300).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
         return max(60, onboardArrival.arrival.timeIntervalSince(date))
+    }
+
+    /// The journey card, Live Activity and reminder use this same estimate.
+    /// Retained geometry freezes known progress during a gap; it never restarts
+    /// the full ride or counts a missing GPS report as an observed arrival.
+    private func busRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, estimatedPosition: Bool) {
+        if let progress = onboardProgress, progress.rideID == ride.id,
+           progress.hasConfirmedProgress, progress.isFresh(at: date) {
+            let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds
+            onboardArrival = (ride.id,date.addingTimeInterval(seconds),progress.confirmedAt!)
+            return (seconds,false)
+        }
+        if let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
+           let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
+           let progress = journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) {
+            if progress.distance < -20 { return (0,false) }
+            if let prediction = arrivalForecast.prediction(bus, stopID: ride.alighting.id, metadata: metadata,
+                    at: date, allowTypicalWhenStopped: true) {
+                onboardArrival = (ride.id,date.addingTimeInterval(prediction.seconds),bus.observedAt)
+                return (prediction.seconds,false)
+            }
+        }
+        if let held = heldOnboardSeconds(ride, at: date) { return (held,true) }
+        if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
+            return (max(60,arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds),true)
+        }
+        let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt ?? date).seconds
+        return (max(60,planned - max(0,date.timeIntervalSince(boardedAt ?? date))),true)
     }
 
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
@@ -1175,8 +1204,7 @@ final class TransitAppModel: ObservableObject {
         var cycling = option.walks.dropFirst(index).compactMap(\.bike).reduce(0) { $0 + $1.cyclingSeconds }
         var handling = option.walks.dropFirst(index).compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
         if !onboard, !walking.isEmpty, planner.walkingLegIndex == index,
-           let progress = planner.walkingProgress, progress.locationConfirmed,
-           let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
+           let progress = planner.walkingProgress, progress.hasConfirmedProgress {
             let leg = option.walks[index]
             let stationAllowance = max(0,(leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
             if let bike = leg.bike {
@@ -1193,33 +1221,10 @@ final class TransitAppModel: ObservableObject {
             if first.route.mode != .bus {
                 let remaining = metroRemaining(first, at: date)
                 riding[0] = remaining.seconds; positionUncertain = remaining.source == .schedule
-            } else if let bus = onboardVehicle(for: first), bus.hasReliablePosition(at: date),
-               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
-               let progress = journey.progress(stopID: first.alighting.id, vehicle: bus, at: date) {
-                if progress.distance < -20 { riding[0] = 0 }
-                else if let prediction = arrivalForecast.prediction(bus, stopID: first.alighting.id, metadata: metadata, at: date, allowTypicalWhenStopped: true) {
-                    riding[0] = prediction.seconds; onboardSpread = prediction.uncertaintySeconds
-                    onboardArrival = (first.id, date.addingTimeInterval(prediction.seconds), date)
-                } else if let held = heldOnboardSeconds(first, at: date) {
-                    riding[0] = held
-                } else if let board = journey.anchors.first(where: { $0.stop.id == first.boarding.id }),
-                          let alight = journey.anchors.first(where: { $0.stop.id == first.alighting.id }) {
-                    let total = abs(alight.match.along - board.match.along)
-                    // A delayed report can still sit before the boarding stop; never stretch the ride beyond its plan.
-                    if total > 1 { riding[0] *= min(1, max(0, progress.distance / total)) }
-                }
-            } else if let held = heldOnboardSeconds(first, at: date) {
-                riding[0] = held
-            } else if let boardedAt {
-                riding[0] = max(60, riding[0] - max(0, date.timeIntervalSince(boardedAt)))
-                positionUncertain = true
             } else {
-                positionUncertain = true
-            }
-            // Without new movement the bus is at worst where it was, so a fallback never exceeds the
-            // last movement-based remaining time; that is what jumped from 23 to 83 min and back.
-            if let last = onboardArrival, last.rideID == first.id, last.at != date {
-                riding[0] = min(riding[0], max(60, last.arrival.timeIntervalSince(last.at)))
+                let remaining = busRemaining(first, at: date)
+                riding[0] = remaining.seconds; positionUncertain = remaining.estimatedPosition
+                onboardSpread = remaining.seconds * (remaining.estimatedPosition ? 0.3 : 0.15)
             }
             if let bike = option.walks[index].bike {
                 cycling -= bike.cyclingSeconds; handling -= bike.handlingSeconds
@@ -1248,14 +1253,14 @@ final class TransitAppModel: ObservableObject {
         return duration
     }
 
-    func boardCurrentRide() {
+    func boardCurrentRide(at date: Date = Date()) {
         clearJourneySuggestion()
         guard let ride = planner.activeRide else { return }
         clearWalkingMap()
 #if DEBUG
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
-        boardedAt = Date()
+        boardedAt = date
         if alightReminderActive {
             Task { [weak self] in
                 guard let self, await self.alightReminder.authorize() else { return }
@@ -1275,17 +1280,21 @@ final class TransitAppModel: ObservableObject {
             confirmBoardedVehicle(bus, ride: ride)
         }
         planner.boardCurrentRide()
+        onboardArrival = nil; onboardProgress = nil
+        anchorBoardedVehicle(at: date)
     }
 
     func confirmBoardedVehicle(_ bus: BusVehicle, ride: TransitRide) {
         guard metadata.canServe(ride, vehicle: bus) else { return }
         boardedVehicle = BoardedVehicle(rideID: ride.id, vehicleID: bus.id, plate: bus.plate)
+        boardedReport = bus
         trackApproachingVehicle(bus, userInitiated: false)
     }
 
     func onboardVehicle(for ride: TransitRide) -> BusVehicle? {
         guard let boardedVehicle, boardedVehicle.rideID == ride.id else { return nil }
         return snapshot.vehicles.first { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) }
+            ?? riderAnchored.flatMap { $0.id == boardedVehicle.vehicleID && metadata.canServe(ride, vehicle: $0) ? $0 : nil }
     }
 
     /// The feed reports each bus only every 20–60 s, so on board the rider's phone is ahead of
@@ -1293,20 +1302,38 @@ final class TransitAppModel: ObservableObject {
     /// the delayed report. Nothing is extrapolated; every position is a real reading.
     @Published private(set) var anchorRevision = 0
     private var riderAnchored: BusVehicle?
-    func anchorBoardedVehicle(publish: Bool = true) {
-        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
-              let boardedVehicle, boardedVehicle.rideID == ride.id,
-              let index = snapshot.vehicles.firstIndex(where: { $0.id == boardedVehicle.vehicleID }) else {
-            riderAnchored = nil; location.setRidingNavigation(false); return
+    func anchorBoardedVehicle(publish: Bool = true, at now: Date = Date()) {
+        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide, ride.route.mode == .bus else {
+            riderAnchored = nil; onboardProgress = nil; boardedReport = nil
+            location.setRidingNavigation(false); return
         }
         location.setRidingNavigation(true)
-        let bus = snapshot.vehicles[index]
-        let now = Date()
+        let previouslyConfirmed = onboardProgress?.confirmedAt
+        defer {
+            if publish, onboardProgress?.confirmedAt != previouslyConfirmed {
+                updateAlightReminder(); updateLiveSurfaces()
+            }
+        }
+        if onboardProgress?.rideID != ride.id { onboardProgress = OnboardProgress(ride: ride, metadata: metadata) }
+        let riderFix = location.navigationSample(at:now)
+        if let riderFix, let boardedAt {
+            onboardProgress?.update(coordinate: riderFix.coordinate, accuracy: riderFix.accuracy,
+                timestamp: riderFix.timestamp, boardedAt: boardedAt, now: now)
+        }
+        guard let boardedVehicle, boardedVehicle.rideID == ride.id else { return }
+        let index = snapshot.vehicles.firstIndex(where: { $0.id == boardedVehicle.vehicleID })
+        let reported = index.map { snapshot.vehicles[$0] }
+        guard let bus = reported ?? boardedReport, metadata.canServe(ride, vehicle: bus) else { riderAnchored = nil; return }
+        if let reported { boardedReport = reported }
+        if bus.hasReliablePosition(at: now), let boardedAt {
+            onboardProgress?.update(coordinate: bus.coordinate, accuracy: 15, timestamp: bus.observedAt,
+                boardedAt: boardedAt, now: now, maximumAge:90)
+        }
         if riderAnchored?.id != bus.id { riderAnchored = nil }
         var next: BusVehicle?
-        if let position = location.usableCoordinate, let accuracy = location.accuracy, let fixedAt = location.updatedAt,
+        if let riderFix,
            let line = metadata.line(bus.routeID, direction: bus.direction) {
-            next = RiderAnchor.anchor(bus, rider: position, accuracy: accuracy, fixedAt: fixedAt,
+            next = RiderAnchor.anchor(bus, rider: riderFix.coordinate, accuracy: riderFix.accuracy, fixedAt: riderFix.timestamp,
                                       previous: riderAnchored?.roadMatch, line: line,
                                       journey: metadata.journey(routeID: bus.routeID, direction: bus.direction), now: now)
         }
@@ -1320,9 +1347,9 @@ final class TransitAppModel: ObservableObject {
         }
         guard let next else { riderAnchored = nil; return }
         if riderAnchored?.observedAt == next.observedAt, riderAnchored?.coordinate == next.coordinate,
-           snapshot.vehicles[index].observedAt == next.observedAt { return }
+           reported?.observedAt == next.observedAt { return }
         riderAnchored = next
-        snapshot.vehicles[index] = next
+        if let index { snapshot.vehicles[index] = next } else { snapshot.vehicles.append(next) }
         guard publish else { return }
         anchorRevision += 1
         planner.updateSnapshot(snapshot, forecast: arrivalForecast)
@@ -1521,6 +1548,12 @@ final class TransitAppModel: ObservableObject {
     /// boarding platform back into the remaining stops or continue past alighting.
     func onboardStops(for ride: TransitRide, at date: Date) -> [BusStop] {
         let planned = Array(ride.stops.dropFirst())
+        if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
+            // Keep stops lacking a map anchor until a later confirmed stop is passed.
+            let passedIDs = progress.passedStopIDs
+            let passed = planned.indices.filter { passedIDs.contains(planned[$0].id) }
+            return Array(planned.dropFirst((passed.max() ?? -1)+1))
+        }
         guard let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
               journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil else { return planned }
@@ -1597,6 +1630,11 @@ final class TransitAppModel: ObservableObject {
     }
 
 #if DEBUG
+    func auditNavigation(metadata: TransitMetadata, snapshot: TransitSnapshot, at date: Date) {
+        self.metadata = metadata; self.snapshot = snapshot
+        arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date)
+        planner.updateSnapshot(snapshot,forecast:arrivalForecast)
+    }
     func auditAlternative(_ option: JourneyOption, snapshot: TransitSnapshot) -> Bool {
         self.snapshot = snapshot; planner.updateSnapshot(snapshot)
         guard let origin = planner.origin else { return false }
