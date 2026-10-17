@@ -881,7 +881,12 @@ final class TransitAppModel: ObservableObject {
         markLiveSettingsPreview()
 #endif
         guard let id = selectedVehicleID else { return }
-        guard let bus = result.vehicles.first(where: { $0.id == id }) else { following = false; return }
+        guard let bus = snapshot.vehicles.first(where: { $0.id == id }) else {
+            // Keep the passenger's follow choice through a complete signal gap.
+            // No position is drawn until a real feed or phone fix returns.
+            if hasConfirmedOnboardFollow { return }
+            following = false; return
+        }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
         if selectedRouteID != bus.routeID { selectedRouteID = bus.routeID }
         allRouteVariants = false
@@ -1382,6 +1387,11 @@ final class TransitAppModel: ObservableObject {
     func onboardPlate(for ride: TransitRide) -> String? {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
     }
+    var hasConfirmedOnboardFollow: Bool {
+        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
+              let boardedVehicle, boardedVehicle.rideID == ride.id else { return false }
+        return following && selectedVehicleID == boardedVehicle.vehicleID
+    }
 
     func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {
         metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.remaining(at: date)
@@ -1672,6 +1682,10 @@ final class TransitAppModel: ObservableObject {
     }
 
 #if DEBUG
+    func auditReceiveSnapshot(_ value: TransitSnapshot) {
+        var next = value; next.revision = snapshot.revision+1
+        applySnapshot(next)
+    }
     func auditNavigation(metadata: TransitMetadata, snapshot: TransitSnapshot, at date: Date) {
         self.metadata = metadata; self.snapshot = snapshot
         arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date)

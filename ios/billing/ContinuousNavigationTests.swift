@@ -68,7 +68,7 @@ import XCTest
         model.alight(); XCTAssertNil(model.onboardProgress); model.finishJourney()
     }
     func testMissingProviderBusDoesNotRemoveAnAlreadyConfirmedPhoneAnchoredBus() throws {
-        let date = Date(), (model,metadata,option) = makeModel(at:date), ride = option.rides[0]
+        let date = Date().addingTimeInterval(-200), (model,metadata,option) = makeModel(at:date), ride = option.rides[0]
         let raw = BusVehicle(id:"physical",plate:"TEST-01",routeID:"route",parentRouteID:"family",routeName:"284",direction:"0",
             destination:"終點",coordinate:point(0),rawCoordinate:point(0),heading:90,speed:20,observedAt:date,status:"0",lowFloor:true,provider:nil)
         let bus = VehicleTracker.accept(raw,previous:nil,metadata:metadata,now:date)
@@ -76,14 +76,20 @@ import XCTest
         model.trackApproachingVehicle(bus,userInitiated:false)
         model.boardCurrentRide(at:date)
         XCTAssertEqual(model.boardedVehicle?.vehicleID,"physical")
-        let moved = date.addingTimeInterval(80)
-        model.auditNavigation(metadata:metadata,snapshot:TransitSnapshot(),at:moved)
+        model.following = true
+        model.auditReceiveSnapshot(TransitSnapshot())
+        XCTAssertTrue(model.following,"A complete signal gap holds the user's confirmed follow choice")
+        XCTAssertTrue(model.hasConfirmedOnboardFollow,"Returning from an itinerary during a gap must retain the same follow intent")
+        XCTAssertTrue(model.snapshot.vehicles.isEmpty,"Holding a follow choice must not create a vehicle position")
+        let moved = Date()
         model.location.auditLocation(LocationSample(coordinate:point(900),accuracy:5,timestamp:moved))
-        model.anchorBoardedVehicle(at:moved)
+        model.auditReceiveSnapshot(TransitSnapshot())
         let anchored = try XCTUnwrap(model.onboardVehicle(for:ride))
+        XCTAssertTrue(model.following,"A provider miss must preserve an already active camera follow when the phone anchors that same confirmed bus")
         XCTAssertEqual(anchored.plate,"TEST-01")
         XCTAssertLessThan(anchored.coordinate.distance(to:point(900)),2)
         XCTAssertTrue(model.isRiderAnchored(anchored))
+        XCTAssertTrue(model.hasConfirmedOnboardFollow)
         let later = moved.addingTimeInterval(180)
         model.anchorBoardedVehicle(at:later)
         XCTAssertFalse(model.onboardVehicle(for:ride)?.hasReliablePosition(at:later) ?? false,
