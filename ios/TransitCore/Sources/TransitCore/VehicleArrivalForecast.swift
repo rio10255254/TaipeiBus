@@ -411,6 +411,7 @@ public struct VehicleArrivalForecast: Sendable {
     public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
                               travellingAt: Date? = nil, progress: OnboardProgress? = nil) -> RidingTimeEstimate {
         let tuning = ForecastTuning.current
+        let riderProgress = progress?.rideID == ride.id ? progress : nil
         if ride.route.mode != .bus, let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) {
             return RidingTimeEstimate(seconds: seconds, evidence: .railProfile, observedVehicles: 0)
@@ -422,11 +423,12 @@ public struct VehicleArrivalForecast: Sendable {
             let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
             let spans = zip(ride.stops, ride.stops.dropFirst()).map { $0.coordinate.distance(to: $1.coordinate) }
             let totalSpan = spans.reduce(0, +)
-            var seconds = 0.0, published = 0
+            var seconds = 0.0, published = 0, remainingSegments = 0
             for index in ride.stops.indices.dropFirst() {
                 let from = ride.stops[index - 1], to = ride.stops[index]
-                let fraction = progress?.remainingFraction(from: from.id, to: to.id) ?? progress?.remainingFraction ?? 1
+                let fraction: Double = riderProgress?.remainingSegmentFraction(from: from.id, to: to.id) ?? (riderProgress?.remainingFraction ?? 1.0)
                 guard fraction > 0 else { continue }
+                remainingSegments += 1
                 if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
                     subroute: ride.route.id, direction: ride.direction, from: from.id, to: to.id,
                     travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
@@ -437,12 +439,12 @@ public struct VehicleArrivalForecast: Sendable {
                 }
             }
             return RidingTimeEstimate(seconds: seconds,
-                evidence: published == ride.stopCount && published > 0 ? .officialProfile : .typical, observedVehicles: 0)
+                evidence: published == remainingSegments && published > 0 ? .officialProfile : .typical, observedVehicles: 0)
         }
         let traffic = observedRidePace(ride, journey: journey, first: first, last: last, at: date)
         var seconds = 0.0, measured = 0, published = 0, fallback = 0
         for index in (first + 1)...last {
-            let fraction = progress?.remainingFraction(from: journey.anchors[index-1].stop.id,
+            let fraction: Double = riderProgress?.remainingSegmentFraction(from: journey.anchors[index-1].stop.id,
                 to: journey.anchors[index].stop.id) ?? 1
             guard fraction > 0 else { continue }
             let records = (segments[segmentKey(ride.route.id, ride.direction, journey, index, metadata)] ?? [])

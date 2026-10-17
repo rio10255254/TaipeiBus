@@ -667,6 +667,10 @@ final class TransitAppModel: ObservableObject {
             mirror: source == LiveSettingsService.productionURL ? LiveSettingsService.productionMirrorURL : nil,
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.2",
             cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LiveSettings"))
+        location.onNavigationUpdate = { [weak self] in
+            self?.updateWalkingLocation()
+            self?.anchorBoardedVehicle()
+        }
     }
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
     var selectedRoute: BusRoute? { selectedRouteID.flatMap { metadata.route($0) } }
@@ -1143,6 +1147,7 @@ final class TransitAppModel: ObservableObject {
     private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
     @Published private(set) var onboardProgress: OnboardProgress?
     private var boardedReport: BusVehicle?
+    private var passedOnboardStops: (rideID: String, ids: Set<String>)?
     private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
         guard let onboardArrival, onboardArrival.rideID == ride.id,
               (0...300).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
@@ -1281,6 +1286,7 @@ final class TransitAppModel: ObservableObject {
         }
         planner.boardCurrentRide()
         onboardArrival = nil; onboardProgress = nil
+        passedOnboardStops = nil
         anchorBoardedVehicle(at: date)
     }
 
@@ -1304,7 +1310,8 @@ final class TransitAppModel: ObservableObject {
     private var riderAnchored: BusVehicle?
     func anchorBoardedVehicle(publish: Bool = true, at now: Date = Date()) {
         guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide, ride.route.mode == .bus else {
-            riderAnchored = nil; onboardProgress = nil; boardedReport = nil
+            riderAnchored = nil; boardedReport = nil; passedOnboardStops = nil
+            if onboardProgress != nil { onboardProgress = nil }
             location.setRidingNavigation(false); return
         }
         location.setRidingNavigation(true)
@@ -1548,20 +1555,21 @@ final class TransitAppModel: ObservableObject {
     /// boarding platform back into the remaining stops or continue past alighting.
     func onboardStops(for ride: TransitRide, at date: Date) -> [BusStop] {
         let planned = Array(ride.stops.dropFirst())
+        var passedIDs = passedOnboardStops.flatMap { $0.rideID == ride.id ? $0.ids : nil } ?? []
         if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
-            // Keep stops lacking a map anchor until a later confirmed stop is passed.
-            let passedIDs = progress.passedStopIDs
-            let passed = planned.indices.filter { passedIDs.contains(planned[$0].id) }
-            return Array(planned.dropFirst((passed.max() ?? -1)+1))
+            passedIDs.formUnion(progress.passedStopIDs)
         }
-        guard let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
+        if let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
               let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction),
-              journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil else { return planned }
+              journey.progress(stopID: ride.alighting.id, vehicle: bus, at: date) != nil {
+            for stop in planned where journey.progress(stopID: stop.id, vehicle: bus, at: date).map({ $0.distance < -20 }) == true {
+                passedIDs.insert(stop.id)
+            }
+        }
+        passedOnboardStops = (ride.id,passedIDs)
         // Keep unmapped intermediate platforms in the list until a later known
         // platform is passed. Missing geometry must not silently remove a stop.
-        let passed = planned.indices.filter { index in
-            journey.progress(stopID: planned[index].id, vehicle: bus, at: date).map { $0.distance < -20 } == true
-        }
+        let passed = planned.indices.filter { passedIDs.contains(planned[$0].id) }
         return Array(planned.dropFirst((passed.max() ?? -1) + 1))
     }
     func onboardTimeLabel(_ bus: BusVehicle, ride: TransitRide, stopID: String, at date: Date) -> String {

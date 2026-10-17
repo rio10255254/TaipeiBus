@@ -376,9 +376,11 @@ struct TransitHomeView: View {
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
-        .onChange(of: location.revision, initial: true) { _, _ in
-            model.updateWalkingLocation()
-            model.anchorBoardedVehicle()
+        .onChange(of: location.revision, initial: true) { before, after in
+            if before == after {
+                model.updateWalkingLocation()
+                model.anchorBoardedVehicle()
+            }
             if let position = location.usableCoordinate { planner.locationArrived(position, metadata: model.metadata) }
             if model.userMapMode != .free, let position = location.displayCoordinate, lastLocationFocus != position {
                 lastLocationFocus = position; model.focusMap(.userLocation)

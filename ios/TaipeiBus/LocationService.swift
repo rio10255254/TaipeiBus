@@ -10,6 +10,8 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var accuracy: Double?
     @Published private(set) var updatedAt: Date?
     @Published private(set) var revision = 0
+    /// Navigation consumes fixes even when the Lock Screen suspends SwiftUI.
+    var onNavigationUpdate: (() -> Void)?
     private(set) var heading: Double?
     private(set) var headingAccuracy: Double?
     private var headingTime = Date.distantPast
@@ -73,9 +75,10 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
 #if DEBUG
     private var auditLocationEnabled = false
-    func auditLocation(_ value: LocationSample) {
+    func auditLocation(_ value: LocationSample, notify: Bool = false) {
         auditLocationEnabled = true; sample = value
         coordinate = value.coordinate; accuracy = value.accuracy; updatedAt = value.timestamp; revision += 1
+        if notify { onNavigationUpdate?() }
     }
 #endif
     var displayCoordinate: Coordinate? {
@@ -212,6 +215,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         else if value.accuracy > 120 { message = AppText.text("位置約 ±%@ 公尺", Int(value.accuracy.rounded())) }
         else { message = nil }
         revision += 1
+        onNavigationUpdate?()
 #if DEBUG
         if firstUsableMilliseconds == nil, value.canPlan(at: Date()), let started = requestStartedAt {
             firstUsableMilliseconds = Date().timeIntervalSince(started) * 1_000

@@ -45,7 +45,7 @@ public struct OnboardProgress: Sendable {
         let along = match.along * Double(direction)
         return Set(anchors.dropFirst().filter { $0.match.along * Double(direction) < along-20 }.map { $0.stop.id })
     }
-    public func remainingFraction(from fromID: String, to toID: String) -> Double? {
+    public func remainingSegmentFraction(from fromID: String, to toID: String) -> Double? {
         guard let a = anchors.first(where: { $0.stop.id == fromID }),
               let b = anchors.first(where: { $0.stop.id == toID }) else { return nil }
         let first = a.match.along * Double(direction), last = b.match.along * Double(direction)

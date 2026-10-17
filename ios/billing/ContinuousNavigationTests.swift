@@ -94,4 +94,13 @@ import XCTest
         XCTAssertNil(model.onboardSecondsToAlight(option.rides[0],at:date))
         model.finishJourney()
     }
+    func testLocationDeliveryAdvancesTheRideWithoutAnyRenderedView() {
+        let date = Date().addingTimeInterval(-100), (model,_,option) = makeModel(at:date)
+        model.boardCurrentRide(at:date)
+        XCTAssertNil(model.onboardProgress?.confirmedAt)
+        model.location.auditLocation(LocationSample(coordinate:point(900),accuracy:5,timestamp:Date()),notify:true)
+        XCTAssertNotNil(model.onboardProgress?.confirmedAt)
+        XCTAssertEqual(model.onboardStops(for:option.rides[0],at:Date()).map(\.id),["s3","s4","s5"])
+        model.finishJourney()
+    }
 }
