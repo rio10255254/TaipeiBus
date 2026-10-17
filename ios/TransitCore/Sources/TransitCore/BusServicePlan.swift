@@ -59,13 +59,21 @@ public struct BusServicePlan: Sendable {
     }
 }
 
-public enum WaitingEvidence: String, Sendable { case official, timetable, headway, unknown }
+public enum WaitingEvidence: String, Sendable { case official, gps, timetable, headway, unknown }
+/// A physical bus reaching this boarding stop, measured from the same query time
+/// as the official countdown. It is never an identity assigned to the official ETA.
+public struct BoardingDeparture: Equatable, Sendable {
+    public let seconds: Double
+    public let spread: Double
+    public init(seconds: Double, spread: Double) { self.seconds = seconds; self.spread = spread }
+}
 public struct BoardingWait: Equatable, Sendable {
     public let seconds: Double
     public let lowerSeconds: Double
     public let upperSeconds: Double
     public let evidence: WaitingEvidence
     public let missedNext: Bool
+    public var departureSeconds: Double? = nil
     public var isEstimated: Bool { evidence == .headway || evidence == .unknown }
     public var label: String {
         if evidence == .unknown { return AppText.text("候車待確認") }
@@ -79,13 +87,26 @@ public enum BoardingTime {
     /// Arrival is measured from query time; readyAt includes all preceding travel, not just the transfer walk.
     public static func wait(official: Int?, readyAt: Double, buffer: Double,
                             service: BusDayService? = nil, secondsOfDay: Double = 0,
-                            boardingOffset: Double = 0, minimumServiceWait: Double = 0) -> BoardingWait {
+                            boardingOffset: Double = 0, minimumServiceWait: Double = 0,
+                            departures: [BoardingDeparture] = []) -> BoardingWait {
         let ready = max(0, readyAt), safe = ready + max(0, buffer)
         if let arrival = official, arrival >= 0, Double(arrival) >= safe {
             let wait = max(0, Double(arrival) - ready)
-            return BoardingWait(seconds: wait, lowerSeconds: wait, upperSeconds: wait, evidence: .official, missedNext: false)
+            return BoardingWait(seconds: wait, lowerSeconds: wait, upperSeconds: wait, evidence: .official,
+                missedNext: false, departureSeconds: Double(arrival))
         }
         let missed = official.map { $0 >= 0 && Double($0) < safe } ?? false
+        // A reachable official bus always wins. When it has already gone, use a
+        // later observed bus before inventing another departure from the headway.
+        let serviceOpen = official == nil || official! >= 0
+        if serviceOpen, let bus = departures.filter({
+            $0.seconds.isFinite && $0.spread.isFinite && $0.spread >= 0 &&
+            max(0, $0.seconds - $0.spread) >= safe && (official == nil || $0.seconds > Double(official!) + 60)
+        }).min(by: { $0.seconds < $1.seconds }) {
+            let wait = bus.seconds - ready
+            return BoardingWait(seconds: wait, lowerSeconds: max(buffer, wait - bus.spread),
+                upperSeconds: wait + bus.spread, evidence: .gps, missedNext: missed, departureSeconds: bus.seconds)
+        }
         if let service, !service.departures.isEmpty {
             let times = service.departures.map { Double($0 * 60) + boardingOffset - secondsOfDay }
             if let arrival = times.first(where: { $0 >= safe }) {

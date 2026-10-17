@@ -173,11 +173,9 @@ final class TransitAppModel: ObservableObject {
             let ride = option.rides[index]
             var target: Date?, status: String?
             if ride.route.mode == .bus {
-                let guide = BoardingGuide(ride: ride, metadata: metadata, snapshot: snapshot, at: now)
-                if let seconds = guide.estimateSeconds, seconds >= 0 {
-                    target = now.addingTimeInterval(Double(seconds))
-                    status = AppText.text("官方下一班")
-                } else { status = guide.arrivalShortLabel }
+                let boarding = boardingInformation(ride, at: now)
+                target = boarding.seconds.map { now.addingTimeInterval($0) }
+                status = boarding.source
             } else if let seconds = metroArrival(ride, at: now) {
                 target = now.addingTimeInterval(Double(seconds)); status = AppText.text("官方下班列車")
             } else if let estimate = metroPlatformEstimate(ride, at: now) {
@@ -717,6 +715,7 @@ final class TransitAppModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard isActive != active else { return }
         isActive = active
+        JourneyDiagnostics.shared.record(active ? "scene_active" : "scene_inactive")
         if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
         location.setActive(active)
         if !active {
@@ -1105,6 +1104,41 @@ final class TransitAppModel: ObservableObject {
         return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
     }
 
+    /// The main banner and Live Activity describe the departure the rider can
+    /// actually reach, rather than a bus leaving before the access walk finishes.
+    func boardingInformation(_ ride: TransitRide, at date: Date) -> (label: String, source: String, seconds: Double?) {
+        let official = snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date)
+        if let official, official < 0 { return (EstimateFeed.label(official), AppText.text("官方到站"), nil) }
+        var ready = 0.0
+        if let option = planner.selected, let index = option.rides.firstIndex(where: { $0.id == ride.id }), option.walks.indices.contains(index) {
+            let leg = option.walks[index]
+            ready = leg.duration ?? 0
+            if planner.walkingLegIndex == index, let progress = planner.walkingProgress,
+               progress.locationConfirmed, let fix = progress.lastFix, date.timeIntervalSince(fix) <= 20 {
+                let allowance = max(0, (leg.duration ?? 0) - (leg.streetDuration ?? leg.duration ?? 0))
+                ready = (leg.bike.map { $0.remaining(meters: progress.remainingDistance).total } ?? progress.remainingSeconds) + allowance
+            }
+        }
+        let wait = BoardingTime.wait(official: official, readyAt: ready,
+            buffer: ConnectionTiming.buffer(first: true, walking: ready),
+            service: ride.route.servicePlans[ride.direction]?.service(at: date),
+            secondsOfDay: BusServiceWindow.secondsOfDay(at: date), boardingOffset: ride.boardingOffsetSeconds,
+            minimumServiceWait: ride.route.minimumServiceWait(direction: ride.direction, at: date, fullRouteSeconds: ride.fullRouteSeconds),
+            departures: arrivalForecast.departures(for: ride, metadata: metadata, snapshot: snapshot, at: date))
+        guard wait.evidence != .unknown else { return (AppText.text("查看班次"), AppText.text("班次資訊"), nil) }
+        let seconds = wait.departureSeconds ?? (ready + wait.seconds)
+        let label = seconds <= 30 ? AppText.text("即將到站") : (wait.evidence == .official ? AppText.minutes(max(1, Int(ceil(seconds / 60)))) : AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60)))))
+        let source: String
+        switch wait.evidence {
+        case .official: source = AppText.text("官方下一班")
+        case .gps: source = AppText.text("GPS 估算")
+        case .timetable: source = AppText.text("依時刻表")
+        case .headway: source = AppText.text("班距估算")
+        case .unknown: source = AppText.text("班次資訊")
+        }
+        return (label, wait.missedNext ? AppText.text("可搭班次 · %@", source) : source, seconds)
+    }
+
     /// The last movement-based arrival while on board. A momentarily stale feed report must not
     /// swap the remaining time for the much more conservative planned ride time and back again.
     private var onboardArrival: (rideID: String, arrival: Date, at: Date)?
@@ -1204,7 +1238,8 @@ final class TransitAppModel: ObservableObject {
             boardingOffsets: remainingRides.map(\.boardingOffsetSeconds),
             ridingSpreads: spreads, at: date,
             boardingBuffers: ConnectionTiming.buffers(rides: remainingRides, walking: walking,
-                transferDistances: transfers, ridingSpreads: spreads))
+                transferDistances: transfers, ridingSpreads: spreads),
+            departures: remainingRides.map { arrivalForecast.departures(for: $0, metadata: metadata, snapshot: snapshot, at: date) })
         duration.cyclingSeconds = max(0,cycling); duration.cyclingHandlingSeconds = max(0,handling)
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
@@ -1504,7 +1539,7 @@ final class TransitAppModel: ObservableObject {
     }
     func onboardEstimateLabel(_ bus: BusVehicle, stopID: String, at date: Date) -> String {
         let display = arrivalDisplay(bus, stopID: stopID, at: date, onboard: true)
-        return display.prediction != nil ? display.label : AppText.text("時間待確認")
+        return display.prediction != nil ? display.label : display.positionLabel
     }
 
     func returnToWaiting() {

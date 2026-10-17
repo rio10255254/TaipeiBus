@@ -2,6 +2,22 @@ import XCTest
 @testable import TransitCore
 
 final class IntegratedPlanningTests: XCTestCase {
+    private final class Preliminary: @unchecked Sendable {
+        private let lock = NSLock()
+        private(set) var stages: [[TransitTrip]] = []
+        func record(_ trips: [TransitTrip]) { lock.lock(); stages.append(trips); lock.unlock() }
+    }
+    func testProgressiveCandidatesDoNotChangeTheCompleteSearch() {
+        let (metadata,bikes,counts) = fixture(), planner = MultimodalPlanner(metadata:metadata)
+        let log = Preliminary()
+        let complete = planner.plan(from:a,to:d,maximumWalk:100,limit:36,at:date,
+            bikeNetwork:bikes,bikeAvailability:counts,onPreliminary: { log.record($0) })
+        let normal = planner.plan(from:a,to:d,maximumWalk:100,limit:36,at:date,bikeNetwork:bikes,bikeAvailability:counts)
+        XCTAssertFalse(log.stages.isEmpty)
+        XCTAssertTrue(log.stages.allSatisfy { !$0.isEmpty && $0.count <= 3 })
+        XCTAssertEqual(complete.map(\.id),normal.map(\.id))
+        XCTAssertTrue(log.stages.flatMap { $0 }.allSatisfy { !$0.rides.isEmpty && $0.rides.allSatisfy { $0.stops.count >= 2 } })
+    }
     func testBicycleIsAShortTransitFeederRatherThanTheMainLeg() {
         XCTAssertTrue(TransitBikePolicy.isTransitLed(transitSeconds:1200,rideSeconds:[240],rideMeters:[900]))
         XCTAssertFalse(TransitBikePolicy.isTransitLed(transitSeconds:300,rideSeconds:[720],rideMeters:[2400]))

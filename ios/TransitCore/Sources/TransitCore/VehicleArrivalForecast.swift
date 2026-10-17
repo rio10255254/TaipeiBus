@@ -15,20 +15,20 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 }
 
 public struct VehicleArrivalPrediction: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, limited }
+    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, routeProgress, limited }
     public let seconds: Double
     public let uncertaintySeconds: Double
     public let evidence: Evidence
     public let nearStop: Bool
     public var hasUsableTime: Bool {
-        nearStop || (evidence != .limited && uncertaintySeconds <= 120 && uncertaintySeconds <= max(60, seconds * 0.4))
+        nearStop || (evidence != .limited && seconds <= 1_800 &&
+            uncertaintySeconds <= (evidence == .routeProgress ? 180 : 300) &&
+            uncertaintySeconds <= max(60, seconds * 0.4))
     }
     public var label: String {
         if nearStop { return AppText.text("站牌附近") }
         guard hasUsableTime else { return AppText.text("時間待確認") }
-        let lower = max(1, Int(ceil((seconds - uncertaintySeconds) / 60)))
-        let upper = max(lower, Int(ceil((seconds + uncertaintySeconds) / 60)))
-        return upper - lower >= 2 ? AppText.text("約 %@–%@ 分", lower, upper) : AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60))))
+        return AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60))))
     }
     public var rangeLabel: String {
         let lower = max(1, Int(ceil((seconds - uncertaintySeconds) / 60)))
@@ -40,6 +40,7 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
         case .roadHistory: return AppText.text("依近期車輛通過各站的時間估算")
         case .officialProfile: return AppText.text("依官方分時段車程與近期車流估算")
         case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
+        case .routeProgress: return AppText.text("依 GPS 位置與沿線車程估算")
         case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
         }
     }
@@ -102,13 +103,39 @@ public struct VehicleArrivalForecast: Sendable {
     private var crossings: [String: Crossing] = [:]
     private var segments: [String: [SegmentSample]] = [:]
     private var metadataRevision: UUID?
+    private var roadSignatures: [String: Int] = [:]
     public init() {}
 
     public mutating func ingest(_ vehicles: [BusVehicle], metadata: TransitMetadata, at date: Date) {
         if metadataRevision != metadata.revision {
-            history.removeAll(); crossings.removeAll(); segments.removeAll(); metadataRevision = metadata.revision
+            var signatures: [String: Int] = [:]
+            let contexts = vehicles.map { ($0.routeID, $0.direction) } + history.values.compactMap { values in
+                values.last.map { ($0.route, $0.direction) }
+            }
+            for (route, direction) in contexts {
+                let key = route + ":" + direction
+                guard signatures[key] == nil else { continue }
+                var hash = Hasher()
+                for anchor in metadata.journey(routeID: route, direction: direction)?.anchors ?? [] {
+                    hash.combine(anchor.stop.id); hash.combine(anchor.match.along)
+                }
+                for point in metadata.line(route, direction: direction)?.coordinates ?? [] {
+                    hash.combine(point.latitude); hash.combine(point.longitude)
+                }
+                signatures[key] = hash.finalize()
+            }
+            history = history.filter { _, values in
+                guard let latest = values.last else { return false }
+                let key = latest.route + ":" + latest.direction
+                return signatures[key] != nil && signatures[key] == roadSignatures[key]
+            }
+            crossings = crossings.filter { history[$0.key] != nil }
+            roadSignatures = signatures; metadataRevision = metadata.revision
         }
-        var current: [String: [Observation]] = [:], currentCrossings: [String: Crossing] = [:]
+        // One missing packet must not erase the preceding traffic sample. The
+        // public prediction still requires a fresh GPS report from this vehicle.
+        var current = history.filter { $0.value.last.map { (-5...90).contains(date.timeIntervalSince($0.date)) } ?? false }
+        var currentCrossings = crossings.filter { current[$0.key] != nil }
         for bus in vehicles where bus.hasReliablePosition(at: date) {
             guard bus.aligned, let match = bus.roadMatch,
                   let journey = metadata.journey(routeID: bus.routeID, direction: bus.direction) else { continue }
@@ -253,9 +280,15 @@ public struct VehicleArrivalForecast: Sendable {
         guard seconds > 0 else { return nil }
         // A short movement sample cannot describe distant traffic or extrapolate a terminal dwell over the whole route.
         let withinObservedHorizon = seconds <= 900 && progress.distance <= max(1_200, observedDistance * 4 + 40)
+        // One fresh moving GPS report can provide a short-range estimate before
+        // history matures. Never extend a terminal layover or a 50-minute crawl
+        // across the route, and never use a straight-line distance to the stop.
+        let localGPS = inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
+            seconds <= 600 && progress.distance <= 2_500
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
             fallback == 0 && profiled > 0 ? .officialProfile :
-            learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement : .limited
+            learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement :
+            localGPS ? .routeProgress : .limited
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
         let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, seconds * 0.1) : 0
         return VehicleArrivalPrediction(seconds: max(15, seconds - elapsed),
@@ -293,7 +326,7 @@ public struct VehicleArrivalForecast: Sendable {
         }
         if let official = officialSeconds, official >= 0,
            result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) {
-            return VehicleArrivalDisplay(label: AppText.text("時間待確認"), positionLabel: position,
+            return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。"), prediction: nil)
         }
         guard result.hasUsableTime else {
@@ -304,6 +337,22 @@ public struct VehicleArrivalForecast: Sendable {
             explanation: result.evidenceLabel, prediction: result)
     }
 
+    /// Only real, fresh, upstream buses on the complete requested stop pattern.
+    /// A route-level official ETA is kept independent of these physical buses.
+    public func departures(for ride: TransitRide, metadata: TransitMetadata, snapshot: TransitSnapshot,
+                           at date: Date) -> [BoardingDeparture] {
+        guard ride.route.mode == .bus else { return [] }
+        let official = snapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date)
+        if let official, official < 0 { return [] }
+        return BoardingGuide.vehicles(ride: ride, metadata: metadata, snapshot: snapshot, at: date, approachingOnly: true)
+            .compactMap { approach in
+                let result = display(approach.vehicle, stopID: ride.boarding.id, metadata: metadata,
+                    at: date, officialSeconds: official).prediction
+                guard let result, result.hasUsableTime else { return nil }
+                return BoardingDeparture(seconds: result.seconds, spread: result.uncertaintySeconds)
+            }.sorted { $0.seconds < $1.seconds }
+    }
+
     public func ridingSeconds(_ ride: TransitRide, metadata: TransitMetadata, at date: Date) -> Double {
         ridingEstimate(ride, metadata: metadata, at: date).seconds
     }
@@ -312,14 +361,14 @@ public struct VehicleArrivalForecast: Sendable {
     /// Observation freshness stays anchored to now, even for a later transfer.
     public func plannedRidingEstimates(_ trip: TransitTrip, metadata: TransitMetadata, estimates: EstimateFeed,
                                       walkingDurations: [Double?], preferences: LiveSettings.Planning = .init(),
-                                      at date: Date) -> [RidingTimeEstimate] {
+                                      at date: Date, departures: [[BoardingDeparture]] = []) -> [RidingTimeEstimate] {
         let walks = trip.planningWalkSeconds.enumerated().map { index, seconds in
             walkingDurations.indices.contains(index) ? walkingDurations[index] ?? seconds : seconds
         }
         var durations = trip.rideSeconds, result: [RidingTimeEstimate] = [], elapsed = 0.0
         for (index, ride) in trip.rides.enumerated() {
             let assessment = TripRanking.assessment(trip, estimates: estimates, at: date, preferences: preferences,
-                walkingDurations: walkingDurations, ridingDurations: durations)
+                walkingDurations: walkingDurations, ridingDurations: durations, departures: departures)
             elapsed += max(0, walks[index]) + assessment.waits[index].seconds
             let value = ridingEstimate(ride, metadata: metadata, at: date, travellingAt: date.addingTimeInterval(elapsed))
             durations[index] = value.seconds; result.append(value); elapsed += value.seconds

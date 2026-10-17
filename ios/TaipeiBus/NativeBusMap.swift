@@ -52,6 +52,7 @@ struct NativeBusMap: UIViewRepresentable {
         context.coordinator.model = model
         context.coordinator.reduceMotion = reduceMotion
         context.coordinator.darkMode = colorScheme == .dark
+        if !model.isActive { context.coordinator.resetPacing() }
         let inset = UIEdgeInsets(top: topInset, left: 12, bottom: bottomInset, right: 12)
         let viewportChanged = context.coordinator.requestInset(inset, map: map)
         context.coordinator.update(location: location, viewportChanged: viewportChanged)
@@ -103,6 +104,9 @@ struct NativeBusMap: UIViewRepresentable {
         }
         private let places = ViewportPlaceRenderer()
         private var displayLink: CADisplayLink?
+        private var pacing = FramePacingWindow()
+        private let previousBatteryMonitoring = UIDevice.current.isBatteryMonitoringEnabled
+        func resetPacing() { pacing.reset() }
         private var lastSnapshotRevision = -1
         private var lastRouteKey = ""
         private var lastVehicleKey = ""
@@ -203,6 +207,8 @@ struct NativeBusMap: UIViewRepresentable {
         /// ProMotion screens run the map, the 3D buses and the camera at up to 120 Hz.
         private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
         func stop() {
+            pacing.reset()
+            UIDevice.current.isBatteryMonitoringEnabled = previousBatteryMonitoring
             insetWork?.cancel(); insetWork = nil; pendingInset = nil
             places.stop()
             displayLink?.invalidate(); displayLink = nil
@@ -1484,6 +1490,10 @@ struct NativeBusMap: UIViewRepresentable {
 
         @objc private func tick(_ link: CADisplayLink) {
             guard model.isActive, let map else { return }
+            if let sample = pacing.observe(timestamp: link.timestamp, targetInterval: link.targetTimestamp-link.timestamp) {
+                UIDevice.current.isBatteryMonitoringEnabled = true
+                JourneyDiagnostics.shared.record("display fps=\(Int(sample.framesPerSecond.rounded())) delayed=\(sample.delayedFrames)/\(sample.frames) longest_ms=\(Int(sample.longestGapMilliseconds.rounded())) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) battery_pct=\(Int(UIDevice.current.batteryLevel*100)) low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled)")
+            }
 #if DEBUG
             let tickStarted = CACurrentMediaTime()
             defer { zoomProbe.tick(milliseconds: (CACurrentMediaTime() - tickStarted) * 1000) }

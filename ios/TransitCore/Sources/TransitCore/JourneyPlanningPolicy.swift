@@ -69,6 +69,21 @@ public struct JourneyChoice: Sendable {
 }
 
 public enum JourneyChoiceRanking {
+    public static func reason(for choice: JourneyChoice, comparedTo other: JourneyChoice) -> String? {
+        let extra = choice.elapsed - other.elapsed
+        if choice.transfers < other.transfers {
+            if extra > 90, extra <= 300 {
+                return AppText.text("多花 %@ 分，少轉乘 %@ 次", Int(ceil(extra / 60)), other.transfers - choice.transfers)
+            }
+            return AppText.text("少轉乘 %@ 次", other.transfers - choice.transfers)
+        }
+        if choice.rentals == 1, other.rentals > 1 { return AppText.text("只需借還一次") }
+        if choice.rentals == 0, other.rentals > 0 { return AppText.text("不用借還車") }
+        let foot = other.walking - choice.walking
+        if foot >= 120 { return AppText.text("少走 %@ 分", Int((foot / 60).rounded())) }
+        if extra <= -120 { return AppText.text("快約 %@ 分", Int((-extra / 60).rounded())) }
+        return nil
+    }
     /// Preserve meaningful time/effort/reliability tradeoffs across every travel mode.
     public static func recommended(_ choices: [JourneyChoice]) -> [String] {
         let ordered = choices.filter { $0.score.isFinite && $0.elapsed.isFinite && $0.elapsed >= 0 }.sorted {

@@ -83,7 +83,7 @@ final class ArrivalIntegrityTests: XCTestCase {
         var forecast = VehicleArrivalForecast(); forecast.ingest([vehicle], metadata: metadata, at: now)
         XCTAssertLessThan(try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now)).seconds, 60)
         let display = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 720)
-        XCTAssertEqual(display.label, "時間待確認"); XCTAssertEqual(display.positionLabel, "還有 1 站")
+        XCTAssertEqual(display.label, display.positionLabel); XCTAssertEqual(display.positionLabel, "還有 1 站")
         XCTAssertNil(display.prediction)
         XCTAssertFalse(display.label.contains("12")); XCTAssertFalse(display.label.contains("1 分"))
     }
@@ -101,7 +101,7 @@ final class ArrivalIntegrityTests: XCTestCase {
         let display = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now)
         XCTAssertTrue(display.label.contains("分")); XCTAssertNotNil(display.prediction)
         let conflict = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 720)
-        XCTAssertEqual(conflict.label, "時間待確認"); XCTAssertNil(conflict.prediction)
+        XCTAssertEqual(conflict.label, conflict.positionLabel); XCTAssertNil(conflict.prediction)
         XCTAssertTrue(conflict.explanation.contains("候車請以官方下一班為準"))
         for status in [-1, -2, -3, -4] {
             let unavailable = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: status)
@@ -126,6 +126,62 @@ final class ArrivalIntegrityTests: XCTestCase {
         forecast.ingest([bus(along: 300, age: -100, speed: 0, metadata: metadata)], metadata: metadata, at: now.addingTimeInterval(100))
         XCTAssertNil(forecast.prediction(bus(along: 300, age: -100, speed: 0, metadata: metadata), stopID: ride.boarding.id,
             metadata: metadata, at: now.addingTimeInterval(100)), "Reset travel history after a long reporting gap")
+    }
+
+    func testFreshMovingGPSOffersUsefulShortEstimateImmediately() throws {
+        let (metadata, ride) = source()
+        let vehicle = bus(along: 250, metadata: metadata)
+        let forecast = VehicleArrivalForecast()
+        let prediction = try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now))
+        XCTAssertEqual(prediction.evidence, .routeProgress)
+        XCTAssertTrue(prediction.hasUsableTime)
+        let display = forecast.display(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now)
+        XCTAssertNotNil(display.prediction); XCTAssertTrue(display.label.contains("約")); XCTAssertTrue(display.label.contains("分"))
+        XCTAssertFalse(display.label.contains("–"))
+        var snapshot = TransitSnapshot(); snapshot.vehicles = [vehicle]
+        XCTAssertEqual(forecast.departures(for: ride, metadata: metadata, snapshot: snapshot, at: now).count, 1)
+        XCTAssertNil(forecast.prediction(bus(along: 10, speed: 0, metadata: metadata), stopID: ride.boarding.id, metadata: metadata, at: now))
+    }
+
+    func testOneMissingPacketAndUnchangedMetadataRefreshPreserveLearning() throws {
+        var (metadata, ride) = source()
+        var forecast = VehicleArrivalForecast()
+        for (age, along) in [(60.0,100.0),(30.0,250.0)] {
+            forecast.ingest([bus(along: along, age: age, metadata: metadata)], metadata: metadata, at: now.addingTimeInterval(-age))
+        }
+        forecast.ingest([], metadata: metadata, at: now.addingTimeInterval(-15))
+        metadata.rebuildJourneys()
+        let vehicle = bus(along: 400, metadata: metadata)
+        forecast.ingest([vehicle], metadata: metadata, at: now)
+        let result = try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.boarding.id, metadata: metadata, at: now))
+        XCTAssertEqual(result.evidence,.recentMovement)
+        XCTAssertTrue(result.hasUsableTime)
+    }
+
+    func testHourOfGPSIncludesStopsMissingPacketsTurnaroundsAndMetadataRefresh() throws {
+        var (metadata, ride) = source(count: 80, boarding: 40)
+        var forecast = VehicleArrivalForecast()
+        var usable = 0
+        for second in stride(from: 0, through: 3_600, by: 15) {
+            let date = now.addingTimeInterval(Double(second))
+            if second > 0, second % 300 == 0 { metadata.rebuildJourneys() }
+            let length = metadata.line(ride.route.id, direction: ride.direction)!.length
+            let vehicles = (0..<24).compactMap { id -> BusVehicle? in
+                if second % 105 == 0, id % 5 == 0 { return nil }
+                let travelled = Double(second-(second/120)*20-min(second%120,20)) * 5 + Double(id)*400
+                let along = travelled.truncatingRemainder(dividingBy:length)
+                return bus("long-\(id)", along: along, age: -Double(second), speed: second % 120 < 20 ? 0 : 18, metadata: metadata)
+            }
+            forecast.ingest(vehicles,metadata:metadata,at:date)
+            var snapshot = TransitSnapshot(); snapshot.vehicles = vehicles
+            let departures = forecast.departures(for:ride,metadata:metadata,snapshot:snapshot,at:date)
+            XCTAssertEqual(departures.map(\.seconds),departures.map(\.seconds).sorted())
+            for departure in departures { XCTAssertTrue(departure.seconds.isFinite); XCTAssertGreaterThanOrEqual(departure.seconds,0) }
+            usable += departures.count
+            let wait = BoardingTime.wait(official:nil,readyAt:300,buffer:60,departures:departures)
+            if wait.evidence == .gps { XCTAssertGreaterThanOrEqual(try XCTUnwrap(wait.departureSeconds),360) }
+        }
+        XCTAssertGreaterThan(usable,200)
     }
 
     func testDelayedOrOppositeHeadingGPSNeverPromisesArrival() throws {
