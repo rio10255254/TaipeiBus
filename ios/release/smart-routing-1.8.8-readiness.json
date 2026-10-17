@@ -1,0 +1,154 @@
+{
+  "version": "1.8.8",
+  "distribution": "testflight-only",
+  "production_submission_authorized": false,
+  "source_head": "3c38fcb8e55ab0b01d69e8b6eb8affffb3f36612",
+  "verification": {
+    "core_run": 38991131490,
+    "core_tests": 284,
+    "core_optional_skipped": 12,
+    "core_failures": 0,
+    "gps_replay_seconds": 3600,
+    "display_counter_replay_seconds": 3600,
+    "physical_device_validation": "not performed",
+    "native_run": 38992775660,
+    "ui_run": 38989590608,
+    "native_status": "success",
+    "ui_status": "success",
+    "english_templates": 727,
+    "core_status": "success",
+    "native_source": "5928b67e61e72dd3ac34012e4f2026d4ee4388aa",
+    "ui_source": "cf8c188b32be642178ef9c2bf1a08b07a2204568",
+    "ui_tests": 2,
+    "ui_failures": 0,
+    "ui_seconds": 150.731,
+    "ui_changes_since_verified_source": [
+      "Restore the existing Comparing badge while background comparisons are still running; fixture screenshots have comparisons completed."
+    ],
+    "ui_artifact": 12085346482,
+    "visually_inspected": [
+      "FD84DD23-412D-47B1-91B5-8D4F0B2040AB.png",
+      "F0602F99-9C9C-4F4E-97B4-BEF95DE06625.png",
+      "F9BF3419-B120-4FF2-BC7A-35D51E843B64.png",
+      "5F1B54CC-D06C-4D5E-9FC5-D907194FDB54.png"
+    ],
+    "previous_native_run": 38990932821,
+    "previous_native_tests": 87,
+    "previous_native_failures": 0,
+    "previous_native_quality_gap": "Only one provisional bus alternative could survive a depleted optional verification allowance; release held to restore better rail contenders.",
+    "native_tests": 88,
+    "native_failures": 0,
+    "native_seconds": 281.985,
+    "native_artifact": 12085987082,
+    "consecutive_searches": 12,
+    "first_choice_seconds": {
+      "minimum": 1.6982719898223877,
+      "median": 2.933149993419647,
+      "maximum": 3.5081329345703125
+    },
+    "reported_origin_checked_options": {
+      "Neihu": 2,
+      "NiuSi": 4
+    },
+    "neihu_rail_with_bike_seconds": 2302.8171459543437,
+    "neihu_walking_rail_seconds": 2695.9137294186476,
+    "live_audit_run": 38993238529,
+    "live_audit_status": "success",
+    "live_vehicle_reports": 1189,
+    "live_vehicles_with_raw_predictions": 744,
+    "live_ordered_raw_predictions": 13824,
+    "live_checks": [
+      "finite and nonnegative times",
+      "ordered downstream stop times",
+      "expired GPS cannot produce predictions",
+      "published route and cooperated variant coverage"
+    ],
+    "hour_replay_kind": "Synthetic route-aligned GPS with stops, missing packets, turnarounds and metadata refresh; not a physical-device hour"
+  },
+  "gps_policy": {
+    "official_first": true,
+    "cold_gps_max_age_seconds": 30,
+    "cold_gps_max_road_distance_meters": 2500,
+    "cold_gps_max_arrival_seconds": 600,
+    "known_source_conflict_does_not_reassign_official_vehicle_identity": true,
+    "short_missing_packet_preserves_history": true,
+    "route_changes_expire_history": true,
+    "unchanged_metadata_preserves_history": true,
+    "terminal_layover_is_not_departure": true
+  },
+  "walking_policy": {
+    "personal_pace_uses_recent_device_gps": true,
+    "requires_fresh_accurate_fixes": true,
+    "bicycle_does_not_train_walking_pace": true,
+    "verified_public_entrance_alternatives": true,
+    "keeps_real_provider_geometry": true
+  },
+  "presentation": {
+    "reachable_departure_in_main_banner_and_live_activity": true,
+    "central_arrival_estimate_in_primary_card": true,
+    "bounds_available_in_timing_details": true,
+    "meaningful_time_effort_tradeoffs": true,
+    "manual_selection_retained": true
+  },
+  "performance": {
+    "previous_run": 38989863904,
+    "original_seconds": [
+      5.492438,
+      5.46111,
+      8.435202
+    ],
+    "cache_check_run": 38990630916,
+    "improved_seconds": [
+      3.657498,
+      3.915162,
+      6.334502
+    ],
+    "candidate_counts": [
+      54,
+      54,
+      54
+    ],
+    "cycling_counts": [
+      47,
+      49,
+      38
+    ],
+    "production_latency_budget_seconds": 8,
+    "unoptimized_debug_still_checks_route_content": true,
+    "final_run": 38991131490,
+    "final_seconds": [
+      3.472184,
+      3.717681,
+      5.267584
+    ],
+    "final_status": "success"
+  },
+  "street_verification": {
+    "hard_request_budget": 40,
+    "first_choice_budget": 36,
+    "optional_budget": 12,
+    "window_seconds": 60,
+    "concurrent_requests": 2,
+    "prioritize_best_overall_rail_and_bike_rail": true,
+    "retain_early_checked_route_during_recovery": true,
+    "recover_better_contenders_after_shared_interruption": true
+  },
+  "tested_code_head": "5928b67e61e72dd3ac34012e4f2026d4ee4388aa",
+  "tested_tree_matches_release_tree": true,
+  "release": {
+    "run": 38993833703,
+    "artifact": 12086154351,
+    "status": "internal_group_assigned",
+    "build_number": "140.1.0",
+    "build_id": "bd20f783-26a0-432d-b542-1419aaf20ece",
+    "upload_confirmed": true,
+    "uploaded_at": "2026-10-17T02:14:51.020938+00:00",
+    "archive": "D:\\TaipeiBus-release-1.8.8\\release\\testflight-dSYMs.zip",
+    "dsym_sha256": "9a1d716d198fb87aa092e809addae5fa3df1a407080ab60c6cc50e0d7cdbb6d4",
+    "dsym_crc_verified": true,
+    "app_and_widget_dwarf_present": true,
+    "receipt": "testflight-1.8.8-receipt.json"
+  },
+  "what_to_test_sha256_lf": "c21df3148c3b2a076dbddd57151c9bf8e7861680ccdeaeffce197ffa671222f1",
+  "recorded_at": "2026-10-17T02:28:14.216363+00:00"
+}
