@@ -54,9 +54,11 @@ final class RidingTrafficTests: XCTestCase {
         XCTAssertEqual(prediction.evidence, .officialProfile)
         XCTAssertEqual(prediction.seconds, 400 + 200 * (span - 700) / span, accuracy: 5)
         XCTAssertTrue(prediction.hasUsableTime)
-        // Without the profile the same lone bus only has its own short movement sample.
+        // Without a profile, fresh GPS can still offer a short approximate time,
+        // clearly distinguished from the official hour profile.
         let plain = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: source().0, at: now))
-        XCTAssertEqual(plain.evidence, .limited)
+        XCTAssertEqual(plain.evidence, .routeProgress)
+        XCTAssertTrue(plain.hasUsableTime)
     }
     func testOfficialProfileIsNotAppliedToABusWaitingAtItsFirstStop() throws {
         let m = try withOfficialProfile(source().0, seconds: 200)

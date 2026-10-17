@@ -796,12 +796,6 @@ private struct JourneyWaitingActions: View {
                     }
                     BikeStationAlert(model: model, planner: planner)
                 }
-                TimelineView(.periodic(from: .now, by: 1)) { timeline in
-                    if model.journeyDuration(option, at: timeline.date)?.waits.first?.missedNext == true {
-                        Label(AppText.text("下一班可能趕不上"), systemImage: "exclamationmark.triangle.fill")
-                            .liveFont(.caption, weight: .semibold).foregroundStyle(MapChrome.caution)
-                    }
-                }
             }
         }
     }
@@ -1029,10 +1023,14 @@ struct JourneyOptionsView: View {
                 }
             }
             if let timing {
-                if !option.walkingOnly { Text(timing.includedWaitingLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1) }
-                Text(timing.arrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                if !option.walkingOnly { Text(timing.expectedWaitingLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1) }
+                Text(timing.expectedArrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
             }
             JourneyRouteChain(option: option).padding(.top, 5)
+            if let reason = planner.optionReasons[option.id] {
+                Text(reason).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .accessibilityIdentifier("journey-recommendation-reason")
+            }
             if live.language == .english, let first = option.rides.first, let last = option.rides.last {
                 Text(first.boarding.name + " → " + last.alighting.name).liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -1063,7 +1061,7 @@ struct JourneyItineraryView: View {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(planner.started ? duration.summaryLabel(remaining: true) : duration.conciseLabel)
                                         .liveFont(.headline).monospacedDigit()
-                                    Text(duration.arrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary)
+                                    Text(duration.expectedArrivalLabel).liveFont(.subheadline).foregroundStyle(.secondary)
                                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
                                 Spacer()
                                 Button { showTimingInfo = true } label: { Image(systemName: "info.circle").frame(width: 40, height: 40) }
@@ -1072,6 +1070,7 @@ struct JourneyItineraryView: View {
                                         VStack(alignment: .leading, spacing: 10) {
                                             Text(duration.breakdownLabel).liveFont(.headline)
                                             Text(duration.waitingLabel)
+                                            Text(duration.arrivalLabel)
                                             if duration.ridingSeconds > 0 { Text(duration.ridingSourceLabel) }
                                             Text(AppText.text("總時間已包含步行、候車與搭車。")).fixedSize(horizontal: false, vertical: true)
                                         }.liveFont(.subheadline).padding(20).frame(maxWidth: 320).presentationCompactAdaptation(.popover)
@@ -1547,6 +1546,7 @@ private struct WaitingBannerContent: View {
     let date: Date
     var body: some View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
+        let boarding = model.boardingInformation(ride, at: date)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
@@ -1563,11 +1563,11 @@ private struct WaitingBannerContent: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(ride.route.mode == .bus ? guide.arrivalShortLabel : model.metroWaitLabel(ride, at: date)).liveFont(.title, weight: .bold, design: .rounded)
+                    Text(ride.route.mode == .bus ? boarding.label : model.metroWaitLabel(ride, at: date)).liveFont(.title, weight: .bold, design: .rounded)
                         .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("boarding-official-arrival")
-                    Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : guide.estimateSeconds == nil ? AppText.text("暫無預估") : AppText.text("官方下一班"))
+                    Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : boarding.source)
                         .liveFont(.caption, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
                 }.layoutPriority(1)

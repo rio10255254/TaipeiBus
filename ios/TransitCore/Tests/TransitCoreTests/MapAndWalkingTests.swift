@@ -51,6 +51,23 @@ final class MapAndWalkingTests: XCTestCase {
         XCTAssertTrue(progress.update(coordinate: point(12,4), accuracy: 5, timestamp: now.addingTimeInterval(3), now: now.addingTimeInterval(3)))
         XCTAssertGreaterThan(progress.remainingDistance, 180, "GPS drift onto a nearby parallel leg must not jump to the destination.")
     }
+    func testActualWalkingPaceRefinesTimeWithoutMistakingCyclingForWalking() {
+        var walking = WalkingProgress(coordinates:[point(0),point(500)],distance:500,seconds:500)
+        var bike = WalkingProgress(coordinates:[point(0),point(500)],distance:500,seconds:120,learnsWalkingPace:false)
+        for second in stride(from:0,through:60,by:10) {
+            let date = now.addingTimeInterval(Double(second)), location = point(Double(second)*1.6)
+            XCTAssertTrue(walking.update(coordinate:location,accuracy:5,timestamp:date,now:date))
+            XCTAssertTrue(bike.update(coordinate:location,accuracy:5,timestamp:date,now:date))
+        }
+        XCTAssertEqual(walking.observedWalkingSpeed ?? 0,1.6,accuracy:0.05)
+        XCTAssertLessThan(walking.remainingSeconds,walking.remainingDistance)
+        XCTAssertGreaterThan(walking.remainingSeconds,walking.remainingDistance/1.6)
+        XCTAssertNil(bike.observedWalkingSpeed)
+        XCTAssertEqual(bike.remainingSeconds,120*bike.remainingDistance/500,accuracy:0.01)
+        let resume = now.addingTimeInterval(120)
+        _ = walking.update(coordinate:point(100),accuracy:5,timestamp:resume,now:resume)
+        XCTAssertNil(walking.observedWalkingSpeed,"A reporting gap must not preserve an old walking speed indefinitely")
+    }
     func testOffRouteRequiresRepeatedFreshEvidenceAndResetsAfterRecovery() {
         var progress = WalkingProgress(coordinates: [point(0),point(100)], distance: 100, seconds: 80)
         _ = progress.update(coordinate: point(10), accuracy: 5, timestamp: now, now: now)

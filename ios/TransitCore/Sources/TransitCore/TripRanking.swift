@@ -32,7 +32,8 @@ public enum TripRanking {
                               services: [BusDayService?] = [], boardingOffsets: [Double] = [],
                               ridingSpreads: [Double] = [],
                               at date: Date = Date(), serviceTimeOfDay: Double? = nil, cyclingSeconds: Double = 0,
-                              rentalCount: Int = 0, boardingBuffers: [Double] = [], supplyRisk: Double = 0) -> TripAssessment {
+                              rentalCount: Int = 0, boardingBuffers: [Double] = [], supplyRisk: Double = 0,
+                              departures: [[BoardingDeparture]] = []) -> TripAssessment {
         precondition(walking.count == riding.count + 1 && arrivals.count == riding.count)
         let walks = walking.map { max(0, $0) }
         var elapsed = 0.0, lower = 0.0, upper = 0.0, waiting = 0.0, unknown = 0, missed = false, spread = 0.0
@@ -50,7 +51,8 @@ public enum TripRanking {
                 service: services.indices.contains(index) ? services[index] : nil,
                 secondsOfDay: timeOfDay,
                 boardingOffset: boardingOffsets.indices.contains(index) ? boardingOffsets[index] : 0,
-                minimumServiceWait: minimumServiceWaits.indices.contains(index) ? minimumServiceWaits[index] : 0)
+                minimumServiceWait: minimumServiceWaits.indices.contains(index) ? minimumServiceWaits[index] : 0,
+                departures: departures.indices.contains(index) ? departures[index] : [])
             if index == 0 && result.missedNext { missed = true }
             if result.isEstimated { unknown += 1 }
             let before = elapsed, beforeLower = lower, beforeUpper = upper
@@ -59,8 +61,9 @@ public enum TripRanking {
             let rideSpread = ridingSpreads.indices.contains(index) ? max(0, ridingSpreads[index]) : 0
             // A reachable official departure is anchored to query time. Earlier
             // uncertainty changes how long we wait, not that departure's clock.
-            if result.evidence == .official, let arrival {
-                elapsed = Double(arrival) + ride; lower = elapsed; upper = elapsed
+            if let departure = result.departureSeconds {
+                elapsed = departure + ride
+                lower = ready + result.lowerSeconds + ride; upper = ready + result.upperSeconds + ride
                 // Catching that departure absorbs how early or late the earlier rides ran.
                 spread = rideSpread
             } else if result.evidence == .timetable || result.missedNext {
@@ -77,7 +80,7 @@ public enum TripRanking {
             waits.append(BoardingWait(seconds: wait,
                 lowerSeconds: max(0, lower - ride - beforeUpper),
                 upperSeconds: max(0, upper - ride - beforeLower),
-                evidence: result.evidence, missedNext: result.missedNext))
+                evidence: result.evidence, missedNext: result.missedNext, departureSeconds: result.departureSeconds))
             waiting += wait
         }
         elapsed += walks.last ?? 0
@@ -98,7 +101,8 @@ public enum TripRanking {
                                   preferences: LiveSettings.Planning = .init(),
                                   walkingDurations: [Double?]? = nil, ridingDurations: [Double]? = nil,
                                   ridingSpreads: [Double]? = nil, cyclingSeconds: Double? = nil,
-                                  rentalCount: Int? = nil, supplyRisk: Double? = nil) -> TripAssessment {
+                                  rentalCount: Int? = nil, supplyRisk: Double? = nil,
+                                  departures: [[BoardingDeparture]] = []) -> TripAssessment {
         let walking = trip.planningWalkSeconds.enumerated().map { index, seconds -> Double in
             if let durations = walkingDurations, durations.indices.contains(index), let seconds = durations[index] { return seconds }
             return seconds
@@ -115,7 +119,7 @@ public enum TripRanking {
             ridingSpreads: spreads, at: date, cyclingSeconds: cyclingSeconds ?? trip.planningCyclingSeconds,
             rentalCount: rentalCount ?? trip.bikeConnections.count,
             boardingBuffers: ConnectionTiming.buffers(for: trip, walking: walking, ridingSpreads: spreads),
-            supplyRisk: supplyRisk ?? trip.planningSupplyRisk)
+            supplyRisk: supplyRisk ?? trip.planningSupplyRisk, departures: departures)
     }
 
     /// Keep a reasonable direct alternative alongside meaningful time/walking trade-offs.
@@ -124,14 +128,16 @@ public enum TripRanking {
                                    walkingDurations: [String: [Double?]] = [:],
                                    ridingDurations: [String: [Double]] = [:], diverse: Bool = true,
                                    cyclingDurations: [String: Double] = [:], rentalCounts: [String: Int] = [:],
-                                   choiceGroups: [String: String] = [:]) -> [TransitTrip] {
+                                   choiceGroups: [String: String] = [:],
+                                   departureOptions: [String: [[BoardingDeparture]]] = [:]) -> [TransitTrip] {
         guard limit > 0 else { return [] }
         let byID = Dictionary(uniqueKeysWithValues: trips.map { ($0.id, $0) })
         let scores = Dictionary(uniqueKeysWithValues: trips.map { trip in
             (trip.id, assessment(trip, estimates: estimates, at: date, preferences: preferences,
                 walkingDurations: walkingDurations[trip.id], ridingDurations: ridingDurations[trip.id],
                 cyclingSeconds: cyclingDurations[trip.id],
-                rentalCount: rentalCounts[trip.id] ?? (trip.bikeConnections.isEmpty ? ((cyclingDurations[trip.id] ?? 0) > 0 ? 1 : 0) : trip.bikeConnections.count)))
+                rentalCount: rentalCounts[trip.id] ?? (trip.bikeConnections.isEmpty ? ((cyclingDurations[trip.id] ?? 0) > 0 ? 1 : 0) : trip.bikeConnections.count),
+                departures: departureOptions[trip.id] ?? []))
         })
         // Connector durations include cycling so departure feasibility and arrival clocks
         // remain correct. Only the preference cost and walking comparison exclude riding.

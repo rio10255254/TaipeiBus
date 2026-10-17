@@ -79,6 +79,16 @@ public struct JourneyDuration: Equatable, Sendable {
         }
         return AppText.text("約 %@ 抵達", clock(referenceDate.addingTimeInterval(totalSeconds)))
     }
+    /// The central estimate is the first thing to read; detailed bounds remain
+    /// available in the journey's timing explanation.
+    public var expectedArrivalLabel: String {
+        if unknownWaits > 0 || positionUncertain { return arrivalLabel }
+        return AppText.text("約 %@ 抵達", clock(referenceDate.addingTimeInterval(totalSeconds)))
+    }
+    public var expectedWaitingLabel: String {
+        guard !waits.isEmpty, unknownWaits == 0 else { return waitingLabel }
+        return waitingSeconds < 30 ? AppText.text("已含候車 · 即將可搭") : AppText.text("含候車約 %@ 分", minutes(waitingSeconds))
+    }
     private func minutes(_ seconds: Double) -> Int { max(seconds > 0 ? 1 : 0, Int(ceil(max(0, seconds) / 60))) }
     private func clock(_ date: Date) -> String {
         let formatter = DateFormatter(); formatter.locale = Locale(identifier: "zh_TW"); formatter.timeZone = TimeZone(identifier: "Asia/Taipei")
@@ -89,10 +99,10 @@ public struct JourneyDuration: Equatable, Sendable {
 
     public init(riding: [Double], walking: [Double], arrivals: [Int?], minimumServiceWaits: [Double] = [],
                 services: [BusDayService?] = [], boardingOffsets: [Double] = [], ridingSpreads: [Double] = [],
-                at date: Date = Date(), boardingBuffers: [Double] = []) {
+                at date: Date = Date(), boardingBuffers: [Double] = [], departures: [[BoardingDeparture]] = []) {
         let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: arrivals,
             minimumServiceWaits: minimumServiceWaits, services: services, boardingOffsets: boardingOffsets,
-            ridingSpreads: ridingSpreads, at: date, boardingBuffers: boardingBuffers)
+            ridingSpreads: ridingSpreads, at: date, boardingBuffers: boardingBuffers, departures: departures)
         self.init(assessment: assessment, riding: riding)
     }
     public init(assessment: TripAssessment, riding: [Double]) {

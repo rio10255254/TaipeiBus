@@ -12,8 +12,13 @@ public struct WalkingProgress: Sendable {
     private var lastAccuracy = 0.0
     private var outsideSince: Date?
     private var outsideCount = 0
-    public init(coordinates: [Coordinate], distance: Double, seconds: Double) {
+    private let learnsWalkingPace: Bool
+    private var paceSamples: [(along: Double, date: Date)] = []
+    public private(set) var observedWalkingSpeed: Double?
+    private var paceWeight = 0.0
+    public init(coordinates: [Coordinate], distance: Double, seconds: Double, learnsWalkingPace: Bool = true) {
         line = RouteLine(coordinates: coordinates); routeDistance = distance; routeSeconds = seconds
+        self.learnsWalkingPace = learnsWalkingPace
     }
     public var needsReroute: Bool { outsideCount >= 3 }
     public var remainingDistance: Double {
@@ -22,7 +27,9 @@ public struct WalkingProgress: Sendable {
     }
     public var remainingSeconds: Double {
         guard routeDistance > 0 else { return 0 }
-        return routeSeconds * remainingDistance / routeDistance
+        let planned = routeSeconds * remainingDistance / routeDistance
+        guard let speed = observedWalkingSpeed else { return planned }
+        return planned * (1-paceWeight) + remainingDistance / speed * paceWeight
     }
     public var remainingCoordinates: [Coordinate] {
         guard let match, let end = line.coordinates.last, line.coordinates.count >= 2 else { return line.coordinates }
@@ -55,6 +62,24 @@ public struct WalkingProgress: Sendable {
         }
         lastFix = timestamp; lastAccuracy = accuracy
         if let best {
+            if accuracy > 15 { paceSamples = []; observedWalkingSpeed = nil; paceWeight = 0 }
+            if learnsWalkingPace, accuracy <= 15 {
+                if let latest = paceSamples.last,
+                   timestamp.timeIntervalSince(latest.date) > 20 || best.along < latest.along-20 {
+                    paceSamples = []; observedWalkingSpeed = nil; paceWeight = 0
+                }
+                if paceSamples.last.map({ timestamp.timeIntervalSince($0.date) >= 5 }) ?? true {
+                    paceSamples.append((best.along,timestamp))
+                }
+                paceSamples.removeAll { timestamp.timeIntervalSince($0.date) > 90 }
+                if let first = paceSamples.first, paceSamples.count >= 4 {
+                    let duration = timestamp.timeIntervalSince(first.date), moved = best.along-first.along
+                    if duration >= 45, moved >= 30, (0.5...2.5).contains(moved/duration) {
+                        observedWalkingSpeed = min(2,max(0.6,moved/duration))
+                        paceWeight = min(0.7,duration/120)
+                    }
+                }
+            }
             match = best; locationConfirmed = true; outsideSince = nil; outsideCount = 0
             return true
         }

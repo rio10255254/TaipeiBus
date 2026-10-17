@@ -138,7 +138,8 @@ public struct MultimodalPlanner: Sendable {
 
     public func plan(from origin: Coordinate, to destination: Coordinate, maximumWalk: Double = 1000, limit: Int = 36,
                      preferences: LiveSettings.Planning = .init(), estimates: EstimateFeed = .init(), at date: Date = Date(),
-                     bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil) -> [TransitTrip] {
+                     bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil,
+                     onPreliminary: (@Sendable ([TransitTrip]) -> Void)? = nil) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
         let profile = ProcessInfo.processInfo.environment["BUS_PLANNING_PROFILE"] == "1"
         let began = ProcessInfo.processInfo.systemUptime
@@ -278,6 +279,46 @@ public struct MultimodalPlanner: Sendable {
             }
             streetLinks[id] = result; return result
         }
+        func materialize(_ values: [Candidate], maximum: Int) -> [TransitTrip] {
+            let grouped = Dictionary(grouping:values,by:{ candidate in
+                candidate.label.family + "|bikes:" + (candidate.label.bikes.keys.sorted().map(String.init) + (candidate.bike == nil ? [] : ["end"])).joined(separator: "-")
+            })
+            var representative: [Candidate] = []
+            for pool in grouped.values { representative.append(contentsOf:pool.sorted { $0.score < $1.score }.prefix(3)) }
+            representative.sort { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
+            let retained = representative.prefix(maximum)
+            let results = retained.map { candidate -> TransitTrip in
+                let label = candidate.label
+                let rides = label.segments.map { segment -> TransitRide in
+                    let p = patterns[segment.pattern], stops = Array(p.stops[segment.first...segment.last])
+                    var coordinates: [Coordinate] = []
+                    if let line = metadata.line(p.route.id,direction:p.direction),
+                       let journey = metadata.journey(routeID:p.route.id,direction:p.direction),
+                       let from = journey.anchors.first(where:{ $0.stop.id == stops[0].id }),
+                       let to = journey.anchors.first(where:{ $0.stop.id == stops.last!.id }) {
+                        coordinates = line.slice(from:from.match,to:to.match)
+                    }
+                    return TransitRide(route:p.route,direction:p.direction,stops:stops,coordinates:coordinates,
+                        fullRouteSeconds:p.cumulative.last ?? 0,boardingOffsetSeconds:p.cumulative[segment.first],
+                        railService:p.route.mode != .bus ? metadata.metro.combinedService(routeID:p.route.id,direction:p.direction,
+                            from:stops[0].stationID,to:stops.last!.stationID,at:date) : nil,
+                        boardingAccessSeconds:p.route.mode != .bus ? 120 : 0,alightingAccessSeconds:p.route.mode != .bus ? 90 : 0)
+                }
+                let times = label.segments.map { s -> Double in
+                    let p = patterns[s.pattern], dwell = s.first > 0 && p.dwell.indices.contains(s.first) ? p.dwell[s.first] : 0
+                    return p.cumulative[s.last] - p.cumulative[s.first] - dwell
+                }
+                var trip = TransitTrip(rides:rides,accessDistance:label.access,egressDistance:candidate.egress,
+                    transferDistance:label.distances.reduce(0,+),score:candidate.score,rideSeconds:times,
+                    transferDistances:label.distances,transferSeconds:label.transferSeconds)
+                var connections = label.bikes
+                if let bike = candidate.bike { connections[rides.count] = bike }
+                trip = trip.withBikeConnections(connections, supplyRisk: candidate.supplyRisk)
+                return trip
+            }
+            return results
+        }
+        if !bus.isEmpty { onPreliminary?(Array(bus.prefix(3))) }
         // Three transfers cover bus–metro–metro–bus and cross-branch rail journeys.
         for round in 0..<4 {
             if Task.isCancelled { return [] }
@@ -419,6 +460,11 @@ public struct MultimodalPlanner: Sendable {
                     }
                 }
             }
+            if round < 2, onPreliminary != nil, !candidates.isEmpty, !Task.isCancelled {
+                let early = materialize(candidates, maximum: 6)
+                onPreliminary?(TripRanking.recommended(early, estimates: estimates, at: date,
+                    preferences: preferences, limit: 3, diverse: false))
+            }
             if round == 3 { break }
             var next: [String: [Label]] = [:]
             for (id, labels) in arrived {
@@ -450,44 +496,7 @@ public struct MultimodalPlanner: Sendable {
             previous = next
             if profile { print("PLANNING_PHASE round=\(round) seconds=\(ProcessInfo.processInfo.systemUptime - began) nodes=\(previous.count) candidates=\(candidates.count) transfer_nodes=\(streetLinks.count)") }
         }
-        // Construct road slices only for useful candidates, after the complete graph
-        // search. Thousands of dominated trips do not need expensive map geometry.
-        let grouped = Dictionary(grouping:candidates,by:{ candidate in
-            candidate.label.family + "|bikes:" + (candidate.label.bikes.keys.sorted().map(String.init) + (candidate.bike == nil ? [] : ["end"])).joined(separator: "-")
-        })
-        var representative: [Candidate] = []
-        for pool in grouped.values { representative.append(contentsOf:pool.sorted { $0.score < $1.score }.prefix(3)) }
-        representative.sort { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
-        let retained = representative.prefix(max(36,limit * 2))
-        let results = retained.map { candidate -> TransitTrip in
-            let label = candidate.label
-            let rides = label.segments.map { segment -> TransitRide in
-                let p = patterns[segment.pattern], stops = Array(p.stops[segment.first...segment.last])
-                var coordinates: [Coordinate] = []
-                if let line = metadata.line(p.route.id,direction:p.direction),
-                   let journey = metadata.journey(routeID:p.route.id,direction:p.direction),
-                   let from = journey.anchors.first(where:{ $0.stop.id == stops[0].id }),
-                   let to = journey.anchors.first(where:{ $0.stop.id == stops.last!.id }) {
-                    coordinates = line.slice(from:from.match,to:to.match)
-                }
-                return TransitRide(route:p.route,direction:p.direction,stops:stops,coordinates:coordinates,
-                    fullRouteSeconds:p.cumulative.last ?? 0,boardingOffsetSeconds:p.cumulative[segment.first],
-                    railService:p.route.mode != .bus ? metadata.metro.combinedService(routeID:p.route.id,direction:p.direction,
-                        from:stops[0].stationID,to:stops.last!.stationID,at:date) : nil,
-                    boardingAccessSeconds:p.route.mode != .bus ? 120 : 0,alightingAccessSeconds:p.route.mode != .bus ? 90 : 0)
-            }
-            let times = label.segments.map { s -> Double in
-                let p = patterns[s.pattern], dwell = s.first > 0 && p.dwell.indices.contains(s.first) ? p.dwell[s.first] : 0
-                return p.cumulative[s.last] - p.cumulative[s.first] - dwell
-            }
-            var trip = TransitTrip(rides:rides,accessDistance:label.access,egressDistance:candidate.egress,
-                transferDistance:label.distances.reduce(0,+),score:candidate.score,rideSeconds:times,
-                transferDistances:label.distances,transferSeconds:label.transferSeconds)
-            var connections = label.bikes
-            if let bike = candidate.bike { connections[rides.count] = bike }
-            trip = trip.withBikeConnections(connections, supplyRisk: candidate.supplyRisk)
-            return trip
-        }
+        let results = materialize(candidates, maximum: max(36, limit * 2))
         let unique = Dictionary((bus + results).map { ($0.id, $0) }, uniquingKeysWith: { a, b in a.score < b.score ? a : b })
         if profile { print("PLANNING_PHASE complete seconds=\(ProcessInfo.processInfo.systemUptime - began) materialized=\(unique.count)") }
         return TripRanking.recommended(Array(unique.values), estimates: estimates, at: date, preferences: preferences, limit: limit, diverse: false)

@@ -709,5 +709,21 @@
   "預計可省約 %@ 分": "About %@ min faster",
   "有另一條可行路線": "Another route is available",
   "改走": "Switch",
-  "保留目前路線": "Keep current route"
+  "保留目前路線": "Keep current route",
+  "依 GPS 位置與沿線車程估算": "Estimated from GPS progress and route travel times",
+  "查看班次": "See departures",
+  "班次資訊": "Departures",
+  "GPS 估算": "GPS estimate",
+  "可搭班次 · %@": "Reachable service · %@",
+  "多花 %@ 分，少轉乘 %@ 次": "%@ min longer · %@ fewer transfers",
+  "少轉乘 %@ 次": "%@ fewer transfers",
+  "只需借還一次": "Only one bike rental",
+  "不用借還車": "No bike rental needed",
+  "少走 %@ 分": "%@ min less walking",
+  "快約 %@ 分": "About %@ min faster",
+  "官方到站": "Official arrival",
+  "依時刻表": "Scheduled service",
+  "班距估算": "Headway estimate",
+  "多花 %@ 分，少一次轉乘": "%@ min longer · one fewer transfer",
+  "少一次轉乘": "One fewer transfer"
 }

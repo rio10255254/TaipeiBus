@@ -42,7 +42,7 @@ import Combine
     private var wake: Task<Void, Never>?
     private var blockedUntil = 0.0
 
-    init(window: Double = 60, limits: [Int] = [40, 32, 18], concurrency: Int = 2, spacing: Double = 0.35) {
+    init(window: Double = 60, limits: [Int] = [40, 36, 12], concurrency: Int = 2, spacing: Double = 0.35) {
         precondition(window > 0 && limits.count == 3 && limits.allSatisfy { $0 > 0 } && concurrency > 0 && spacing >= 0)
         self.window = window; self.limits = limits; self.concurrency = concurrency; self.spacing = spacing
     }

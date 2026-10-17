@@ -49,6 +49,64 @@ import MapKit
         XCTAssertTrue(p.options.contains { $0.id == bike.id },"The faster cycling choice remains available")
         XCTAssertTrue(p.options.contains { $0.id == bus.id },"The convenient no-rental choice remains available")
     }
+
+    func testFirstChoiceChecksBothWalkingEndsTogether() async throws {
+        let p = JourneyPlannerModel()
+        var option = transit()
+        option.walks = [WalkingLeg(from:a,to:.init(latitude:a.latitude+0.001,longitude:a.longitude)),
+            WalkingLeg(from:b,to:.init(latitude:b.latitude+0.001,longitude:b.longitude))]
+        var active = 0, peak = 0
+        p.testStreet = { input, _ in
+            active += 1; peak = max(peak,active)
+            try await Task.sleep(for:.milliseconds(80)); active -= 1
+            return WalkingLeg(from:input.from,to:input.to,coordinates:[input.from,input.to],distance:120,duration:100)
+        }
+        let result = try await p.auditEnrich(option,metadata:TransitMetadata())
+        XCTAssertEqual(peak,2)
+        XCTAssertTrue(result.verified); XCTAssertEqual(result.walks.map(\.duration),[100,100])
+    }
+
+    func testAnotherOfficialEntranceRescuesAnUnreachableEntrance() async throws {
+        let p = JourneyPlannerModel(), next = Coordinate(latitude:a.latitude+0.001,longitude:a.longitude)
+        var option = transit()
+        var leg = WalkingLeg(from:a,to:b,stationSeconds:120,stationInstruction:"入口 1")
+        leg.entranceAlternatives = [WalkingEntrance(from:a,to:next,instruction:"入口 2")]
+        option.walks[0] = leg
+        p.testStreet = { input, _ in
+            if input.from == input.to { return WalkingLeg(from:input.from,to:input.to,distance:0,duration:0) }
+            if input.to == self.b { return WalkingLeg(from:input.from,to:input.to) }
+            return WalkingLeg(from:input.from,to:input.to,coordinates:[input.from,input.to],distance:100,duration:90)
+        }
+        let result = try await p.auditEnrich(option,metadata:TransitMetadata())
+        XCTAssertTrue(result.verified)
+        XCTAssertEqual(result.walks[0].to,next)
+        XCTAssertEqual(result.walks[0].stationInstruction,"入口 2")
+        XCTAssertEqual(result.walks[0].duration,210)
+    }
+
+    func testLongerStraightLineExitCanWinByActualWalkingTime() async throws {
+        let next = Coordinate(latitude:a.latitude+0.001,longitude:a.longitude)
+        let near = Coordinate(latitude:a.latitude+0.0003,longitude:a.longitude)
+        var option = transit()
+        option.walks[0] = WalkingLeg(from:a,to:near,coordinates:[a,near],distance:500,duration:420,
+            stationSeconds:120,stationInstruction:"入口 1",streetDuration:300)
+        option.walks[0].entranceAlternatives = [WalkingEntrance(from:a,to:next,instruction:"入口 2")]
+        let p = planner([option])
+        p.testStreet = { input, _ in
+            WalkingLeg(from:input.from,to:input.to,coordinates:[input.from,input.to],distance:100,duration:90)
+        }
+        await p.auditRefineEntrances()
+        XCTAssertEqual(p.selected?.walks[0].to,next)
+        XCTAssertEqual(p.selected?.walks[0].duration,210)
+        XCTAssertEqual(p.selected?.walks[0].stationInstruction,"入口 2")
+        XCTAssertGreaterThan(a.distance(to:next),a.distance(to:near))
+        XCTAssertFalse(p.started)
+        // Once a person is inspecting the route, background refinement is quiet.
+        p.select(try XCTUnwrap(p.selected))
+        let revision = p.mapRevision
+        await p.auditRefineEntrances()
+        XCTAssertEqual(p.mapRevision,revision)
+    }
     func testEmptyPickupReordersTheRecommendationWithoutMovingTheInspectedMap() {
         let bus = transit(), bike = bicycle(), p = planner([bus,bike])
         p.select(bike); let revision = p.mapRevision
@@ -130,12 +188,12 @@ import MapKit
         p.testStreet = { input,_ in calls += 1; return WalkingLeg(from:input.from,to:input.to) }
         let unavailable = try await p.auditEnrich(option,metadata:TransitMetadata())
         XCTAssertFalse(unavailable.verified)
-        XCTAssertEqual(calls,1,"Stop checking the rest of an unusable journey")
+        XCTAssertEqual(calls,2,"At most the leading choice's two parallel walking checks are sent")
         _ = try await p.auditEnrich(option,metadata:TransitMetadata())
-        XCTAssertEqual(calls,1,"The same unavailable connection must not be downloaded once per route")
+        XCTAssertEqual(calls,2,"The same unavailable connections must not be downloaded once per route")
         p.finish()
         _ = try await p.auditEnrich(option,metadata:TransitMetadata())
-        XCTAssertEqual(calls,2,"Starting a new search permits recovery")
+        XCTAssertEqual(calls,4,"Starting a new search permits both endpoints to recover")
     }
     func testASecondDockPairCanWinAfterActualStreetVerificationWithoutChangingThePreview() async throws {
         var original = bicycle()
