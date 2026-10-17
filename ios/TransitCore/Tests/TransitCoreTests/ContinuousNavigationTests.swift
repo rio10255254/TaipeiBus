@@ -50,6 +50,9 @@ final class ContinuousNavigationTests: XCTestCase {
         let full = forecast.ridingEstimate(ride,metadata:metadata,at:date).seconds
         let remaining = forecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress).seconds
         XCTAssertGreaterThan(remaining,full*0.5); XCTAssertLessThan(remaining,full*0.6)
+        let next = forecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress,to:"s3").seconds
+        let following = forecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress,to:"s4").seconds
+        XCTAssertGreaterThan(next,0); XCTAssertLessThan(next,following); XCTAssertLessThan(following,remaining)
         XCTAssertFalse(progress.update(coordinate:point(1_200,north:90),accuracy:100,timestamp:date.addingTimeInterval(90),boardedAt:date,now:date.addingTimeInterval(90)))
         XCTAssertEqual(progress.upcomingStops.map(\.id),["s3","s4","s5"])
         XCTAssertFalse(progress.isFresh(at:date.addingTimeInterval(120)))
@@ -125,5 +128,15 @@ final class ContinuousNavigationTests: XCTestCase {
         XCTAssertGreaterThan(corrected.seconds,original.seconds)
         XCTAssertLessThan(abs(corrected.seconds-70),abs(original.seconds-70),"Compare against a later actual crossing, not another prediction")
         XCTAssertLessThanOrEqual(corrected.seconds,original.seconds*1.201)
+    }
+    func testMissingBoardingAnchorFallsBackToTheVerifiedRideGeometry() throws {
+        var (metadata,ride) = fixture()
+        metadata.lines["sub:route"] = RouteLine(coordinates:[point(200),point(2_000)])
+        metadata.rebuildJourneys()
+        var progress = try XCTUnwrap(OnboardProgress(ride:ride,metadata:metadata))
+        XCTAssertTrue(progress.update(coordinate:point(600),accuracy:5,timestamp:date.addingTimeInterval(40),boardedAt:date,now:date.addingTimeInterval(40)))
+        XCTAssertTrue(progress.passedStopIDs.contains("s1"))
+        XCTAssertLessThan(VehicleArrivalForecast().ridingEstimate(ride,metadata:metadata,at:date,progress:progress).seconds,
+            VehicleArrivalForecast().ridingEstimate(ride,metadata:metadata,at:date).seconds)
     }
 }

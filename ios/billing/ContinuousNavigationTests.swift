@@ -56,6 +56,8 @@ import XCTest
         let duration = try XCTUnwrap(model.journeyDuration(option,at:moved))
         XCTAssertEqual(try XCTUnwrap(model.onboardSecondsToAlight(ride,at:moved)),duration.ridingSeconds,accuracy:0.01)
         XCTAssertTrue(duration.expectedArrivalLabel.contains(":"))
+        XCTAssertTrue(model.onboardStopTimeLabel(ride,stopID:"s3",at:moved).contains("分"))
+        XCTAssertTrue(model.onboardPositionSource(ride,at:moved).contains("你的定位"))
         let outage = moved.addingTimeInterval(400)
         XCTAssertEqual(model.onboardStops(for:ride,at:outage).map(\.id),["s3","s4","s5"])
         XCTAssertLessThan(try XCTUnwrap(model.journeyDuration(option,at:outage)).ridingSeconds,600)

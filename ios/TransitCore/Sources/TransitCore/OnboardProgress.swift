@@ -14,7 +14,9 @@ public struct OnboardProgress: Sendable {
         guard ride.route.mode == .bus else { return nil }
         let source: RouteLine, journey: RouteJourney
         if let road = metadata.line(ride.route.id, direction: ride.direction),
-           let ordered = metadata.journey(routeID: ride.route.id, direction: ride.direction) {
+           let ordered = metadata.journey(routeID: ride.route.id, direction: ride.direction),
+           ordered.anchors.contains(where: { $0.stop.id == ride.boarding.id }),
+           ordered.anchors.contains(where: { $0.stop.id == ride.alighting.id }) {
             source = road; journey = ordered
         } else {
             let road = RouteLine(coordinates: ride.coordinates)

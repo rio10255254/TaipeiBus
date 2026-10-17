@@ -1583,6 +1583,29 @@ final class TransitAppModel: ObservableObject {
         return display.prediction != nil ? display.label : display.positionLabel
     }
 
+    func onboardStopTimeLabel(_ ride: TransitRide, stopID: String, at date: Date) -> String {
+        let seconds: Double
+        if stopID == ride.alighting.id { seconds = busRemaining(ride,at:date).seconds }
+        else if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
+            seconds = arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress,to:stopID).seconds
+        } else if let bus = onboardVehicle(for:ride),
+                  let prediction = arrivalForecast.prediction(bus,stopID:stopID,metadata:metadata,at:date,allowTypicalWhenStopped:true) {
+            seconds = prediction.seconds
+        } else {
+            seconds = max(60,arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,to:stopID).seconds - max(0,date.timeIntervalSince(boardedAt ?? date)))
+        }
+        return AppText.text("約 %@ 分",max(1,Int(ceil(seconds/60))))
+    }
+    func onboardPositionSource(_ ride: TransitRide, at date: Date) -> String {
+        if let progress = onboardProgress, progress.rideID == ride.id, progress.isFresh(at:date) {
+            return AppText.text("依你的定位即時更新")
+        }
+        if onboardVehicle(for:ride)?.hasReliablePosition(at:date) == true {
+            return AppText.text("依 GPS 位置與沿線車程估算")
+        }
+        return AppText.text("依站間車程估計 · 到站請確認站名")
+    }
+
     func returnToWaiting() {
         alightReminder.reset()
         boardedVehicle = nil; planner.returnToWaiting()

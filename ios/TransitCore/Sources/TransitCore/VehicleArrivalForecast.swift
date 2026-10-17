@@ -409,22 +409,24 @@ public struct VehicleArrivalForecast: Sendable {
     }
 
     public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
-                              travellingAt: Date? = nil, progress: OnboardProgress? = nil) -> RidingTimeEstimate {
+                              travellingAt: Date? = nil, progress: OnboardProgress? = nil, to stopID: String? = nil) -> RidingTimeEstimate {
         let tuning = ForecastTuning.current
         let riderProgress = progress?.rideID == ride.id ? progress : nil
+        let targetID = stopID ?? ride.alighting.id
         if ride.route.mode != .bus, let seconds = metadata.metro.ridingSeconds(routeID: ride.route.id, direction: ride.direction,
             from: ride.boarding.stationID, to: ride.alighting.stationID) {
             return RidingTimeEstimate(seconds: seconds, evidence: .railProfile, observedVehicles: 0)
         }
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
-              let last = journey.anchors.firstIndex(where: { $0.stop.id == ride.alighting.id }), last > first else {
+              let last = journey.anchors.firstIndex(where: { $0.stop.id == targetID }), last > first else {
             let points = ride.coordinates.count >= 2 ? ride.coordinates : ride.stops.map(\.coordinate)
             let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
             let spans = zip(ride.stops, ride.stops.dropFirst()).map { $0.coordinate.distance(to: $1.coordinate) }
             let totalSpan = spans.reduce(0, +)
             var seconds = 0.0, published = 0, remainingSegments = 0
-            for index in ride.stops.indices.dropFirst() {
+            let endIndex = ride.stops.firstIndex(where: { $0.id == targetID }) ?? ride.stops.count-1
+            for index in ride.stops.indices.dropFirst() where index <= endIndex {
                 let from = ride.stops[index - 1], to = ride.stops[index]
                 let fraction: Double = riderProgress?.remainingSegmentFraction(from: from.id, to: to.id) ?? (riderProgress?.remainingFraction ?? 1.0)
                 guard fraction > 0 else { continue }
