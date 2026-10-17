@@ -74,7 +74,7 @@ import MapKit
         option.walks[0] = leg
         p.testStreet = { input, _ in
             if input.from == input.to { return WalkingLeg(from:input.from,to:input.to,distance:0,duration:0) }
-            if input.to == b { return WalkingLeg(from:input.from,to:input.to) }
+            if input.to == self.b { return WalkingLeg(from:input.from,to:input.to) }
             return WalkingLeg(from:input.from,to:input.to,coordinates:[input.from,input.to],distance:100,duration:90)
         }
         let result = try await p.auditEnrich(option,metadata:TransitMetadata())
