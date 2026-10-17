@@ -58,7 +58,10 @@ import XCTest
         XCTAssertTrue(duration.expectedArrivalLabel.contains(":"))
         XCTAssertTrue(model.onboardStopTimeLabel(ride,stopID:"s3",at:moved).contains("分"))
         XCTAssertTrue(model.onboardPositionSource(ride,at:moved).contains("你的定位"))
+        let shortGap = try XCTUnwrap(model.onboardSecondsToAlight(ride,at:moved.addingTimeInterval(120)))
         let outage = moved.addingTimeInterval(400)
+        XCTAssertEqual(try XCTUnwrap(model.onboardSecondsToAlight(ride,at:outage)),shortGap,accuracy:0.01,
+            "A long outage cannot rewind time at the former five-minute cache boundary")
         XCTAssertEqual(model.onboardStops(for:ride,at:outage).map(\.id),["s3","s4","s5"])
         XCTAssertLessThan(try XCTUnwrap(model.journeyDuration(option,at:outage)).ridingSeconds,600)
         XCTAssertEqual(model.planner.currentStep,.ride(0),"A clock or GPS cannot confirm alighting")

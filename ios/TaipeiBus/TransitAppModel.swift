@@ -1150,8 +1150,12 @@ final class TransitAppModel: ObservableObject {
     private var passedOnboardStops: (rideID: String, ids: Set<String>)?
     private func heldOnboardSeconds(_ ride: TransitRide, at date: Date) -> Double? {
         guard let onboardArrival, onboardArrival.rideID == ride.id,
-              (0...300).contains(date.timeIntervalSince(onboardArrival.at)) else { return nil }
-        return max(60, onboardArrival.arrival.timeIntervalSince(date))
+              date.timeIntervalSince(onboardArrival.at) >= -2 else { return nil }
+        // A brief gap may consume the next few seconds. A long outage must not
+        // count a potentially stopped bus all the way to a fabricated arrival,
+        // or restart the full ride when a five-minute cache expires.
+        let elapsed = min(30,max(0,date.timeIntervalSince(onboardArrival.at)))
+        return max(60,onboardArrival.arrival.timeIntervalSince(onboardArrival.at)-elapsed)
     }
 
     /// The journey card, Live Activity and reminder use this same estimate.
@@ -1161,7 +1165,7 @@ final class TransitAppModel: ObservableObject {
         if let progress = onboardProgress, progress.rideID == ride.id,
            progress.hasConfirmedProgress, progress.isFresh(at: date), progress.source == .phone {
             let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds
-            onboardArrival = (ride.id,date.addingTimeInterval(seconds),progress.confirmedAt!)
+            onboardArrival = (ride.id,progress.confirmedAt!.addingTimeInterval(seconds),progress.confirmedAt!)
             return (seconds,false)
         }
         if let bus = onboardVehicle(for: ride), bus.hasReliablePosition(at: date),
