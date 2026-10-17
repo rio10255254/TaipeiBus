@@ -1563,9 +1563,9 @@ private struct WaitingBannerContent: View {
                         .contentTransition(.numericText())
                         .accessibilityIdentifier("boarding-official-arrival")
                     Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : boarding.source)
-                        .liveFont(.caption, weight: .semibold).lineLimit(1).minimumScaleFactor(0.7)
+                        .liveFont(.caption, weight: .semibold).lineLimit(2).minimumScaleFactor(0.9)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
-                }.layoutPriority(1)
+                }.frame(width: live.language == .english ? 112 : 98, alignment: .trailing)
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             BannerStrip {
@@ -1585,13 +1585,8 @@ private struct WaitingBannerContent: View {
 private struct BannerTitle: View {
     let text: String
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            Text(text).liveFont(.title3, weight: .bold).lineLimit(1)
-            Text(text).liveFont(.headline, weight: .bold).lineLimit(1)
-            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1)
-            // Beside the badge and the stop count there is only ~155 pt; shrink rather than wrap.
-            Text(text).liveFont(.subheadline, weight: .bold).lineLimit(1).minimumScaleFactor(0.7)
-        }
+        Text(text).liveFont(.title3, weight: .bold).lineLimit(2).minimumScaleFactor(0.9)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

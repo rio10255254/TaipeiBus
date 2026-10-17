@@ -867,6 +867,8 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(instruction.waitForExistence(timeout:90))
         XCTAssertTrue(instruction.label.contains(language == "en" ? "Walk to" : "步行至"))
         XCTAssertTrue(instruction.isHittable)
+        XCTAssertGreaterThanOrEqual(instruction.frame.width,110,"The station name must not collapse into a narrow column")
+        XCTAssertLessThanOrEqual(instruction.frame.height,72,"The primary instruction should remain a readable two-line heading")
         XCTAssertTrue(button("journey-board").isHittable)
         XCTAssertFalse(button("journey-alight").exists)
         let before = instruction.label
