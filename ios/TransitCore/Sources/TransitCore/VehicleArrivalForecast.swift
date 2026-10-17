@@ -284,7 +284,7 @@ public struct VehicleArrivalForecast: Sendable {
         // One fresh moving GPS report can provide a short-range estimate before
         // history matures. Never extend a terminal layover or a 50-minute crawl
         // across the route, and never use a straight-line distance to the stop.
-        let localGPS = age <= 15 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
+        let localGPS = age <= 30 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
             seconds <= 600 && progress.distance <= 2_500
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
             fallback == 0 && profiled > 0 ? .officialProfile :

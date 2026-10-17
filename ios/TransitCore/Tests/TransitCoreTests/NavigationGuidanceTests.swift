@@ -207,7 +207,9 @@ final class NavigationGuidanceTests: XCTestCase {
         let later = try XCTUnwrap(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(30)))
         XCTAssertEqual(later.seconds, predictions[2].seconds - min(15, predictions[2].seconds * 0.1), accuracy: 0.01)
         XCTAssertGreaterThan(later.uncertaintySeconds, predictions[2].uncertaintySeconds)
-        XCTAssertFalse(later.hasUsableTime, "One position is insufficient for a confident per-vehicle minute label")
+        XCTAssertEqual(later.evidence,.routeProgress)
+        XCTAssertTrue(later.hasUsableTime,"Fresh moving GPS supports a bounded short-range estimate, clearly identified as an estimate")
+        XCTAssertNil(forecast.display(vehicle,stopID:ride.alighting.id,metadata:metadata,at:now.addingTimeInterval(31)).prediction)
         XCTAssertNil(forecast.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now.addingTimeInterval(91)))
         XCTAssertNil(forecast.prediction(vehicle, stopID: "stop-1", metadata: metadata, at: now))
     }
