@@ -884,7 +884,7 @@ final class TransitAppModel: ObservableObject {
         guard let bus = snapshot.vehicles.first(where: { $0.id == id }) else {
             // Keep the passenger's follow choice through a complete signal gap.
             // No position is drawn until a real feed or phone fix returns.
-            if planner.started, case .ride = planner.currentStep, boardedVehicle?.vehicleID == id { return }
+            if hasConfirmedOnboardFollow { return }
             following = false; return
         }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
@@ -1386,6 +1386,11 @@ final class TransitAppModel: ObservableObject {
 
     func onboardPlate(for ride: TransitRide) -> String? {
         boardedVehicle.flatMap { $0.rideID == ride.id ? $0.plate : nil }
+    }
+    var hasConfirmedOnboardFollow: Bool {
+        guard planner.started, case .ride = planner.currentStep, let ride = planner.activeRide,
+              let boardedVehicle, boardedVehicle.rideID == ride.id else { return false }
+        return following && selectedVehicleID == boardedVehicle.vehicleID
     }
 
     func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {

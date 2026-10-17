@@ -79,6 +79,7 @@ import XCTest
         model.following = true
         model.auditReceiveSnapshot(TransitSnapshot())
         XCTAssertTrue(model.following,"A complete signal gap holds the user's confirmed follow choice")
+        XCTAssertTrue(model.hasConfirmedOnboardFollow,"Returning from an itinerary during a gap must retain the same follow intent")
         XCTAssertTrue(model.snapshot.vehicles.isEmpty,"Holding a follow choice must not create a vehicle position")
         let moved = Date()
         model.location.auditLocation(LocationSample(coordinate:point(900),accuracy:5,timestamp:moved))
@@ -88,6 +89,7 @@ import XCTest
         XCTAssertEqual(anchored.plate,"TEST-01")
         XCTAssertLessThan(anchored.coordinate.distance(to:point(900)),2)
         XCTAssertTrue(model.isRiderAnchored(anchored))
+        XCTAssertTrue(model.hasConfirmedOnboardFollow)
         let later = moved.addingTimeInterval(180)
         model.anchorBoardedVehicle(at:later)
         XCTAssertFalse(model.onboardVehicle(for:ride)?.hasReliablePosition(at:later) ?? false,
