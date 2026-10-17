@@ -1556,6 +1556,7 @@ private struct WaitingBannerContent: View {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
                     BannerTitle(text: access ?? (live.text("上車 · ") + ride.boarding.localizedName))
+                        .accessibilityIdentifier("journey-current-instruction")
                     if live.language == .english { Text(ride.boarding.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                     if ride.route.displayName != ride.route.name,
                        model.metadata.routeIDs(serving: ride).filter({ model.metadata.routes[$0] != nil }).count <= 1 {

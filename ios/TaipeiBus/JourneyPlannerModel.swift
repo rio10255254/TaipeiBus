@@ -322,6 +322,9 @@ final class JourneyPlannerModel: ObservableObject {
         let leg = option.walks[index], ride = option.rides[index]
         if leg.bike != nil { return cyclingInstruction(at: index) }
         if leg.internalTransfer { return leg.stationInstruction ?? AppText.text("前往 %@ 月台", ride.route.localizedName) }
+        if (leg.distance ?? .infinity) <= 30, (leg.streetDuration ?? leg.duration ?? .infinity) <= 45 {
+            return ride.route.mode == .bus ? nil : leg.stationInstruction
+        }
         if walkingLegIndex == index, let progress = walkingProgress, progress.hasConfirmedProgress,
            progress.remainingDistance <= 30 {
             if ride.route.mode != .bus { return leg.stationInstruction ?? AppText.text("前往 %@ 月台", ride.route.localizedName) }
@@ -1778,6 +1781,12 @@ final class JourneyPlannerModel: ObservableObject {
             walks.append(WalkingLeg(from: from, to: to, distance: distance, duration: distance / 1.2))
         }
         walks.append(WalkingLeg(from: last.alighting.coordinate, to: last.alighting.coordinate, distance: 0, duration: 0))
+        if ProcessInfo.processInfo.arguments.contains("--preview-access-walk") {
+            let board = first.boarding.coordinate
+            let start = Coordinate(latitude:board.latitude-0.003,longitude:board.longitude)
+            walks[0] = WalkingLeg(from:start,to:board,coordinates:[start,board],distance:start.distance(to:board),duration:300)
+            origin = TravelPlace(name:"目前位置",address:"",coordinate:start,englishName:"Current location")
+        }
         options = [JourneyOption(id: trip.id, trip: trip, walks: walks)]
         selectedID = trip.id; message = nil; mapRevision += 1
     }

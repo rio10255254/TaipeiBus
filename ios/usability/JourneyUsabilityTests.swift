@@ -861,6 +861,32 @@ final class CityFleetUsabilityTests: JourneyUsabilityTestBase {
 }
 
 final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
+    private func checkAccessAndResume(language: String) {
+        launch(["--test-language",language,"--preview-boarding-fixture","--preview-access-walk","--usability-fixture","--test-journey-selection"])
+        let instruction = app.staticTexts["journey-current-instruction"]
+        XCTAssertTrue(instruction.waitForExistence(timeout:90))
+        XCTAssertTrue(instruction.label.contains(language == "en" ? "Walk to" : "步行至"))
+        XCTAssertTrue(instruction.isHittable)
+        XCTAssertTrue(button("journey-board").isHittable)
+        XCTAssertFalse(button("journey-alight").exists)
+        let before = instruction.label
+        capture("continuous-\(language)-01-walk-to-boarding")
+        XCUIDevice.shared.press(.home)
+        Thread.sleep(forTimeInterval:3)
+        app.activate()
+        XCTAssertTrue(instruction.waitForExistence(timeout:10))
+        XCTAssertEqual(instruction.label,before)
+        XCTAssertFalse(button("journey-alight").exists,"Returning to the app cannot confirm boarding")
+        capture("continuous-\(language)-02-resumed-walk")
+        button("journey-board").tap()
+        XCTAssertTrue(button("journey-alight").waitForExistence(timeout:10))
+        capture("continuous-\(language)-03-confirmed-onboard")
+        button("journey-alight").tap()
+        XCTAssertTrue(button("journey-arrive").waitForExistence(timeout:10))
+        capture("continuous-\(language)-04-walk-from-alighting")
+    }
+    func testChineseAccessAndBackgroundResumeKeepTheConfirmedStep() { checkAccessAndResume(language:"zh-Hant") }
+    func testEnglishAccessAndBackgroundResumeKeepTheConfirmedStep() { checkAccessAndResume(language:"en") }
     private func timing() -> [String: Any] {
         guard let bytes = app.staticTexts["journey-timing-state"].label.data(using: .utf8),
               let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
