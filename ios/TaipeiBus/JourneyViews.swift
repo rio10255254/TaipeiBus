@@ -1018,7 +1018,7 @@ struct JourneyOptionsView: View {
                     .liveFont(compact ? .title2 : .title3, weight: .bold, design: .rounded)
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                 if let label = planner.optionLabels[option.id] {
-                    Text(live.text(label)).liveFont(.caption2, weight: .semibold).foregroundStyle(.secondary)
+                    Text(live.text(label == "推薦" && planner.checkingWalks ? "比較中" : label)).liveFont(.caption2, weight: .semibold).foregroundStyle(.secondary)
                         .lineLimit(1).fixedSize(horizontal: true, vertical: false)
                 }
             }
