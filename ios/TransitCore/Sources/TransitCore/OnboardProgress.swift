@@ -3,12 +3,14 @@ import Foundation
 /// The passenger's explicitly confirmed ride, independent of the provider's
 /// vehicle list. It never infers boarding, alighting or a vehicle identity.
 public struct OnboardProgress: Sendable {
+    public enum Source: Sendable { case phone, provider }
     public let rideID: String
     public let line: RouteLine
     private let anchors: [RouteJourney.Anchor]
     private let direction: Int
     public private(set) var match: LineMatch?
     public private(set) var confirmedAt: Date?
+    public private(set) var source: Source?
 
     public init?(ride: TransitRide, metadata: TransitMetadata) {
         guard ride.route.mode == .bus else { return nil }
@@ -57,7 +59,7 @@ public struct OnboardProgress: Sendable {
     }
     @discardableResult
     public mutating func update(coordinate: Coordinate, accuracy: Double, timestamp: Date,
-                                boardedAt: Date, now: Date, maximumAge: TimeInterval = 15) -> Bool {
+                                boardedAt: Date, now: Date, maximumAge: TimeInterval = 15, source: Source = .phone) -> Bool {
         guard accuracy.isFinite, (0...35).contains(accuracy),
               (-2...min(90,maximumAge)).contains(now.timeIntervalSince(timestamp)),
               timestamp >= boardedAt.addingTimeInterval(-15),
@@ -76,7 +78,7 @@ public struct OnboardProgress: Sendable {
         }) else { return false }
         // Small GPS jitter may hold the last position, but cannot rewind it.
         if next.along * Double(direction) >= previous || match == nil { match = next }
-        confirmedAt = timestamp
+        confirmedAt = timestamp; self.source = source
         return true
     }
 }

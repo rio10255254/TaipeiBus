@@ -1159,7 +1159,7 @@ final class TransitAppModel: ObservableObject {
     /// the full ride or counts a missing GPS report as an observed arrival.
     private func busRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, estimatedPosition: Bool) {
         if let progress = onboardProgress, progress.rideID == ride.id,
-           progress.hasConfirmedProgress, progress.isFresh(at: date) {
+           progress.hasConfirmedProgress, progress.isFresh(at: date), progress.source == .phone {
             let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds
             onboardArrival = (ride.id,date.addingTimeInterval(seconds),progress.confirmedAt!)
             return (seconds,false)
@@ -1334,7 +1334,7 @@ final class TransitAppModel: ObservableObject {
         if let reported { boardedReport = reported }
         if bus.hasReliablePosition(at: now), let boardedAt {
             onboardProgress?.update(coordinate: bus.coordinate, accuracy: 15, timestamp: bus.observedAt,
-                boardedAt: boardedAt, now: now, maximumAge:90)
+                boardedAt: boardedAt, now: now, maximumAge:90, source:.provider)
         }
         if riderAnchored?.id != bus.id { riderAnchored = nil }
         var next: BusVehicle?
@@ -1597,7 +1597,7 @@ final class TransitAppModel: ObservableObject {
         return AppText.text("約 %@ 分",max(1,Int(ceil(seconds/60))))
     }
     func onboardPositionSource(_ ride: TransitRide, at date: Date) -> String {
-        if let progress = onboardProgress, progress.rideID == ride.id, progress.isFresh(at:date) {
+        if let progress = onboardProgress, progress.rideID == ride.id, progress.isFresh(at:date), progress.source == .phone {
             return AppText.text("依你的定位即時更新")
         }
         if onboardVehicle(for:ride)?.hasReliablePosition(at:date) == true {

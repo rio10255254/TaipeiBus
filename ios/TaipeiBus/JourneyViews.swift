@@ -1656,7 +1656,7 @@ private struct RidingBannerContent: View {
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
             BannerStrip {
                 if let next {
-                    if model.onboardProgress?.isFresh(at:date) == true || bus.map({ model.isRiderAnchored($0) }) == true {
+                    if (model.onboardProgress?.isFresh(at:date) == true && model.onboardProgress?.source == .phone) || bus.map({ model.isRiderAnchored($0) }) == true {
                         // The bus follows the rider's own fix, so its position is live rather than delayed.
                         Image(systemName: "location.fill").font(.caption2.weight(.bold)).foregroundStyle(Color(liveHex: "#6EA8FF"))
                             .frame(width: 12).accessibilityLabel(AppText.text("依你的定位即時更新"))

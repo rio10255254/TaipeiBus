@@ -46,6 +46,7 @@ final class ContinuousNavigationTests: XCTestCase {
         var progress = try XCTUnwrap(OnboardProgress(ride:ride,metadata:metadata))
         XCTAssertTrue(progress.update(coordinate:point(900),accuracy:8,timestamp:date.addingTimeInterval(80),boardedAt:date,now:date.addingTimeInterval(80)))
         XCTAssertEqual(progress.upcomingStops.map(\.id),["s3","s4","s5"])
+        XCTAssertEqual(progress.source,.phone)
         let forecast = VehicleArrivalForecast()
         let full = forecast.ridingEstimate(ride,metadata:metadata,at:date).seconds
         let remaining = forecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress).seconds
