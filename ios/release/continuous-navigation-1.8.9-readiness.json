@@ -1,0 +1,183 @@
+{
+  "version": "1.8.9",
+  "build_number": "142.1.0",
+  "distribution": "testflight-only",
+  "production_submission_authorized": false,
+  "status": "internal_group_assigned",
+  "source_head": "ea9e29b02381f8ad1b05a201082fce96fdce1f1a",
+  "verified_source_head": "60b2762a8055875c011b41ad40370b0883267aea",
+  "source_tree": "fc4ee19a6fdc41f60f269e52137a5111f1dbdc57",
+  "merged_tree_matches_verified_source": true,
+  "pull_requests": [
+    48,
+    49
+  ],
+  "verification": {
+    "core": {
+      "tests": 293,
+      "optional_skipped": 12,
+      "failures": 0,
+      "source": "4f62ef7b69ac6139092c1466e7d0fd554d0a8de8",
+      "run": 39017807058,
+      "unchanged_package_in_final_release": true,
+      "english_templates": 730
+    },
+    "final_app_checks": {
+      "run": 39023827149,
+      "job": 117371026036,
+      "source": "60b2762a8055875c011b41ad40370b0883267aea",
+      "status": "success",
+      "debug_build": true,
+      "release_build": true
+    },
+    "native_features": {
+      "run": 39023825631,
+      "job": 117370775300,
+      "source": "60b2762a8055875c011b41ad40370b0883267aea",
+      "tests": 84,
+      "failures": 0,
+      "seconds": 124.932
+    },
+    "native_live_routes": {
+      "run": 39018023033,
+      "source": "507e0af16887cdbd960663db7ab08bc7fe489d5c",
+      "route_tests": 12,
+      "route_failures": 0,
+      "cold_first_checked_seconds": 3.2561590672,
+      "sequential_search_successes": 12,
+      "sequential_first_checked_seconds": [
+        2.623480916,
+        3.3801990747,
+        1.3656240702,
+        2.9384280443,
+        3.2536640167,
+        3.6208430529,
+        2.4802689552,
+        4.3068720102,
+        2.8471630812,
+        3.4134680033,
+        2.7259730101,
+        3.3694889545
+      ],
+      "note": "The full run had three Chinese-literal assertion failures under an English locale in the added navigation tests. Those assertions were corrected to the active language and the final 84-feature suite passed. Routing code was unchanged afterwards."
+    },
+    "full_city": {
+      "run": 39017807058,
+      "routes": 735,
+      "choices_per_case": 54,
+      "release_seconds": [
+        4.5323817083,
+        4.526253125,
+        6.340123625
+      ],
+      "maximum_seconds_per_case": 8,
+      "status": "success"
+    },
+    "live_fleet": {
+      "run": 39017807058,
+      "official_reports": 1148,
+      "vehicles_with_raw_predictions": 734,
+      "ordered_stop_predictions": 13302,
+      "status": "success",
+      "note": "Raw prediction availability is not a claim that every prediction is displayable or field-accurate. Nonnegative ordering and stale-report rejection were checked."
+    },
+    "ui": {
+      "source": "6c339e413ad9fcecce1c40cc15878d939568f433",
+      "light": {
+        "run": 39019581097,
+        "tests": 4,
+        "failures": 0,
+        "seconds": 292.11,
+        "artifact": 12096054569
+      },
+      "dark": {
+        "run": 39021579970,
+        "tests": 4,
+        "failures": 0,
+        "seconds": 274.998,
+        "artifact": 12096269969
+      },
+      "earlier_dark_attempt": {
+        "run": 39019581097,
+        "tests": 4,
+        "failures": 1,
+        "note": "The track tap did not dispatch: both camera probes had no track action, empty vehicle, following false and pitch zero. The same app and unmodified assertions passed in the dark-only rerun."
+      },
+      "title_geometry_assertions": {
+        "minimum_width_points": 110,
+        "maximum_height_points": 72
+      },
+      "later_changes": "Final walking-progress and provider-gap follow fixes do not change UI layout; labelled usability fixtures bypass provider ingestion and live walking matching. These actual paths are covered by the final native receiver/progress regression suite.",
+      "screenshot_notice": "UI fixture screenshots are labelled as non-live data and are not promotional assets."
+    },
+    "walking_gap_replay_seconds": 3600,
+    "physical_device_validation": "not performed",
+    "physical_frame_rate_heat_and_power_claims": "No sustained physical-device frame-rate, heat or battery measurement is claimed."
+  },
+  "handled_cases": [
+    "Poor or stale fixes retain the last matched walking/cycling distance instead of restoring the original access duration.",
+    "Longer legitimate GPS gaps can rejoin the verified route; cycling never learns a pedestrian pace.",
+    "Confirmed onboard phone progress works without a selected plate and never invents a physical vehicle identity.",
+    "A missing provider packet can retain the same explicitly confirmed private phone anchor and camera follow.",
+    "Complete signal loss retains follow intent without drawing an invented position; manual panning still stops following.",
+    "Returning from route details preserves confirmed onboard follow through a signal gap.",
+    "Inspecting future walking legs does not reroute or overwrite the actual current walking progress.",
+    "Provider-expiry and long-outage timing transitions do not restart the full ride or count an unobserved arrival.",
+    "The journey card, stop list, reminder and Live Activity use one remaining bus-ride estimate.",
+    "Known schedule-based ride estimates retain approximate arrival clocks; unknown departures still do not gain a clock.",
+    "Bilingual walking/platform actions use the existing banner with a bounded ETA column and readable two-line title."
+  ],
+  "calibration": {
+    "source": "public fleet reports only",
+    "minimum_distinct_vehicles": 3,
+    "retention_seconds": 1200,
+    "maximum_fallback_correction_fraction": 0.2,
+    "maximum_feedback_vehicles_per_packet": 64,
+    "official_times_not_overwritten": true,
+    "session_local": true,
+    "passenger_location_upload": false,
+    "held_out_synthetic_crossing_test": "passed"
+  },
+  "visually_inspected": {
+    "final_light": [
+      "7F421A8F-91EB-4C7F-8749-43702A59B92F.png",
+      "9675B1EC-7FD8-4116-AE24-5C91B977CC97.png"
+    ],
+    "final_dark": [
+      "58749BB0-BFD6-4302-B7B6-F0F6BA45DBDE.png",
+      "DED3BC57-CEF8-4F2E-9E46-9FFF5E51AB64.png",
+      "C5B0A7BA-F08E-4BAA-A2EE-D148AC35FB8F.png",
+      "2BB07CCA-CB03-4F09-A350-DE8B680E61FF.png"
+    ]
+  },
+  "publication": {
+    "run": 39024765735,
+    "job": 117373478856,
+    "artifact": 12098027065,
+    "status": "success",
+    "receipt": "testflight-1.8.9-receipt.json"
+  },
+  "crash_symbols": {
+    "archive": "D:/TaipeiBus-release-1.8.9/release/testflight-dSYMs.zip",
+    "bytes": 10172819,
+    "sha256": "2ae1c3aebb5f2b39c647ca77bba2377e5f431cf0d91ca46e574d46676072bc78",
+    "crc_verified": true,
+    "dwarf_files": [
+      "dSYMs/TaipeiBusWidgets.appex.dSYM/Contents/Resources/DWARF/TaipeiBusWidgets",
+      "dSYMs/TaipeiBus.app.dSYM/Contents/Resources/DWARF/TaipeiBus"
+    ]
+  },
+  "superseded_upload": {
+    "run": 39022988657,
+    "version": "1.8.9",
+    "build_number": "141.1.0",
+    "source_head": "b0f89d5918a68c490b7f580bb492d82e59e783f1",
+    "workflow_status": "cancelled",
+    "receipt_status": "uploaded_processing_pending",
+    "upload_confirmed": true,
+    "tester_group_assignment_confirmed": false,
+    "archive": "D:/TaipeiBus-release-1.8.9/superseded-141",
+    "symbols_sha256": "10e81771d7383541acfe691e8738b62ee7173257ddc46fc17902ab1547d56094",
+    "note": "Cancelled distribution workflow while Apple processing was pending; superseded by verified build 142.1.0. No claim that Apple itself stopped processing or that the earlier binary was expired."
+  }
+}
