@@ -2,6 +2,24 @@ import XCTest
 @testable import TransitCore
 
 final class SmartDeparturesTests: XCTestCase {
+    func testServiceDayCachePreservesTaiwanMidnightAndConcurrentQueries() async throws {
+        let parse = ISO8601DateFormatter()
+        let friday = try XCTUnwrap(parse.date(from:"2026-10-16T15:59:59Z"))
+        let saturday = friday.addingTimeInterval(1)
+        let holiday = try XCTUnwrap(parse.date(from:"2026-10-25T16:00:00Z"))
+        XCTAssertFalse(TransitServiceCalendar.isHoliday(friday))
+        XCTAssertTrue(TransitServiceCalendar.isHoliday(saturday))
+        XCTAssertTrue(TransitServiceCalendar.isHoliday(holiday))
+        await withTaskGroup(of: Bool.self) { group in
+            for index in 0..<256 {
+                group.addTask {
+                    let date = index % 2 == 0 ? friday : saturday
+                    return TransitServiceCalendar.isHoliday(date) == (index % 2 == 1)
+                }
+            }
+            for await correct in group { XCTAssertTrue(correct) }
+        }
+    }
     func testOfficialMinuteDisplayStaysConsistentWithStopCountdowns() {
         for seconds in [60,61,119,120,121,179,180,181] {
             let wait = BoardingTime.wait(official:seconds,readyAt:0,buffer:0)
