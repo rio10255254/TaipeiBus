@@ -881,7 +881,12 @@ final class TransitAppModel: ObservableObject {
         markLiveSettingsPreview()
 #endif
         guard let id = selectedVehicleID else { return }
-        guard let bus = snapshot.vehicles.first(where: { $0.id == id }) else { following = false; return }
+        guard let bus = snapshot.vehicles.first(where: { $0.id == id }) else {
+            // Keep the passenger's follow choice through a complete signal gap.
+            // No position is drawn until a real feed or phone fix returns.
+            if planner.started, case .ride = planner.currentStep, boardedVehicle?.vehicleID == id { return }
+            following = false; return
+        }
         // Follow a physical bus through a return trip or branch change, keeping its current route visible.
         if selectedRouteID != bus.routeID { selectedRouteID = bus.routeID }
         allRouteVariants = false
