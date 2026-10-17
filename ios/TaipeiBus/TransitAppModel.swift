@@ -913,7 +913,14 @@ final class TransitAppModel: ObservableObject {
             return
         }
 #endif
-        let index = activeWalkingIndex
+        // Map inspection may show a later leg while the passenger is walking
+        // or on board. Only the actual current step consumes device progress.
+        let index: Int?
+        if planner.started, case .walk(let current) = planner.currentStep,
+           planner.selected?.walks.indices.contains(current) == true,
+           planner.selected?.walks[current].internalTransfer != true {
+            index = current
+        } else { index = nil }
         location.setWalkingNavigation(index != nil)
         guard let index else {
             if planner.walkingLegIndex != nil { planner.endWalkingGuidance() }

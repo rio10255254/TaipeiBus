@@ -124,4 +124,20 @@ import XCTest
             max(60,before-30),accuracy:0.01)
         XCTAssertEqual(model.planner.currentStep,.ride(0)); model.finishJourney()
     }
+    func testPreviewingALaterWalkCannotReplaceTheCurrentWalkingProgress() throws {
+        let date = Date(), (model,_,_) = makeModel(at:date)
+        model.location.auditLocation(LocationSample(coordinate:point(-200),accuracy:5,timestamp:date))
+        model.updateWalkingLocation()
+        let remaining = try XCTUnwrap(model.planner.walkingProgress).remainingSeconds
+        model.showWalkOnMap(1)
+        XCTAssertEqual(model.walkingMapIndex,1,"The later leg can still be inspected on the map")
+        XCTAssertEqual(model.planner.walkingLegIndex,0)
+        XCTAssertEqual(try XCTUnwrap(model.planner.walkingProgress).remainingSeconds,remaining,accuracy:0.01)
+        model.clearWalkingMap()
+        XCTAssertEqual(model.planner.walkingLegIndex,0)
+        model.boardCurrentRide(at:date)
+        model.showWalkOnMap(1)
+        XCTAssertNil(model.planner.walkingLegIndex,"An onboard passenger cannot be rerouted as a pedestrian by inspecting a future walk")
+        XCTAssertEqual(model.planner.currentStep,.ride(0)); model.finishJourney()
+    }
 }
