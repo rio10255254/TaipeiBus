@@ -1,0 +1,209 @@
+{
+  "version": "1.8.9",
+  "build_number": "149.1.0",
+  "build_id": "22f0248c-0d6a-41b1-9728-46969c2eb732",
+  "status": "submitted_for_app_review",
+  "submission_state": "WAITING_FOR_REVIEW",
+  "submission_id": "4686e741-137d-4655-9336-327f2cdfe863",
+  "submitted_at": "2026-10-18T18:49:04Z",
+  "production_submission_authorized": true,
+  "authorization": "User requested formal App Store publication with the approved gallery and suitable new feature screenshots.",
+  "binary_source": "531a30ff1d67ee5430f3510fc709a370b33ca534",
+  "tested_runtime_source": "7c7b593",
+  "merged_source": "865ff9426bed4f12fa66032a28f8b3d954836a1a",
+  "source_tree_matches_final_release_branch": true,
+  "pull_request": 50,
+  "release_run": 39154709335,
+  "preparation_run": 39155543903,
+  "assets_verification_run": 39155709704,
+  "submission_run": 39155861743,
+  "automatic_release_after_approval": true,
+  "download_price": 0,
+  "enabled_territories": [
+    "TWN"
+  ],
+  "subscriptions": {
+    "monthly_twd": 39,
+    "yearly_twd": 390,
+    "trial_days": 7,
+    "items_verified": true,
+    "review_targets": [
+      {
+        "relationship": "appStoreVersion",
+        "type": "appStoreVersions",
+        "id": "f927f07b-a7e1-48aa-bb8f-3aa2bfd7ec39"
+      },
+      {
+        "relationship": "subscriptionVersion",
+        "type": "subscriptionVersions",
+        "id": "6f6ccb17-264b-40e3-9f63-874065088eb8",
+        "product_id": "com.rio10255254.TaipeiBus.pro.monthly",
+        "product_state": "READY_TO_SUBMIT"
+      },
+      {
+        "relationship": "subscriptionVersion",
+        "type": "subscriptionVersions",
+        "id": "92a062d3-d8a0-4c48-9975-b1d8e6887bdf",
+        "product_id": "com.rio10255254.TaipeiBus.pro.yearly",
+        "product_state": "READY_TO_SUBMIT"
+      },
+      {
+        "relationship": "subscriptionGroupVersion",
+        "type": "subscriptionGroupVersions",
+        "id": "ae7d0774-a63b-4624-89a5-71956ef93122"
+      }
+    ],
+    "billing_setup_run": 39149430148
+  },
+  "functional_checks": {
+    "core_debug_release": {
+      "run": 39152493030,
+      "result": "passed"
+    },
+    "native_features": {
+      "run": 39154707251,
+      "tests": 85,
+      "failures": 0,
+      "duration_seconds": 152.971,
+      "result": "passed"
+    },
+    "actual_native_ui": {
+      "run": 39152492036,
+      "tests": 1,
+      "failures": 0,
+      "duration_seconds": 189.131,
+      "result": "passed",
+      "coverage": [
+        "Actual rendered YouBike station pin opens fresh operator counts",
+        "Current station report is not synthetic or stale",
+        "Completed empty route results expose Try Again and Other transport"
+      ]
+    },
+    "walking_ui": {
+      "run": 39149033787,
+      "walking_case": "passed",
+      "home_route_search_case": "passed",
+      "live_bus_3d_case": "passed",
+      "obsolete_preview_flag_route_case": "failed; capture helper replaced with normal search"
+    },
+    "overnight_full_run_context": {
+      "run": 39152512680,
+      "runtime_source": "7c7b593",
+      "feature_suites": [
+        {
+          "suite": "BikePlannerTests",
+          "tests": 13,
+          "failures": 0
+        },
+        {
+          "suite": "BikeResponseTests",
+          "tests": 9,
+          "failures": 0
+        },
+        {
+          "suite": "ContinuousNavigationTests",
+          "tests": 7,
+          "failures": 0
+        },
+        {
+          "suite": "DirectionsBudgetTests",
+          "tests": 6,
+          "failures": 0
+        },
+        {
+          "suite": "FeedRecoveryTests",
+          "tests": 4,
+          "failures": 0
+        },
+        {
+          "suite": "MixedConnectionsTests",
+          "tests": 10,
+          "failures": 0
+        },
+        {
+          "suite": "PlanningEngineTests",
+          "tests": 17,
+          "failures": 0
+        },
+        {
+          "suite": "ProPurchaseTests",
+          "tests": 11,
+          "failures": 0
+        },
+        {
+          "suite": "RoutePlanningRegressionTests",
+          "tests": 8,
+          "failures": 0
+        }
+      ],
+      "feature_tests": 85,
+      "feature_failures": 0,
+      "full_network_comparisons": [
+        {
+          "suite": "RouteReliabilityTests",
+          "tests": 12,
+          "failures": 17
+        }
+      ],
+      "comparison_time_taipei": "2026-10-19 02:21",
+      "metro_station_windows": 333,
+      "open_metro_station_windows": 0,
+      "planner_file_identical_to_previous_verified_daytime_source_after_removing_new_empty_message_getter": true,
+      "prior_operating_hours_checks": {
+        "run": 39018023033,
+        "cases_passed": 12,
+        "source": "507e0af16887cdbd960663db7ab08bc7fe489d5c"
+      },
+      "note": "No all-green claim for this 97-test run. Live transit/MRT availability assertions ran outside service hours. The new empty-result behavior and purchasing/navigation feature suites passed; repeat only the scoped feature suite separately."
+    },
+    "prior_daytime_navigation_readiness": "continuous-navigation-1.8.9-readiness.json"
+  },
+  "gallery": {
+    "count": 10,
+    "manifest": "screenshots/manifest.json",
+    "first_three": [
+      "3D bus",
+      "3D metro",
+      "Dynamic Island"
+    ],
+    "all_six_user_selected_images_retained": true,
+    "new_real_youbike_image": true,
+    "walking_image_refreshed": true,
+    "dimensions": [
+      1320,
+      2868
+    ],
+    "apple_states": [
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE",
+      "COMPLETE"
+    ],
+    "order_verified": true,
+    "all_uploaded_checksums_match_reviewed_pngs": true,
+    "synthetic_qa_vehicle_images_used": false
+  },
+  "archive": {
+    "build": "149.1.0",
+    "source": "531a30ff1d67ee5430f3510fc709a370b33ca534",
+    "symbols_sha256": "f9e78b9f6c5d8706da6d87cb45ef201c5c67379dc13431222f935cab51be9e20",
+    "symbols": [
+      "dSYMs/TaipeiBusWidgets.appex.dSYM/Contents/Resources/DWARF/TaipeiBusWidgets",
+      "dSYMs/TaipeiBus.app.dSYM/Contents/Resources/DWARF/TaipeiBus"
+    ],
+    "archive": "D:\\TaipeiBus-release-1.8.9\\production-149",
+    "crc_verified": true
+  },
+  "limitations": [
+    "App Store distribution awaits Apple approval; submission is not a claim that 1.8.9 is already publicly live.",
+    "No new physical-device continuous-ride heat/battery measurement was made in this publication task.",
+    "Live MRT-availability comparisons at 02:21 Taipei cannot demonstrate daytime journey availability: 0/333 published boarding windows were open. The 97-test overnight run is preserved as failed, not presented as all-green. The same routing methods passed twelve earlier operating-hours production comparisons; all 85 current feature checks and the actual empty-state UI check passed.",
+    "The approved compressed user captures retain their original detail limits. The YouBike image crops unrelated system/bus status chrome while preserving the actual fresh station report; its complete native source is retained."
+  ]
+}
