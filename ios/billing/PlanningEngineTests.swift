@@ -170,6 +170,18 @@ import MapKit
         XCTAssertEqual(bike.remaining(meters:.nan).total,bike.totalSeconds)
         XCTAssertEqual(bike.remaining(meters:-1).total,0)
     }
+    func testClosedServicesCannotLeaveAnEmptyRouteSheetWithoutANextStep() {
+        let option = transit(), p = planner([option])
+        XCTAssertFalse(p.options.isEmpty)
+        XCTAssertNil(p.emptyOptionsMessage)
+        var closed = TransitSnapshot()
+        closed.estimates = EstimateFeed(seconds:["bus:busa":-3],updatedAt:Date())
+        p.updateSnapshot(closed); p.refreshRecommendations()
+        XCTAssertTrue(p.options.isEmpty)
+        XCTAssertNotNil(p.emptyOptionsMessage)
+        p.finish()
+        XCTAssertNil(p.emptyOptionsMessage, "Finishing a trip must not show an empty-result message on the home screen")
+    }
     func testStreetCacheExpiresAndWalkingAndCyclingRemainSeparate() async throws {
         let p = JourneyPlannerModel(), leg = WalkingLeg(from:a,to:b)
         var calls = 0

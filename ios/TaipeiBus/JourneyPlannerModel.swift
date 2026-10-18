@@ -161,6 +161,12 @@ final class JourneyPlannerModel: ObservableObject {
     @Published private(set) var selectedID: String?
     @Published private(set) var planning = false
     @Published private(set) var checkingWalks = false
+    /// A verified pool can still rank to no usable options (for example after
+    /// service ends). Never leave the completed route sheet blank in that case.
+    var emptyOptionsMessage: String? {
+        guard destination != nil, options.isEmpty, !planning, !checkingWalks else { return nil }
+        return message ?? "這趟行程暫無可用方案，可更換出發地或查看其他交通方式。"
+    }
     @Published private(set) var message: String?
     @Published private(set) var started = false
     @Published private(set) var stepIndex = 0
