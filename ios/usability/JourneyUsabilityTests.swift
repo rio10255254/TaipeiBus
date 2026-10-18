@@ -521,7 +521,9 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         capture("store-12-in-app-walking")
     }
     func testStoreRealDestinationAndItinerary() {
-        launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
+        launch(["--test-map-controls", "--test-journey-selection"])
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 90))
+        button("home-destination-search").tap(); chooseNeihu()
         let choices = app.buttons.matching(NSPredicate(format:"identifier == %@ OR identifier == %@","journey-all-options","journey-options")).firstMatch
         XCTAssertTrue(choices.waitForExistence(timeout:90))
         choices.tap()
