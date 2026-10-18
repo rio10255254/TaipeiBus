@@ -87,7 +87,7 @@ class ReviewBundleTest < Minitest::Test
   def test_developer_withdrawn_catalog_can_join_the_new_authorized_app_submission
     @client.catalog_state = 'DEVELOPER_REJECTED'
     assert bundle.prepare('app-version')[:items_verified]
-    assert_equal 4, @client.items.length
+    assert_equal 4, @client.all('/v1/reviewSubmissions/draft/items', 'include'=>'appStoreVersion,subscriptionVersion,subscriptionGroupVersion').length
     refute @client.writes.any? { |method,_,_| method == :patch }
   end
   def test_unapproved_price_stops_before_creating_a_review_draft

@@ -28,5 +28,5 @@
   },
   "first_review_required": true,
   "review_screenshots_replace_authorized": true,
-  "production_submission_authorized": false
+  "production_submission_authorized": true
 }
