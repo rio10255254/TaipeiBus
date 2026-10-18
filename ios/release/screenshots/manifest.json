@@ -1,7 +1,7 @@
 {
   "app_version": "1.8.9",
-  "release_build": null,
-  "status": "gallery_verified_awaiting_final_build",
+  "release_build": "149.1.0",
+  "status": "verified_gallery_for_authorized_app_store_1.8.9",
   "slides": [
     {
       "source": "user-06.jpg",
@@ -226,6 +226,6 @@
   "scope": "app_store_1.8.9",
   "quality_note": "使用者提供的照片為壓縮圖片，放大後細字清晰度受原檔限制。",
   "target_store_version": "1.8.9",
-  "target_store_build": null,
+  "target_store_build": "149.1.0",
   "sources_unchanged": true
 }
