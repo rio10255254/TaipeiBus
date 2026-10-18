@@ -164,3 +164,4 @@ ensure
   save.call
 end
 puts "Billing setup: #{report[:status]}. No App Review submission, contract acceptance or customer charge occurred."
+abort 'Billing preparation was not completed; see the preserved setup receipt.' unless report[:status] == 'draft_catalog_configured'

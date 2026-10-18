@@ -17,8 +17,13 @@ class SubscriptionDraftTest < Minitest::Test
   def draft(client)
     TaipeiBusRelease.subscription_draft(client, 'subscriptions', 'plan', 'subscriptionVersions', :subscription)
   end
-  def test_withdrawn_metadata_gets_a_new_review_snapshot
+  def test_withdrawn_metadata_reuses_apples_inflight_draft
     client = Client.new(%w[DEVELOPER_REJECTED])
+    assert_equal 'v0', draft(client)['id']
+    assert_empty client.writes
+  end
+  def test_missing_metadata_version_is_created_for_the_same_product
+    client = Client.new([])
     assert_equal 'new', draft(client)['id']
     assert_equal '/v1/subscriptionVersions', client.writes.first[1]
     assert_equal 'plan', client.writes.first[2][:data][:relationships][:subscription][:data][:id]

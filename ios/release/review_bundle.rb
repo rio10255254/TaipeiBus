@@ -123,7 +123,7 @@ module TaipeiBusRelease
     end
     def editable_version(type, id)
       versions = @client.all("/v1/#{type}/#{id}/versions")
-      versions.sort_by { |row| -(row.dig('attributes','version') || 0) }.find { |row| %w[PREPARE_FOR_SUBMISSION READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW APPROVED].include?(row.dig('attributes','state')) } || raise(Error, 'Subscription metadata version is missing.')
+      versions.sort_by { |row| -(row.dig('attributes','version') || 0) }.find { |row| %w[PREPARE_FOR_SUBMISSION DEVELOPER_REJECTED READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW APPROVED].include?(row.dig('attributes','state')) } || raise(Error, 'Subscription metadata version is missing.')
     end
   end
 end
