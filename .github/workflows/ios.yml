@@ -65,7 +65,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -764,9 +764,13 @@ jobs:
               '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreStationAndInAppWalking'
               '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreLiveBusIn3D'
               '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealDestinationAndItinerary')
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealYouBikeConnection')
             # Select a fresh moving bus from the feed inside the running app.
             # A route chosen before launch may have no active vehicle by capture time.
             export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-bike' ]; then
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealYouBikeConnection')
           fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)

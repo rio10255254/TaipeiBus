@@ -3,6 +3,7 @@ require 'bigdecimal'
 require 'date'
 require 'digest'
 require_relative 'regional_prices'
+require_relative 'subscription_draft'
 
 # Creates only the user-approved draft catalog. No review submission or contract acceptance.
 config = JSON.parse(File.read(File.join(__dir__,'billing.json')))
@@ -18,9 +19,7 @@ create = ->(path,type,attributes,relationships) {
 }
 link = ->(type,id) { {data:{type:type,id:id}} }
 version_for = ->(parent_type,parent,version_type,relationship) {
-  values = client.all("/v1/#{parent_type}/#{parent}/versions")
-  values.find { |row| %w[PREPARE_FOR_SUBMISSION DEVELOPER_ACTION_NEEDED REJECTED].include?(row.dig('attributes','state')) } ||
-    values.first || create.call("/v1/#{version_type}",version_type,{}, {relationship=>link.call(parent_type,parent)})
+  TaipeiBusRelease.subscription_draft(client,parent_type,parent,version_type,relationship)
 }
 localize = ->(type,version_type,version,attributes) {
   if type == 'subscriptionLocalizations'

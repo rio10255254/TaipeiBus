@@ -540,6 +540,37 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:15))
         capture("store-05-boarding-map")
     }
+    func testStoreRealYouBikeConnection() {
+        // Real station availability and production routing, with no mock fleet or
+        // synthetic dock counts. This capture must never use --usability-fixture.
+        launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
+        XCTAssertTrue(button("journey-edit-destination").waitForExistence(timeout: 90))
+        button("journey-edit-destination").tap()
+        let field = app.textFields["journey-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 15))
+        field.tap(); field.typeText("臺大計資中心")
+        let destination = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "計資中心")).firstMatch
+        XCTAssertTrue(destination.waitForExistence(timeout: 30)); destination.tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 100))
+        button("journey-all-options").tap()
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 100)); waitForConfirmedChoices()
+        capture("store-20-mixed-transit-choices")
+        let bicycle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "journey-option-", "YouBike")).firstMatch
+        XCTAssertTrue(bicycle.waitForExistence(timeout: 30), "A live, verified YouBike connection must exist before marketing it")
+        let id = String(bicycle.identifier.dropFirst("journey-option-".count))
+        bicycle.tap()
+        XCTAssertTrue(button("journey-steps-" + id).waitForExistence(timeout: 15))
+        capture("store-21-youbike-transit-map")
+        button("journey-steps-" + id).tap()
+        let pickup = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-bike-pickup-")).firstMatch
+        for _ in 0..<3 { if pickup.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(pickup.isHittable)
+        capture("store-22-youbike-transit-steps")
+        pickup.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "bike-station-card").firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["bike-station-report"].exists)
+        capture("store-23-live-youbike-availability")
+    }
     func testPrivacyAndSupportAreAccessible() {
         launch()
         XCTAssertTrue(button("資料來源與地圖設定").waitForExistence(timeout: 20))
