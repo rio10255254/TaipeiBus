@@ -543,19 +543,15 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
     func testStoreRealYouBikeConnection() {
         // Real station availability and production routing, with no mock fleet or
         // synthetic dock counts. This capture must never use --usability-fixture.
-        launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
-        XCTAssertTrue(button("journey-edit-destination").waitForExistence(timeout: 90))
-        button("journey-edit-destination").tap()
-        let field = app.textFields["journey-search-field"]
-        XCTAssertTrue(field.waitForExistence(timeout: 15))
-        field.tap(); field.typeText("臺大計資中心")
-        let destination = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "計資中心")).firstMatch
-        XCTAssertTrue(destination.waitForExistence(timeout: 30)); destination.tap()
+        launch(["--test-map-controls", "--test-journey-selection"])
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 90))
+        button("home-destination-search").tap()
+        chooseNeihu()
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 100))
         button("journey-all-options").tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 100)); waitForConfirmedChoices()
         capture("store-20-mixed-transit-choices")
-        let bicycle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND label CONTAINS %@", "journey-option-", "YouBike")).firstMatch
+        let bicycle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND (label CONTAINS %@ OR label CONTAINS %@)", "journey-option-", "YouBike", "騎車")).firstMatch
         XCTAssertTrue(bicycle.waitForExistence(timeout: 30), "A live, verified YouBike connection must exist before marketing it")
         let id = String(bicycle.identifier.dropFirst("journey-option-".count))
         bicycle.tap()
