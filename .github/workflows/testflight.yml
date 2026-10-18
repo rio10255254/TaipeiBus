@@ -91,6 +91,7 @@ jobs:
           python3 ios/release-check.py
           ruby ios/release/apple_client_test.rb
           ruby ios/release/review_bundle_test.rb
+          ruby ios/release/subscription_draft_test.rb
           ruby ios/release/regional_prices_test.rb
           ruby -c ios/release/store_prepare.rb
           ruby -c ios/release/store_submit.rb

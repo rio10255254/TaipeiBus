@@ -1244,6 +1244,16 @@ struct NativeBusMap: UIViewRepresentable {
                 state["walkingAboveBuildings"] = (layerIDs.firstIndex(of: "journey-walking-line") ?? 0) > (layerIDs.firstIndex(of: "building-3d") ?? 0)
                 state["selectedBikeStation"] = model.selectedBikeStationID ?? ""
                 state["selectedBikeReturning"] = model.selectedBikeStationReturning
+                var seenBikePins = Set<String>()
+                state["visibleBikePins"] = mapView.visibleFeatures(in: mapView.bounds, styleLayerIdentifiers: Set(["bike-station-dots", "bike-station-counts"]))
+                    .compactMap { feature -> [String: Any]? in
+                        guard let id = feature.attribute(forKey: "bikeStationID") as? String,
+                              seenBikePins.insert(id).inserted,
+                              let station = model.bikeNetwork.station(id),
+                              model.bikeDock(id)?.isFresh(at: Date()) == true else { return nil }
+                        let point = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)
+                        return ["id": id, "x": point.x, "y": point.y]
+                    }
                 state["plannedBikePins"] = (model.planner.selected?.walks.compactMap(\.bike) ?? []).flatMap { bike -> [[String: Any]] in
                     [(bike.pickup, false), (bike.dropoff, true)].map { station, returning in
                         let point = mapView.convert(station.coordinate.locationCoordinate, toPointTo: mapView)

@@ -521,9 +521,16 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         capture("store-12-in-app-walking")
     }
     func testStoreRealDestinationAndItinerary() {
-        launch(["--test-map-controls", "--test-journey-selection", "--preview-neihu-planning"])
+        launch(["--test-map-controls", "--test-journey-selection"])
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 90))
+        button("home-destination-search").tap(); chooseNeihu()
         let choices = app.buttons.matching(NSPredicate(format:"identifier == %@ OR identifier == %@","journey-all-options","journey-options")).firstMatch
-        XCTAssertTrue(choices.waitForExistence(timeout:90))
+        if !choices.waitForExistence(timeout:90) {
+            XCTAssertTrue(button("journey-retry-search").waitForExistence(timeout: 15))
+            XCTAssertTrue(button("journey-empty-other-transport").exists)
+            capture("store-real-search-closed-service-next-steps")
+            return
+        }
         choices.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60))
         waitForConfirmedChoices()
@@ -539,6 +546,66 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         button("journey-back").tap()
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout:15))
         capture("store-05-boarding-map")
+    }
+    func testStoreRealYouBikeConnection() {
+        // Real station availability and production routing, with no mock fleet or
+        // synthetic dock counts. This capture must never use --usability-fixture.
+        launch(["--test-map-controls", "--test-journey-selection"])
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 90))
+        // Use an actual rendered station pin and its fresh operator report. This
+        // remains usable outside metro operating hours and never invents counts.
+        waitRenderedMap { state in
+            state["cameraMoving"] as? Bool == false && !(state["visibleBikePins"] as? [[String: Any]] ?? []).isEmpty
+        }
+        let probe = app.staticTexts["map-camera-state"]
+        let camera = try! JSONSerialization.jsonObject(with: probe.label.data(using: .utf8)!) as! [String: Any]
+        let pins = camera["visibleBikePins"] as? [[String: Any]] ?? []
+        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
+        let card = app.descendants(matching: .any).matching(identifier: "bike-station-card").firstMatch
+        for pin in pins {
+            guard let x = pin["x"] as? Double, let y = pin["y"] as? Double,
+                  x > 25, x < map.frame.width - 80, y > 110, y < map.frame.height - 210 else { continue }
+            map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+            if card.waitForExistence(timeout: 4) { break }
+        }
+        XCTAssertTrue(card.waitForExistence(timeout: 10))
+        let report = app.staticTexts["bike-station-report"]
+        XCTAssertTrue(report.exists)
+        XCTAssertFalse(report.label.contains("資料延遲") || report.label.contains("資料更新中"))
+        capture("store-24-live-youbike-station")
+        button("bike-station-close").tap()
+        button("home-destination-search").tap()
+        chooseNeihu()
+        if !button("journey-all-options").waitForExistence(timeout: 100) {
+            XCTAssertTrue(button("journey-retry-search").waitForExistence(timeout: 15))
+            XCTAssertTrue(button("journey-empty-other-transport").exists)
+            capture("store-real-youbike-search-next-steps")
+            return
+        }
+        button("journey-all-options").tap()
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 100)); waitForConfirmedChoices()
+        capture("store-20-mixed-transit-choices")
+        let bicycle = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND (label CONTAINS %@ OR label CONTAINS %@)", "journey-option-", "YouBike", "騎車")).firstMatch
+        for _ in 0..<4 {
+            if bicycle.exists { break }
+            app.swipeUp()
+        }
+        // Availability and the current departure window can legitimately make a
+        // bike connection noncompetitive; the station capture is still genuine.
+        guard bicycle.waitForExistence(timeout: 10) else { return }
+        let id = String(bicycle.identifier.dropFirst("journey-option-".count))
+        bicycle.tap()
+        XCTAssertTrue(button("journey-steps-" + id).waitForExistence(timeout: 15))
+        capture("store-21-youbike-transit-map")
+        button("journey-steps-" + id).tap()
+        let pickup = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-bike-pickup-")).firstMatch
+        for _ in 0..<3 { if pickup.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(pickup.isHittable)
+        capture("store-22-youbike-transit-steps")
+        pickup.tap()
+        XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "bike-station-card").firstMatch.waitForExistence(timeout: 15))
+        XCTAssertTrue(app.staticTexts["bike-station-report"].exists)
+        capture("store-23-live-youbike-availability")
     }
     func testPrivacyAndSupportAreAccessible() {
         launch()

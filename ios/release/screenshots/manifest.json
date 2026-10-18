@@ -1,7 +1,7 @@
 {
-  "app_version": "1.6.1",
-  "release_build": "98.1.0",
-  "status": "approved_gallery_for_paused_store_draft",
+  "app_version": "1.8.9",
+  "release_build": "149.1.0",
+  "status": "verified_gallery_for_authorized_app_store_1.8.9",
   "slides": [
     {
       "source": "user-06.jpg",
@@ -100,6 +100,28 @@
       "render_sha256": "b790dad70c0145f92e4acfb9f88a8539765edbdd30046752a765cb5f1ecbf07c"
     },
     {
+      "source": "native-1.8.9-youbike.png",
+      "file": "10-youbike-connection.png",
+      "title": "最後一段，騎車接上",
+      "caption": "可借車輛與可還空位，點開就看。",
+      "pro": false,
+      "attachment_number": null,
+      "source_kind": "native_simulator_capture",
+      "source_sha256": "f9a134e695c37d9bc171a25ae3c2986a5c43bd8ed7c53a9bac7896c777e483c7",
+      "source_dimensions": [
+        1320,
+        2868
+      ],
+      "source_crop_top": 720,
+      "crop_reason": "Focus on the current YouBike station report and its map; crop the system bar and unrelated bus-feed status. Bike report freshness was verified by the actual app. No source pixels or values changed.",
+      "capture_run": 39152492036,
+      "synthetic_data": false,
+      "width": 1320,
+      "height": 2868,
+      "geometry_verified": true,
+      "render_sha256": "23e6f3bf7ec3d5ad993eabe47efcfe462257a152f8070dd2a11864bc6e04bb2d"
+    },
+    {
       "source": "user-02.jpg",
       "file": "05-official-arrivals.png",
       "title": "下一班，還有多久",
@@ -119,23 +141,24 @@
       "render_sha256": "715caddc0a476e49f4772309a71cbdbce7afa04d03f07c3f071a121dfc06e161"
     },
     {
-      "source": "native-walking.png",
+      "source": "native-1.8.9-walking.png",
       "file": "06-walking.png",
       "title": "走到站牌，不用換 App",
-      "caption": "路線、距離與轉彎指引，就在地圖裡。",
+      "caption": "地圖、距離與轉彎指引，一路接著走。",
       "pro": false,
       "attachment_number": null,
       "source_kind": "native_simulator_capture",
-      "source_sha256": "853d70e9f9552881ca6071d6f1a06b0e10e04acfbce488f69ba2b2484a2e228f",
+      "source_sha256": "8cbca333ce2bfecf4a3a56ba429ade275a98bb10d6cfdbe29936c9514509386c",
       "source_dimensions": [
         1320,
         2868
       ],
-      "capture_run": 38346575772,
+      "capture_run": 39149033787,
+      "synthetic_data": false,
       "width": 1320,
       "height": 2868,
       "geometry_verified": true,
-      "render_sha256": "35f4f654ce0a18d63b5d475c1ec9f60942b90ad615843d914382a6571940564f"
+      "render_sha256": "1bb0649305c4d598a6d9bed18f6c45ed71d6e41b592979169278921d80e3d3b7"
     },
     {
       "source": "user-05.jpg",
@@ -195,14 +218,14 @@
       "render_sha256": "c7cac4a11e975a2f23c74239ed2f483220b4ca9ecf0f6dacffa29e9d59787447"
     }
   ],
-  "exports_directory": "exports-v3",
-  "preview_file": "preview-v3.html",
-  "overview_file": "overview-v3.png",
-  "overview_caption": "3D 公車、捷運列車與動態島排在前面。你的六張全數保留，Pro 功能與方案合併呈現。",
-  "revision": "polished-v3",
-  "scope": "app_store_1.6.1",
+  "exports_directory": "exports-1.8.9",
+  "preview_file": "preview-1.8.9.html",
+  "overview_file": "overview-1.8.9.png",
+  "overview_caption": "3D 公車、捷運列車與動態島排在前面；保留你挑選的六張，補上 YouBike 站點與新版步行導航畫面。",
+  "revision": "1.8.9-ten-images",
+  "scope": "app_store_1.8.9",
   "quality_note": "使用者提供的照片為壓縮圖片，放大後細字清晰度受原檔限制。",
-  "sources_unchanged": true,
-  "target_store_version": "1.8.0",
-  "target_store_build": "124.1.0"
+  "target_store_version": "1.8.9",
+  "target_store_build": "149.1.0",
+  "sources_unchanged": true
 }
