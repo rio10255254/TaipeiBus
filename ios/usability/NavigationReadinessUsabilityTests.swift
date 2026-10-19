@@ -83,11 +83,12 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(go.waitForExistence(timeout: 10)); go.tap()
         XCTAssertTrue(button("journey-end").waitForExistence(timeout: 10))
         waitState("An explicit departure begins the trip", { $0["started"] as? Bool == true })
-        let phase = probe()["step"] as? String
+        let phase = probe()["step"] as? Int
+        XCTAssertNotNil(phase)
         XCUIDevice.shared.press(.home)
         capture(english ? "navigation-background-english" : "navigation-background-chinese")
         app.activate()
-        waitState("Returning keeps the same step", { $0["started"] as? Bool == true && $0["step"] as? String == phase })
+        waitState("Returning keeps the same step", { $0["started"] as? Bool == true && $0["step"] as? Int == phase })
         button("journey-end").tap()
         let keep = button(english ? "Continue navigation" : "繼續導航")
         XCTAssertTrue(keep.waitForExistence(timeout: 10)); keep.tap()

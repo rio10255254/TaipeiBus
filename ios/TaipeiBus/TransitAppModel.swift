@@ -167,13 +167,13 @@ final class TransitAppModel: ObservableObject {
             notifications: alightReminder.permission, location: location.navigationPermission,
             liveActivitiesAllowed: rideActivity.isAllowed)
         if readiness != navigationReadiness { navigationReadiness = readiness }
+        updateWalkingLocation(); anchorBoardedVehicle(publish: false)
         if !planner.started || planner.arrived {
             if !planner.started { boardedAt = nil; boardedVehicle = nil }
             alightReminder.cancel(); rideActivity.endAll()
             location.setBackgroundNavigation(false)
             location.setWalkingNavigation(stationWalk.isActive); location.setRidingNavigation(false)
         } else {
-            updateWalkingLocation(); anchorBoardedVehicle(publish: false)
             rideActivity.update(rideActivityState(at: Date()), destination: planner.destination?.localizedName ?? "",
                                 language: language, enabled: purchases.hasPro && rideActivityOn)
             location.setBackgroundNavigation(journeyInBackground)
@@ -742,8 +742,6 @@ final class TransitAppModel: ObservableObject {
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.2",
             cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LiveSettings"))
         location.onNavigationUpdate = { [weak self] in
-            self?.updateWalkingLocation()
-            self?.anchorBoardedVehicle()
             self?.synchronizeNavigationState()
         }
         planner.onNavigationChange = { [weak self] in self?.synchronizeNavigationState() }

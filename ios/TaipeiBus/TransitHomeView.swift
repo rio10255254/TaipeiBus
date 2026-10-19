@@ -329,7 +329,7 @@ struct TransitHomeView: View {
     }
 
 
-    var body: some View {
+    private var presentedMap: some View {
         mapContent
         .tint(Color(liveHex: live.appearance.accentColor))
         .onPreferenceChange(MapBottomControlsHeightKey.self) { bottomControlsHeight = $0 }
@@ -394,6 +394,10 @@ struct TransitHomeView: View {
         .sheet(isPresented: $model.showingArrivingVehicles) {
             if let ride = planner.activeRide { VehicleArrivalsView(model: model, ride: ride) }
         }
+    }
+
+    var body: some View {
+        presentedMap
         .onChange(of: location.revision, initial: true) { before, after in
             if before == after {
                 model.updateWalkingLocation()
