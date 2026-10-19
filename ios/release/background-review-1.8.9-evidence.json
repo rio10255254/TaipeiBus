@@ -1,0 +1,55 @@
+{
+  "version": "1.8.9",
+  "reviewed_build": "149.1.0",
+  "captured_date": "2026-10-19",
+  "scope": "Actual app UI running in iOS Simulator with local StoreKit test transactions and simulated location. Not physical-device evidence.",
+  "app_store_reply_sent": false,
+  "app_store_resubmitted": false,
+  "physical_device_recording_available": false,
+  "app_runtime_source_matches_submitted_source": "git diff is empty for ios/TaipeiBus, ios/TransitCore and ios/TaipeiBusWidgets against 531a30ff1d67ee5430f3510fc709a370b33ca534; the simulator test build is not the signed App Store binary",
+  "iphone": {
+    "run": 39216377758,
+    "source_commit": "42277cd53106b5613195ba38954d551f99d163c8",
+    "job_result": "success",
+    "native_ui_test": "testBackgroundReviewWalkthrough",
+    "test_seconds": 285.241,
+    "tests": 1,
+    "failures": 0,
+    "artifact_id": 12170382836,
+    "video": "work/review-1.8.9-issues/recording-iphone-final/iPhone17-simulator-labelled.mp4",
+    "video_sha256": "fa07defe8a2a99db92415f76f2023b7abcbdcb0aecdca3484423dda39f6eac8c",
+    "video_seconds": 371.804878,
+    "video_size": [1206, 2718],
+    "full_decode": "FFmpeg decoded the complete video with exit 0 and no errors; OpenCV sequentially decoded all 956 variable-rate frames",
+    "visible_source_label": "Permanent simulator / simulated-location / test-purchase caption beneath the unchanged native recording",
+    "visually_checked": [
+      "Pro controls exist after a verified local test purchase",
+      "Navigation starts using an ordinary live route search",
+      "Notification Center shows the Live Activity for Neihu with remaining time and stops",
+      "The first-use Allow Live Activities prompt is visible; the current test does not accept that prompt",
+      "The app resumes the journey and ending it removes the activity"
+    ],
+    "not_demonstrated": [
+      "Physical-device continuous background GPS",
+      "Delivery of an actual near-stop notification or physical vibration",
+      "Actual on-road passenger movement",
+      "Real-device frame rate or battery life"
+    ]
+  },
+  "ipad": {
+    "first_run": 39214040180,
+    "first_native_ui_result": "1 test passed, 0 failures, 335.969 seconds; Pro, navigation, Home Screen, returning and ending were exercised",
+    "first_video": "Invalid MP4 metadata; not delivered as a playable video",
+    "second_run": 39216377758,
+    "second_native_ui_result": "Failed before planning because Apple's first-use keyboard tutorial covered destination selection",
+    "failure_evidence": "work/review-1.8.9-issues/recording-ipad-final/84E6C416-5547-4C42-9995-9F5AF147BCBD.png",
+    "whole_second_run_is_not_green": true
+  },
+  "review_path": {
+    "offered_by_apple": "Bug Fix Submissions",
+    "source": "https://developer.apple.com/help/app-review/after-submitting-for-review/bug-fix-submissions/",
+    "draft": "ios/release/bug-fix-review-reply-1.8.9.txt",
+    "instruction": "Accept the offered deferral by replying in the existing App Review conversation, if the user agrees. Do not resubmit to start a new review. Resolve the deferred issue in the next update.",
+    "current_access_blocker": "No available browser surface for the App Review conversation; no reply has been sent."
+  }
+}
