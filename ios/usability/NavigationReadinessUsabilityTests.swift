@@ -84,18 +84,29 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(steps.waitForExistence(timeout: 10))
         var lastFrame = CGRect.null, settledAt = Date()
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            guard steps.exists, steps.isHittable else { return false }
+            guard steps.exists, steps.isEnabled else { return false }
             let frame = steps.frame
-            if frame != lastFrame { lastFrame = frame; settledAt = Date(); return false }
+            guard frame.width > 20, frame.height > 20,
+                  self.app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+            if lastFrame.isNull || abs(frame.midX - lastFrame.midX) > 1 || abs(frame.midY - lastFrame.midY) > 1 {
+                lastFrame = frame; settledAt = Date(); return false
+            }
             return Date().timeIntervalSince(settledAt) >= 0.5
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
-        steps.tap()
+        func tapSteps() {
+            let frame = steps.frame
+            XCTAssertTrue(app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        }
+        // XCTest's hittability result can be false for a visible control inside a
+        // transformed native sheet. Send a real touch at its current screen bounds.
+        tapSteps()
         let start = button("journey-start-navigation")
         // The hosted simulator may drop a tap while the native sheet settles.
         // Retry only when the same preview action remains visible and no trip began.
-        if !start.waitForExistence(timeout: 5), steps.exists, steps.isHittable,
-           probe()["started"] as? Bool == false { steps.tap() }
+        if !start.waitForExistence(timeout: 5), steps.exists, steps.isEnabled,
+           probe()["started"] as? Bool == false { tapSteps() }
         XCTAssertTrue(start.waitForExistence(timeout: 10))
         XCTAssertFalse(probe()["started"] as? Bool ?? true)
         button("journey-back").tap()
