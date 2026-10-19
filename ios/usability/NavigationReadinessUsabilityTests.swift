@@ -24,11 +24,10 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(XCTWaiter.wait(for: [match], timeout: 20), .completed, description + ": " + String(describing: probe()))
     }
     private func openPro(_ english: Bool) {
-        launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-navigation-readiness",
+        launch(["--test-navigation-readiness",
                 "-alightReminderOn", "YES", "-rideActivityOn", "YES"] + (english ? ["--test-language", "en"] : []))
-        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 80))
-        waitState("A fixture is a preview", { $0["started"] as? Bool == false })
-        button(english ? "Information and settings" : "資料來源與地圖設定").tap()
+        let information = button(english ? "Information and settings" : "資料來源與地圖設定")
+        XCTAssertTrue(information.waitForExistence(timeout: 30)); information.tap()
         XCTAssertTrue(button("settings-pro").waitForExistence(timeout: 15)); button("settings-pro").tap()
         XCTAssertTrue(button("pro-open-plans").waitForExistence(timeout: 10)); button("pro-open-plans").tap()
         if !button("pro-plan-monthly").waitForExistence(timeout: 8), button("pro-open-plans").isHittable { button("pro-open-plans").tap() }
@@ -47,7 +46,13 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
         XCTAssertTrue(button(english ? "Done" : "完成").waitForExistence(timeout: 10))
         button(english ? "Done" : "完成").tap()
-        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 15))
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 15))
+        // Open the planning fixture after leaving Settings: two sibling sheets cannot
+        // present over one another. The real StoreKit purchase survives this relaunch.
+        launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-navigation-readiness",
+                "-alightReminderOn", "YES", "-rideActivityOn", "YES"] + (english ? ["--test-language", "en"] : []))
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 80))
+        waitState("The purchased account opens a preview", { $0["started"] as? Bool == false && $0["pro"] as? Bool == true })
     }
     func testDeniedNotificationsAreNeverShownAsReady() {
         openPro(true)
