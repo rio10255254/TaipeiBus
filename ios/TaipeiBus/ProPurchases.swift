@@ -38,6 +38,7 @@ final class ProPurchases: ObservableObject {
     private var accessTask: Task<Void, Never>?
     private var generation = 0
     private var awaitingApproval = false
+    var onAccessChange: (() -> Void)?
 
     init() {
         updates = Task { [weak self] in
@@ -126,6 +127,7 @@ final class ProPurchases: ObservableObject {
         }
         periodEndsAt = grace ? nil : current?.expirationDate
         willAutoRenew = renewal?.willAutoRenew
+        onAccessChange?()
         await refreshTrialEligibility()
         guard token == generation else { return }
         expiryCheck?.cancel(); expiryCheck = nil
@@ -221,6 +223,36 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
     private static let identifier = "alight-reminder"
     private var scheduled: (rideID: String, fireAt: Date)?
     private var announced: Set<String> = []
+    private(set) var permission: NavigationPermission = .checking
+    var onPermissionChange: (() -> Void)?
+    var onOpenJourney: (() -> Void)?
+    private var permissionGeneration = 0
+
+    private func applyPermission(_ value: NavigationPermission) {
+        guard permission != value else { return }
+        permission = value
+        if value != .allowed { cancel() }
+        onPermissionChange?()
+    }
+    @discardableResult func refreshPermission() async -> NavigationPermission {
+        permissionGeneration += 1
+        let generation = permissionGeneration
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        let value: NavigationPermission
+        switch status {
+        case .authorized, .provisional, .ephemeral: value = .allowed
+        case .denied: value = .denied
+        case .notDetermined: value = .notDetermined
+        @unknown default: value = .denied
+        }
+        if generation == permissionGeneration { applyPermission(value) }
+        return value
+    }
+#if DEBUG
+    func auditPermission(_ value: NavigationPermission) {
+        permissionGeneration += 1; applyPermission(value)
+    }
+#endif
 
     override init() {
         super.init()
@@ -229,21 +261,21 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
     /// Asks once; returns whether notifications may be shown.
     func authorize() async -> Bool {
         let center = UNUserNotificationCenter.current()
-        switch await center.notificationSettings().authorizationStatus {
-        case .authorized, .provisional, .ephemeral: return true
-        case .denied: return false
-        default: return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
+        if await refreshPermission() == .notDetermined {
+            _ = try? await center.requestAuthorization(options: [.alert, .sound])
         }
+        return await refreshPermission() == .allowed
     }
     /// The latest prediction for the current ride. Small changes do not reschedule.
     func update(rideID: String, stopName: String, secondsToAlight: Double, now: Date) {
-        guard secondsToAlight.isFinite, !announced.contains(rideID) else { return }
+        guard permission == .allowed, secondsToAlight.isFinite, !announced.contains(rideID) else { return }
         let fireAt = now.addingTimeInterval(max(1, secondsToAlight - Self.leadSeconds))
         if let current = scheduled, current.rideID == rideID, abs(current.fireAt.timeIntervalSince(fireAt)) < 20 { return }
         let content = UNMutableNotificationContent()
-        content.title = AppText.text("下一站下車")
+        content.title = AppText.text("準備下車")
         content.body = AppText.text("快到「%@」了，準備下車。", stopName)
         content.sound = .default
+        content.userInfo = ["navigation": "journey"]
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])
         center.add(UNNotificationRequest(identifier: Self.identifier, content: content,
@@ -264,5 +296,9 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
         await MainActor.run { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
         return [.banner, .list, .sound]
+    }
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+        guard response.notification.request.content.userInfo["navigation"] as? String == "journey" else { return }
+        await MainActor.run { self.onOpenJourney?() }
     }
 }

@@ -12,6 +12,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     @Published private(set) var revision = 0
     /// Navigation consumes fixes even when the Lock Screen suspends SwiftUI.
     var onNavigationUpdate: (() -> Void)?
+    var onAuthorizationChange: (() -> Void)?
     private(set) var heading: Double?
     private(set) var headingAccuracy: Double?
     private var headingTime = Date.distantPast
@@ -28,8 +29,13 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
     private var ridingNavigation = false
     /// A trip in progress keeps receiving fixes behind the Lock Screen (blue status indicator).
-    private var backgroundNavigation = false
+    private(set) var backgroundNavigation = false
+    var navigationPermission: NavigationPermission {
+        if authorized { return .allowed }
+        return permissionDenied ? .denied : .notDetermined
+    }
     func setBackgroundNavigation(_ enabled: Bool) {
+        let enabled = enabled && authorized
         guard backgroundNavigation != enabled else { return }
         backgroundNavigation = enabled
         manager.allowsBackgroundLocationUpdates = enabled
@@ -184,6 +190,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         if authorized, active || permissionRequested { request() }
         else if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted { request() }
+        onAuthorizationChange?()
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) { accept(Self.sample(location)) }

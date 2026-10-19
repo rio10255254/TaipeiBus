@@ -698,6 +698,7 @@ private struct JourneyDockHeader: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let showJourney: () -> Void
+    @State private var confirmingEnd = false
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -720,12 +721,18 @@ private struct JourneyDockHeader: View {
             .buttonStyle(MapActionStyle(tint: Color.primary))
             .accessibilityLabel(live.text(planner.started ? "行程" : "路線"))
             .accessibilityIdentifier("journey-options")
-            Button { model.finishJourney() } label: {
+            Button { if planner.arrived { model.finishJourney() } else { confirmingEnd = true } } label: {
                 Text(AppText.text("結束")).liveFont(.subheadline, weight: .bold).padding(.horizontal, 14).frame(minHeight: 40)
             }
             .buttonStyle(MapActionStyle(tint: MapChrome.destructive))
             .accessibilityLabel(live.text("結束行程"))
+            .accessibilityIdentifier("journey-end")
         }
+        .alert(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd) {
+            Button(AppText.text("結束行程"), role: .destructive) { model.finishJourney() }
+                .accessibilityIdentifier("journey-confirm-end")
+            Button(AppText.text("繼續導航"), role: .cancel) {}
+        } message: { Text(AppText.text("行程資訊與下車提醒會一起停止。")) }
     }
 }
 
@@ -1422,6 +1429,7 @@ struct JourneyGuideCard: View {
                                     .liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
                             }.buttonStyle(MapActionStyle())
                                 .accessibilityLabel(model.alightReminderActive ? AppText.text("關閉下車提醒") : AppText.text("下車提醒"))
+                                .accessibilityValue(model.alightReminderStatus)
                                 .accessibilityIdentifier("journey-alight-reminder")
                             // Icon-sized like the bell beside it, so the plate never has to shrink.
                             Button { showRideStops = true } label: {
@@ -1431,6 +1439,13 @@ struct JourneyGuideCard: View {
                             .buttonStyle(MapActionStyle(tint: Color.primary))
                             .accessibilityLabel(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"))
                             .accessibilityIdentifier("journey-ride-stops")
+                        }
+                        if model.alightReminderState == .needsPermission {
+                            Button { model.requestAlightReminderAccess() } label: {
+                                Label(model.alightReminderStatus, systemImage: "bell.badge")
+                                    .liveFont(.caption, weight: .semibold).frame(minHeight: 40)
+                            }.buttonStyle(MapActionStyle(tint: MapChrome.caution))
+                                .accessibilityIdentifier("journey-reminder-permission")
                         }
                         if option.rides.indices.contains(index + 1) {
                             let next = option.rides[index + 1]

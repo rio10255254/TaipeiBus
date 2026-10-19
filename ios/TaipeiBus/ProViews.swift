@@ -179,9 +179,30 @@ struct ProSettingsView: View {
             if purchases.hasPro {
                 Section {
                     Toggle(AppText.text("動態島與鎖定畫面"), isOn: $model.rideActivityOn).accessibilityIdentifier("pro-ride-activity")
-                    Toggle(AppText.text("下車提醒"), isOn: $model.alightReminderOn).accessibilityIdentifier("pro-alight-reminder")
+                    HStack {
+                        Text(model.liveActivityStatus).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("pro-live-activity-readiness")
+                        Spacer()
+                        if model.liveActivityState == .needsPermission {
+                            Button(AppText.text("開啟設定")) { model.openAppSettings() }
+                        } else if model.liveActivityState == .unavailable {
+                            Button(AppText.text("重新顯示")) { model.retryLiveActivity() }
+                        }
+                    }
+                    Toggle(AppText.text("下車提醒"), isOn: Binding(get: { model.alightReminderOn },
+                        set: { model.setAlightReminderPreference($0) })).accessibilityIdentifier("pro-alight-reminder")
+                    HStack {
+                        Text(model.alightReminderStatus).font(.caption).foregroundStyle(.secondary)
+                            .accessibilityIdentifier("pro-alight-readiness")
+                        Spacer()
+                        if model.alightReminderState == .needsPermission {
+                            Button(AppText.text(model.alightReminder.permission == .denied ? "開啟設定" : "允許通知")) {
+                                model.requestAlightReminderAccess()
+                            }.accessibilityIdentifier("pro-authorize-notifications")
+                        }
+                    }
                 } header: { Text(AppText.text("導航")) } footer: {
-                    Text(AppText.text("導航進行中，App 會在背景持續定位與更新到站時間，讓鎖定畫面與下車提醒跟著車輛即時更新；行程結束即停止。桌面小工具：長按主畫面空白處，點「＋」，搜尋「台北公車」。"))
+                    Text(AppText.text("導航期間在背景更新，結束後停止。小工具可從主畫面新增。"))
                 }
             }
             Section {
@@ -190,7 +211,7 @@ struct ProSettingsView: View {
             }
         }.navigationTitle(AppText.text("台北公車 Pro")).navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented:$showingPurchase) { ProPurchaseView(purchases:purchases) }
-            .task { await purchases.refreshAccess() }
+            .task { await purchases.refreshAccess(); await model.refreshNavigationPermissions() }
     }
 }
 

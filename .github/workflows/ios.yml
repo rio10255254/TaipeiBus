@@ -29,7 +29,7 @@ on:
       native_suite:
         description: 'All hosted checks, or feature regressions after the live walking suite has passed'
         type: choice
-        options: ['all', 'features']
+        options: ['all', 'features', 'navigation']
         default: 'all'
       street_repeat:
         description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
@@ -58,6 +58,10 @@ on:
         type: choice
         options: ['both', 'light', 'dark']
         default: 'both'
+      ui_test_filter:
+        description: 'Optional exact native UI test for a focused rerun after other checks passed'
+        type: string
+        default: ''
       content_revision_before:
         description: 'For live-settings verification: current live content revision'
         type: string
@@ -65,7 +69,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -83,6 +87,7 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
   BUS_CONTENT_BEFORE: ${{ inputs.content_revision_before }}
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
+  BUS_UI_TEST_FILTER: ${{ inputs.ui_test_filter }}
 
 jobs:
   street_probe:
@@ -105,7 +110,7 @@ jobs:
           name: street-probe
           path: ${{ runner.temp }}/street-probe.log
   bike_behavior:
-    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'route-reliability')
+    if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && (inputs.usability_scope == 'youbike' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'route-reliability' || inputs.usability_scope == 'navigation-readiness')
     runs-on: macos-15
     timeout-minutes: 25
     steps:
@@ -121,11 +126,14 @@ jobs:
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
           selection=('-parallel-testing-enabled' 'NO')
-          if [ '${{ inputs.usability_scope }}' = 'route-reliability' ]; then
+          if [ '${{ inputs.usability_scope }}' = 'route-reliability' ] && [ '${{ inputs.native_suite }}' != 'navigation' ]; then
             selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
           if [ '${{ inputs.native_suite }}' = 'features' ]; then
             selection+=('-skip-testing:TaipeiBusBillingTests/RouteReliabilityTests')
+          fi
+          if [ '${{ inputs.native_suite }}' = 'navigation' ]; then
+            selection+=('-only-testing:TaipeiBusBillingTests/NavigationLifecycleTests' '-only-testing:TaipeiBusBillingTests/ContinuousNavigationTests')
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
@@ -206,7 +214,8 @@ jobs:
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
-        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
+        # UI-only readiness reruns reuse the separate PR's device-build verification.
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing' && (inputs.usability_scope != 'navigation-readiness' || inputs.billing_tests)
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -217,7 +226,7 @@ jobs:
         env:
           BUS_LIVE_CYCLING_TEST: "1"
         id: billing_transactions
-        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
+        if: github.event_name == 'workflow_dispatch' && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && inputs.usability_scope != 'navigation-readiness'
         timeout-minutes: 22
         run: |
           set -euo pipefail
@@ -234,7 +243,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/billing-tests.log"
       - name: Preserve StoreKit verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && inputs.usability_scope != 'navigation-readiness'
         uses: actions/upload-artifact@v4
         with:
           name: billing-tests
@@ -243,7 +252,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
       - name: Tap through Pro trial and commute features in both appearances
-        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
+        if: always() && !cancelled() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && inputs.usability_scope != 'navigation-readiness' && (steps.billing_transactions.outcome == 'success' || steps.billing_transactions.outcome == 'failure')
         timeout-minutes: 24
         run: |
           set -euo pipefail
@@ -269,7 +278,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/pro-ui-dark.log"
       - name: Preserve native Pro screenshots and verification
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && inputs.usability_scope != 'navigation-readiness'
         run: |
           for mode in pro-ui pro-ui-dark; do
             if [ -d "$RUNNER_TEMP/$mode.xcresult" ]; then
@@ -277,7 +286,7 @@ jobs:
             fi
           done
       - name: Save native Pro walkthrough
-        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine'
+        if: always() && inputs.billing_tests && inputs.usability_scope != 'youbike' && inputs.usability_scope != 'mixed-route-menu' && inputs.usability_scope != 'planning-engine' && inputs.usability_scope != 'navigation-readiness'
         uses: actions/upload-artifact@v4
         with:
           name: pro-walkthrough
@@ -617,9 +626,16 @@ jobs:
           location_fixture_pid=$!
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           gem install xcodeproj -v 1.27.0 --no-document --user-install
-          ruby ios/usability/setup.rb
+          if [ '${{ inputs.usability_scope }}' = 'navigation-readiness' ]; then
+            BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
+          else
+            ruby ios/usability/setup.rb
+          fi
           xcrun simctl privacy "$BUS_SIM_DEVICE" grant location com.example.TaipeiBus
           selection=('-skip-testing:TaipeiBusUsabilityTests/NoLocationUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'navigation-readiness' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/NavigationReadinessUsabilityTests')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'metro' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests'
               '-only-testing:TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
@@ -794,6 +810,10 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
             selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
+          if [ -n "$BUS_UI_TEST_FILTER" ]; then
+            [[ "$BUS_UI_TEST_FILTER" =~ ^TaipeiBusUsabilityTests/[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid UI test filter'; exit 1; }
+            selection=("-only-testing:$BUS_UI_TEST_FILTER")
+          fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
@@ -818,7 +838,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
       - name: Verify system dark appearance with native journeys
-        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_appearance != 'light' && inputs.usability_appearance != 'dark' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
+        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && inputs.usability_appearance != 'light' && inputs.usability_appearance != 'dark' && (inputs.usability_scope == 'planning-engine' || inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'mixed-route-additions' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'navigation-readiness' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'zoom-fix' || inputs.usability_scope == 'zoom-controls' || inputs.usability_scope == 'youbike')
         run: |
           set -euo pipefail
           xcrun simctl ui "$BUS_SIM_DEVICE" appearance dark
@@ -829,6 +849,9 @@ jobs:
           trap 'kill "$location_fixture_pid" 2>/dev/null || true' EXIT
           export TEST_RUNNER_BUS_TEST_DARK=true
           selection=('-only-testing:TaipeiBusUsabilityTests/AppearanceUsabilityTests')
+          if [ '${{ inputs.usability_scope }}' = 'navigation-readiness' ]; then
+            selection=('-only-testing:TaipeiBusUsabilityTests/NavigationReadinessUsabilityTests')
+          fi
           if [ '${{ inputs.usability_scope }}' = 'youbike' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/BikeUsabilityTests/testBikeStationsCanBeInspectedWithoutStartingOrLosingNavigation' '-only-testing:TaipeiBusUsabilityTests/BikeUsabilityTests/testStaleReturnAvailabilityIsNotDisplayedAsConfirmedParking')
           fi
@@ -899,7 +922,7 @@ jobs:
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
             | tee "$RUNNER_TEMP/usability-dark.log"
       - name: Verify appearance switches without resetting the active bus
-        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
+        if: always() && steps.native_journeys.outcome == 'success' && github.event_name == 'workflow_dispatch' && inputs.capture_preview && inputs.preview_scope == 'usability' && (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'navigation-appearance' || inputs.usability_scope == 'navigation-readiness' || inputs.usability_scope == 'continuous-gps' || inputs.usability_scope == 'navigation-optimization' || inputs.usability_scope == 'navigation-details' || inputs.usability_scope == 'navigation-onboard' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey')
         run: |
           location_args=("$BUS_SIM_DEVICE")
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] || [ '${{ inputs.usability_scope }}' = 'mixed-route-menu' ]; then location_args+=('--jitter'); fi
