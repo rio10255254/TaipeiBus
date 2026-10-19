@@ -170,6 +170,8 @@ final class JourneyPlannerModel: ObservableObject {
     @Published private(set) var message: String?
     @Published private(set) var started = false
     @Published private(set) var stepIndex = 0
+    /// A complete navigation transition, delivered after all of its state has changed.
+    var onNavigationChange: (() -> Void)?
     @Published private(set) var mapRevision = 0
     @Published private(set) var recentPlaces: [TravelPlace] = []
     private let network = TripNetwork()
@@ -1105,6 +1107,7 @@ final class JourneyPlannerModel: ObservableObject {
         return JourneyOption(id: aligned.id, trip: aligned, walks: walks)
     }
     func plan(metadata: TransitMetadata) {
+        defer { onNavigationChange?() }
         durationCache.removeAll(keepingCapacity: true)
         lastMetadata = metadata; selectionConfirmed = false
         cancelRequests()
@@ -1234,6 +1237,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func select(_ option: JourneyOption) {
+        defer { onNavigationChange?() }
         // A row can still receive its tap while a fresh recommendation removes it
         // from the compact list. Resolve the checked choice and retain it before
         // changing selection; never leave selectedID pointing at an absent option.
@@ -1513,6 +1517,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func begin() {
         guard let option = selected, canUse(option) else { return }
+        defer { onNavigationChange?() }
         cancelRequests()
         started = true; stepIndex = 0; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -1541,6 +1546,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     @discardableResult
     func adoptRemaining(_ option: JourneyOption, from start: TravelPlace) -> Bool {
+        defer { onNavigationChange?() }
         guard started, case .walk = currentStep, canUse(option),
               option.walks.count == option.rides.count + 1 else { return false }
         if case .walk(let index) = currentStep, selected?.walks.indices.contains(index) == true,
@@ -1558,12 +1564,14 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func advance() {
         guard started, stepIndex < steps.count else { return }
+        defer { onNavigationChange?() }
         stepIndex += 1; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
     }
     func boardCurrentRide() {
         guard let index = boardingRideIndex,
               let target = steps.firstIndex(of: .ride(index)) else { return }
+        defer { onNavigationChange?() }
         cancelRequests()
         started = true; stepIndex = target; mapRevision += 1
         UISelectionFeedbackGenerator().selectionChanged()
@@ -1571,9 +1579,11 @@ final class JourneyPlannerModel: ObservableObject {
     func returnToWaiting() {
         guard case .ride(let index) = currentStep,
               let target = steps.firstIndex(of: .walk(index)) else { return }
+        defer { onNavigationChange?() }
         started = true; stepIndex = target; mapRevision += 1
     }
     func finish() {
+        defer { onNavigationChange?() }
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]

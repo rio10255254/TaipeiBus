@@ -64,9 +64,55 @@ final class TransitAppModel: ObservableObject {
     // MARK: Alighting reminder (Pro)
     let alightReminder = AlightReminder()
     @Published var alightReminderOn: Bool = UserDefaults.standard.object(forKey: "alightReminderOn") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(alightReminderOn, forKey: "alightReminderOn"); if !alightReminderOn { alightReminder.cancel() } }
+        didSet { UserDefaults.standard.set(alightReminderOn, forKey: "alightReminderOn"); synchronizeNavigationState() }
     }
-    var alightReminderActive: Bool { purchases.hasPro && alightReminderOn }
+    @Published private(set) var navigationReadiness = NavigationReadiness()
+    var alightReminderState: NavigationFeatureState { navigationReadiness.reminder(enabled: alightReminderOn) }
+    var alightReminderActive: Bool { alightReminderState == .ready }
+    @Published private(set) var liveActivityState: NavigationFeatureState = .checking
+    @Published private(set) var liveActivityRunning = false
+    var alightReminderStatus: String {
+        switch alightReminderState {
+        case .ready: return AppText.text("下車提醒已準備好")
+        case .disabled: return AppText.text("下車提醒已關閉")
+        case .needsPermission: return AppText.text("需要允許通知")
+        case .checking: return AppText.text("確認通知設定中")
+        case .requiresPro: return AppText.text("Pro 功能")
+        case .unavailable: return AppText.text("提醒暫時無法開啟")
+        }
+    }
+    var liveActivityStatus: String {
+        switch liveActivityState {
+        case .ready: return liveActivityRunning ? AppText.text("行程資訊顯示中") : AppText.text("開始導航後顯示")
+        case .disabled: return AppText.text("即時動態已關閉")
+        case .needsPermission: return AppText.text("需要允許即時動態")
+        case .unavailable: return AppText.text("本次行程尚未顯示")
+        case .checking: return AppText.text("確認設定中")
+        case .requiresPro: return AppText.text("Pro 功能")
+        }
+    }
+    func openAppSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+        UIApplication.shared.open(url)
+    }
+    func requestAlightReminderAccess() {
+        guard purchases.hasPro else { showingProPlans = true; return }
+        if alightReminder.permission == .denied { openAppSettings(); return }
+        Task { [weak self] in
+            guard let self else { return }
+            _ = await self.alightReminder.authorize()
+            self.synchronizeNavigationState()
+        }
+    }
+    func setAlightReminderPreference(_ enabled: Bool) {
+        alightReminderOn = enabled
+        if enabled, alightReminder.permission == .notDetermined { requestAlightReminderAccess() }
+    }
+    func retryLiveActivity() { rideActivity.allowRestart(); synchronizeNavigationState() }
+    func refreshNavigationPermissions() async {
+        await alightReminder.refreshPermission()
+        synchronizeNavigationState()
+    }
     /// Seconds until the rider reaches the alighting stop of the ride they are on.
     func onboardSecondsToAlight(_ ride: TransitRide, at date: Date) -> Double? {
         if ride.route.mode != .bus { return metroRemaining(ride, at: date).seconds }
@@ -75,7 +121,7 @@ final class TransitAppModel: ObservableObject {
     }
     private func updateAlightReminder() {
         guard alightReminderActive, boardedAt != nil, case .ride(let index) = planner.currentStep,
-              let rides = planner.selected?.rides, rides.indices.contains(index) else { return }
+              let rides = planner.selected?.rides, rides.indices.contains(index) else { alightReminder.cancel(); return }
         let ride = rides[index], now = Date()
         guard let seconds = onboardSecondsToAlight(ride, at: now) else { return }
         alightReminder.update(rideID: ride.id, stopName: ride.alighting.localizedName, secondsToAlight: seconds, now: now)
@@ -83,12 +129,8 @@ final class TransitAppModel: ObservableObject {
     /// The bell on the riding card: Pro turns the reminder on or off; otherwise it shows Pro.
     func toggleAlightReminder() {
         guard purchases.hasPro else { showingProPlans = true; return }
-        if alightReminderOn { alightReminderOn = false; return }
-        Task { [weak self] in
-            guard let self else { return }
-            if await self.alightReminder.authorize() { self.alightReminderOn = true; self.updateAlightReminder() }
-            else { self.proNote = AppText.text("請在「設定」允許台北公車傳送通知，才能收到下車提醒") }
-        }
+        if alightReminderActive { alightReminderOn = false }
+        else { alightReminderOn = true; requestAlightReminderAccess() }
     }
 
     // MARK: Live Activity and Home Screen widget (Pro)
@@ -101,12 +143,12 @@ final class TransitAppModel: ObservableObject {
     /// iOS background navigation location, so the Live Activity's stops and countdown and the
     /// alighting reminder follow the real bus or train.
     var journeyInBackground: Bool {
-        purchases.hasPro && planner.started && !planner.arrived && !location.permissionDenied &&
-            (rideActivityOn || alightReminderOn)
+        navigationReadiness.canRunInBackground(started: planner.started, arrived: planner.arrived,
+            reminderEnabled: alightReminderOn, activityEnabled: rideActivityOn, activityRunning: rideActivity.isRunning)
     }
     /// Pro setting: show the trip on the Lock Screen and in the Dynamic Island.
     @Published var rideActivityOn: Bool = UserDefaults.standard.object(forKey: "rideActivityOn") as? Bool ?? true {
-        didSet { UserDefaults.standard.set(rideActivityOn, forKey: "rideActivityOn"); if !rideActivityOn { rideActivity.endAll() } }
+        didSet { UserDefaults.standard.set(rideActivityOn, forKey: "rideActivityOn"); synchronizeNavigationState() }
     }
 #if DEBUG
     /// Interface verification reads whether the system accepted the Live Activity.
@@ -115,16 +157,41 @@ final class TransitAppModel: ObservableObject {
     /// A widget link that arrived before routes were loaded; opened once they are.
     private var pendingSavedJourneyID: UUID?
     private var runsLiveWork: Bool { isActive || journeyInBackground }
-    func updateLiveSurfaces() {
-        // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
-        guard !purchases.checkingAccess else { return }
-        location.setBackgroundNavigation(journeyInBackground)
-        let now = Date()
-        rideActivity.update(rideActivityState(at: now), destination: planner.destination?.localizedName ?? "",
-                            language: language, enabled: purchases.hasPro && rideActivityOn)
+    private var synchronizingNavigation = false
+    /// Starts/stops on the user's transition, independently of provider refresh or SwiftUI.
+    func synchronizeNavigationState() {
+        guard !synchronizingNavigation else { return }
+        synchronizingNavigation = true
+        defer { synchronizingNavigation = false }
+        let readiness = NavigationReadiness(hasPro: purchases.hasPro, checkingPro: purchases.checkingAccess,
+            notifications: alightReminder.permission, location: location.navigationPermission,
+            liveActivitiesAllowed: rideActivity.isAllowed)
+        if readiness != navigationReadiness { navigationReadiness = readiness }
+        if !planner.started || planner.arrived {
+            if !planner.started { boardedAt = nil; boardedVehicle = nil }
+            alightReminder.cancel(); rideActivity.endAll()
+            location.setBackgroundNavigation(false)
+            location.setWalkingNavigation(stationWalk.isActive); location.setRidingNavigation(false)
+        } else {
+            updateWalkingLocation(); anchorBoardedVehicle(publish: false)
+            rideActivity.update(rideActivityState(at: Date()), destination: planner.destination?.localizedName ?? "",
+                                language: language, enabled: purchases.hasPro && rideActivityOn)
+            location.setBackgroundNavigation(journeyInBackground)
+            updateAlightReminder()
+        }
+        let activityState = navigationReadiness.liveActivity(enabled: rideActivityOn,
+            failed: planner.started && ["unavailable", "dismissed"].contains(rideActivity.debugState))
+        if liveActivityState != activityState { liveActivityState = activityState }
+        if liveActivityRunning != rideActivity.isRunning { liveActivityRunning = rideActivity.isRunning }
 #if DEBUG
         if rideActivityDebug != rideActivity.debugState { rideActivityDebug = rideActivity.debugState }
 #endif
+    }
+    func updateLiveSurfaces() {
+        synchronizeNavigationState()
+        // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
+        guard !purchases.checkingAccess else { return }
+        let now = Date()
         openPendingSavedJourney()
         recordSavedJourneyRide()
         let proUntil = purchases.hasPro ? purchases.periodEndsAt ?? now.addingTimeInterval(3 * 86_400) : nil
@@ -214,6 +281,7 @@ final class TransitAppModel: ObservableObject {
     func open(_ url: URL) {
         guard url.scheme == "taipeibus" else { return }
         switch url.host {
+        case "journey": resumeCurrentJourney()
         case "pro": if !purchases.hasPro { showingProPlans = true }
         case "commute":
             guard !planner.started, let id = UUID(uuidString: url.lastPathComponent),
@@ -221,6 +289,12 @@ final class TransitAppModel: ObservableObject {
             pendingSavedJourneyID = id; openPendingSavedJourney()
         default: break
         }
+    }
+    @Published var resumeJourneyRequested = false
+    func resumeCurrentJourney() {
+        guard planner.started, !planner.arrived else { return }
+        showingProPlans = false; showingArrivingVehicles = false; selectedBikeStationID = nil
+        clearWalkingMap(); resumeJourneyRequested = true
     }
 
     /// End of a free 15-minute look at live metro trains.
@@ -670,6 +744,15 @@ final class TransitAppModel: ObservableObject {
         location.onNavigationUpdate = { [weak self] in
             self?.updateWalkingLocation()
             self?.anchorBoardedVehicle()
+            self?.synchronizeNavigationState()
+        }
+        planner.onNavigationChange = { [weak self] in self?.synchronizeNavigationState() }
+        purchases.onAccessChange = { [weak self] in self?.synchronizeNavigationState() }
+        alightReminder.onPermissionChange = { [weak self] in self?.synchronizeNavigationState() }
+        alightReminder.onOpenJourney = { [weak self] in self?.resumeCurrentJourney() }
+        location.onAuthorizationChange = { [weak self] in self?.synchronizeNavigationState() }
+        rideActivity.onAvailabilityChange = { [weak self] in
+            self?.objectWillChange.send(); self?.synchronizeNavigationState()
         }
     }
     var selectedStation: Station? { selectedStationID.flatMap { metadata.stations[$0] } }
@@ -718,7 +801,11 @@ final class TransitAppModel: ObservableObject {
         guard isActive != active else { return }
         isActive = active
         JourneyDiagnostics.shared.record(active ? "scene_active" : "scene_inactive")
-        if active { Task { [weak self] in await self?.purchases.refreshAccess(); self?.applyPersonalPreferences() } }
+        if active { Task { [weak self] in
+            await self?.refreshNavigationPermissions()
+            await self?.purchases.refreshAccess(); self?.applyPersonalPreferences()
+        } }
+        synchronizeNavigationState()
         location.setActive(active)
         if !active {
             clearJourneySuggestion(); alternativeCheckedAt = .distantPast
@@ -839,6 +926,22 @@ final class TransitAppModel: ObservableObject {
     }
 
     func retry() { setActive(false); setActive(true) }
+    var visibleBusDataNeeds: (positions: Bool, arrivals: Bool) {
+        if stationWalk.isActive || selectedBikeStationID != nil || selectedTrainID != nil { return (false, false) }
+        if let option = planner.selected {
+            if planner.started {
+                if case .walk(let index) = planner.currentStep, option.walks.indices.contains(index),
+                   option.walks[index].bike != nil { return (false, false) }
+                guard planner.activeRide?.route.mode == .bus else { return (false, false) }
+            } else if !option.rides.contains(where: { $0.route.mode == .bus }) { return (false, false) }
+            return (true, true)
+        }
+        if planner.destination != nil { return (false, false) }
+        if selectedStation.map({ $0.mode != .bus }) == true || selectedRoute.map({ $0.mode != .bus }) == true {
+            return (false, false)
+        }
+        return (true, selectedStation != nil || selectedRoute != nil)
+    }
     private func applyLiveSettings(_ packet: LiveSettingsPacket) async {
         guard packet.settings.revision >= liveSettings.revision else { return }
         vocabulary = packet.vocabulary
@@ -1282,7 +1385,7 @@ final class TransitAppModel: ObservableObject {
         debugActions.append("board:" + (selectedVehicle?.plate ?? "none") + ":" + String(selectedVehicle.map { metadata.canServe(ride, vehicle: $0) } ?? false))
 #endif
         boardedAt = date
-        if alightReminderActive {
+        if purchases.hasPro && alightReminderOn {
             Task { [weak self] in
                 guard let self, await self.alightReminder.authorize() else { return }
                 self.updateAlightReminder()

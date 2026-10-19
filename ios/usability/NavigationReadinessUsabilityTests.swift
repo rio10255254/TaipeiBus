@@ -1,0 +1,106 @@
+import XCTest
+import StoreKitTest
+
+final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
+    private var session: SKTestSession!
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        let file = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "ProProducts", withExtension: "storekit"))
+        session = try SKTestSession(contentsOf: file)
+        session.resetToDefaultState(); session.clearTransactions(); session.disableDialogs = true
+        session.storefront = "TWN"; session.locale = Locale(identifier: "zh_TW"); session.timeRate = .realTime
+    }
+    override func tearDownWithError() throws {
+        try super.tearDownWithError(); session.clearTransactions(); session = nil
+    }
+    private func probe() -> [String: Any] {
+        let element = app.staticTexts["navigation-readiness-state"]
+        guard element.exists, let data = element.label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func waitState(_ description: String, _ condition: @escaping ([String: Any]) -> Bool) {
+        let match = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition(self.probe()) }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [match], timeout: 20), .completed, description + ": " + String(describing: probe()))
+    }
+    private func openPro(_ english: Bool) {
+        launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-navigation-readiness",
+                "-alightReminderOn", "YES", "-rideActivityOn", "YES"] + (english ? ["--test-language", "en"] : []))
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 80))
+        waitState("A fixture is a preview", { $0["started"] as? Bool == false })
+        button(english ? "Information and settings" : "資料來源與地圖設定").tap()
+        XCTAssertTrue(button("settings-pro").waitForExistence(timeout: 15)); button("settings-pro").tap()
+        XCTAssertTrue(button("pro-open-plans").waitForExistence(timeout: 10)); button("pro-open-plans").tap()
+        if !button("pro-plan-monthly").waitForExistence(timeout: 8), button("pro-open-plans").isHittable { button("pro-open-plans").tap() }
+        let purchase = button("pro-purchase")
+        XCTAssertTrue(purchase.waitForExistence(timeout: 15))
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: purchase)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 30), .completed)
+        purchase.tap()
+        let active = app.staticTexts[english ? "Pro free trial is active" : "正在免費試用 Pro"]
+        if !active.waitForExistence(timeout: 20), purchase.isHittable && purchase.isEnabled { purchase.tap() }
+        XCTAssertTrue(active.waitForExistence(timeout: 20)); button("pro-close").tap()
+        XCTAssertTrue(app.staticTexts["pro-alight-readiness"].waitForExistence(timeout: 15))
+    }
+    private func backToJourney(_ english: Bool) {
+        let back = app.navigationBars.buttons.firstMatch
+        XCTAssertTrue(back.waitForExistence(timeout: 10)); back.tap()
+        XCTAssertTrue(button(english ? "Done" : "完成").waitForExistence(timeout: 10))
+        button(english ? "Done" : "完成").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 15))
+    }
+    func testDeniedNotificationsAreNeverShownAsReady() {
+        openPro(true)
+        let permission = button("pro-authorize-notifications")
+        XCTAssertTrue(permission.waitForExistence(timeout: 10))
+        if permission.label == "Allow notifications" {
+            permission.tap()
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let deny = springboard.alerts.buttons.matching(NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "不允許"])).firstMatch
+            XCTAssertTrue(deny.waitForExistence(timeout: 10)); deny.tap()
+        }
+        let status = app.staticTexts["pro-alight-readiness"]
+        XCTAssertEqual(status.label, "Notifications need permission")
+        XCTAssertEqual(permission.label, "Open Settings")
+        capture("navigation-notification-permission-needed")
+        backToJourney(true)
+        waitState("Denied permission stays inactive", { $0["notifications"] as? String == "denied" && $0["reminderReady"] as? Bool == false })
+        XCTAssertFalse(probe()["started"] as? Bool ?? true)
+    }
+    func testPreviewBackgroundReturnAndEndConfirmation() { lifecycle(english: false) }
+    func testEnglishPreviewBackgroundReturnAndEndConfirmation() { lifecycle(english: true) }
+    private func lifecycle(english: Bool) {
+        openPro(english); capture(english ? "navigation-readiness-english" : "navigation-readiness-chinese")
+        backToJourney(english)
+        let steps = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-steps-")).firstMatch
+        XCTAssertTrue(steps.waitForExistence(timeout: 10)); steps.tap()
+        XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
+        XCTAssertFalse(probe()["started"] as? Bool ?? true)
+        button("journey-back").tap()
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
+        XCTAssertFalse(probe()["started"] as? Bool ?? true)
+        let go = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-go-")).firstMatch
+        XCTAssertTrue(go.waitForExistence(timeout: 10)); go.tap()
+        XCTAssertTrue(button("journey-end").waitForExistence(timeout: 10))
+        waitState("An explicit departure begins the trip", { $0["started"] as? Bool == true })
+        let phase = probe()["step"] as? String
+        XCUIDevice.shared.press(.home)
+        capture(english ? "navigation-background-english" : "navigation-background-chinese")
+        app.activate()
+        waitState("Returning keeps the same step", { $0["started"] as? Bool == true && $0["step"] as? String == phase })
+        button("journey-end").tap()
+        let keep = button(english ? "Continue navigation" : "繼續導航")
+        XCTAssertTrue(keep.waitForExistence(timeout: 10)); keep.tap()
+        waitState("Cancelling end keeps navigation", { $0["started"] as? Bool == true })
+        button("journey-end").tap()
+        capture(english ? "navigation-confirm-end-english" : "navigation-confirm-end-chinese")
+        let confirm = app.buttons.matching(identifier: "journey-confirm-end").firstMatch
+        if confirm.waitForExistence(timeout: 3) { confirm.tap() }
+        else { app.buttons[english ? "End trip" : "結束行程"].lastMatch.tap() }
+        waitState("Ending clears the trip and its background work", {
+            $0["started"] as? Bool == false && $0["background"] as? Bool == false && $0["liveActivity"] as? Bool == false
+        })
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 10))
+        capture(english ? "navigation-ended-english" : "navigation-ended-chinese")
+    }
+}

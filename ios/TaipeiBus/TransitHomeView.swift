@@ -92,6 +92,16 @@ struct TransitHomeView: View {
 #if DEBUG
                 Text(model.rideActivityDebug).font(.system(size: 1)).foregroundStyle(.clear)
                     .frame(width: 1, height: 1).accessibilityIdentifier("debug-live-activity").allowsHitTesting(false)
+                if ProcessInfo.processInfo.arguments.contains("--test-navigation-readiness") {
+                    let state: [String: Any] = ["started": planner.started, "step": planner.stepIndex,
+                        "background": location.backgroundNavigation, "pro": purchases.hasPro,
+                        "notifications": model.navigationReadiness.notifications.rawValue,
+                        "reminderReady": model.alightReminderActive, "liveActivity": model.liveActivityRunning]
+                    let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
+                    Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
+                        .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
+                        .accessibilityIdentifier("navigation-readiness-state").allowsHitTesting(false)
+                }
                 if ProcessInfo.processInfo.arguments.contains("--test-journey-selection") {
                     Text(planner.selectedID ?? "").font(.system(size: 1)).foregroundStyle(.clear)
                         .frame(width: 1, height: 1).accessibilityIdentifier("journey-selected-state").allowsHitTesting(false)
@@ -155,7 +165,8 @@ struct TransitHomeView: View {
         }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
-                SourceStatusView(snapshot: model.snapshot, loading: model.loading) {
+                SourceStatusView(snapshot: model.snapshot, positionsNeeded: model.visibleBusDataNeeds.positions,
+                                 arrivalsNeeded: model.visibleBusDataNeeds.arrivals) {
                     if model.loadError != nil { model.retry() }
                     else { Task { await model.refresh() } }
                 }
@@ -362,6 +373,13 @@ struct TransitHomeView: View {
                 }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .onChange(of: model.resumeJourneyRequested) { _, requested in
+            guard requested else { return }
+            model.resumeJourneyRequested = false
+            showInformation = false; showDetails = false; showSearch = false
+            showJourney = false; showJourneyItinerary = false; pendingJourneyDetail = false
+            restoreJourneyMap()
+        }
         .bikeStationDetails(model: model, active: hasSelection && !showJourney && !showDetails && !showSearch && !showInformation)
         .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
@@ -585,7 +603,8 @@ struct PhonePressStyle: ButtonStyle {
 private struct SourceStatusView: View {
     @Environment(\.liveSettings) private var live
     let snapshot: TransitSnapshot
-    let loading: Bool
+    let positionsNeeded: Bool
+    let arrivalsNeeded: Bool
     let refresh: () -> Void
     static var clockStyle: Date.FormatStyle {
         Date.FormatStyle(date: .omitted, time: .shortened,
@@ -594,19 +613,16 @@ private struct SourceStatusView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            let age = snapshot.sourceUpdatedAt.map { timeline.date.timeIntervalSince($0) }
-            let estimateAge = snapshot.estimates.updatedAt.map { timeline.date.timeIntervalSince($0) }
-            let waiting = loading || (snapshot.sourceUpdatedAt == nil && snapshot.vehicleError == nil)
-            let healthy = snapshot.vehicleError == nil && age.map { (-60...120).contains($0) } == true &&
-                snapshot.estimates.error == nil && estimateAge.map { (-60...120).contains($0) } == true
-            if waiting || !healthy {
+            if let status = BusDataStatus.evaluate(snapshot, positions: positionsNeeded, arrivals: arrivalsNeeded, at: timeline.date) {
+                let waiting = status.state == .updating
+                let age = status.updatedAt.map { timeline.date.timeIntervalSince($0) }
                 Button(action: refresh) {
                     HStack(spacing: 7) {
                         // A static dot: a spinner would animate for as long as data is unavailable.
                         // Loading stays quiet; data that is actually late says so, with its age, and
                         // a tap retries. An old position is never presented as merely "updating".
                         Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
-                        Text(waiting ? AppText.text("更新中") : AppText.text("資料延遲 · 重試")).liveFont(.subheadline, weight: .semibold)
+                        Text(label(status)).liveFont(.subheadline, weight: .semibold)
                         if !waiting, let age, age >= 120 {
                             Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
@@ -615,9 +631,20 @@ private struct SourceStatusView: View {
                     .phoneGlass(in: Capsule())
                 }
                 .buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
+                .accessibilityIdentifier("bus-data-status")
                 .accessibilityHint(AppText.text("點一下重新取得定位與到站資料"))
                 .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topLeading)))
             }
+        }
+    }
+    private func label(_ status: BusDataStatus) -> String {
+        switch (status.source, status.state) {
+        case (.positions, .updating): return AppText.text("公車位置更新中")
+        case (.arrivals, .updating): return AppText.text("到站時間更新中")
+        case (.both, .updating): return AppText.text("公車資料更新中")
+        case (.positions, .delayed): return AppText.text("公車位置稍後更新 · 重試")
+        case (.arrivals, .delayed): return AppText.text("到站時間稍後更新 · 重試")
+        case (.both, .delayed): return AppText.text("公車資料稍後更新 · 重試")
         }
     }
 }

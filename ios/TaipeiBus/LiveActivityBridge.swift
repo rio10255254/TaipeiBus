@@ -21,20 +21,60 @@ final class RideActivityController {
     private var activity: Activity<RideActivityAttributes>?
     private var pushed: State?
     private(set) var debugState = "none"
+    var isAllowed: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+    var isRunning: Bool { activity.map { $0.activityState == .active || $0.activityState == .stale } ?? false }
+    var onAvailabilityChange: (() -> Void)?
+    private var authorizationTask: Task<Void, Never>?
+    private var stateTask: Task<Void, Never>?
+    private var stoppedByUser = false
+
+    init() {
+        authorizationTask = Task { [weak self] in
+            for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
+                guard !Task.isCancelled else { return }
+                self?.onAvailabilityChange?()
+            }
+        }
+    }
+    deinit { authorizationTask?.cancel(); stateTask?.cancel() }
+    private func observe(_ value: Activity<RideActivityAttributes>) {
+        stateTask?.cancel()
+        stateTask = Task { [weak self] in
+            for await state in value.activityStateUpdates {
+                guard !Task.isCancelled else { return }
+                guard self?.activity?.id == value.id else { return }
+                if state == .dismissed || state == .ended {
+                    self?.stoppedByUser = true; self?.debugState = "dismissed"
+                    self?.onAvailabilityChange?()
+                }
+            }
+        }
+    }
+    func allowRestart() {
+        guard !isRunning else { return }
+        stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil
+        mayHaveActivities = false; stoppedByUser = false; debugState = "none"
+    }
 
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool) {
         guard enabled, let state else { endAll(); return }
-        if activity == nil, mayHaveActivities {
-            activity = Activity<RideActivityAttributes>.activities.first { $0.activityState == .active }
+        guard !stoppedByUser else { return }
+        if let activity, activity.activityState == .dismissed || activity.activityState == .ended {
+            stoppedByUser = true; debugState = "dismissed"; return
         }
-        if let current = activity, current.attributes.destination != destination || current.activityState != .active {
+        if activity == nil, mayHaveActivities {
+            activity = Activity<RideActivityAttributes>.activities.first { $0.activityState == .active || $0.activityState == .stale }
+            if let activity { observe(activity) }
+        }
+        if let current = activity, current.attributes.destination != destination {
             endAll()
         }
-        guard ActivityAuthorizationInfo().areActivitiesEnabled else { debugState = "disabled"; return }
+        guard isAllowed else { endAll(); debugState = "disabled"; return }
         guard let current = activity else {
             do {
                 activity = try Activity.request(attributes: RideActivityAttributes(destination: destination, language: language.rawValue),
                                                 content: ActivityContent(state: state, staleDate: Self.staleDate(state)), pushType: nil)
+                if let activity { observe(activity) }
                 pushed = state; mayHaveActivities = true; debugState = "started:" + state.phase.rawValue
             } catch { debugState = "unavailable" }
             return
@@ -50,6 +90,7 @@ final class RideActivityController {
     /// does not ask the system on every tick when there is nothing to end.
     private var mayHaveActivities = true
     func endAll() {
+        stoppedByUser = false; stateTask?.cancel(); stateTask = nil
         guard mayHaveActivities || activity != nil else { return }
         mayHaveActivities = false
         let running = Activity<RideActivityAttributes>.activities
