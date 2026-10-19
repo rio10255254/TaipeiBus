@@ -1160,7 +1160,7 @@ private struct StationDetails: View {
                 HStack {
                     Text(station.mode == .bus ? live.text("官方到站預估") : live.text("列車方向")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
-                    if let time = model.snapshot.estimates.updatedAt {
+                    if let time = station.mode == .bus ? model.busArrivals.updatedAt : model.snapshot.estimates.updatedAt {
                         Text(time.formatted(SourceStatusView.clockStyle)).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                     }
                 }.padding(.bottom, 8 * CGFloat(live.appearance.spacingScale))
