@@ -16,8 +16,8 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         for _ in 0..<5 { if item.isHittable { break }; app.swipeUp() }
         XCTAssertTrue(item.isHittable,id); item.tap()
     }
-    private func openPlans(english: Bool = false) {
-        launch(english ? ["--test-language","en"] : [])
+    private func openPlans(english: Bool = false, extraArguments: [String] = []) {
+        launch((english ? ["--test-language","en"] : []) + extraArguments)
         let settings = english ? button("Information and settings") : button("資料來源與地圖設定")
         XCTAssertTrue(settings.waitForExistence(timeout:25))
         settings.tap(); XCTAssertTrue(button("settings-pro").waitForExistence(timeout:10)); button("settings-pro").tap()
@@ -121,6 +121,72 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         app.activate()
         XCTAssertTrue(state.waitForExistence(timeout:10))
         XCTAssertFalse(state.label == "ended", "Returning to the app must keep the trip's Live Activity")
+    }
+    /// Actual UI recording, explicitly labelled as simulator / test-purchase evidence.
+    /// Uses ordinary search and live providers; no preview vehicle or journey fixtures.
+    func testBackgroundReviewWalkthrough() throws {
+        openPlans(extraArguments: ["--test-journey-selection"])
+        capture("background-review-01-real-paywall-test-purchase")
+        startTrial()
+        button("pro-close").tap()
+        XCTAssertTrue(app.switches["pro-ride-activity"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.switches["pro-alight-reminder"].exists)
+        for id in ["pro-ride-activity", "pro-alight-reminder"] {
+            let setting = app.switches[id]
+            if setting.value as? String == "0" { setting.tap() }
+            XCTAssertEqual(setting.value as? String, "1")
+        }
+        capture("background-review-02-navigation-settings")
+        let back = app.navigationBars.buttons.firstMatch
+        if back.waitForExistence(timeout: 5) { back.tap() }
+        if button("完成").exists { button("完成").tap() }
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 10))
+        button("home-destination-search").tap(); chooseNeihu()
+        XCTAssertTrue(firstOption.waitForExistence(timeout: 150), "Ordinary live route search must produce an available option")
+        capture("background-review-03-route-preview")
+        selectOptionAndStart(firstOption)
+        let state = app.staticTexts["debug-live-activity"]
+        let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            state.exists && (state.label.hasPrefix("started") || state.label.hasPrefix("updated"))
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [started], timeout: 60), .completed,
+                       "Live Activity state: \(state.exists ? state.label : "missing")")
+        capture("background-review-04-navigation-started")
+        let board = button("journey-board")
+        if board.waitForExistence(timeout: 10) {
+            board.tap()
+            let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let alert = springboard.alerts.firstMatch
+            if alert.waitForExistence(timeout: 5) {
+                let allow = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Allow", "允許"])).firstMatch
+                if allow.exists { allow.tap() }
+            }
+            XCTAssertTrue(button("journey-alight").waitForExistence(timeout: 15))
+            capture("background-review-05-simulated-boarding")
+        }
+        XCUIDevice.shared.press(.home)
+        sleep(8)
+        capture("background-review-06-home-live-activity")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let homeTree = XCTAttachment(string: springboard.debugDescription)
+        homeTree.name = "background-review-home-elements"; homeTree.lifetime = .keepAlways; add(homeTree)
+        // Leave the process in the background long enough to observe its system surface.
+        sleep(40)
+        capture("background-review-07-after-48-seconds-background")
+        app.activate()
+        XCTAssertTrue(state.waitForExistence(timeout: 10))
+        XCTAssertTrue(state.label.hasPrefix("started") || state.label.hasPrefix("updated"), state.label)
+        capture("background-review-08-returned-trip")
+        let end = button("結束行程")
+        XCTAssertTrue(end.waitForExistence(timeout: 10)); end.tap()
+        XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 15))
+        let ended = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            state.exists && state.label == "ended"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 20), .completed)
+        capture("background-review-09-ended")
+        XCUIDevice.shared.press(.home); sleep(5)
+        capture("background-review-10-ended-home")
     }
     func testWidgetAndLiveActivityLayouts() {
         for english in [false, true] {

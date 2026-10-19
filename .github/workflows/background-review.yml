@@ -1,0 +1,98 @@
+name: Background navigation review recording
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: background-review-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  record:
+    runs-on: macos-15
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: iPhone17
+            device: iPhone 17
+          - label: iPadAirM3
+            device: iPad Air 11-inch (M3)
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      DEVICE_NAME: ${{ matrix.device }}
+      BUS_VERIFY_PRO_UI: 'true'
+      BUS_INTERACTION_RECORDING_NAME: ${{ matrix.label }}-simulator-raw.mp4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare actual app and simulator test-purchase configuration
+        run: |
+          set -euo pipefail
+          python3 ios/release-check.py
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/usability/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          type=$(xcrun simctl list devicetypes -j | python3 -c 'import json,os,sys; print(next(x["identifier"] for x in json.load(sys.stdin)["devicetypes"] if x["name"]==os.environ["DEVICE_NAME"]))')
+          device=$(xcrun simctl create Background-review "$type" "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl ui "$device" appearance light
+          xcrun simctl list devices -j > "$RUNNER_TEMP/simulator-devices.json"
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            MARKETING_VERSION=1.8.9 CURRENT_PROJECT_VERSION=149.1.0 \
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing \
+            > "$RUNNER_TEMP/background-build.log" 2>&1
+          xcrun simctl install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
+          xcrun simctl privacy "$device" grant location com.example.TaipeiBus
+      - name: Record actual Pro and navigation interactions
+        run: |
+          set -euo pipefail
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" --jitter > "$RUNNER_TEMP/simulated-location.log" 2>&1 &
+          location_pid=$!
+          trap 'kill "$location_pid" 2>/dev/null || true' EXIT
+          python3 ios/usability/record-run.py \
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/background-review.xcresult" \
+            -only-testing:TaipeiBusUsabilityTests/ProUsabilityTests/testBackgroundReviewWalkthrough \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+            | tee "$RUNNER_TEMP/background-review.log"
+      - name: Export evidence and add permanent simulator label
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ -d "$RUNNER_TEMP/background-review.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/background-review.xcresult" --output-path "$RUNNER_TEMP/screenshots"
+          fi
+          if [ -f "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" ]; then
+            if ! command -v ffmpeg >/dev/null; then brew install ffmpeg; fi
+            ffmpeg -y -i "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" \
+              -vf "pad=iw:ih+96:0:0:black,drawtext=text='iOS SIMULATOR - simulated location and test purchase - not physical-device footage':fontcolor=white:fontsize=24:x=(w-tw)/2:y=h-62" \
+              -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -movflags +faststart -an \
+              "$RUNNER_TEMP/${{ matrix.label }}-simulator-labelled.mp4"
+            ffprobe -v error -show_format -show_streams -of json "$RUNNER_TEMP/${{ matrix.label }}-simulator-labelled.mp4" > "$RUNNER_TEMP/video-info.json"
+          fi
+          python3 - <<'PY'
+          import json,os,pathlib
+          report={"source_commit":os.environ["GITHUB_SHA"],"device":os.environ["DEVICE_NAME"],"environment":"iOS Simulator","app_source_version":"1.8.9 / 149.1.0","location":"simulated Taipei coordinate; no physical GPS","purchase":"local Apple StoreKit test transaction; not charged","vehicle_data":"normal providers; no preview vehicle fixture enabled","physical_device_evidence":False,"limitations":"A simulator recording does not satisfy Apple's explicit physical-device request by itself. A live countdown alone does not establish continuous background GPS or prove delivery of an alighting notification."}
+          (pathlib.Path(os.environ["RUNNER_TEMP"])/"recording-provenance.json").write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: background-review-${{ matrix.label }}
+          path: |
+            ${{ runner.temp }}/*simulator*.mp4
+            ${{ runner.temp }}/background-*.log
+            ${{ runner.temp }}/recording-provenance.json
+            ${{ runner.temp }}/video-info.json
+            ${{ runner.temp }}/simulator-devices.json
+            ${{ runner.temp }}/screenshots
+          retention-days: 14
