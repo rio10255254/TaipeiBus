@@ -1,6 +1,6 @@
 import XCTest
 import StoreKitTest
-import TransitCore
+@testable import TransitCore
 @testable import TaipeiBus
 
 @MainActor final class NavigationLifecycleTests: XCTestCase {
