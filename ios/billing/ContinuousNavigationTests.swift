@@ -82,7 +82,9 @@ import XCTest
         XCTAssertTrue(model.hasConfirmedOnboardFollow,"Returning from an itinerary during a gap must retain the same follow intent")
         XCTAssertTrue(model.snapshot.vehicles.isEmpty,"Holding a follow choice must not create a vehicle position")
         let moved = Date()
-        model.location.auditLocation(LocationSample(coordinate:point(900),accuracy:5,timestamp:moved))
+        let revision = model.anchorRevision
+        model.location.auditLocation(LocationSample(coordinate:point(900),accuracy:5,timestamp:moved),notify:true)
+        XCTAssertGreaterThan(model.anchorRevision,revision,"A phone fix must immediately publish the confirmed bus to the map, without waiting for another provider refresh")
         model.auditReceiveSnapshot(TransitSnapshot())
         let anchored = try XCTUnwrap(model.onboardVehicle(for:ride))
         XCTAssertTrue(model.following,"A provider miss must preserve an already active camera follow when the phone anchors that same confirmed bus")

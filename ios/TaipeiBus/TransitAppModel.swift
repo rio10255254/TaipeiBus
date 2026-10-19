@@ -159,7 +159,7 @@ final class TransitAppModel: ObservableObject {
     private var runsLiveWork: Bool { isActive || journeyInBackground }
     private var synchronizingNavigation = false
     /// Starts/stops on the user's transition, independently of provider refresh or SwiftUI.
-    func synchronizeNavigationState() {
+    func synchronizeNavigationState(publishLocation: Bool = false) {
         guard !synchronizingNavigation else { return }
         synchronizingNavigation = true
         defer { synchronizingNavigation = false }
@@ -167,7 +167,7 @@ final class TransitAppModel: ObservableObject {
             notifications: alightReminder.permission, location: location.navigationPermission,
             liveActivitiesAllowed: rideActivity.isAllowed)
         if readiness != navigationReadiness { navigationReadiness = readiness }
-        updateWalkingLocation(); anchorBoardedVehicle(publish: false)
+        updateWalkingLocation(); anchorBoardedVehicle(publish: publishLocation)
         if !planner.started || planner.arrived {
             if !planner.started { boardedAt = nil; boardedVehicle = nil }
             alightReminder.cancel(); rideActivity.endAll()
@@ -742,7 +742,7 @@ final class TransitAppModel: ObservableObject {
             appVersion: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.4.2",
             cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("LiveSettings"))
         location.onNavigationUpdate = { [weak self] in
-            self?.synchronizeNavigationState()
+            self?.synchronizeNavigationState(publishLocation: true)
         }
         planner.onNavigationChange = { [weak self] in self?.synchronizeNavigationState() }
         purchases.onAccessChange = { [weak self] in self?.synchronizeNavigationState() }

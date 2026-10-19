@@ -29,7 +29,7 @@ on:
       native_suite:
         description: 'All hosted checks, or feature regressions after the live walking suite has passed'
         type: choice
-        options: ['all', 'features']
+        options: ['all', 'features', 'navigation']
         default: 'all'
       street_repeat:
         description: 'Opt-in probe of the previous repeated-search request burst; stops on the first limit'
@@ -121,11 +121,14 @@ jobs:
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
           selection=('-parallel-testing-enabled' 'NO')
-          if [ '${{ inputs.usability_scope }}' = 'route-reliability' ]; then
+          if [ '${{ inputs.usability_scope }}' = 'route-reliability' ] && [ '${{ inputs.native_suite }}' != 'navigation' ]; then
             selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
           if [ '${{ inputs.native_suite }}' = 'features' ]; then
             selection+=('-skip-testing:TaipeiBusBillingTests/RouteReliabilityTests')
+          fi
+          if [ '${{ inputs.native_suite }}' = 'navigation' ]; then
+            selection+=('-only-testing:TaipeiBusBillingTests/NavigationLifecycleTests' '-only-testing:TaipeiBusBillingTests/ContinuousNavigationTests')
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
