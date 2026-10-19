@@ -1,0 +1,39 @@
+背景定位審查補件準備
+
+狀態：等待送審版本的實機操作影片。尚未回覆 Apple，也尚未重新送審。
+版本：1.8.9（149.1.0）
+審查日期：2026-10-19
+審查裝置：iPad Air 11-inch（M3）
+Apple 指出：2.5.4，宣告背景定位，但審查員找不到需要持續定位的功能。
+這三張截圖沒有列出價格、宣傳圖或訂閱資料缺漏的問題。
+
+用途與目前核對結果
+- 背景用途為 Pro 導航期間的行程資訊更新、下車通知；不是日常開啟地圖就持續追蹤。
+- 需要先取得 Pro 使用權，才會顯示兩項導航設定。沒有開始導航，或只預覽路線時，不會進入此模式。
+- 開啟背景導航時會設定系統定位指示；App 離開前景後會保留定位與行程更新。
+- 手機位置更新會接回步行進度及上車後的公車進度；下車提醒依剩餘時間重新安排。
+- 現有說明已提到此用途，但缺少完整的逐步操作與本次要求的實機影片。
+- 程式檢查與模擬器紀錄無法取代 Apple 指定的實機影片；不能把本次退回解讀為已證實背景功能完全正常或完全故障。
+
+實機影片怎麼錄
+1. 使用 TestFlight 中的 1.8.9（149.1.0），從開啟 App 開始錄，進入資訊設定，展示 Pro 已開通。
+2. 展示「動態島與鎖定畫面」及「下車提醒」都開啟，並允許定位、通知。
+3. 在公車營運時段，規劃一段你確實要搭乘的短程，點「出發」，上車後點「已上車」。不要只停在預覽，不要在未上車時假裝搭車。
+4. 切回手機主畫面，繼續記錄一段移動；展示動態島或鎖定畫面上的行程資訊有更新。有機會時，一併錄到接近下車站的提醒。
+5. 回到 App 點「結束」，再展示行程資訊結束。保留手機型號、系統版本以及影片使用版本。
+6. 如果手機螢幕錄影無法完整錄下鎖定畫面，可以用另一支手機拍攝同一台實機的操作；不能以模擬器或製作畫面取代。
+影片可分成操作與背景移動兩段，不需要拍攝整趟長程；重點是實際使用、離開 App 後仍更新，以及結束導航。
+
+給 Apple 的英文回覆草稿（影片核對後再送；目前未送出）
+Hello App Review,
+
+Regarding Guideline 2.5.4, version 1.8.9 (149.1.0) uses background location for an active public-transit navigation: the rider's phone position advances trip progress and updates the Lock Screen Live Activity and the local alighting reminder while the app is in the background. This is not solely a countdown timer or a request to keep unrelated network work alive.
+
+These features require a verified Pro subscription. To access them:
+1. Open Information and settings > 台北公車 Pro > 查看 Pro 方案, and complete an Apple sandbox subscription purchase.
+2. Return to Pro settings and enable 動態島與鎖定畫面 (Live Activity) and 下車提醒 (alighting reminder). Allow location and notification access.
+3. During Taipei operating hours, plan a public-transit journey and tap 出發 / 開始導航 (Go / Start Navigation). Route preview alone does not start navigation. After actually boarding, tap 已上車 (Boarded).
+4. Send the app to the background and observe trip information on the Lock Screen or Dynamic Island. Devices without Dynamic Island can use the Lock Screen Live Activity and local alighting notification instead.
+5. End the trip. Background navigation is limited to an active Pro trip with at least one of these features enabled; it is not used during ordinary map browsing. Passenger position is processed on the device and is not uploaded to a developer server.
+
+Before sending: attach the verified physical-device recording to the review conversation, add its accessible reference to App Review Notes, and state its actual device, OS version and app build. Do not send this checklist paragraph as if the recording has already been attached.
