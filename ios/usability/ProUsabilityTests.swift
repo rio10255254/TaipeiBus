@@ -125,7 +125,7 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
     /// Actual UI recording, explicitly labelled as simulator / test-purchase evidence.
     /// Uses ordinary search and live providers; no preview vehicle or journey fixtures.
     func testBackgroundReviewWalkthrough() throws {
-        openPlans(extraArguments: ["--test-journey-selection"])
+        openPlans()
         capture("background-review-01-real-paywall-test-purchase")
         startTrial()
         button("pro-close").tap()
@@ -142,9 +142,12 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         if button("完成").exists { button("完成").tap() }
         XCTAssertTrue(button("home-destination-search").waitForExistence(timeout: 10))
         button("home-destination-search").tap(); chooseNeihu()
-        XCTAssertTrue(firstOption.waitForExistence(timeout: 150), "Ordinary live route search must produce an available option")
+        // Cards can already be tappable while walking checks and better alternatives arrive.
+        // Use the current, enabled Go action, as a rider does, instead of caching a transient ID.
+        let go = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@ AND enabled == true", "journey-go-")).firstMatch
+        XCTAssertTrue(go.waitForExistence(timeout: 180), "A confirmed route must expose an enabled Go action")
         capture("background-review-03-route-preview")
-        selectOptionAndStart(firstOption)
+        go.tap()
         let state = app.staticTexts["debug-live-activity"]
         let started = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             state.exists && (state.label.hasPrefix("started") || state.label.hasPrefix("updated"))
@@ -170,6 +173,10 @@ final class ProUsabilityTests: JourneyUsabilityTestBase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         let homeTree = XCTAttachment(string: springboard.debugDescription)
         homeTree.name = "background-review-home-elements"; homeTree.lifetime = .keepAlways; add(homeTree)
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.005))
+            .press(forDuration: 0.2, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.2, dy: 0.8)))
+        sleep(3)
+        capture("background-review-06b-notification-center-live-activity")
         // Leave the process in the background long enough to observe its system surface.
         sleep(40)
         capture("background-review-07-after-48-seconds-background")

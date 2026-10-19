@@ -52,6 +52,7 @@ jobs:
           xcrun simctl install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
           xcrun simctl privacy "$device" grant location com.example.TaipeiBus
       - name: Record actual Pro and navigation interactions
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" --jitter > "$RUNNER_TEMP/simulated-location.log" 2>&1 &
@@ -73,8 +74,10 @@ jobs:
           fi
           if [ -f "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" ]; then
             if ! command -v ffmpeg >/dev/null; then brew install ffmpeg; fi
-            ffmpeg -y -i "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" \
-              -vf "pad=iw:ih+96:0:0:black,drawtext=text='iOS SIMULATOR - simulated location and test purchase - not physical-device footage':fontcolor=white:fontsize=24:x=(w-tw)/2:y=h-62" \
+            width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME")
+            swift ios/usability/recording-label.swift "$width" "$RUNNER_TEMP/simulator-label.png"
+            ffmpeg -y -i "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" -loop 1 -i "$RUNNER_TEMP/simulator-label.png" \
+              -filter_complex '[0:v]pad=iw:ih+96:0:0:black[base];[base][1:v]overlay=0:H-h:shortest=1' \
               -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -movflags +faststart -an \
               "$RUNNER_TEMP/${{ matrix.label }}-simulator-labelled.mp4"
             ffprobe -v error -show_format -show_streams -of json "$RUNNER_TEMP/${{ matrix.label }}-simulator-labelled.mp4" > "$RUNNER_TEMP/video-info.json"
