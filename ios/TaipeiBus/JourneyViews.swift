@@ -728,7 +728,7 @@ private struct JourneyDockHeader: View {
             .accessibilityLabel(live.text("結束行程"))
             .accessibilityIdentifier("journey-end")
         }
-        .confirmationDialog(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd, titleVisibility: .visible) {
+        .alert(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd) {
             Button(AppText.text("結束行程"), role: .destructive) { model.finishJourney() }
                 .accessibilityIdentifier("journey-confirm-end")
             Button(AppText.text("繼續導航"), role: .cancel) {}

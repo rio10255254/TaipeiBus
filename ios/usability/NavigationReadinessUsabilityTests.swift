@@ -54,7 +54,7 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 80))
         waitState("The purchased account opens a preview", { $0["started"] as? Bool == false && $0["pro"] as? Bool == true })
     }
-    func testDeniedNotificationsAreNeverShownAsReady() {
+    func testEnglishDeniedNotificationsAndNavigationLifecycle() {
         openPro(true)
         let permission = button("pro-authorize-notifications")
         XCTAssertTrue(permission.waitForExistence(timeout: 10))
@@ -71,12 +71,15 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         backToJourney(true)
         waitState("Denied permission stays inactive", { $0["notifications"] as? String == "denied" && $0["reminderReady"] as? Bool == false })
         XCTAssertFalse(probe()["started"] as? Bool ?? true)
+        tripLifecycle(english: true)
     }
     func testPreviewBackgroundReturnAndEndConfirmation() { lifecycle(english: false) }
-    func testEnglishPreviewBackgroundReturnAndEndConfirmation() { lifecycle(english: true) }
     private func lifecycle(english: Bool) {
         openPro(english); capture(english ? "navigation-readiness-english" : "navigation-readiness-chinese")
         backToJourney(english)
+        tripLifecycle(english: english)
+    }
+    private func tripLifecycle(english: Bool) {
         let steps = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-steps-")).firstMatch
         XCTAssertTrue(steps.waitForExistence(timeout: 10)); steps.tap()
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
