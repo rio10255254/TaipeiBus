@@ -476,6 +476,8 @@ final class TransitAppModel: ObservableObject {
     }
     @Published private(set) var metadata = TransitMetadata()
     @Published private(set) var snapshot = TransitSnapshot()
+    /// Keep bus health before metro estimates are independently re-anchored for planning.
+    @Published private(set) var busArrivals = EstimateFeed()
     @Published private(set) var metroRealtime: MetroRealtime?
     @Published private(set) var metroRevision = 0
     /// Recent official "train entering station" sightings, kept for 15 minutes.
@@ -972,6 +974,7 @@ final class TransitAppModel: ObservableObject {
         if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil { return }
 #endif
         guard result.revision > snapshot.revision else { return }
+        busArrivals = result.estimates
         snapshot = result
         if let metroRealtime { snapshot.estimates = metroRealtime.applying(to: result.estimates, network: metadata.metro, at: Date()) }
         arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
@@ -1788,7 +1791,7 @@ final class TransitAppModel: ObservableObject {
         applySnapshot(next)
     }
     func auditNavigation(metadata: TransitMetadata, snapshot: TransitSnapshot, at date: Date) {
-        self.metadata = metadata; self.snapshot = snapshot
+        self.metadata = metadata; self.snapshot = snapshot; busArrivals = snapshot.estimates
         arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date)
         planner.updateSnapshot(snapshot,forecast:arrivalForecast)
     }

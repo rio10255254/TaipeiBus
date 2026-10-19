@@ -165,7 +165,7 @@ struct TransitHomeView: View {
         }
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
-                SourceStatusView(snapshot: model.snapshot, positionsNeeded: model.visibleBusDataNeeds.positions,
+                SourceStatusView(snapshot: model.snapshot, arrivalFeed: model.busArrivals, positionsNeeded: model.visibleBusDataNeeds.positions,
                                  arrivalsNeeded: model.visibleBusDataNeeds.arrivals) {
                     if model.loadError != nil { model.retry() }
                     else { Task { await model.refresh() } }
@@ -607,6 +607,7 @@ struct PhonePressStyle: ButtonStyle {
 private struct SourceStatusView: View {
     @Environment(\.liveSettings) private var live
     let snapshot: TransitSnapshot
+    let arrivalFeed: EstimateFeed
     let positionsNeeded: Bool
     let arrivalsNeeded: Bool
     let refresh: () -> Void
@@ -617,7 +618,8 @@ private struct SourceStatusView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            if let status = BusDataStatus.evaluate(snapshot, positions: positionsNeeded, arrivals: arrivalsNeeded, at: timeline.date) {
+            if let status = BusDataStatus.evaluate(snapshot, positions: positionsNeeded, arrivals: arrivalsNeeded,
+                                                   at: timeline.date, arrivalFeed: arrivalFeed) {
                 let waiting = status.state == .updating
                 let age = status.updatedAt.map { timeline.date.timeIntervalSince($0) }
                 Button(action: refresh) {

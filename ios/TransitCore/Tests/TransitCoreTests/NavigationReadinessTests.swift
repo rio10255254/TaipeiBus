@@ -71,6 +71,14 @@ final class NavigationReadinessTests: XCTestCase {
         let snapshot = TransitSnapshot(vehicleError: "network", estimates: EstimateFeed(error: "network"))
         XCTAssertNil(BusDataStatus.evaluate(snapshot, positions: false, arrivals: false, at: Date()))
     }
+    func testFreshMetroPlanningEstimatesCannotHideAFailedBusFeed() throws {
+        let now = Date(), old = now.addingTimeInterval(-240)
+        let rawBus = EstimateFeed(updatedAt: old, error: "offline")
+        let mixed = TransitSnapshot(sourceUpdatedAt: now, estimates: EstimateFeed(updatedAt: now))
+        let status = try XCTUnwrap(BusDataStatus.evaluate(mixed, positions: true, arrivals: true, at: now, arrivalFeed: rawBus))
+        XCTAssertEqual(status.source, .arrivals); XCTAssertEqual(status.state, .delayed)
+        XCTAssertEqual(status.updatedAt, old)
+    }
     func testInitialLoadIsDistinctFromRetainedDelayedData() throws {
         let now = Date()
         let waiting = try XCTUnwrap(BusDataStatus.evaluate(TransitSnapshot(), positions: true, arrivals: true, at: now))
