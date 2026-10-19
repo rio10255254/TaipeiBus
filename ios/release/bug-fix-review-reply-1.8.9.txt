@@ -1,0 +1,26 @@
+狀態：回覆草稿，尚未傳送。
+用途：接受 Apple 在 2026-10-19 審查訊息提供的 Bug Fix Submissions 選項。
+這個選項需要回覆目前的審查對話；不要另外重送而開啟新一輪審查。
+不得把模擬器影片稱為實機影片，也不宣稱已完成實機測試。
+
+建議傳送的英文內容：
+
+Hello App Review,
+
+Thank you for offering the Bug Fix Submissions option for submission 4686e741-137d-4655-9336-327f2cdfe863.
+
+We would like to accept this option and have the current version 1.8.9 (149.1.0) approved. This update includes fixes that preserve navigation progress through short GPS interruptions, keep future-leg previews from changing the active navigation step, make remaining-time displays consistent, and provide recovery actions when no route is available.
+
+We will address the Guideline 2.5.4 issue in our next update, including clear access instructions for the Pro background-navigation features and the requested physical-device screen recording in App Review Information. These features support the Lock Screen trip information and alighting reminder during an explicitly started journey. We understand that this deferred issue must be resolved for the next update.
+
+Please proceed with the current submission under the Bug Fix Submissions option, without starting a new submission.
+
+Thank you.
+
+同意後也可直接使用以下中文回覆：
+
+您好，謝謝提供 Bug Fix Submissions 選項。我們希望接受這項安排，請先核准目前的 1.8.9（149.1.0）。本版修正了定位短暫中斷時的導航進度、查看後續路段影響當前導航、剩餘時間顯示，以及沒有可用路線時缺少下一步操作等問題。
+
+我們會在下一次更新完成 2.5.4 的要求，補上 Pro 背景導航功能的清楚操作說明，以及您要求的實體裝置操作影片。背景定位用於使用者開始導航後的鎖定畫面行程資訊與下車提醒。我們了解這項問題必須在下一版解決。
+
+請依 Bug Fix Submissions 安排繼續處理目前這次提交，謝謝。
