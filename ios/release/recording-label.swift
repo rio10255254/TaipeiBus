@@ -1,3 +1,4 @@
+// macOS-only recording helper. Keep outside the iOS UI-test source directory.
 // A permanent, separate caption strip; native recording pixels are not altered.
 import AppKit
 

@@ -75,7 +75,7 @@ jobs:
           if [ -f "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" ]; then
             if ! command -v ffmpeg >/dev/null; then brew install ffmpeg; fi
             width=$(ffprobe -v error -select_streams v:0 -show_entries stream=width -of csv=p=0 "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME")
-            swift ios/usability/recording-label.swift "$width" "$RUNNER_TEMP/simulator-label.png"
+            swift ios/release/recording-label.swift "$width" "$RUNNER_TEMP/simulator-label.png"
             ffmpeg -y -i "$RUNNER_TEMP/$BUS_INTERACTION_RECORDING_NAME" -loop 1 -i "$RUNNER_TEMP/simulator-label.png" \
               -filter_complex '[0:v]pad=iw:ih+96:0:0:black[base];[base][1:v]overlay=0:H-h:shortest=1' \
               -c:v libx264 -preset fast -crf 20 -pix_fmt yuv420p -movflags +faststart -an \
