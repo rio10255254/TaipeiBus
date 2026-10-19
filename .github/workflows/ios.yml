@@ -58,6 +58,10 @@ on:
         type: choice
         options: ['both', 'light', 'dark']
         default: 'both'
+      ui_test_filter:
+        description: 'Optional exact native UI test for a focused rerun after other checks passed'
+        type: string
+        default: ''
       content_revision_before:
         description: 'For live-settings verification: current live content revision'
         type: string
@@ -83,6 +87,7 @@ env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
   BUS_CONTENT_BEFORE: ${{ inputs.content_revision_before }}
   BUS_CONTENT_AFTER: ${{ inputs.content_revision_after }}
+  BUS_UI_TEST_FILTER: ${{ inputs.ui_test_filter }}
 
 jobs:
   street_probe:
@@ -804,6 +809,10 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
             selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
+          fi
+          if [ -n "$BUS_UI_TEST_FILTER" ]; then
+            [[ "$BUS_UI_TEST_FILTER" =~ ^TaipeiBusUsabilityTests/[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid UI test filter'; exit 1; }
+            selection=("-only-testing:$BUS_UI_TEST_FILTER")
           fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \

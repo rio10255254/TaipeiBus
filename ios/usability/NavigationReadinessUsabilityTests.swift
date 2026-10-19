@@ -81,8 +81,22 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
     }
     private func tripLifecycle(english: Bool) {
         let steps = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-steps-")).firstMatch
-        XCTAssertTrue(steps.waitForExistence(timeout: 10)); steps.tap()
-        XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 10))
+        XCTAssertTrue(steps.waitForExistence(timeout: 10))
+        var lastFrame = CGRect.null, settledAt = Date()
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard steps.exists, steps.isHittable else { return false }
+            let frame = steps.frame
+            if frame != lastFrame { lastFrame = frame; settledAt = Date(); return false }
+            return Date().timeIntervalSince(settledAt) >= 0.5
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
+        steps.tap()
+        let start = button("journey-start-navigation")
+        // The hosted simulator may drop a tap while the native sheet settles.
+        // Retry only when the same preview action remains visible and no trip began.
+        if !start.waitForExistence(timeout: 5), steps.exists, steps.isHittable,
+           probe()["started"] as? Bool == false { steps.tap() }
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
         XCTAssertFalse(probe()["started"] as? Bool ?? true)
         button("journey-back").tap()
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
