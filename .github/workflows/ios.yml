@@ -206,7 +206,8 @@ jobs:
             "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
-        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing'
+        # UI-only readiness reruns reuse the separate PR's device-build verification.
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing' && (inputs.usability_scope != 'navigation-readiness' || inputs.billing_tests)
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \

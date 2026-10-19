@@ -102,7 +102,11 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         capture(english ? "navigation-confirm-end-english" : "navigation-confirm-end-chinese")
         let confirm = app.buttons.matching(identifier: "journey-confirm-end").firstMatch
         if confirm.waitForExistence(timeout: 3) { confirm.tap() }
-        else { app.buttons[english ? "End trip" : "結束行程"].lastMatch.tap() }
+        else {
+            let end = app.buttons.matching(NSPredicate(format: "label == %@", english ? "End trip" : "結束行程"))
+                .allElementsBoundByIndex.first { $0.isHittable }
+            XCTAssertNotNil(end); end?.tap()
+        }
         waitState("Ending clears the trip and its background work", {
             $0["started"] as? Bool == false && $0["background"] as? Bool == false && $0["liveActivity"] as? Bool == false
         })
