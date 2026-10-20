@@ -65,7 +65,14 @@ struct TransitHomeView: View {
 
     private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
         let panel: CGFloat
-        if showJourney { panel = min(journeyPanelHeight, geometry.size.height) }
+        if showJourney {
+            // A page update can briefly report the hosting content's ideal height.
+            // Fixed detents already tell us which part of the map the sheet covers.
+            if journeyDetent == .height(420) { panel = 420 }
+            else if journeyDetent == .height(510) { panel = 510 }
+            else if journeyDetent == .height(560) { panel = 560 }
+            else { panel = min(journeyPanelHeight, geometry.size.height) }
+        }
         else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
         else if showSearch { panel = 390 }
         else { panel = bottomControlsHeight }

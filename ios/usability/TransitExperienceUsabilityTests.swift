@@ -7,6 +7,11 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
               let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
         return value
     }
+    private func camera() -> [String: Any] {
+        guard let data = app.staticTexts["map-camera-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [:] }
+        return value
+    }
     private func waitFor(_ description: String, _ condition: @escaping () -> Bool) {
         let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in condition() }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [expectation], timeout: 25), .completed, description + ": \(state())")
@@ -107,12 +112,14 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         waitFor("An alternative remains a preview on a compact display") {
             self.state()["selected"] as? String == other && self.state()["started"] as? Bool == false
         }
-        let probe = app.staticTexts["map-camera-state"]
-        if let data = probe.label.data(using: .utf8),
-           let camera = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-           let viewport = camera["routeViewport"] as? [String: Any] {
-            XCTAssertGreaterThan(viewport["height"] as? Double ?? 0, 80)
-        } else { XCTFail("The map must retain a measurable unobstructed area") }
+        waitFor("The newly selected route fills the settled, unobstructed map on a compact display") {
+            let value = self.camera()
+            guard value["cameraMoving"] as? Bool == false,
+                  let viewport = value["routeViewport"] as? [String: Any],
+                  let framing = value["routeFraming"] as? [String: Any] else { return false }
+            return (viewport["height"] as? Double ?? 0) > 80 && framing["inside"] as? Bool == true &&
+                max(framing["heightUsage"] as? Double ?? 0, framing["widthUsage"] as? Double ?? 0) > 0.72
+        }
         capture("experience-compact-alternative")
     }
 }
