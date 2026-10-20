@@ -39,6 +39,14 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         let active = app.staticTexts[english ? "Pro free trial is active" : "正在免費試用 Pro"]
         if !active.waitForExistence(timeout: 20), purchase.isHittable && purchase.isEnabled { purchase.tap() }
         XCTAssertTrue(active.waitForExistence(timeout: 20)); button("pro-close").tap()
+        XCTAssertTrue(button("pro-open-plans").waitForExistence(timeout: 15))
+        // In iPhone compatibility mode, the permission rows are below the fold.
+        // Scroll the real settings list before asking XCTest for a lazy row.
+        for _ in 0..<5 {
+            if app.staticTexts["pro-alight-readiness"].exists { break }
+            let list = app.collectionViews.firstMatch.exists ? app.collectionViews.firstMatch : app.tables.firstMatch
+            list.swipeUp()
+        }
         XCTAssertTrue(app.staticTexts["pro-alight-readiness"].waitForExistence(timeout: 15))
     }
     private func backToJourney(_ english: Bool) {
