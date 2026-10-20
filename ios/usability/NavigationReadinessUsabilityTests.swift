@@ -90,18 +90,23 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
     private func tripLifecycle(english: Bool) {
         let steps = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-steps-")).firstMatch
         XCTAssertTrue(steps.waitForExistence(timeout: 10))
+        let visibleWindow = app.windows.firstMatch.frame
+        print("NAVIGATION_STEPS_BOUNDS target=\(steps.frame) window=\(visibleWindow)")
         var lastFrame = CGRect.null, settledAt = Date()
         let settled = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard steps.exists, steps.isEnabled else { return false }
             let frame = steps.frame
             guard frame.width > 20, frame.height > 20,
-                  self.app.windows.firstMatch.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+                  visibleWindow.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
             if lastFrame.isNull || abs(frame.midX - lastFrame.midX) > 1 || abs(frame.midY - lastFrame.midY) > 1 {
                 lastFrame = frame; settledAt = Date(); return false
             }
             return Date().timeIntervalSince(settledAt) >= 0.5
         }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
+        // The hosted iPad can take several seconds per accessibility snapshot.
+        // Match the bounded settling budget used by the route-comparison tests;
+        // trip-state and end/background assertions keep their existing deadlines.
+        XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 25), .completed)
         func tapSteps() {
             let frame = steps.frame
             let window = app.windows.firstMatch
