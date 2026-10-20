@@ -372,6 +372,7 @@ struct TransitHomeView: View {
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
+                .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
                 .background {

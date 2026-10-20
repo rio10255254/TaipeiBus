@@ -70,7 +70,7 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 120))
         let selected = state()["selected"] as? String ?? ""
         capture("experience-accessibility-top")
-        let time = app.staticTexts["journey-preview-duration-" + selected]
+        let time = app.staticTexts.matching(NSPredicate(format: "identifier == %@", "journey-preview-duration-" + selected)).firstMatch
         XCTAssertGreaterThan(time.frame.height, 32, "Accessibility text must propagate into the presented route sheet")
         let steps = button("journey-steps-" + selected), go = button("journey-go-" + selected)
         reveal(go)
