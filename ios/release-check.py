@@ -65,6 +65,15 @@ def source_checks(root):
     require(raw[25] == 2 and b"tRNS" not in chunks, "App Store icon must be RGB without transparency.")
     for field in ("description_file", "what_to_test_file"):
         require(bool((root / "release" / config[field]).read_text(encoding="utf-8").strip()), f"Missing {field}.")
+    store_copy = json.loads((root / "release/app-store.zh-Hant.json").read_text(encoding="utf-8"))
+    # App Store Connect's documented version-information limits. Review notes and
+    # keywords use UTF-8 bytes, unlike the character limits on customer-facing copy.
+    for field, maximum in {"name": 30, "subtitle": 30, "description": 4000,
+                           "promotionalText": 170, "whatsNew": 4000}.items():
+        require(0 < len(store_copy[field]) <= maximum, f"App Store {field} exceeds its {maximum}-character limit.")
+    for field, maximum in {"keywords": 100, "reviewNotes": 4000}.items():
+        require(0 < len(store_copy[field].encode("utf-8")) <= maximum,
+                f"App Store {field} exceeds its {maximum}-byte limit.")
     require(re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", config["bundle_id"]), "Invalid release Bundle ID.")
     require(not config["bundle_id"].startswith("com.example."), "Release config still has a placeholder Bundle ID.")
     return config

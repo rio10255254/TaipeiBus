@@ -108,5 +108,13 @@ private actor PartialFeedRecorder {
         XCTAssertNotNil(model.snapshot.estimates.updatedAt)
         XCTAssertLessThan(Date().timeIntervalSince(started),2.5,"Live polling must start before the slow metadata downloads finish")
         XCTAssertFalse(model.loading)
+        let requests = RecoveryFeedProtocol.requests
+        print("FIRST_LIVE_FEEDS seconds=\(Date().timeIntervalSince(started)) requests=\(requests)")
+        let gps = try XCTUnwrap(requests.firstIndex(of:"GetBusData"))
+        let eta = try XCTUnwrap(requests.firstIndex(of:"GetEstimateTime"))
+        if let catalog = requests.firstIndex(where: { ["GetRoute","GetStop","GetPathDetail","GetProvider","GetBusShape"].contains($0) }) {
+            XCTAssertLessThan(gps,catalog,"Live GPS starts before optional catalog downloads")
+            XCTAssertLessThan(eta,catalog,"Live arrivals start before optional catalog downloads")
+        }
     }
 }

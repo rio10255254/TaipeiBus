@@ -855,7 +855,8 @@ final class TransitAppModel: ObservableObject {
                 // A working bundled/cached network can plan immediately. Downloads of
                 // shapes, station catalogs and travel profiles must not hold live GPS/ETA.
                 if metadata.routes.isEmpty { metadata = try await service.prepare() }
-                else { prepareMetadataInBackground() }
+                // Start the first GPS/ETA poll before optional catalog work can
+                // occupy the service actor. The bundled network is already usable.
                 openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
@@ -869,6 +870,7 @@ final class TransitAppModel: ObservableObject {
                     guard !Task.isCancelled else { return }
                     if let packet = await rail, packet != metroRealtime { metroRealtime = packet; metroRevision += 1 }
                     applySnapshot(result)
+                    prepareMetadataInBackground()
                     updateEstimatedTrains(with: nil)
                     expireLiveTrainTrial()
                     updateAlightReminder()
@@ -892,7 +894,6 @@ final class TransitAppModel: ObservableObject {
                         if remaining <= 0.25 { try await Task.sleep(for: .seconds(0.25)); break }
                         try await Task.sleep(for: .seconds(min(remaining, 1)))
                     }
-                    prepareMetadataInBackground()
                 }
             } catch {
                 if !Task.isCancelled { loading = false; loadError = "無法取得路線與站牌，請檢查網路後重試" }
