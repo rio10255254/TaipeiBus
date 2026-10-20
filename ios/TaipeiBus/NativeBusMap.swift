@@ -23,7 +23,7 @@ struct NativeBusMap: UIViewRepresentable {
         context.coordinator.darkMode = colorScheme == .dark
         map.delegate = context.coordinator
         map.maximumZoomLevel = 20
-        map.minimumZoomLevel = 9
+        map.minimumZoomLevel = RouteOverview.minimumZoom
         map.automaticallyAdjustsContentInset = false
         map.showsUserLocation = false // A single Core Location service owns permission and location requests.
         map.showsLogoView = false
@@ -856,9 +856,11 @@ struct NativeBusMap: UIViewRepresentable {
             // Finish an explicit focus even when panels resize during the animation or tiles are still loading.
             // A sheet covering most of the map leaves nothing worth reframing; the map stays still.
             let visibleHeight = map.bounds.height - map.contentInset.top - map.contentInset.bottom
-            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil && visibleHeight > 220 &&
+            let preview = model.planner.selected != nil && !model.planner.started
+            let minimumHeight = preview ? RouteOverview.minimumPreviewHeight : 220
+            let refit = viewportChanged && !model.mapWasMoved && model.focus != nil && Double(visibleHeight) > minimumHeight &&
                 (model.selectedVehicleID == nil || model.following)
-            let routePreviewCovered = model.planner.selected != nil && !model.planner.started && visibleHeight <= 220
+            let routePreviewCovered = preview && Double(visibleHeight) <= minimumHeight
             if (lastFocusRevision != model.focusRevision || refit), !routePreviewCovered, map.bounds.width > 0, map.bounds.height > 0 {
                 focus(model.focus, map: map, duration: lastFocusRevision != model.focusRevision ? 0.65 : 0.38)
                 lastFocusRevision = model.focusRevision
@@ -1446,10 +1448,11 @@ struct NativeBusMap: UIViewRepresentable {
         private func fittedCamera(_ coordinates: [Coordinate], map: MLNMapView, pitch requestedPitch: Double? = nil) -> MLNMapCamera? {
             let routePreview = model.planner.selected != nil && !model.planner.started
             let pitch = requestedPitch ?? (routePreview || model.stationBrowsing || model.activeWalkingIndex != nil || model.stationWalk.isActive ? 0 : 35)
+            let width = Double(map.bounds.width - map.contentInset.left - map.contentInset.right)
+            let height = Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom)
             guard let overview = RouteOverview(coordinates: coordinates,
-                viewportWidth: Double(map.bounds.width - map.contentInset.left - map.contentInset.right),
-                viewportHeight: Double(map.bounds.height - map.contentInset.top - map.contentInset.bottom), pitch: pitch,
-                padding: routePreview ? 32 : 16) else { return nil }
+                viewportWidth: width, viewportHeight: height, pitch: pitch,
+                padding: routePreview ? RouteOverview.previewPadding(width: width, height: height) : 16) else { return nil }
             // Convert the existing verified framing to one camera, so center, zoom,
             // tilt and padding travel together instead of two instantaneous moves.
             let altitude = MLNAltitudeForZoomLevel(overview.zoom, pitch, overview.center.latitude, map.bounds.size)

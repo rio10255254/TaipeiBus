@@ -3,6 +3,13 @@ import Foundation
 /// Fit a route in the available phone viewport, nearly filling it. A tilted camera
 /// foreshortens the far half of the view, so the zoom backs off by exactly that amount.
 public struct RouteOverview: Sendable {
+    public static let minimumZoom = 7.0
+    public static let minimumPreviewHeight = 100.0
+    /// Reserve room for endpoint signs without shrinking a short visible map to a thumbnail.
+    public static func previewPadding(width: Double, height: Double) -> Double {
+        guard width.isFinite, height.isFinite, width > 0, height > 0 else { return 0 }
+        return min(32, min(width, height) * 0.1)
+    }
     public let center: Coordinate
     public let zoom: Double
 
@@ -22,6 +29,6 @@ public struct RouteOverview: Sendable {
         let vertical = log2(max(80, viewportHeight - edge) / (512 * max(south - north, 0.000001)))
         let tilt = min(60, max(0, pitch.isFinite ? pitch : 0)) * .pi / 180
         let margin = log2(1 / cos(tilt)) + 0.05
-        zoom = min(17.2, max(9, min(horizontal, vertical) - margin))
+        zoom = min(17.2, max(Self.minimumZoom, min(horizontal, vertical) - margin))
     }
 }
