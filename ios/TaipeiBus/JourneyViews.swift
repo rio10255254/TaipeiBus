@@ -716,21 +716,36 @@ private struct JourneyDockHeader: View {
         dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
     }
     var body: some View {
-        layout {
-            VStack(alignment: .leading, spacing: 2) {
+        layout { heading; actions }
+        .alert(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd) {
+            Button(AppText.text("結束行程"), role: .destructive) { model.finishJourney() }
+                .accessibilityIdentifier("journey-confirm-end")
+            Button(AppText.text("繼續導航"), role: .cancel) {}
+        } message: { Text(AppText.text("行程資訊與下車提醒會一起停止。")) }
+    }
+    private func summary(_ duration: JourneyDuration) -> String {
+        let total = planner.started ? duration.summaryLabel(remaining: true) : duration.label
+        let arrival = duration.expectedArrivalLabel
+        let zone = duration.timeZoneNote().map { " · " + $0 } ?? ""
+        return total + " · " + arrival + zone
+    }
+    private var heading: some View {
+        VStack(alignment: .leading, spacing: 2) {
                 Text(planner.destination?.localizedName ?? AppText.text("目的地")).liveFont(.headline, weight: .bold).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 if let option = planner.selected {
                     TimelineView(.periodic(from: .now, by: 15)) { timeline in
                         if let duration = model.journeyDuration(option, at: timeline.date) {
-                            Text((planner.started ? duration.summaryLabel(remaining: true) : duration.label) + " · " + duration.expectedArrivalLabel + (duration.timeZoneNote().map { " · " + $0 } ?? ""))
+                            Text(summary(duration))
                                 .liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                 .accessibilityIdentifier("journey-total-duration")
                                 .liveNumericText()
                         }
                     }
                 }
-            }.frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 10) {
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    private var actions: some View {
+        HStack(spacing: 10) {
             Button(action: showJourney) {
                 Image(systemName: "list.bullet").liveFont(.body, weight: .semibold).frame(width: 44, height: 44)
             }
@@ -743,13 +758,7 @@ private struct JourneyDockHeader: View {
             .buttonStyle(MapActionStyle(tint: MapChrome.destructive))
             .accessibilityLabel(live.text("結束行程"))
             .accessibilityIdentifier("journey-end")
-            }.frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, alignment: .trailing)
-        }
-        .alert(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd) {
-            Button(AppText.text("結束行程"), role: .destructive) { model.finishJourney() }
-                .accessibilityIdentifier("journey-confirm-end")
-            Button(AppText.text("繼續導航"), role: .cancel) {}
-        } message: { Text(AppText.text("行程資訊與下車提醒會一起停止。")) }
+        }.frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, alignment: .trailing)
     }
 }
 
