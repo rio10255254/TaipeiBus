@@ -12,104 +12,176 @@ extension RouteSign {
     static let cycling = RouteSign(text: "🚲", color: "#248A3D", darkInk: false)
 }
 
-/// Pro: the current trip on the Lock Screen and in the Dynamic Island. The app pushes a new
-/// state while it runs; in between, the system counts down to the stored arrival time itself,
-/// so nothing depends on a push server.
-@MainActor
-final class RideActivityController {
+/// The system adapter is also exercised with a delayed store in lifecycle tests.
+@MainActor protocol RideActivitySession: AnyObject {
+    var id: String { get }
+    var attributes: RideActivityAttributes { get }
+    var activityState: ActivityState { get }
+    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>) async
+    func end() async
+    func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never>
+}
+@MainActor protocol RideActivityStore {
+    var allowed: Bool { get }
+    var sessions: [any RideActivitySession] { get }
+    func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession
+}
+@MainActor private final class SystemRideSession: RideActivitySession {
+    let value: Activity<RideActivityAttributes>
+    init(_ value: Activity<RideActivityAttributes>) { self.value = value }
+    var id: String { value.id }
+    var attributes: RideActivityAttributes { value.attributes }
+    var activityState: ActivityState { value.activityState }
+    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>) async { await value.update(content) }
+    func end() async { await value.end(nil, dismissalPolicy: .immediate) }
+    func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
+        Task { for await state in value.activityStateUpdates { guard !Task.isCancelled else { return }; change(state) } }
+    }
+}
+@MainActor private struct SystemRideStore: RideActivityStore {
+    var allowed: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
+    var sessions: [any RideActivitySession] { Activity<RideActivityAttributes>.activities.map { SystemRideSession($0) } }
+    func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession {
+        SystemRideSession(try Activity.request(attributes: attributes, content: content, pushType: nil))
+    }
+}
+
+/// One serialized lifecycle: finish the previous island before starting its replacement.
+/// Updates received during an await are coalesced to the latest trip, never replayed out of order.
+@MainActor final class RideActivityController {
     typealias State = RideActivityAttributes.ContentState
-    private var activity: Activity<RideActivityAttributes>?
+    private struct Desired {
+        var state: State
+        var attributes: RideActivityAttributes
+    }
+    private let store: any RideActivityStore
+    private var activity: (any RideActivitySession)?
+    private var desired: Desired?
     private var pushed: State?
-    private(set) var debugState = "none"
-    var isAllowed: Bool { ActivityAuthorizationInfo().areActivitiesEnabled }
-    var isRunning: Bool { activity.map { $0.activityState == .active || $0.activityState == .stale } ?? false }
-    var onAvailabilityChange: (() -> Void)?
+    private var revision = 0
+    private var worker: Task<Void, Never>?
+    private var mayHaveActivities = true
+    private var retiredIDs = Set<String>()
+    private var stoppedByUser = false
+    private var lastAllowed: Bool?
     private var authorizationTask: Task<Void, Never>?
     private var stateTask: Task<Void, Never>?
-    private var stoppedByUser = false
-
-    init() {
-        authorizationTask = Task { [weak self] in
-            for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
-                guard !Task.isCancelled else { return }
-                self?.onAvailabilityChange?()
-            }
-        }
+    private(set) var debugState = "none"
+    var isAllowed: Bool { store.allowed }
+    var isRunning: Bool {
+        store.allowed && desired != nil && !stoppedByUser && activity.map { $0.activityState == .active || $0.activityState == .stale } == true
     }
-    deinit { authorizationTask?.cancel(); stateTask?.cancel() }
-    private func observe(_ value: Activity<RideActivityAttributes>) {
-        stateTask?.cancel()
-        stateTask = Task { [weak self] in
-            for await state in value.activityStateUpdates {
-                guard !Task.isCancelled else { return }
-                guard self?.activity?.id == value.id else { return }
-                if state == .dismissed || state == .ended {
-                    self?.stoppedByUser = true; self?.debugState = "dismissed"
+    var onAvailabilityChange: (() -> Void)?
+
+    init(store: (any RideActivityStore)? = nil) {
+        self.store = store ?? SystemRideStore()
+        if store == nil {
+            authorizationTask = Task { [weak self] in
+                for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
+                    guard !Task.isCancelled else { return }
                     self?.onAvailabilityChange?()
                 }
             }
         }
     }
+    deinit { authorizationTask?.cancel(); stateTask?.cancel(); worker?.cancel() }
     func allowRestart() {
         guard !isRunning else { return }
-        stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil
-        mayHaveActivities = false; stoppedByUser = false; debugState = "none"
+        stoppedByUser = false; pushed = nil; debugState = "none"
+        revision += 1; schedule()
     }
-
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool) {
         guard enabled, let state else { endAll(); return }
         guard !stoppedByUser else { return }
-        if let activity, activity.activityState == .dismissed || activity.activityState == .ended {
-            stoppedByUser = true; debugState = "dismissed"; return
-        }
-        if activity == nil, mayHaveActivities {
-            activity = Activity<RideActivityAttributes>.activities.first { $0.activityState == .active || $0.activityState == .stale }
-            if let activity { observe(activity) }
-        }
-        if let current = activity, current.attributes.destination != destination {
-            endAll()
-        }
-        guard isAllowed else { endAll(); debugState = "disabled"; return }
-        guard let current = activity else {
-            do {
-                activity = try Activity.request(attributes: RideActivityAttributes(destination: destination, language: language.rawValue),
-                                                content: ActivityContent(state: state, staleDate: Self.staleDate(state)), pushType: nil)
-                if let activity { observe(activity) }
-                pushed = state; mayHaveActivities = true; debugState = "started:" + state.phase.rawValue
-            } catch { debugState = "unavailable" }
-            return
-        }
-        guard let pushed, !Self.changed(pushed, state), state.updatedAt.timeIntervalSince(pushed.updatedAt) < 60 else {
-            self.pushed = state; debugState = "updated:" + state.phase.rawValue
-            Task { await current.update(ActivityContent(state: state, staleDate: Self.staleDate(state))) }
-            return
-        }
+        let permissionChanged = lastAllowed != store.allowed
+        lastAllowed = store.allowed
+        let attributes = RideActivityAttributes(destination: destination, language: language.rawValue)
+        if !permissionChanged, let old = desired, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
+           state.updatedAt.timeIntervalSince(old.state.updatedAt) < 30, isRunning || worker != nil { return }
+        desired = Desired(state: state, attributes: attributes)
+        revision += 1; mayHaveActivities = true; schedule()
     }
-
-    /// Whether an activity may exist (from this launch or a previous one), so the refresh loop
-    /// does not ask the system on every tick when there is nothing to end.
-    private var mayHaveActivities = true
     func endAll() {
-        stoppedByUser = false; stateTask?.cancel(); stateTask = nil
-        guard mayHaveActivities || activity != nil else { return }
-        mayHaveActivities = false
-        let running = Activity<RideActivityAttributes>.activities
-        activity = nil; pushed = nil
-        guard !running.isEmpty else { return }
-        debugState = "ended"
-        Task { for item in running { await item.end(nil, dismissalPolicy: .immediate) } }
+        guard desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
+        retiredIDs.formUnion(store.sessions.map(\.id))
+        if let activity { retiredIDs.insert(activity.id) }
+        // A terminal callback already queued by the old activity must not dismiss
+        // a journey that the user starts immediately after this one.
+        stateTask?.cancel(); stateTask = nil; activity = nil
+        desired = nil; stoppedByUser = false; pushed = nil; debugState = "ended"
+        revision += 1; schedule()
     }
-
-    private static func staleDate(_ state: State) -> Date {
-        max(state.updatedAt.addingTimeInterval(900), (state.target ?? .distantPast).addingTimeInterval(300))
+    private func schedule() {
+        guard worker == nil else { return }
+        worker = Task { [weak self] in
+            guard let self else { return }
+            let wasRunning = isRunning, oldDebug = debugState
+            await reconcile()
+            worker = nil
+            if wasRunning != isRunning || oldDebug != debugState { onAvailabilityChange?() }
+        }
     }
-    /// A new push only when something the rider reads changed; the countdown runs by itself.
+    private func reconcile() async {
+        while !Task.isCancelled {
+            let version = revision
+            let next = store.allowed && !stoppedByUser ? desired : nil
+            var sessions = store.sessions
+            if let activity, !sessions.contains(where: { $0.id == activity.id }) { sessions.append(activity) }
+            let matching = next.flatMap { wanted in
+                sessions.first { !retiredIDs.contains($0.id) && Self.same($0.attributes, wanted.attributes) && ($0.activityState == .active || $0.activityState == .stale) }
+            }
+            // Detach the observer before intentional end events; those are not a user dismissal.
+            if activity?.id != matching?.id { stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil }
+            for session in sessions where session.id != matching?.id { await session.end(); retiredIDs.remove(session.id) }
+            guard version == revision else { continue }
+            guard let next else {
+                activity = nil; pushed = nil; mayHaveActivities = false
+                if !store.allowed { debugState = "disabled" }
+                return
+            }
+            if activity == nil, let matching { activity = matching; observe(matching) }
+            if activity == nil {
+                do {
+                    let created = try store.start(next.attributes, content: Self.content(next.state))
+                    activity = created; pushed = next.state; observe(created)
+                    debugState = "started:" + next.state.phase.rawValue
+                } catch { debugState = "unavailable" }
+            } else if let current = activity,
+                      pushed.map({ Self.changed($0, next.state) || next.state.updatedAt.timeIntervalSince($0.updatedAt) >= 30 }) ?? true {
+                await current.update(Self.content(next.state))
+                guard version == revision else { continue }
+                pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
+            }
+            if version == revision { return }
+        }
+    }
+    private func observe(_ session: any RideActivitySession) {
+        stateTask?.cancel()
+        stateTask = session.observe { [weak self] state in
+            guard let self, activity?.id == session.id else { return }
+            if state == .dismissed || state == .ended {
+                stoppedByUser = true; debugState = "dismissed"; onAvailabilityChange?()
+            }
+        }
+    }
+    private static func same(_ a: RideActivityAttributes, _ b: RideActivityAttributes) -> Bool {
+        a.destination == b.destination && a.language == b.language
+    }
+    private static func content(_ state: State) -> ActivityContent<State> {
+        ActivityContent(state: state, staleDate: state.updateDeadline)
+    }
     private static func changed(_ old: State, _ new: State) -> Bool {
+        if let before = old.freshUntil, let after = new.freshUntil,
+           (before <= new.updatedAt) != (after <= new.updatedAt) { return true }
         if old.phase != new.phase || old.sign != new.sign || old.headline != new.headline || old.detail != new.detail ||
-            old.status != new.status || old.stopsLeft != new.stopsLeft || (old.target == nil) != (new.target == nil) { return true }
+            old.status != new.status || old.stopsLeft != new.stopsLeft || old.totalStops != new.totalStops || old.symbol != new.symbol ||
+            (old.target == nil) != (new.target == nil) { return true }
         guard let a = old.target, let b = new.target else { return false }
         return abs(a.timeIntervalSince(b)) >= 20
     }
+#if DEBUG
+    func waitForPendingChanges() async { while let task = worker { await task.value } }
+#endif
 }
 
 /// Pro: saved trips on the Home Screen. The app records which bus each trip starts with; the
@@ -200,6 +272,97 @@ final class CommuteWidgetBridge {
         WidgetCenter.shared.reloadTimelines(ofKind: "CommuteWidget")
     }
 }
+
+#if DEBUG
+/// Deliberately labelled development fixtures, never used as physical-device review evidence.
+struct IslandPreviewGallery: View {
+    let language: AppLanguage
+    @State private var selected = ProcessInfo.processInfo.arguments.contains("--island-companion") ? 4 : 0
+    @State private var reference = Date()
+    @State private var controller = RideActivityController()
+    @State private var message = ""
+    private let names = ["waiting", "riding", "alighting", "walking", "cycling", "transfer", "stale", "due", "long"]
+    private var state: RideActivityAttributes.ContentState {
+        Self.sample(names[selected], language: language, now: reference)
+    }
+    static func sample(_ name: String, language: AppLanguage, now: Date) -> RideActivityAttributes.ContentState {
+        let english = language == .english
+        var value = RideActivityAttributes.ContentState(phase: .waiting,
+            sign: RouteSign(text: "630", color: "#1F6FD1", darkInk: false),
+            headline: english ? "Neihu Station" : "捷運內湖站",
+            detail: english ? "Toward Donghu · Wait at this stop" : "往東湖 · 在本站候車",
+            target: now.addingTimeInterval(240), status: AppText.text("官方下一班", language: language),
+            stopsLeft: nil, totalStops: nil, updatedAt: now, symbol: "bus.fill", freshUntil: now.addingTimeInterval(120))
+        switch name {
+        case "riding", "alighting", "stale":
+            value.phase = .riding; value.stopsLeft = name == "alighting" ? 1 : 5; value.totalStops = 12
+            value.detail = AppText.remainingStops(value.stopsLeft!, language: language)
+            value.status = AppText.text("預估時間", language: language)
+            if name == "stale" { value.updatedAt = now.addingTimeInterval(-300); value.freshUntil = now.addingTimeInterval(-1) }
+        case "walking", "cycling", "transfer":
+            value.phase = name == "cycling" ? .cycling : name == "transfer" ? .transferring : .walking
+            value.sign = name == "cycling" ? .cycling : .walking
+            value.symbol = name == "cycling" ? "bicycle" : "figure.walk"
+            value.detail = english ? "Follow the route to the next connection" : "沿路線前往下一段接駁"
+            value.status = AppText.text("預估時間", language: language)
+        case "due": value.target = now.addingTimeInterval(-5)
+        case "long":
+            value.sign.text = english ? "Minsheng Metrobus" : "民生幹線（往返區間）"
+            value.headline = english ? "Zhongxiao Fuxing Station · Exit 2" : "捷運忠孝復興站・二號出口"
+        default: break
+        }
+        return value
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Dynamic Island · Layout verification").font(.headline)
+                Picker("Scenario", selection: $selected) {
+                    ForEach(names.indices, id: \.self) { index in Text(names[index]).tag(index) }
+                }.pickerStyle(.menu).accessibilityIdentifier("island-scenario")
+                Button("Next scenario") { selected = (selected + 1) % names.count; reference = Date() }
+                    .accessibilityIdentifier("island-next")
+                let value = RideActivityPresentation(state: state, language: language)
+                HStack {
+                    RideIslandLeading(presentation: value)
+                    Spacer().frame(minWidth: 70)
+                    RideIslandTrailing(presentation: value)
+                }.padding(.horizontal, 12).frame(width: 250, height: 37).background(.black, in: Capsule())
+                    .accessibilityIdentifier("island-compact")
+                HStack(spacing: 8) {
+                    Capsule().fill(.black).frame(width: 170, height: 37)
+                    RideIslandMinimal(presentation: value).frame(width: 37, height: 37).background(.black, in: Circle())
+                }.accessibilityIdentifier("island-minimal")
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        RideActivityBadge(state: state)
+                        Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
+                        Spacer(minLength: 4)
+                        RideCountdown(state: state, language: language, size: 24).frame(maxWidth: 130)
+                    }
+                    RideActivityDetails(presentation: value)
+                }.padding(16).frame(maxWidth: .infinity).background(.black, in: RoundedRectangle(cornerRadius: 32))
+                    .environment(\.colorScheme, .dark).foregroundStyle(.white).accessibilityIdentifier("island-expanded")
+                RideActivityLockView(state: state, attributes: .init(destination: state.headline, language: language.rawValue))
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)).accessibilityIdentifier("island-lock")
+                Button("Start system activity") {
+                    controller.onAvailabilityChange = { message = controller.debugState }
+                    controller.update(state, destination: "Island verification", language: language, enabled: true)
+                }.accessibilityIdentifier("island-system-start")
+                Button("Add second test activity") {
+                    do {
+                        _ = try Activity<RideActivityAttributes>.request(attributes: .init(destination: "Second test activity", language: language.rawValue),
+                            content: ActivityContent(state: Self.sample("cycling", language: language, now: Date()), staleDate: Date().addingTimeInterval(120)), pushType: nil)
+                        message = "two-activities"
+                    } catch { message = "second-failed" }
+                }.accessibilityIdentifier("island-system-second")
+                Button("End test activities") { controller.endAll(); message = "ended" }.accessibilityIdentifier("island-system-end")
+                Text(message).accessibilityIdentifier("island-system-status")
+            }.padding(16)
+        }
+    }
+}
+#endif
 
 #if DEBUG
 /// Interface verification: the widget and Live Activity layouts rendered at their real sizes

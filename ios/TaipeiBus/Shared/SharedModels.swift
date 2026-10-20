@@ -1,6 +1,7 @@
 import Foundation
 import Security
 import SwiftUI
+import TransitCore
 #if canImport(ActivityKit)
 import ActivityKit
 #endif
@@ -18,7 +19,7 @@ struct RouteSign: Codable, Hashable, Sendable {
 /// between updates the system keeps counting down to `target` on its own.
 struct RideActivityAttributes: ActivityAttributes {
     struct ContentState: Codable, Hashable, Sendable {
-        enum Phase: String, Codable, Hashable, Sendable { case waiting, riding, walking }
+        enum Phase: String, Codable, Hashable, Sendable { case waiting, riding, walking, cycling, transferring }
         var phase: Phase
         var sign: RouteSign
         /// Waiting: "往 板橋"; riding: the alighting stop; walking: the destination.
@@ -32,9 +33,93 @@ struct RideActivityAttributes: ActivityAttributes {
         var stopsLeft: Int?
         var totalStops: Int?
         var updatedAt: Date
+        /// Optional additions keep already-running activities decodable after an app update.
+        var symbol: String? = nil
+        var freshUntil: Date? = nil
+        /// ActivityKit asks the extension to redraw at this deadline. No view-local
+        /// periodic schedule is needed to stop an expired countdown.
+        var updateDeadline: Date {
+            let expiry = freshUntil ?? updatedAt.addingTimeInterval(120)
+            return target.map { min(expiry, max(updatedAt, $0)) } ?? expiry
+        }
     }
     var destination: String
     var language: String
+}
+
+/// One meaning across the small island, expanded island and Lock Screen.
+/// Expiry is checked before stops or urgency, so a lost feed cannot leave a false alight cue.
+struct RideActivityPresentation {
+    let state: RideActivityAttributes.ContentState
+    let language: AppLanguage
+    var systemStale = false
+    var now = Date()
+
+    var stale: Bool {
+        systemStale || state.updatedAt.timeIntervalSince(now) > 60
+            || now >= (state.freshUntil ?? state.updatedAt.addingTimeInterval(120))
+    }
+    var target: Date? {
+        guard !stale, let target = state.target, target > now, target > state.updatedAt else { return nil }
+        return target
+    }
+    var due: Bool { !stale && state.target.map { $0 <= now } == true }
+    var alightingSoon: Bool {
+        !stale && state.phase == .riding && state.stopsLeft.map { $0 <= 1 } == true
+    }
+    var symbol: String {
+        if stale { return "arrow.clockwise" }
+        if alightingSoon { return "arrow.down" }
+        if let symbol = state.symbol { return symbol }
+        switch state.phase {
+        case .walking, .transferring: return "figure.walk"
+        case .cycling: return "bicycle"
+        default: return "bus.fill"
+        }
+    }
+    var phaseTitle: String {
+        switch state.phase {
+        case .waiting: return AppText.text("等車", language: language)
+        case .riding: return AppText.text("下車站", language: language)
+        case .walking: return AppText.text("步行前往", language: language)
+        case .cycling: return AppText.text("騎車前往", language: language)
+        case .transferring: return AppText.text("轉乘", language: language)
+        }
+    }
+    var status: String {
+        if stale {
+            if state.phase == .waiting, state.target.map({ $0 <= now }) == true {
+                return AppText.text("留意來車，點一下更新", language: language)
+            }
+            return AppText.text("點一下更新", language: language)
+        }
+        if alightingSoon { return AppText.text("準備下車", language: language) }
+        if due {
+            switch state.phase {
+            case .waiting: return AppText.text("留意來車", language: language)
+            case .riding: return AppText.text("留意下車站", language: language)
+            default: return AppText.text("確認目前進度", language: language)
+            }
+        }
+        return state.status ?? AppText.text("查看行程", language: language)
+    }
+    var minutes: Int? { target.map { max(1, Int(ceil($0.timeIntervalSince(now) / 60))) } }
+    var compactText: String? {
+        guard !stale else { return nil }
+        if alightingSoon { return AppText.text("下車", language: language) }
+        if state.phase == .riding, let stops = state.stopsLeft {
+            return AppText.stops(max(0, stops), language: language)
+        }
+        return minutes.map { AppText.text("%@ 分", $0, language: language) }
+    }
+    var progress: Double? {
+        guard !stale, let left = state.stopsLeft, let total = state.totalStops, total > 0 else { return nil }
+        return min(1, max(0, Double(total - left) / Double(total)))
+    }
+    var accessibilityLabel: String {
+        [phaseTitle, state.sign.text, state.headline, stale || due || alightingSoon ? status : compactText ?? status]
+            .joined(separator: " · ")
+    }
 }
 #endif
 

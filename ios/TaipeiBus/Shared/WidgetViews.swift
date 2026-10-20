@@ -215,62 +215,136 @@ struct CommuteWidgetView: View {
 }
 
 #if canImport(ActivityKit)
-/// The countdown keeps running on the Lock Screen while the app is suspended.
+/// All island sizes use these same components, including the in-app layout checks.
+struct RideActivityBadge: View {
+    let state: RideActivityAttributes.ContentState
+    var body: some View {
+        if [.walking, .cycling, .transferring].contains(state.phase) {
+            Image(systemName: state.phase == .cycling ? "bicycle" : "figure.walk")
+                .font(.system(size: 24, weight: .semibold)).frame(width: 36, height: 30)
+        } else { RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 108, alignment: .leading) }
+    }
+}
+
+struct RideIslandLeading: View {
+    let presentation: RideActivityPresentation
+    var body: some View {
+        Group {
+            if [.walking, .cycling, .transferring].contains(presentation.state.phase) {
+                Image(systemName: presentation.symbol).font(.system(size: 16, weight: .semibold))
+            } else if presentation.state.sign.text.count > 5 {
+                Image(systemName: presentation.symbol).font(.system(size: 16, weight: .semibold))
+            } else {
+                RouteSignView(sign: presentation.state.sign, size: 12)
+            }
+        }
+        .frame(maxWidth: 56).foregroundStyle(.white)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+struct RideIslandTrailing: View {
+    let presentation: RideActivityPresentation
+    var body: some View {
+        Group {
+            if presentation.state.phase != .riding, let target = presentation.target {
+                Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
+                    .font(.system(size: 13, weight: .bold, design: .rounded)).monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+            } else if let text = presentation.compactText {
+                Text(text).font(.system(size: 13, weight: .bold, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+            } else {
+                Image(systemName: presentation.symbol).font(.system(size: 15, weight: .semibold))
+            }
+        }
+        .frame(maxWidth: 58)
+        .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
+        .accessibilityLabel(presentation.accessibilityLabel)
+    }
+}
+
+struct RideIslandMinimal: View {
+    let presentation: RideActivityPresentation
+    var body: some View {
+        // No long route names squeezed into the detached circle. Identify the current action
+        // and show a count only while it is fresh; the expanded view retains the full route.
+        VStack(spacing: 0) {
+            Image(systemName: presentation.symbol)
+                .font(.system(size: presentation.target == nil || presentation.alightingSoon ? 16 : 9, weight: .semibold))
+            if let target = presentation.target, !presentation.alightingSoon {
+                Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8).multilineTextAlignment(.center)
+            }
+        }
+        .frame(width: 24, height: 26)
+        .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
+        .accessibilityElement(children: .ignore).accessibilityLabel(presentation.accessibilityLabel)
+    }
+
+}
+
 struct RideCountdown: View {
     let state: RideActivityAttributes.ContentState
     let language: AppLanguage
     var size: CGFloat = 28
     var stale = false
     var body: some View {
-        if stale {
-            Text(AppText.text("打開 App 更新", language: language))
-                .font(.system(size: size * 0.5, weight: .semibold, design: .rounded)).lineLimit(2).minimumScaleFactor(0.6)
-        } else if let target = state.target, target > state.updatedAt {
-            Text(timerInterval: state.updatedAt...target, countsDown: true)
+        let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
+        if let target = value.target {
+            Text(timerInterval: state.updatedAt...target, countsDown: true, showsHours: false)
                 .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
                 .multilineTextAlignment(.trailing)
         } else {
-            Text(state.status ?? (state.phase == .riding ? AppText.text("即將抵達", language: language) : "—"))
-                .font(.system(size: size * 0.62, weight: .bold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.6)
+            Text(value.status).font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
+                .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
         }
+    }
+}
+
+struct RideActivityDetails: View {
+    let presentation: RideActivityPresentation
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(presentation.state.headline).font(.headline).lineLimit(2)
+            if let progress = presentation.progress {
+                ProgressView(value: progress).tint(presentation.alightingSoon ? .orange : Color(signHex: presentation.state.sign.color))
+                    .accessibilityLabel(presentation.compactText ?? presentation.phaseTitle)
+            }
+            Text(presentation.stale ? presentation.status : presentation.state.detail)
+                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            if !presentation.stale, let status = presentation.state.status, presentation.state.target != nil,
+               status != presentation.state.detail {
+                Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
 struct RideActivityLockView: View {
     let state: RideActivityAttributes.ContentState
     let attributes: RideActivityAttributes
-    /// The app stopped updating (for example it was closed); times would no longer be true.
     var stale = false
     private var language: AppLanguage { AppLanguage(rawValue: attributes.language) ?? .traditionalChinese }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .center, spacing: 10) {
-                RouteSignView(sign: state.sign, size: 17)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(phaseTitle).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    Text(state.headline).font(.headline).lineLimit(1)
+        let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
+        Group {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    if [.walking, .cycling, .transferring].contains(state.phase) {
+                        Image(systemName: value.symbol).font(.title2).frame(width: 36)
+                    } else { RouteSignView(sign: state.sign, size: 15).frame(maxWidth: 108) }
+                    Text(value.alightingSoon ? AppText.text("準備下車", language: language) : value.phaseTitle)
+                        .font(.subheadline.weight(.semibold)).lineLimit(1)
+                    Spacer(minLength: 4)
+                    RideCountdown(state: state, language: language, size: 24, stale: stale)
+                        .frame(maxWidth: 130, alignment: .trailing)
                 }
-                Spacer(minLength: 6)
-                RideCountdown(state: state, language: language, stale: stale).frame(maxWidth: 120, alignment: .trailing)
+                RideActivityDetails(presentation: value)
             }
-            if let left = state.stopsLeft, let total = state.totalStops, total > 0 {
-                ProgressView(value: Double(max(0, total - left)), total: Double(total)).tint(Color(signHex: state.sign.color))
-            }
-            HStack {
-                Text(state.detail).font(.subheadline.weight(.medium)).lineLimit(1)
-                Spacer()
-                Text(AppText.text("更新於 %@", state.updatedAt.formatted(.dateTime.hour().minute()), language: language))
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }
-        .padding(16)
-    }
-    private var phaseTitle: String {
-        switch state.phase {
-        case .waiting: return AppText.text("等車", language: language)
-        case .riding: return AppText.text("搭乘中 · 下車站", language: language)
-        case .walking: return AppText.text("步行前往", language: language)
+            .padding(16)
         }
     }
 }
