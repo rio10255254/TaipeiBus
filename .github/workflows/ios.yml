@@ -59,9 +59,9 @@ on:
         options: ['both', 'light', 'dark']
         default: 'both'
       preview_device:
-        description: 'Phone size for the requested native walkthrough'
+        description: 'Device for the requested native walkthrough, including iPad compatibility mode'
         type: choice
-        options: ['iphone-17', 'small']
+        options: ['iphone-17', 'small', 'ipad']
         default: 'iphone-17'
       ui_test_filter:
         description: 'Optional exact native UI test for a focused rerun after other checks passed'
@@ -378,6 +378,9 @@ jobs:
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17
           if [ '${{ inputs.preview_device }}' = 'small' ]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation
+          fi
+          if [ '${{ inputs.preview_device }}' = 'ipad' ]; then
+            device_type=com.apple.CoreSimulator.SimDeviceType.iPad-Air-11-inch-M3
           fi
           if [[ '${{ inputs.usability_scope }}' = app-store* ]]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
