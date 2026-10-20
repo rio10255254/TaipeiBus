@@ -1,6 +1,7 @@
 import XCTest
 
 final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
+    private var viewport: CGRect { app.windows.firstMatch.frame }
     private func state() -> [String: Any] {
         let element = app.staticTexts["journey-timing-state"]
         guard element.exists, let data = element.label.data(using: .utf8),
@@ -18,20 +19,25 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
     }
     private func tapSettled(_ element: XCUIElement) {
         XCTAssertTrue(element.waitForExistence(timeout: 15))
+        print("TOUCH_BOUNDS target=\(element.frame) application=\(app.frame) window=\(viewport)")
         var prior = CGRect.zero, since = Date()
         waitFor("The visible action has finished its sheet transition") {
             let frame = element.frame
             guard frame.width >= 20, frame.height >= 20, element.isEnabled,
-                  self.app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { since = Date(); return false }
+                  self.viewport.contains(CGPoint(x: frame.midX, y: frame.midY)) else { since = Date(); return false }
             if abs(frame.midX - prior.midX) > 1 || abs(frame.midY - prior.midY) > 1 { prior = frame; since = Date(); return false }
             return Date().timeIntervalSince(since) >= 0.6
         }
-        let frame = element.frame
-        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+        if element.isHittable { element.tap() }
+        else {
+            let frame = element.frame, window = viewport
+            app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: frame.midX-window.minX, dy: frame.midY-window.minY)).tap()
+        }
     }
     private func reveal(_ element: XCUIElement) {
         for _ in 0..<8 {
-            if element.exists, app.frame.insetBy(dx: 8, dy: 60).contains(CGPoint(x: element.frame.midX, y: element.frame.midY)) { return }
+            if element.exists, viewport.insetBy(dx: 8, dy: 60).contains(CGPoint(x: element.frame.midX, y: element.frame.midY)) { return }
             app.scrollViews.firstMatch.swipeUp()
         }
     }
@@ -89,7 +95,7 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         let destination = app.staticTexts["journey-destination-title"]
         waitFor("The details open at their destination summary, even after scrolling the preview") {
             destination.exists && destination.frame.minY >= self.app.navigationBars.firstMatch.frame.maxY - 1 &&
-                destination.frame.maxY < self.app.frame.maxY * 0.65
+                destination.frame.maxY < self.viewport.minY + self.viewport.height * 0.65
         }
         capture("experience-accessibility-steps")
         tapSettled(button("journey-back"))

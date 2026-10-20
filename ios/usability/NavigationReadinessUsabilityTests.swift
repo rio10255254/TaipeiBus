@@ -87,7 +87,7 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
             guard steps.exists, steps.isEnabled else { return false }
             let frame = steps.frame
             guard frame.width > 20, frame.height > 20,
-                  self.app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
+                  self.app.windows.firstMatch.frame.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return false }
             if lastFrame.isNull || abs(frame.midX - lastFrame.midX) > 1 || abs(frame.midY - lastFrame.midY) > 1 {
                 lastFrame = frame; settledAt = Date(); return false
             }
@@ -96,8 +96,13 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertEqual(XCTWaiter.wait(for: [settled], timeout: 10), .completed)
         func tapSteps() {
             let frame = steps.frame
-            XCTAssertTrue(app.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
-            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.midX, dy: frame.midY)).tap()
+            let window = app.windows.firstMatch
+            XCTAssertTrue(window.frame.contains(CGPoint(x: frame.midX, y: frame.midY)))
+            if steps.isHittable { steps.tap() }
+            else {
+                window.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: frame.midX-window.frame.minX, dy: frame.midY-window.frame.minY)).tap()
+            }
         }
         // XCTest's hittability result can be false for a visible control inside a
         // transformed native sheet. Send a real touch at its current screen bounds.
