@@ -19,7 +19,48 @@ public struct JourneyDuration: Equatable, Sendable {
     /// Part of `walkingSeconds` that is spent riding a YouBike, including unlocking and docking.
     public var cyclingSeconds: Double = 0
     public var cyclingHandlingSeconds: Double = 0
+    /// Already included in walkingSeconds; never added to the journey a second time.
+    public var stationSeconds: Double = 0
     public var ridingEvidence: RidingTimeEstimate.Evidence = .typical
+    public struct Component: Equatable, Sendable, Identifiable {
+        public enum Kind: String, Sendable { case walking, station, waiting, transit, cycling, handling }
+        public let kind: Kind
+        public let seconds: Double
+        public var unconfirmed = false
+        public var id: Kind { kind }
+        public var title: String {
+            switch kind {
+            case .walking: return AppText.text("步行")
+            case .station: return AppText.text("進出站與轉乘")
+            case .waiting: return AppText.text("候車")
+            case .transit: return AppText.text("搭車")
+            case .cycling: return AppText.text("騎車")
+            case .handling: return AppText.text("取還車")
+            }
+        }
+        public var durationLabel: String {
+            unconfirmed ? AppText.text("候車待確認") : AppText.text("約 %@ 分鐘", max(1, Int(ceil(seconds / 60))))
+        }
+    }
+    /// A partition of the elapsed time, including bike handling and indoor access exactly once.
+    public var components: [Component] {
+        let cycling = min(walkingSeconds, max(0, cyclingSeconds))
+        let handling = min(cycling, max(0, cyclingHandlingSeconds))
+        let station = min(max(0, walkingSeconds - cycling), max(0, stationSeconds))
+        return [Component(kind: .walking, seconds: max(0, walkingSeconds - cycling - station)),
+                Component(kind: .station, seconds: station), Component(kind: .waiting, seconds: waitingSeconds, unconfirmed: unknownWaits > 0),
+                Component(kind: .transit, seconds: ridingSeconds), Component(kind: .cycling, seconds: cycling - handling),
+                Component(kind: .handling, seconds: handling)].filter { $0.seconds > 0 }
+    }
+    public func timeZoneNote(in timeZone: TimeZone = .current) -> String? {
+        guard let taipei = TimeZone(identifier: "Asia/Taipei"),
+              timeZone.secondsFromGMT(for: referenceDate) != taipei.secondsFromGMT(for: referenceDate) else { return nil }
+        return AppText.text("台北時間")
+    }
+    /// All preview surfaces share the same departure instant rather than creating their own clocks.
+    public static func previewDate(_ date: Date) -> Date {
+        Date(timeIntervalSince1970: floor(date.timeIntervalSince1970 / 15) * 15)
+    }
     public var unknownWaits: Int { waits.filter { $0.evidence == .unknown }.count }
     public var travelSeconds: Double { walkingSeconds + ridingSeconds }
     public var totalSeconds: Double { walkingSeconds + waitingSeconds + ridingSeconds }

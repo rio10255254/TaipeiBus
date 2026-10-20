@@ -219,7 +219,7 @@ private struct MapContextLabelContent: View, Equatable {
                                     .foregroundStyle(model.followingTrain ? Color.white : Color.accentColor)
                                     .frame(width: 32, height: 32)
                                     .background(model.followingTrain ? Color.accentColor : Color.accentColor.opacity(0.12), in: Circle())
-                                    .animation(.smooth(duration: 0.2), value: model.followingTrain)
+                                    .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: model.followingTrain)
                             }.buttonStyle(.plain)
                             .accessibilityLabel(model.followingTrain ? AppText.text("停止跟隨") : AppText.text("跟隨列車"))
                             .accessibilityIdentifier("map-metro-train-follow")
@@ -231,7 +231,7 @@ private struct MapContextLabelContent: View, Equatable {
                                 Spacer(minLength:4)
                                 if !state.atPlatform && !state.holding {
                                     Text(MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))).font(.subheadline).monospacedDigit()
-                                        .contentTransition(.numericText(countsDown: true))
+                                        .liveNumericText(countsDown: true)
                                 }
                             }
                             if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
@@ -239,7 +239,7 @@ private struct MapContextLabelContent: View, Equatable {
                         // A held train has missed its expected sighting: say so rather than implying it is tracked.
                         Text(report.isEstimated ? (state.holding ? AppText.text("等待下一筆進站紀錄") : AppText.text("依進站紀錄推估位置")) : AppText.text("官方列車訊號 · 位置為估計"))
                             .font(.caption2).foregroundStyle(.secondary)
-                    }.mapLabelSurface().animation(.smooth(duration: 0.3), value: stationIndex)
+                    }.mapLabelSurface().animation(reduceMotion ? nil : .smooth(duration: 0.3), value: stationIndex)
                     .accessibilityElement(children:.contain).accessibilityIdentifier("map-metro-train-label")
                 }
             }

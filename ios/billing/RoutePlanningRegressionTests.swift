@@ -46,6 +46,45 @@ import XCTest
         XCTAssertEqual(p.selectedID,green.id)
         XCTAssertFalse(p.started)
     }
+    func testVisibleFirstChoiceKeepsItsActionWhileLaterRoutesAreCompared() async {
+        let bus = choice("18", rideSeconds: 2200), green = choice("G", rideSeconds: 900, metro: true)
+        let p = planner([bus]); p.retainVisiblePreview()
+        let revision = p.mapRevision
+        p.auditVerifyAdditionalChoices([green])
+        await waitForChoices(p)
+        XCTAssertEqual(p.options.first?.id, green.id)
+        XCTAssertEqual(p.selectedID, bus.id)
+        XCTAssertEqual(p.mapRevision, revision)
+        XCTAssertTrue(p.comparisonChanged); XCTAssertFalse(p.started)
+        p.select(green); p.begin()
+        XCTAssertEqual(p.selectedID, green.id); XCTAssertTrue(p.started)
+    }
+    func testStationAccessAndTransferAppearInTheBreakdownWithoutAddingTime() throws {
+        var option = choice("G", rideSeconds: 900, metro: true)
+        option.walks[0].duration = 420; option.walks[0].streetDuration = 240; option.walks[0].stationSeconds = 180
+        option.walks[1].duration = 180; option.walks[1].streetDuration = 60; option.walks[1].stationSeconds = 120
+        let p = planner([option]), time = try XCTUnwrap(p.duration(option, at: Date()))
+        XCTAssertEqual(time.stationSeconds, 300)
+        XCTAssertEqual(time.walkingSeconds, 600)
+        XCTAssertEqual(time.components.first { $0.kind == .walking }?.seconds, 300)
+        XCTAssertEqual(time.components.reduce(0) { $0 + $1.seconds }, time.totalSeconds, accuracy: 0.001)
+    }
+    func testInternalTransferAllowanceRemainsInsideItsExistingLeg() {
+        let leg = WalkingLeg(from: start, to: end, duration: 180, internalTransfer: true)
+        XCTAssertEqual(leg.stationAllowance, 180)
+        let minimum = WalkingLeg(from: start, to: end, duration: 300, stationSeconds: 60, streetDuration: 120)
+        XCTAssertEqual(minimum.stationAllowance, 180, "An official minimum transfer allowance is already part of this leg")
+    }
+    func testLessWalkingBadgeBelongsToTheShortestDisplayedWalk() {
+        var fastest = choice("fastest", rideSeconds: 500)
+        var middle = choice("middle", rideSeconds: 1000)
+        let shortest = choice("shortest", rideSeconds: 1600)
+        fastest.walks[0].duration = 600; middle.walks[0].duration = 300
+        let p = planner([fastest, middle, shortest])
+        XCTAssertEqual(p.options.count, 3)
+        XCTAssertNotEqual(p.optionLabels[middle.id], "少走路")
+        XCTAssertEqual(p.optionLabels[shortest.id], "少走路")
+    }
     func testOfficialArrivalUpdateKeepsRecommendationFirstWithoutMovingTheInspectedRoute() throws {
         let one=choice("one",rideSeconds:900),two=choice("two",rideSeconds:900)
         let p=planner([one,two]), now=Date()

@@ -11,14 +11,20 @@ struct TransitHomeView: View {
     @ObservedObject private var commutes: CommuteLibrary
     @ObservedObject private var stationWalk: StationWalkingNavigation
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
+    private var journeyPreviewDetent: PresentationDetent {
+        if dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 { return .fraction(0.82) }
+        return .height(viewportHeight > 0 && viewportHeight < 760 ? 420 : 510)
+    }
+    @State private var viewportHeight: CGFloat = 0
     @State private var showSearch = false
     @State private var showDetails = false
     @State private var showInformation = false
     @State private var showJourney = false
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
-    @State private var journeyPanelHeight: CGFloat = 420
+    @State private var journeyPanelHeight: CGFloat = 510
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
     @State private var stationWalkReturnSearch = false
@@ -59,7 +65,14 @@ struct TransitHomeView: View {
 
     private func mapBottomInset(_ geometry: GeometryProxy) -> CGFloat {
         let panel: CGFloat
-        if showJourney { panel = min(journeyPanelHeight, geometry.size.height) }
+        if showJourney {
+            // A page update can briefly report the hosting content's ideal height.
+            // Fixed detents already tell us which part of the map the sheet covers.
+            if journeyDetent == .height(420) { panel = 420 }
+            else if journeyDetent == .height(510) { panel = 510 }
+            else if journeyDetent == .height(560) { panel = 560 }
+            else { panel = min(journeyPanelHeight, geometry.size.height) }
+        }
         else if showDetails || pendingJourneyDetail || (showSearch && hasTransitSelection) { panel = model.sheetDetent == .height(520) ? 520 : 330 }
         else if showSearch { panel = 390 }
         else { panel = bottomControlsHeight }
@@ -88,7 +101,6 @@ struct TransitHomeView: View {
                         HStack { Spacer(); MapLocationControl(model:model,location:location) }
                     }.padding(.trailing,16).padding(.bottom,mapBottomInset(geometry) + 10)
                 }
-
 #if DEBUG
                 Text(model.rideActivityDebug).font(.system(size: 1)).foregroundStyle(.clear)
                     .frame(width: 1, height: 1).accessibilityIdentifier("debug-live-activity").allowsHitTesting(false)
@@ -135,6 +147,7 @@ struct TransitHomeView: View {
                 }
                 if let notice = model.previewNotice {
                     Text(live.text(notice)).liveFont(.caption, weight: .semibold).padding(8)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                         .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80 * CGFloat(live.appearance.spacingScale))
                 }
 #endif
@@ -149,6 +162,8 @@ struct TransitHomeView: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
+            }.onChange(of: geometry.size.height, initial: true) { _, height in
+                if abs(viewportHeight - height) > 1 { viewportHeight = height }
             }
         }
     }
@@ -293,7 +308,7 @@ struct TransitHomeView: View {
                         ForEach(commutes.journeys) { saved in
                             Button {
                                 model.previewSavedJourney(saved); showJourneyItinerary = false
-                                journeyDetent = .height(420); showJourney = true
+                                journeyDetent = journeyPreviewDetent; showJourney = true
                             } label: {
                                 Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
                                     .padding(.horizontal,14).frame(minHeight:44)
@@ -324,7 +339,7 @@ struct TransitHomeView: View {
         planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
                                metadata: model.metadata, currentLocation: location.usableCoordinate)
         showJourneyItinerary = false
-        journeyDetent = planner.origin == nil ? .large : .height(420)
+        journeyDetent = planner.origin == nil ? .large : journeyPreviewDetent
         showJourney = true
     }
 
@@ -357,12 +372,14 @@ struct TransitHomeView: View {
         }) {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 showingItinerary: $showJourneyItinerary,
-                                compact: journeyDetent == .height(420),
+                                compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(420) } })
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = journeyPreviewDetent } })
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
-                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
+                .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
                 .background {
@@ -388,7 +405,7 @@ struct TransitHomeView: View {
             showInformation = false
             // Present the route panel once the Settings sheet has finished dismissing.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
         }
         .sheet(isPresented: $model.showingArrivingVehicles) {
@@ -398,6 +415,9 @@ struct TransitHomeView: View {
 
     var body: some View {
         presentedMap
+        .onChange(of: journeyPreviewDetent) { before, after in
+            if journeyDetent == before { journeyDetent = after }
+        }
         .onChange(of: location.revision, initial: true) { before, after in
             if before == after {
                 model.updateWalkingLocation()
@@ -415,7 +435,7 @@ struct TransitHomeView: View {
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
             if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
@@ -453,12 +473,12 @@ struct TransitHomeView: View {
             if index != nil {
                 pendingJourneyDetail = false; showDetails = false; showSearch = false
                 if planner.started { showJourney = false }
-                else { showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true }
+                else { showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true }
             }
         }
         .onChange(of: showDetails) { _, visible in
             if !visible, !pendingJourneyDetail, !showSearch, planner.selected != nil, !planner.started {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
         }
         .onChange(of: stationWalk.isActive) { _, active in
@@ -606,6 +626,7 @@ struct PhonePressStyle: ButtonStyle {
 /// appears for the first load, a delay or a failed request, and retries on tap.
 private struct SourceStatusView: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let snapshot: TransitSnapshot
     let arrivalFeed: EstimateFeed
     let positionsNeeded: Bool
@@ -628,16 +649,20 @@ private struct SourceStatusView: View {
                         // Loading stays quiet; data that is actually late says so, with its age, and
                         // a tap retries. An old position is never presented as merely "updating".
                         Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
-                        Text(label(status)).liveFont(.subheadline, weight: .semibold)
-                        if !waiting, let age, age >= 120 {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Label(AppText.text(waiting ? "更新中" : "稍後更新"), systemImage: status.source == .arrivals ? "clock" : "bus.fill")
+                                .liveFont(.caption, weight: .semibold).fixedSize(horizontal: false, vertical: true)
+                        } else { Text(label(status)).liveFont(.subheadline, weight: .semibold) }
+                        if !dynamicTypeSize.isAccessibilitySize, !waiting, let age, age >= 120 {
                             Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
-                    .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
+                    .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
                     .phoneGlass(in: Capsule())
                 }
                 .buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("bus-data-status")
+                .accessibilityLabel(label(status))
                 .accessibilityHint(AppText.text("點一下重新取得定位與到站資料"))
                 .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topLeading)))
             }

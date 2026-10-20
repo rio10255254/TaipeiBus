@@ -57,8 +57,21 @@ struct TaipeiBusApp: App {
             TransitHomeView(model: model)
                 .environment(\.liveSettings, model.presentationSettings)
                 .environment(\.locale, model.language.locale)
+                .modifier(AuditTextSize())
                 .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
                 .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
+    }
+}
+
+private struct AuditTextSize: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--test-accessibility-text") {
+            content.dynamicTypeSize(.accessibility3)
+        } else { content }
+#else
+        content
+#endif
     }
 }
 
