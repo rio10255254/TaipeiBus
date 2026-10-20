@@ -140,6 +140,7 @@ struct TransitHomeView: View {
                 }
                 if let notice = model.previewNotice {
                     Text(live.text(notice)).liveFont(.caption, weight: .semibold).padding(8)
+                        .dynamicTypeSize(...DynamicTypeSize.large)
                         .background(Color.orange.opacity(0.9), in: Capsule()).padding(.top, 80 * CGFloat(live.appearance.spacingScale))
                 }
 #endif
@@ -367,6 +368,7 @@ struct TransitHomeView: View {
                                 compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = journeyPreviewDetent } })
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
@@ -616,6 +618,7 @@ struct PhonePressStyle: ButtonStyle {
 /// appears for the first load, a delay or a failed request, and retries on tap.
 private struct SourceStatusView: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let snapshot: TransitSnapshot
     let arrivalFeed: EstimateFeed
     let positionsNeeded: Bool
@@ -638,16 +641,20 @@ private struct SourceStatusView: View {
                         // Loading stays quiet; data that is actually late says so, with its age, and
                         // a tap retries. An old position is never presented as merely "updating".
                         Circle().fill(waiting ? Color.secondary : Color.orange).frame(width: 7, height: 7)
-                        Text(label(status)).liveFont(.subheadline, weight: .semibold)
-                        if !waiting, let age, age >= 120 {
+                        if dynamicTypeSize.isAccessibilitySize {
+                            Label(AppText.text(waiting ? "更新中" : "稍後更新"), systemImage: status.source == .arrivals ? "clock" : "bus.fill")
+                                .liveFont(.caption, weight: .semibold).fixedSize(horizontal: false, vertical: true)
+                        } else { Text(label(status)).liveFont(.subheadline, weight: .semibold) }
+                        if !dynamicTypeSize.isAccessibilitySize, !waiting, let age, age >= 120 {
                             Text(AppText.text("· %@ 分鐘前", Int(age / 60))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                     }
-                    .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 40)
+                    .padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
                     .phoneGlass(in: Capsule())
                 }
                 .buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                 .accessibilityIdentifier("bus-data-status")
+                .accessibilityLabel(label(status))
                 .accessibilityHint(AppText.text("點一下重新取得定位與到站資料"))
                 .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topLeading)))
             }

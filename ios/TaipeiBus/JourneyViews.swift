@@ -1115,6 +1115,7 @@ struct JourneyOptionsView: View {
                 Text(timing?.conciseLabel ?? AppText.text("確認接駁中"))
                     .liveFont(compact ? .title2 : .title3, weight: .bold, design: .rounded)
                     .monospacedDigit().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
+                    .accessibilityIdentifier("journey-preview-duration-" + option.id)
                 if let label = planner.optionLabels[option.id] {
                     Text(live.text(label == "推薦" && planner.checkingWalks ? "比較中" : label)).liveFont(.caption2, weight: .semibold).foregroundStyle(.secondary)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
@@ -1218,6 +1219,7 @@ private struct JourneyTimingExplanation: View {
 
 struct JourneyItineraryView: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     var showMap: () -> Void = {}
@@ -1243,6 +1245,7 @@ struct JourneyItineraryView: View {
                                     .accessibilityLabel(AppText.text("行程時間說明")).accessibilityIdentifier("journey-time-info")
                                     .popover(isPresented: $showTimingInfo) {
                                         JourneyTimingExplanation(duration: duration) { showTimingInfo = false }
+                                            .environment(\.dynamicTypeSize, dynamicTypeSize)
                                             .presentationCompactAdaptation(.popover)
                                     }
                             }

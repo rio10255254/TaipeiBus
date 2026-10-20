@@ -764,5 +764,7 @@
   "繼續比較其他方案": "Comparing more routes",
   "從最近目的地移除": "Remove from recents",
   "總時間已包含步行、候車、進出站及取還車；不需另外相加。": "Total time already includes walking, waiting, station access and bike handling.",
-  "關閉時間說明": "Close timing details"
+  "關閉時間說明": "Close timing details",
+  "稍後更新": "Try again shortly",
+  "介面驗證用行程 · 非即時班次": "Interface test trip · not live service"
 }
