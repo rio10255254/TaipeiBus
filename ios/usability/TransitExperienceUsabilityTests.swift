@@ -81,6 +81,11 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         capture("experience-accessibility-actions")
         tapSettled(steps)
         XCTAssertTrue(button("journey-start-navigation").waitForExistence(timeout: 15))
+        let destination = app.staticTexts["journey-destination-title"]
+        waitFor("The details open at their destination summary, even after scrolling the preview") {
+            destination.exists && destination.frame.minY >= self.app.navigationBars.firstMatch.frame.maxY - 1 &&
+                destination.frame.maxY < self.app.frame.maxY * 0.65
+        }
         capture("experience-accessibility-steps")
         tapSettled(button("journey-back"))
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 15))

@@ -47,6 +47,7 @@ struct JourneyPlanningView: View {
     }
     var body: some View {
         NavigationStack {
+            ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: compact && !searchingPlaces ? 12 : 20) {
                     if searchingPlaces { originButton }
@@ -76,6 +77,17 @@ struct JourneyPlanningView: View {
                     .smoothChanges(searchingPlaces)
                     .smoothChanges(showingItinerary)
                     .smoothChanges(model.language)
+                    .id("journey-scroll-top")
+            }
+            .onChange(of: showingItinerary) { _, showing in
+                guard showing, !planner.started else { return }
+                DispatchQueue.main.async {
+                    guard showingItinerary, !planner.started else { return }
+                    // The route card may have been scrolled to Go. Details begin at their
+                    // destination and total, rather than inheriting that preview offset.
+                    scroll.scrollTo("journey-scroll-top", anchor: .top)
+                }
+            }
             }
             .scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom) {
