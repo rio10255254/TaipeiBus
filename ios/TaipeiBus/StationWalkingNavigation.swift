@@ -40,6 +40,7 @@ final class StationWalkingNavigation: ObservableObject {
     private var request: MKDirections?
     private var generation = UUID()
     private var requestedAt = Date.distantPast
+    private var waitingForLocation = false
     var isActive: Bool { target != nil }
     var coordinates: [Coordinate] { progress?.remainingCoordinates ?? leg?.coordinates ?? [] }
     var remainingDistance: Double? { progress?.remainingDistance ?? leg?.distance }
@@ -63,8 +64,10 @@ final class StationWalkingNavigation: ObservableObject {
     func update(location: LocationService) {
         guard let target else { return }
         guard let coordinate = location.usableCoordinate else {
+            waitingForLocation = true
             issue = location.message ?? AppText.text("正在取得目前位置"); return
         }
+        if waitingForLocation { waitingForLocation = false; issue = nil }
         if leg == nil { if !calculating, Date().timeIntervalSince(requestedAt) >= 20 { calculate(from: coordinate, to: target) }; return }
         guard let accuracy = location.accuracy, let timestamp = location.updatedAt, var value = progress else { return }
         let now = Date()
@@ -118,8 +121,15 @@ final class StationWalkingNavigation: ObservableObject {
     }
     func cancel() {
         task?.cancel(); task = nil; request?.cancel(); request = nil; generation = UUID()
+        requestedAt = .distantPast; waitingForLocation = false
         target = nil; leg = nil; progress = nil; instructions = []; calculating = false; issue = nil; revision += 1
     }
+#if DEBUG
+    func auditRoute(_ path: WalkingLeg, to station: Station) {
+        cancel(); target = station; leg = path
+        progress = WalkingProgress(coordinates: path.coordinates, distance: path.distance ?? 0, seconds: path.duration ?? 0)
+    }
+#endif
 }
 
 struct StationWalkingDock: View {

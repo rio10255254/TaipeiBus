@@ -3,6 +3,46 @@ import XCTest
 @testable import TaipeiBus
 
 @MainActor final class ContinuousNavigationTests: XCTestCase {
+    private func station(_ id: String, at coordinate: Coordinate) -> Station {
+        Station(id:id,name:id,coordinate:coordinate,address:"",bearing:"N",stopIDs:[])
+    }
+    func testChangingWalkingStationStartsTheNewRouteImmediately() {
+        let navigation = StationWalkingNavigation(), location = LocationService()
+        location.auditLocation(.init(coordinate:point(0),accuracy:5,timestamp:Date()))
+        navigation.begin(station("first",at:point(400)),location:location)
+        XCTAssertTrue(navigation.calculating)
+        navigation.begin(station("second",at:point(800)),location:location)
+        XCTAssertEqual(navigation.target?.id,"second")
+        XCTAssertTrue(navigation.calculating,"A different destination must not inherit the previous route's twenty-second retry delay")
+        navigation.cancel()
+    }
+    func testRestartingStationWalkingDoesNotWaitForTheCancelledRequest() {
+        let navigation = StationWalkingNavigation(), location = LocationService()
+        location.auditLocation(.init(coordinate:point(0),accuracy:5,timestamp:Date()))
+        let target = station("target",at:point(400))
+        navigation.begin(target,location:location); navigation.cancel()
+        navigation.begin(target,location:location)
+        XCTAssertTrue(navigation.calculating)
+        XCTAssertNil(navigation.issue)
+        navigation.cancel()
+    }
+    func testRecoveredWalkingLocationRestoresGuidanceWithoutLosingTheRoute() throws {
+        let navigation = StationWalkingNavigation(), location = LocationService(), now = Date()
+        let target = station("target",at:point(400))
+        let path = WalkingLeg(from:point(0),to:target.coordinate,coordinates:[point(0),target.coordinate],distance:400,duration:320)
+        navigation.auditRoute(path,to:target)
+        location.auditLocation(.init(coordinate:point(0),accuracy:5,timestamp:now.addingTimeInterval(-900)))
+        navigation.update(location:location)
+        XCTAssertNotNil(navigation.issue)
+        location.auditLocation(.init(coordinate:point(100),accuracy:5,timestamp:now))
+        navigation.update(location:location)
+        XCTAssertNil(navigation.issue,"A recovered location must not leave the old warning hiding turn instructions")
+        XCTAssertEqual(navigation.leg?.coordinates,path.coordinates)
+        XCTAssertEqual(navigation.target?.id,target.id)
+        XCTAssertTrue(navigation.locationConfirmed)
+        XCTAssertFalse(navigation.calculating,"A valid retained route does not need another directions download")
+        navigation.cancel()
+    }
     func point(_ meters: Double) -> Coordinate {
         Coordinate(latitude:25.04,longitude:121.55+meters/100_750)
     }
