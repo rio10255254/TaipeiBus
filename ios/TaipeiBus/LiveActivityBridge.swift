@@ -329,7 +329,7 @@ struct IslandPreviewGallery: View {
                 }.accessibilityIdentifier("island-minimal")
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
-                        RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 100)
+                        RideActivityBadge(state: state)
                         Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
                         RideCountdown(state: state, language: language, size: 24).frame(maxWidth: 130)

@@ -242,7 +242,7 @@ final class TransitAppModel: ObservableObject {
             let meters = progress?.hasConfirmedProgress == true ? progress!.remainingDistance : leg.distance ?? .infinity
             let walking = leg.streetDuration ?? leg.duration
             let seconds = progress?.hasConfirmedProgress == true ? progress!.remainingSeconds : walking
-            let atBoarding = leg.bike == nil && !leg.internalTransfer && meters <= 30
+            let atBoarding = (leg.bike == nil || planner.cyclingPhase(at: index) == .fromDropoff) && !leg.internalTransfer && meters <= 30
                 && (progress?.isFresh(at: now) == true || (walking ?? .infinity) <= 45)
             if ride == nil || !atBoarding {
                 var phase: RideActivityAttributes.ContentState.Phase = leg.internalTransfer ? .transferring : .walking
@@ -271,7 +271,8 @@ final class TransitAppModel: ObservableObject {
                 let expiry = leg.internalTransfer ? now.addingTimeInterval(120)
                     : min(now.addingTimeInterval(120), progress?.confirmedAt?.addingTimeInterval(120) ?? now.addingTimeInterval(120))
                 return .init(phase: phase, sign: phase == .cycling ? .cycling : .walking,
-                    headline: headline, detail: detail, target: target, status: AppText.text("預估時間"),
+                    headline: headline, detail: detail, target: target,
+                    status: target != nil ? AppText.text("預估時間") : remaining.map { $0 <= 0 } == true ? AppText.text("就在附近") : AppText.text("查看行程"),
                     stopsLeft: nil, totalStops: nil, updatedAt: now,
                     symbol: phase == .cycling ? "bicycle" : "figure.walk", freshUntil: expiry)
             }
@@ -283,7 +284,7 @@ final class TransitAppModel: ObservableObject {
             if ride.route.mode == .bus {
                 let boarding = boardingInformation(ride, at: now)
                 target = boarding.seconds.map { now.addingTimeInterval($0) }
-                status = boarding.source
+                status = boarding.seconds == nil ? boarding.label : boarding.source
             } else if let seconds = metroArrival(ride, at: now) {
                 target = now.addingTimeInterval(Double(seconds)); status = AppText.text("官方下班列車")
             } else if let estimate = metroPlatformEstimate(ride, at: now) {
@@ -301,11 +302,20 @@ final class TransitAppModel: ObservableObject {
             let ride = option.rides[index]
             let left = ride.route.mode == .bus ? onboardStops(for: ride, at: now).count : metroRemaining(ride, at: now).stops.count
             let seconds = onboardSecondsToAlight(ride, at: now)
+            var expiry = now.addingTimeInterval(120)
+            var source = AppText.text("預估時間")
+            if ride.route.mode == .bus {
+                let phone = onboardProgress.flatMap { $0.rideID == ride.id ? $0.confirmedAt : nil }
+                let observed = [phone, onboardVehicle(for: ride)?.observedAt].compactMap { $0 }.max()
+                expiry = min(expiry, (observed ?? boardedAt ?? now).addingTimeInterval(120))
+            } else {
+                source = metroPositionLabel(metroRemaining(ride, at: now).source, detailed: false)
+            }
             return .init(phase: .riding, sign: RouteSign(ride.route), headline: ride.alighting.localizedName,
                          detail: AppText.remainingStops(left), target: seconds.map { now.addingTimeInterval($0) },
-                         status: seconds == nil ? AppText.text("依行程進度") : AppText.text("預估時間"),
+                         status: seconds == nil ? AppText.text("依行程進度") : source,
                          stopsLeft: left, totalStops: ride.stopCount, updatedAt: now,
-                         symbol: ride.route.mode == .bus ? "bus.fill" : "tram.fill", freshUntil: now.addingTimeInterval(120))
+                         symbol: ride.route.mode == .bus ? "bus.fill" : "tram.fill", freshUntil: expiry)
         default: return nil
         }
     }

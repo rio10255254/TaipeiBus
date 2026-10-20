@@ -49,9 +49,12 @@ struct RideActivityPresentation {
     var systemStale = false
     var now = Date()
 
-    var stale: Bool { systemStale || now >= (state.freshUntil ?? state.updatedAt.addingTimeInterval(120)) }
+    var stale: Bool {
+        systemStale || state.updatedAt.timeIntervalSince(now) > 60
+            || now >= (state.freshUntil ?? state.updatedAt.addingTimeInterval(120))
+    }
     var target: Date? {
-        guard !stale, let target = state.target, target > now else { return nil }
+        guard !stale, let target = state.target, target > now, target > state.updatedAt else { return nil }
         return target
     }
     var due: Bool { !stale && state.target.map { $0 <= now } == true }

@@ -93,6 +93,12 @@ import XCTest
         option.walks[0].bike = BikeLeg(pickup: BikeStation(id: "p", name: "借車站", coordinate: point(-600), capacity: 20),
             dropoff: BikeStation(id: "d", name: "還車站", coordinate: point(-100), capacity: 20), bikes: 5, docks: 8, handlingSeconds: 60,
             toPickupMeters: 200, toPickupSeconds: 150, rideMeters: 500, rideSeconds: 120, fromDropoffMeters: 100, fromDropoffSeconds: 80)
+        let bike = try XCTUnwrap(option.walks[0].bike)
+        model.planner.updateBikes(network: BikeNetwork(stations: [bike.pickup, bike.dropoff]),
+            availability: BikeAvailability(docks: [
+                "p": BikeDock(stationID: "p", rentable: 5, returnable: 8, capacity: 20, active: true, observedAt: date),
+                "d": BikeDock(stationID: "d", rentable: 5, returnable: 8, capacity: 20, active: true, observedAt: date)
+            ], receivedAt: date))
         model.auditNavigation(metadata: metadata, snapshot: TransitSnapshot(), at: date)
         model.planner.auditLoadChoices([option], from: TravelPlace(name: "起點", address: "", coordinate: point(-800)),
             to: TravelPlace(name: "終點", address: "", coordinate: point(2000)))
@@ -121,6 +127,18 @@ import XCTest
         let state = try XCTUnwrap(model.rideActivityState(at: date))
         XCTAssertEqual(state.phase, .transferring)
         XCTAssertEqual(state.detail, "前往轉乘月台")
+    }
+    func testBackgroundRefreshCannotMakeOldBusPositionFreshAgain() throws {
+        let date = Date(), (model, _, _) = makeModel(at: date)
+        defer { model.finishJourney() }
+        model.boardCurrentRide(at: date)
+        let later = date.addingTimeInterval(180)
+        let state = try XCTUnwrap(model.rideActivityState(at: later))
+        XCTAssertEqual(state.updatedAt, later)
+        let value = RideActivityPresentation(state: state, language: .traditionalChinese, now: later)
+        XCTAssertTrue(value.stale, "Freshly rendered text is not a new vehicle or phone observation")
+        XCTAssertNil(value.compactText)
+        XCTAssertNil(value.progress)
     }
     func testStaleWalkingKeepsTheSameRemainingTimeAndClosingMapDoesNotResetIt() throws {
         let date = Date(), (model,_,option) = makeModel(at:date)

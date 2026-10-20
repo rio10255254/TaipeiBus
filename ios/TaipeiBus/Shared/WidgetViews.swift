@@ -216,6 +216,16 @@ struct CommuteWidgetView: View {
 
 #if canImport(ActivityKit)
 /// All island sizes use these same components, including the in-app layout checks.
+struct RideActivityBadge: View {
+    let state: RideActivityAttributes.ContentState
+    var body: some View {
+        if [.walking, .cycling, .transferring].contains(state.phase) {
+            Image(systemName: state.phase == .cycling ? "bicycle" : "figure.walk")
+                .font(.system(size: 24, weight: .semibold)).frame(width: 36, height: 30)
+        } else { RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 108) }
+    }
+}
+
 struct RideIslandLeading: View {
     let presentation: RideActivityPresentation
     var body: some View {
@@ -269,7 +279,6 @@ struct RideIslandMinimal: View {
     }
     private var value: String? {
         guard !presentation.stale, !presentation.alightingSoon else { return nil }
-        if presentation.state.phase == .riding, let left = presentation.state.stopsLeft { return String(max(0, left)) }
         return presentation.minutes.map { "\($0)′" }
     }
 }

@@ -147,7 +147,7 @@ struct RideLiveActivity: Widget {
             let language = AppLanguage(rawValue: context.attributes.language) ?? .traditionalChinese
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 100).padding(.leading, 4)
+                    RideActivityBadge(state: state).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
                     RideCountdown(state: state, language: language, size: 24, stale: context.isStale)

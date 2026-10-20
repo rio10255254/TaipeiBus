@@ -25,6 +25,14 @@ import ActivityKit
         XCTAssertTrue(value.stale); XCTAssertNil(value.compactText)
         XCTAssertEqual(value.status, "Tap to refresh")
     }
+    func testClockChangeAndInvalidCountdownDoNotCreateAnInvertedTimerRange() {
+        let shifted = RideActivityPresentation(state: state(), language: .english, now: now.addingTimeInterval(-600))
+        XCTAssertTrue(shifted.stale); XCTAssertNil(shifted.target)
+        var invalid = state()
+        invalid.target = now.addingTimeInterval(-5)
+        let value = RideActivityPresentation(state: invalid, language: .english, now: now.addingTimeInterval(-10))
+        XCTAssertNil(value.target)
+    }
     func testElapsedCountdownDoesNotClaimTheVehicleHasArrived() {
         let value = RideActivityPresentation(state: state("due"), language: .traditionalChinese, now: now)
         XCTAssertTrue(value.due); XCTAssertNil(value.target); XCTAssertNil(value.minutes)
@@ -41,7 +49,7 @@ import ActivityKit
     func testMissingTimeDoesNotMeanArrivalAndProgressIsClamped() {
         var state = state(); state.target = nil; state.status = nil; state.stopsLeft = 15
         let value = RideActivityPresentation(state: state, language: .english, now: now)
-        XCTAssertEqual(value.status, "View trip"); XCTAssertFalse(value.due)
+        XCTAssertEqual(value.status, "Trip details"); XCTAssertFalse(value.due)
         XCTAssertEqual(value.progress, 0)
     }
     func testOldActivityPayloadStillDecodes() throws {
@@ -136,6 +144,22 @@ import ActivityKit
         await value.waitForPendingChanges()
         XCTAssertEqual(store.sessions.count, 1); XCTAssertEqual(store.created.count, 2)
         XCTAssertTrue(value.isRunning)
+    }
+    func testRevokingAndRestoringPermissionDoesNotRequireAChangedRoute() async {
+        let store = FakeRideStore(), snapshot = state()
+        let controller = RideActivityController(store: store)
+        store.allowed = false
+        controller.update(snapshot, destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertFalse(controller.isRunning)
+        XCTAssertTrue(store.created.isEmpty)
+        store.allowed = true
+        controller.update(snapshot, destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(controller.isRunning)
+        controller.update(nil, destination: "", language: .english, enabled: false)
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(store.sessions.isEmpty)
     }
 }
 
