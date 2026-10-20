@@ -16,7 +16,7 @@ abort 'The selected build differs from the authorized exact build.' unless build
 billing = JSON.parse(File.read(File.join(__dir__,'billing.json')))
 bundle = TaipeiBusRelease::ReviewBundle.new(client,billing).prepare(version_id)
 submission = client.request(:get,"/v1/reviewSubmissions/#{bundle.fetch(:submission_id)}").fetch('data')
-if submission.dig('attributes', 'state') == 'READY_FOR_REVIEW'
+if (%w[READY_FOR_REVIEW] + TaipeiBusRelease::ReviewBundle::RESUBMITTABLE_STATES).include?(submission.dig('attributes', 'state'))
   client.request(:patch, "/v1/reviewSubmissions/#{submission.fetch('id')}", {}, data: {
     type: 'reviewSubmissions', id: submission.fetch('id'), attributes: { submitted: true }
   })
