@@ -91,6 +91,11 @@ struct WalkingLeg: Sendable {
     var entranceAlternatives: [WalkingEntrance] = []
     var verified: Bool { duration != nil }
     var cyclingSeconds: Double { bike?.cyclingSeconds ?? 0 }
+    var stationAllowance: Double {
+        let total = max(0, duration ?? 0)
+        if internalTransfer { return total }
+        return min(total, max(0, total - (streetDuration ?? max(0, total - stationSeconds))))
+    }
     /// Only the parts of this leg that are walked; a cycling leg keeps its ridden path apart.
     var footPaths: [[Coordinate]] {
         if let bike { return [bike.toPickup, bike.fromDropoff].filter { $0.count >= 2 } }
@@ -347,6 +352,10 @@ final class JourneyPlannerModel: ObservableObject {
            let places = try? JSONDecoder().decode([TravelPlace].self, from: data) { recentPlaces = places }
     }
     var selected: JourneyOption? { options.first { $0.id == selectedID } }
+    func removeRecentPlace(_ id: String) {
+        recentPlaces.removeAll { $0.id == id }
+        if let data = try? JSONEncoder().encode(recentPlaces) { UserDefaults.standard.set(data, forKey: "journeyRecentPlaces") }
+    }
     /// Keep the compact carousel readable while the full list retains other useful tradeoffs.
     var featuredOptions: [JourneyOption] {
         var result = Array(options.prefix(5))
@@ -441,6 +450,7 @@ final class JourneyPlannerModel: ObservableObject {
             var duration = JourneyDuration(assessment: assessment, riding: riding)
             duration.cyclingSeconds = option.cyclingSeconds
             duration.cyclingHandlingSeconds = option.walks.compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
+            duration.stationSeconds = option.walks.reduce(0) { $0 + $1.stationAllowance }
             duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
                 estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
                 estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : estimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
@@ -449,6 +459,7 @@ final class JourneyPlannerModel: ObservableObject {
         var duration = JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)
         duration.cyclingSeconds = option.cyclingSeconds
         duration.cyclingHandlingSeconds = option.walks.compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
+        duration.stationSeconds = option.walks.reduce(0) { $0 + $1.stationAllowance }
         return duration
     }
     private func connectionStarts(_ option: JourneyOption, at date: Date) -> [Double] {
@@ -533,6 +544,9 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
+        let durations = result.compactMap { duration($0, at: date) }
+        let fastest = durations.map(\.totalSeconds).min() ?? .infinity
+        let shortestWalk = durations.map { max(0, $0.walkingSeconds - $0.cyclingSeconds) }.min() ?? .infinity
         var labels: [String: String] = [:]
         for option in result {
             if option.cycles, let timing = duration(option,at:date), !isTransitLed(option,timing:timing,hasTransit:result.contains { !$0.rides.isEmpty }) {
@@ -547,8 +561,9 @@ final class JourneyPlannerModel: ObservableObject {
             if option.cycles { labels[option.id] = "YouBike 接駁"; continue }
             if recommendedOption?.cycles == true { labels[option.id] = "免騎車"; continue }
             if let timing = duration(option, at: date), let recommended {
-                if timing.totalSeconds < recommended.totalSeconds - 60 { labels[option.id] = "較快" }
-                else if timing.walkingSeconds - timing.cyclingSeconds < recommended.walkingSeconds - recommended.cyclingSeconds - 120 { labels[option.id] = "少走路" }
+                if timing.totalSeconds < recommended.totalSeconds - 60, timing.totalSeconds <= fastest + 30 { labels[option.id] = "較快" }
+                else if timing.walkingSeconds - timing.cyclingSeconds < recommended.walkingSeconds - recommended.cyclingSeconds - 120,
+                        timing.walkingSeconds - timing.cyclingSeconds <= shortestWalk + 30 { labels[option.id] = "少走路" }
                 else if option.rides.count == 1 { labels[option.id] = "直達" }
                 else { labels[option.id] = option.rides.count < (recommendedOption?.rides.count ?? 0) ? "少轉乘" : "轉乘" }
             }
@@ -1249,6 +1264,12 @@ final class JourneyPlannerModel: ObservableObject {
         guard selectedID != current.id else { return }
         endWalkingGuidance()
         selectedID = current.id; started = false; stepIndex = 0; mapRevision += 1
+    }
+    /// Once a usable card has appeared, later results may improve the list but cannot
+    /// replace its Go button or map underneath the reader's finger.
+    func retainVisiblePreview() {
+        guard !started, let selected, selected.verified, selected.walkIssue == nil else { return }
+        selectionConfirmed = true
     }
     private func enrich(_ option: JourneyOption, compareStations: Bool = false) async throws -> JourneyOption {
         var result = option

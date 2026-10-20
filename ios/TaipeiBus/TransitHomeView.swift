@@ -11,14 +11,18 @@ struct TransitHomeView: View {
     @ObservedObject private var commutes: CommuteLibrary
     @ObservedObject private var stationWalk: StationWalkingNavigation
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
+    private var journeyPreviewDetent: PresentationDetent {
+        dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 ? .fraction(0.82) : .height(510)
+    }
     @State private var showSearch = false
     @State private var showDetails = false
     @State private var showInformation = false
     @State private var showJourney = false
     @State private var showJourneyItinerary = false
     @State private var journeyDetent: PresentationDetent = .large
-    @State private var journeyPanelHeight: CGFloat = 420
+    @State private var journeyPanelHeight: CGFloat = 510
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
     @State private var stationWalkReturnSearch = false
@@ -293,7 +297,7 @@ struct TransitHomeView: View {
                         ForEach(commutes.journeys) { saved in
                             Button {
                                 model.previewSavedJourney(saved); showJourneyItinerary = false
-                                journeyDetent = .height(420); showJourney = true
+                                journeyDetent = journeyPreviewDetent; showJourney = true
                             } label: {
                                 Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
                                     .padding(.horizontal,14).frame(minHeight:44)
@@ -324,7 +328,7 @@ struct TransitHomeView: View {
         planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
                                metadata: model.metadata, currentLocation: location.usableCoordinate)
         showJourneyItinerary = false
-        journeyDetent = planner.origin == nil ? .large : .height(420)
+        journeyDetent = planner.origin == nil ? .large : journeyPreviewDetent
         showJourney = true
     }
 
@@ -357,11 +361,11 @@ struct TransitHomeView: View {
         }) {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 showingItinerary: $showJourneyItinerary,
-                                compact: journeyDetent == .height(420),
+                                compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .height(420) } })
+                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = journeyPreviewDetent } })
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
-                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [.height(420), .height(560), .large], selection: $journeyDetent)
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
                 .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
@@ -388,7 +392,7 @@ struct TransitHomeView: View {
             showInformation = false
             // Present the route panel once the Settings sheet has finished dismissing.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
         }
         .sheet(isPresented: $model.showingArrivingVehicles) {
@@ -398,6 +402,9 @@ struct TransitHomeView: View {
 
     var body: some View {
         presentedMap
+        .onChange(of: journeyPreviewDetent) { before, after in
+            if journeyDetent == before { journeyDetent = after }
+        }
         .onChange(of: location.revision, initial: true) { before, after in
             if before == after {
                 model.updateWalkingLocation()
@@ -415,7 +422,7 @@ struct TransitHomeView: View {
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
             if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
             let coordinates = planner.mapCoordinates
@@ -453,12 +460,12 @@ struct TransitHomeView: View {
             if index != nil {
                 pendingJourneyDetail = false; showDetails = false; showSearch = false
                 if planner.started { showJourney = false }
-                else { showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true }
+                else { showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true }
             }
         }
         .onChange(of: showDetails) { _, visible in
             if !visible, !pendingJourneyDetail, !showSearch, planner.selected != nil, !planner.started {
-                showJourneyItinerary = false; journeyDetent = .height(420); showJourney = true
+                showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
         }
         .onChange(of: stationWalk.isActive) { _, active in

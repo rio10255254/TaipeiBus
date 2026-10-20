@@ -1305,9 +1305,9 @@ final class TransitAppModel: ObservableObject {
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
 #if DEBUG
         let date = ProcessInfo.processInfo.arguments.contains("--preview-mixed-planning")
-            ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : suppliedDate
+            ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : planner.started ? suppliedDate : JourneyDuration.previewDate(suppliedDate)
 #else
-        let date = suppliedDate
+        let date = planner.started ? suppliedDate : JourneyDuration.previewDate(suppliedDate)
 #endif
         guard option.verified, option.walkIssue == nil else { return nil }
         if option.id != planner.selectedID || (!planner.started && walkingMapIndex == nil) {
@@ -1371,6 +1371,9 @@ final class TransitAppModel: ObservableObject {
                 transferDistances: transfers, ridingSpreads: spreads),
             departures: remainingRides.map { arrivalForecast.departures(for: $0, metadata: metadata, snapshot: snapshot, at: date) })
         duration.cyclingSeconds = max(0,cycling); duration.cyclingHandlingSeconds = max(0,handling)
+        duration.stationSeconds = option.walks.enumerated().reduce(0) { result, item in
+            result + (item.offset < index || (onboard && item.offset == index) ? 0 : item.element.stationAllowance)
+        }
         duration.positionUncertain = positionUncertain
         duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
             rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :

@@ -54,10 +54,28 @@ private struct LiveFontModifier: ViewModifier {
     func body(content: Content) -> some View {
         let category = UITraitCollection(preferredContentSizeCategory: .large)
         let base = UIFont.preferredFont(forTextStyle: uiStyle, compatibleWith: category).pointSize
-        let size = UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: base * CGFloat(live.appearance.textScale))
-        // Read dynamicTypeSize so system accessibility changes invalidate this modifier too.
-        let _ = dynamicTypeSize
+        let traits = UITraitCollection(preferredContentSizeCategory: dynamicTypeSize.contentSizeCategory)
+        let size = UIFontMetrics(forTextStyle: uiStyle).scaledValue(for: base * CGFloat(live.appearance.textScale), compatibleWith: traits)
         return content.font(.system(size: size, weight: weight, design: design))
+    }
+}
+extension DynamicTypeSize {
+    var contentSizeCategory: UIContentSizeCategory {
+        switch self {
+        case .xSmall: return .extraSmall
+        case .small: return .small
+        case .medium: return .medium
+        case .large: return .large
+        case .xLarge: return .extraLarge
+        case .xxLarge: return .extraExtraLarge
+        case .xxxLarge: return .extraExtraExtraLarge
+        case .accessibility1: return .accessibilityMedium
+        case .accessibility2: return .accessibilityLarge
+        case .accessibility3: return .accessibilityExtraLarge
+        case .accessibility4: return .accessibilityExtraExtraLarge
+        case .accessibility5: return .accessibilityExtraExtraExtraLarge
+        @unknown default: return .large
+        }
     }
 }
 extension View {
@@ -187,7 +205,7 @@ enum MapChrome {
     static let destructive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FF6961") : UIColor(liveHex: "#C4151C") })
     static let positive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#5EDB86") : UIColor(liveHex: "#1A7F37") })
     /// Apple Maps' green Go action, dark enough for white text.
-    static let go = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#30A14E") : UIColor(liveHex: "#1E7F3C") })
+    static let go = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#23813F") : UIColor(liveHex: "#1E7F3C") })
     static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
 }
 
