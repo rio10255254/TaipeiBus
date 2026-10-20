@@ -712,8 +712,11 @@ private struct JourneyDockHeader: View {
     @ObservedObject var planner: JourneyPlannerModel
     let showJourney: () -> Void
     @State private var confirmingEnd = false
+    private var layout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 10)) : AnyLayout(HStackLayout(alignment: .center, spacing: 10))
+    }
     var body: some View {
-        AnyLayout(dynamicTypeSize.isAccessibilitySize ? VStackLayout(alignment: .leading, spacing: 10) : HStackLayout(alignment: .center, spacing: 10)) {
+        layout {
             VStack(alignment: .leading, spacing: 2) {
                 Text(planner.destination?.localizedName ?? AppText.text("目的地")).liveFont(.headline, weight: .bold).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1)
                 if let option = planner.selected {
@@ -777,9 +780,12 @@ private struct JourneyWaitingActions: View {
     @ObservedObject var planner: JourneyPlannerModel
     let index: Int
     let board: () -> Void
+    private var layout: AnyLayout {
+        dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
+    }
     var body: some View {
         VStack(spacing: 6) {
-            AnyLayout(dynamicTypeSize.isAccessibilitySize ? VStackLayout(spacing: 12) : HStackLayout(spacing: 12)) {
+            layout {
                 if planner.selected?.walks.indices.contains(index) == true, planner.selected?.walks[index].internalTransfer != true {
                 let cycling = planner.selected?.walks[index].bike != nil
                 Button { model.showWalkOnMap(index) } label: {
