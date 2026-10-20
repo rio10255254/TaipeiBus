@@ -75,6 +75,16 @@ import XCTest
         let minimum = WalkingLeg(from: start, to: end, duration: 300, stationSeconds: 60, streetDuration: 120)
         XCTAssertEqual(minimum.stationAllowance, 180, "An official minimum transfer allowance is already part of this leg")
     }
+    func testLessWalkingBadgeBelongsToTheShortestDisplayedWalk() {
+        var fastest = choice("fastest", rideSeconds: 500)
+        var middle = choice("middle", rideSeconds: 1000)
+        let shortest = choice("shortest", rideSeconds: 1600)
+        fastest.walks[0].duration = 600; middle.walks[0].duration = 300
+        let p = planner([fastest, middle, shortest])
+        XCTAssertEqual(p.options.count, 3)
+        XCTAssertNotEqual(p.optionLabels[middle.id], "少走路")
+        XCTAssertEqual(p.optionLabels[shortest.id], "少走路")
+    }
     func testOfficialArrivalUpdateKeepsRecommendationFirstWithoutMovingTheInspectedRoute() throws {
         let one=choice("one",rideSeconds:900),two=choice("two",rideSeconds:900)
         let p=planner([one,two]), now=Date()

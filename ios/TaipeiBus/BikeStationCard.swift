@@ -141,13 +141,14 @@ extension View {
 
 struct JourneyBikeStations: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var model: TransitAppModel
     let bike: BikeLeg
     let index: Int
     var compact = false
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { timeline in
-            if compact {
+            if compact, !dynamicTypeSize.isAccessibilitySize {
                 HStack(spacing: 8) {
                     station(bike.pickup, returning: false, at: timeline.date)
                     station(bike.dropoff, returning: true, at: timeline.date)

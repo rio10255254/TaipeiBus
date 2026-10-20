@@ -104,11 +104,19 @@ private struct SmoothChange<Value: Equatable>: ViewModifier {
 }
 extension View {
     func smoothChanges<Value: Equatable>(_ value: Value) -> some View { modifier(SmoothChange(value: value)) }
+    func liveNumericText(countsDown: Bool = false) -> some View { modifier(LiveNumericText(countsDown: countsDown)) }
     func secondaryAction() -> some View {
         modifier(NativeActionSurface(prominent: false)).buttonBorderShape(.capsule).controlSize(.small)
     }
     func primaryAction() -> some View { modifier(NativeActionSurface(prominent: true)).buttonBorderShape(.capsule) }
     func readableMapSurface() -> some View { modifier(ReadableMapSurface()) }
+}
+private struct LiveNumericText: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let countsDown: Bool
+    func body(content: Content) -> some View {
+        content.contentTransition(InterfaceMotion.reduced(systemReduceMotion) ? .identity : .numericText(countsDown: countsDown))
+    }
 }
 
 private struct NativeActionSurface: ViewModifier {

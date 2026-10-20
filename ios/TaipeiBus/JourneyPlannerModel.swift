@@ -195,6 +195,8 @@ final class JourneyPlannerModel: ObservableObject {
         let to: [Coordinate]
         let riding: [Double]
         let cycling: Double
+        let station: Double
+        let handling: Double
         let value: JourneyDuration
     }
     private var durationCache: [String: CachedDuration] = [:]
@@ -430,13 +432,16 @@ final class JourneyPlannerModel: ObservableObject {
         guard option.verified, option.walkIssue == nil else { return nil }
         let bucket = Int(floor(date.timeIntervalSince1970 / 5))
         let walks = option.walks.map(\.duration), from = option.walks.map(\.from), to = option.walks.map(\.to)
+        let station = option.walks.reduce(0) { $0 + $1.stationAllowance }
+        let handling = option.walks.compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
         if let cached = durationCache[option.id], cached.bucket == bucket,
            cached.walks == walks, cached.from == from, cached.to == to,
-           cached.riding == option.trip?.rideSeconds ?? [], cached.cycling == option.cyclingSeconds { return cached.value }
+           cached.riding == option.trip?.rideSeconds ?? [], cached.cycling == option.cyclingSeconds,
+           cached.station == station, cached.handling == handling { return cached.value }
         guard let value = calculateDuration(option, at: date) else { return nil }
         if durationCache.count >= 100 { durationCache.removeAll(keepingCapacity: true) }
         durationCache[option.id] = CachedDuration(bucket: bucket, walks: walks, from: from, to: to,
-            riding: option.trip?.rideSeconds ?? [], cycling: option.cyclingSeconds, value: value)
+            riding: option.trip?.rideSeconds ?? [], cycling: option.cyclingSeconds, station: station, handling: handling, value: value)
         return value
     }
     private func calculateDuration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
@@ -517,7 +522,8 @@ final class JourneyPlannerModel: ObservableObject {
             transfers: max(0, option.rides.count - 1), rentals: option.walks.filter { $0.bike != nil }.count,
             unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences)
     }
-    private func recommendations(at date: Date) -> [JourneyOption] {
+    private func recommendations(at suppliedDate: Date) -> [JourneyOption] {
+        let date = JourneyDuration.previewDate(suppliedDate)
         let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil && unavailableBoarding($0) == nil }
         let hasTransit = valid.contains { !$0.rides.isEmpty }
         var metrics: [JourneyChoice] = []
@@ -571,7 +577,7 @@ final class JourneyPlannerModel: ObservableObject {
         return labels
     }
     private func publishRecommendations() {
-        let date = Date()
+        let date = JourneyDuration.previewDate(Date())
         let ranked = recommendations(at: date)
         // Previewing a result must not cancel discovery of later alternatives. Keep
         // the inspected route available even if it falls outside the new top three.
@@ -647,7 +653,7 @@ final class JourneyPlannerModel: ObservableObject {
         latestSnapshot = snapshot; self.forecast = forecast
         // Refresh the order without changing an inspected route or its map camera.
         if !started, !planning, !checkingWalks, !verifiedPool.isEmpty {
-            let date = Date()
+            let date = JourneyDuration.previewDate(Date())
             let fresh = recommendations(at: date)
             var orderedIDs = fresh.map(\.id)
             if selectionConfirmed, let selectedID, !orderedIDs.contains(selectedID) { orderedIDs.append(selectedID) }
