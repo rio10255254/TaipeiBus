@@ -52,8 +52,7 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         tapSettled(button("journey-time-info"))
         XCTAssertTrue(app.descendants(matching: .any).matching(identifier: "journey-time-component-transit").firstMatch.waitForExistence(timeout: 10))
         capture("experience-\(english ? "en" : "zh")-time-explanation")
-        // Tap away from the popover, then return; none of those actions starts a trip.
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.08, dy: 0.15)).tap()
+        tapSettled(button("journey-time-close"))
         tapSettled(button("journey-back"))
         XCTAssertTrue(button("journey-go-" + alternative).waitForExistence(timeout: 10))
         XCTAssertEqual(state()["selected"] as? String, alternative)
@@ -85,5 +84,28 @@ final class TransitExperienceUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 15))
         XCTAssertEqual(state()["selected"] as? String, selected)
         XCTAssertEqual(state()["started"] as? Bool, false)
+    }
+    func testCompactViewportKeepsMapAndRouteActionsUsable() {
+        launch(["--preview-mixed-planning", "--usability-fixture", "--test-journey-selection", "--test-map-controls"])
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 120))
+        let selected = state()["selected"] as? String ?? ""
+        let go = button("journey-go-" + selected)
+        reveal(go)
+        XCTAssertGreaterThanOrEqual(go.frame.height, 44)
+        let options = state()["options"] as? [[String: Any]] ?? []
+        let other = options.first { $0["id"] as? String != selected }?["id"] as? String ?? ""
+        let compare = button("journey-compare-" + other)
+        reveal(compare); capture("experience-compact-viewport")
+        tapSettled(compare)
+        waitFor("An alternative remains a preview on a compact display") {
+            self.state()["selected"] as? String == other && self.state()["started"] as? Bool == false
+        }
+        let probe = app.staticTexts["map-camera-state"]
+        if let data = probe.label.data(using: .utf8),
+           let camera = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let viewport = camera["routeViewport"] as? [String: Any] {
+            XCTAssertGreaterThan(viewport["height"] as? Double ?? 0, 80)
+        } else { XCTFail("The map must retain a measurable unobstructed area") }
+        capture("experience-compact-alternative")
     }
 }

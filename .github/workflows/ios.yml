@@ -58,6 +58,11 @@ on:
         type: choice
         options: ['both', 'light', 'dark']
         default: 'both'
+      preview_device:
+        description: 'Phone size for the requested native walkthrough'
+        type: choice
+        options: ['iphone-17', 'small']
+        default: 'iphone-17'
       ui_test_filter:
         description: 'Optional exact native UI test for a focused rerun after other checks passed'
         type: string
@@ -371,6 +376,9 @@ jobs:
           }
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
           device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17
+          if [ '${{ inputs.preview_device }}' = 'small' ]; then
+            device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation
+          fi
           if [[ '${{ inputs.usability_scope }}' = app-store* ]]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
           fi

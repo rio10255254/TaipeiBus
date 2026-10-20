@@ -14,8 +14,10 @@ struct TransitHomeView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     private var journeyPreviewDetent: PresentationDetent {
-        dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 ? .fraction(0.82) : .height(510)
+        if dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 { return .fraction(0.82) }
+        return .height(viewportHeight > 0 && viewportHeight < 760 ? 420 : 510)
     }
+    @State private var viewportHeight: CGFloat = 0
     @State private var showSearch = false
     @State private var showDetails = false
     @State private var showInformation = false
@@ -92,7 +94,6 @@ struct TransitHomeView: View {
                         HStack { Spacer(); MapLocationControl(model:model,location:location) }
                     }.padding(.trailing,16).padding(.bottom,mapBottomInset(geometry) + 10)
                 }
-
 #if DEBUG
                 Text(model.rideActivityDebug).font(.system(size: 1)).foregroundStyle(.clear)
                     .frame(width: 1, height: 1).accessibilityIdentifier("debug-live-activity").allowsHitTesting(false)
@@ -153,6 +154,8 @@ struct TransitHomeView: View {
                         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
+            }.onChange(of: geometry.size.height, initial: true) { _, height in
+                if abs(viewportHeight - height) > 1 { viewportHeight = height }
             }
         }
     }

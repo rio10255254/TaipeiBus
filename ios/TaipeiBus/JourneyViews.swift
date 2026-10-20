@@ -747,13 +747,13 @@ private struct JourneyDockHeader: View {
     private var actions: some View {
         HStack(spacing: 10) {
             Button(action: showJourney) {
-                Image(systemName: "list.bullet").liveFont(.body, weight: .semibold).frame(width: 44, height: 44)
+                Image(systemName: "list.bullet").liveFont(.body, weight: .semibold).frame(width: 48, height: 48)
             }
             .buttonStyle(MapActionStyle(tint: Color.primary))
             .accessibilityLabel(live.text(planner.started ? "行程" : "路線"))
             .accessibilityIdentifier("journey-options")
             Button { if planner.arrived { model.finishJourney() } else { confirmingEnd = true } } label: {
-                Text(AppText.text("結束")).liveFont(.subheadline, weight: .bold).padding(.horizontal, 14).frame(minHeight: 44)
+                Text(AppText.text("結束")).liveFont(.subheadline, weight: .bold).padding(.horizontal, 14).frame(minHeight: 48)
             }
             .buttonStyle(MapActionStyle(tint: MapChrome.destructive))
             .accessibilityLabel(live.text("結束行程"))
@@ -1045,7 +1045,7 @@ struct JourneyOptionsView: View {
     private func compactActions(_ option: JourneyOption) -> some View {
         VStack(spacing: 6) {
             goButton(option).frame(width: 66, height: 62)
-            stepsButton(option).frame(width: 66, height: 44)
+            stepsButton(option).frame(width: 66, height: 48)
         }.frame(width: 66)
     }
     private func goButton(_ option: JourneyOption) -> some View {
@@ -1066,7 +1066,7 @@ struct JourneyOptionsView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Text(AppText.text("步驟")); Image(systemName: "chevron.right")
-                    }.liveFont(.caption, weight: .semibold).frame(maxWidth: .infinity, minHeight: 44)
+                    }.liveFont(.caption, weight: .semibold).frame(maxWidth: .infinity, minHeight: 48)
                 }.buttonStyle(MapActionStyle())
                     // Preview remains available when current supply prevents Go.
                     .disabled(!option.verified)
@@ -1182,9 +1182,21 @@ private struct JourneyArrivalTime: View {
 
 private struct JourneyTimingExplanation: View {
     let duration: JourneyDuration
+    let close: () -> Void
     var body: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Text(AppText.text("行程時間說明")).liveFont(.headline).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Button(action: close) { Image(systemName: "xmark.circle.fill").liveFont(.title3).frame(width: 48, height: 48) }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
+                    .accessibilityLabel(AppText.text("關閉時間說明")).accessibilityIdentifier("journey-time-close")
+            }.padding(.horizontal, 20).padding(.top, 12)
+            ScrollView { breakdown }
+        }.frame(idealWidth: 320, maxWidth: 420, minHeight: 160, idealHeight: 420, maxHeight: 600)
+    }
+    private var breakdown: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(AppText.text("行程時間說明")).liveFont(.headline)
             ForEach(duration.components) { component in
                 HStack(alignment: .firstTextBaseline, spacing: 16) {
                     Text(component.title).fixedSize(horizontal: false, vertical: true)
@@ -1200,7 +1212,7 @@ private struct JourneyTimingExplanation: View {
             if duration.ridingSeconds > 0 { Text(duration.ridingSourceLabel).foregroundStyle(.secondary) }
             Text(AppText.text("總時間已包含步行、候車、進出站及取還車；不需另外相加。"))
                 .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-        }.liveFont(.subheadline).padding(20).frame(idealWidth: 320, maxWidth: 420)
+        }.liveFont(.subheadline).padding(20)
     }
 }
 
@@ -1227,10 +1239,10 @@ struct JourneyItineraryView: View {
                                     JourneyArrivalTime(duration: duration)
                                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
                                 Spacer()
-                                Button { showTimingInfo = true } label: { Image(systemName: "info.circle").frame(width: 44, height: 44) }
+                                Button { showTimingInfo = true } label: { Image(systemName: "info.circle").frame(width: 48, height: 48) }
                                     .accessibilityLabel(AppText.text("行程時間說明")).accessibilityIdentifier("journey-time-info")
                                     .popover(isPresented: $showTimingInfo) {
-                                        ScrollView { JourneyTimingExplanation(duration: duration) }
+                                        JourneyTimingExplanation(duration: duration) { showTimingInfo = false }
                                             .presentationCompactAdaptation(.popover)
                                     }
                             }
