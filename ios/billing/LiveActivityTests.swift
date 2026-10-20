@@ -157,6 +157,15 @@ import ActivityKit
         controller.update(snapshot, destination: "A", language: .english, enabled: true)
         await controller.waitForPendingChanges()
         XCTAssertTrue(controller.isRunning)
+        store.allowed = false
+        controller.update(snapshot, destination: "A", language: .english, enabled: true)
+        XCTAssertFalse(controller.isRunning)
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(store.sessions.isEmpty)
+        store.allowed = true
+        controller.update(snapshot, destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(controller.isRunning)
         controller.update(nil, destination: "", language: .english, enabled: false)
         await controller.waitForPendingChanges()
         XCTAssertTrue(store.sessions.isEmpty)

@@ -63,12 +63,13 @@ extension RouteSign {
     private var mayHaveActivities = true
     private var retiredIDs = Set<String>()
     private var stoppedByUser = false
+    private var lastAllowed: Bool?
     private var authorizationTask: Task<Void, Never>?
     private var stateTask: Task<Void, Never>?
     private(set) var debugState = "none"
     var isAllowed: Bool { store.allowed }
     var isRunning: Bool {
-        desired != nil && !stoppedByUser && activity.map { $0.activityState == .active || $0.activityState == .stale } == true
+        store.allowed && desired != nil && !stoppedByUser && activity.map { $0.activityState == .active || $0.activityState == .stale } == true
     }
     var onAvailabilityChange: (() -> Void)?
 
@@ -92,8 +93,10 @@ extension RouteSign {
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool) {
         guard enabled, let state else { endAll(); return }
         guard !stoppedByUser else { return }
+        let permissionChanged = lastAllowed != store.allowed
+        lastAllowed = store.allowed
         let attributes = RideActivityAttributes(destination: destination, language: language.rawValue)
-        if let old = desired, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
+        if !permissionChanged, let old = desired, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
            state.updatedAt.timeIntervalSince(old.state.updatedAt) < 30, isRunning || worker != nil { return }
         desired = Desired(state: state, attributes: attributes)
         revision += 1; mayHaveActivities = true; schedule()
