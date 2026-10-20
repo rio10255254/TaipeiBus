@@ -26,6 +26,10 @@ on:
         description: 'Run hosted Apple StoreKit transaction and Pro feature tests'
         type: boolean
         default: false
+      island_ui_only:
+        description: 'Rerun island visual checks after hosted lifecycle tests have passed'
+        type: boolean
+        default: false
       native_suite:
         description: 'All hosted checks, or feature regressions after the live walking suite has passed'
         type: choice
@@ -1194,6 +1198,7 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           xcrun simctl boot "$device"
           xcrun simctl bootstatus "$device" -b
+          if [ '${{ inputs.island_ui_only }}' = 'true' ]; then exit 0; fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/island-state.xcresult" \
@@ -1209,13 +1214,21 @@ jobs:
           if [ -n "$BUS_UI_TEST_FILTER" ]; then
             selection=("-only-testing:TaipeiBusUsabilityTests/$BUS_UI_TEST_FILTER")
           fi
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing \
+            | tee "$RUNNER_TEMP/island-ui-build.log"
+          python3 ios/usability/install-island-companion.py \
+            "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
+            "$RUNNER_TEMP/IslandCompanion.app" "$BUS_SIM_DEVICE"
           for appearance in light dark; do
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance "$appearance"
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
               -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
               -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
               "${selection[@]}" \
-              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/island-$appearance.log"
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building | tee "$RUNNER_TEMP/island-$appearance.log"
           done
       - name: Export visual evidence
         if: always()

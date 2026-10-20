@@ -222,7 +222,7 @@ struct RideActivityBadge: View {
         if [.walking, .cycling, .transferring].contains(state.phase) {
             Image(systemName: state.phase == .cycling ? "bicycle" : "figure.walk")
                 .font(.system(size: 24, weight: .semibold)).frame(width: 36, height: 30)
-        } else { RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 108) }
+        } else { RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 108, alignment: .leading) }
     }
 }
 
@@ -320,6 +320,7 @@ struct RideActivityDetails: View {
                 Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
