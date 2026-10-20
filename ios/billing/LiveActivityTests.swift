@@ -38,6 +38,16 @@ import ActivityKit
         XCTAssertTrue(value.due); XCTAssertNil(value.target); XCTAssertNil(value.minutes)
         XCTAssertEqual(value.status, "留意來車")
     }
+    func testActivityKitDeadlineEndsTheTimerWithoutAPeriodicView() {
+        var value = state("waiting")
+        value.target = now.addingTimeInterval(45)
+        XCTAssertEqual(value.updateDeadline, now.addingTimeInterval(45))
+        let expired = RideActivityPresentation(state: value, language: .traditionalChinese, systemStale: true, now: now.addingTimeInterval(46))
+        XCTAssertNil(expired.target)
+        XCTAssertEqual(expired.status, "留意來車，點一下更新")
+        value.target = now.addingTimeInterval(600)
+        XCTAssertEqual(value.updateDeadline, now.addingTimeInterval(120))
+    }
     func testOneStopUsesAlightingCueWhileTimeAndStopCountRemainAvailableWhenExpanded() {
         let value = RideActivityPresentation(state: state("alighting"), language: .traditionalChinese, now: now)
         XCTAssertTrue(value.alightingSoon)

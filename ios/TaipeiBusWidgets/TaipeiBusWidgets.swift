@@ -158,26 +158,18 @@ struct RideLiveActivity: Widget {
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
-                        RideActivityDetails(presentation: RideActivityPresentation(state: state, language: language,
-                            systemStale: context.isStale, now: timeline.date))
-                    }.padding(.horizontal, 4)
+                    RideActivityDetails(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale)).padding(.horizontal, 4)
                 }
             } compactLeading: {
-                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
-                    RideIslandLeading(presentation: RideActivityPresentation(state: state, language: language,
-                        systemStale: context.isStale, now: timeline.date))
-                }
+                RideIslandLeading(presentation: RideActivityPresentation(state: state, language: language,
+                    systemStale: context.isStale))
             } compactTrailing: {
-                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
-                    RideIslandTrailing(presentation: RideActivityPresentation(state: state, language: language,
-                        systemStale: context.isStale, now: timeline.date))
-                }
+                RideIslandTrailing(presentation: RideActivityPresentation(state: state, language: language,
+                    systemStale: context.isStale))
             } minimal: {
-                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
-                    RideIslandMinimal(presentation: RideActivityPresentation(state: state, language: language,
-                        systemStale: context.isStale, now: timeline.date))
-                }
+                RideIslandMinimal(presentation: RideActivityPresentation(state: state, language: language,
+                    systemStale: context.isStale))
             }
             .widgetURL(URL(string: "taipeibus://journey"))
             .keylineTint(Color(signHex: state.sign.color))

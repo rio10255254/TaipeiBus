@@ -168,7 +168,7 @@ extension RouteSign {
         a.destination == b.destination && a.language == b.language
     }
     private static func content(_ state: State) -> ActivityContent<State> {
-        ActivityContent(state: state, staleDate: state.freshUntil ?? state.updatedAt.addingTimeInterval(120))
+        ActivityContent(state: state, staleDate: state.updateDeadline)
     }
     private static func changed(_ old: State, _ new: State) -> Bool {
         if let before = old.freshUntil, let after = new.freshUntil,

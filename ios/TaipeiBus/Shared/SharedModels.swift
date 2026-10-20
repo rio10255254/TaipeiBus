@@ -36,6 +36,12 @@ struct RideActivityAttributes: ActivityAttributes {
         /// Optional additions keep already-running activities decodable after an app update.
         var symbol: String? = nil
         var freshUntil: Date? = nil
+        /// ActivityKit asks the extension to redraw at this deadline. No view-local
+        /// periodic schedule is needed to stop an expired countdown.
+        var updateDeadline: Date {
+            let expiry = freshUntil ?? updatedAt.addingTimeInterval(120)
+            return target.map { min(expiry, max(updatedAt, $0)) } ?? expiry
+        }
     }
     var destination: String
     var language: String
@@ -81,7 +87,12 @@ struct RideActivityPresentation {
         }
     }
     var status: String {
-        if stale { return AppText.text("點一下更新", language: language) }
+        if stale {
+            if state.phase == .waiting, state.target.map({ $0 <= now }) == true {
+                return AppText.text("留意來車，點一下更新", language: language)
+            }
+            return AppText.text("點一下更新", language: language)
+        }
         if alightingSoon { return AppText.text("準備下車", language: language) }
         if due {
             switch state.phase {

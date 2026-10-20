@@ -36,7 +36,9 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         // Use the physical screen coordinates, since SpringBoard is not the app's test window.
         springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
-        sleep(3)
+        XCTAssertTrue(springboard.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20),
+                      "An expanded black shell without trip content is not a successful expansion")
+        sleep(2)
         capture("island-real-system-expanded")
         let companion = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus.IslandCompanion")
         companion.launchArguments = ["--preview-island", "--island-companion", "--test-language", "en"]
@@ -50,6 +52,11 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [secondStarted], timeout: 15), .completed)
         XCUIDevice.shared.press(.home); sleep(5)
+        let bus = springboard.otherElements.matching(NSPredicate(format: "identifier == 'minimal.view' AND label CONTAINS %@", "630")).firstMatch
+        let bike = springboard.otherElements.matching(NSPredicate(format: "identifier == 'minimal.view' AND label CONTAINS %@", "Cycle to")).firstMatch
+        XCTAssertTrue(bus.waitForExistence(timeout: 20), "The bus minimal view must contain trip content")
+        XCTAssertTrue(bike.waitForExistence(timeout: 20), "The second app must render its content, not an empty circle")
+        sleep(2)
         capture("island-real-system-two-activities")
         let tree = XCTAttachment(string: springboard.debugDescription)
         tree.name = "island-two-apps-springboard"; tree.lifetime = .keepAlways; add(tree)

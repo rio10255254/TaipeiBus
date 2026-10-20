@@ -247,7 +247,11 @@ struct RideIslandTrailing: View {
     let presentation: RideActivityPresentation
     var body: some View {
         Group {
-            if let text = presentation.compactText {
+            if presentation.state.phase != .riding, let target = presentation.target {
+                Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
+                    .font(.system(size: 13, weight: .bold, design: .rounded)).monospacedDigit()
+                    .multilineTextAlignment(.trailing)
+            } else if let text = presentation.compactText {
                 Text(text).font(.system(size: 13, weight: .bold, design: .rounded))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
             } else {
@@ -267,20 +271,18 @@ struct RideIslandMinimal: View {
         // and show a count only while it is fresh; the expanded view retains the full route.
         VStack(spacing: 0) {
             Image(systemName: presentation.symbol)
-                .font(.system(size: value == nil ? 16 : 9, weight: .semibold))
-            if let value {
-                Text(value).font(.system(size: 11, weight: .bold, design: .rounded))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.85)
+                .font(.system(size: presentation.target == nil || presentation.alightingSoon ? 16 : 9, weight: .semibold))
+            if let target = presentation.target, !presentation.alightingSoon {
+                Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
+                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8).multilineTextAlignment(.center)
             }
         }
         .frame(width: 24, height: 26)
         .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
         .accessibilityElement(children: .ignore).accessibilityLabel(presentation.accessibilityLabel)
     }
-    private var value: String? {
-        guard !presentation.stale, !presentation.alightingSoon else { return nil }
-        return presentation.minutes.map { "\($0)′" }
-    }
+
 }
 
 struct RideCountdown: View {
@@ -289,17 +291,14 @@ struct RideCountdown: View {
     var size: CGFloat = 28
     var stale = false
     var body: some View {
-        TimelineView(.periodic(from: state.updatedAt, by: 15)) { context in
-            let value = RideActivityPresentation(state: state, language: language, systemStale: stale, now: context.date)
-            if let target = value.target {
-                Text(timerInterval: state.updatedAt...target, countsDown: true)
-                    .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
-                    .multilineTextAlignment(.trailing)
-                    .accessibilityLabel(AppText.text("約 %@ 分鐘", value.minutes ?? 1, language: language))
-            } else {
-                Text(value.status).font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
-                    .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
-            }
+        let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
+        if let target = value.target {
+            Text(timerInterval: state.updatedAt...target, countsDown: true, showsHours: false)
+                .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
+                .multilineTextAlignment(.trailing)
+        } else {
+            Text(value.status).font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
+                .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
         }
     }
 }
@@ -330,8 +329,8 @@ struct RideActivityLockView: View {
     var stale = false
     private var language: AppLanguage { AppLanguage(rawValue: attributes.language) ?? .traditionalChinese }
     var body: some View {
-        TimelineView(.periodic(from: state.updatedAt, by: 15)) { context in
-            let value = RideActivityPresentation(state: state, language: language, systemStale: stale, now: context.date)
+        let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
+        Group {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 10) {
                     if [.walking, .cycling, .transferring].contains(state.phase) {
