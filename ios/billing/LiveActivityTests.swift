@@ -121,6 +121,19 @@ import ActivityKit
         XCTAssertEqual(store.created[0].activityState, .ended)
         XCTAssertEqual(store.sessions.count, 1)
     }
+    func testLateDismissalFromEndedActivityCannotDismissNewJourney() async {
+        let store = FakeRideStore()
+        let value = RideActivityController(store: store)
+        value.update(state(), destination: "A", language: .english, enabled: true)
+        await value.waitForPendingChanges()
+        let previous = store.created[0]
+        value.endAll()
+        value.update(state("walking"), destination: "B", language: .english, enabled: true)
+        previous.dismiss()
+        await value.waitForPendingChanges()
+        XCTAssertTrue(value.isRunning)
+        XCTAssertEqual(store.created.last?.attributes.destination, "B")
+    }
     func testDismissalIsRespectedUntilUserRestarts() async {
         let store = FakeRideStore()
         let value = RideActivityController(store: store)

@@ -105,6 +105,9 @@ extension RouteSign {
         guard desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
         retiredIDs.formUnion(store.sessions.map(\.id))
         if let activity { retiredIDs.insert(activity.id) }
+        // A terminal callback already queued by the old activity must not dismiss
+        // a journey that the user starts immediately after this one.
+        stateTask?.cancel(); stateTask = nil; activity = nil
         desired = nil; stoppedByUser = false; pushed = nil; debugState = "ended"
         revision += 1; schedule()
     }
