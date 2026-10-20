@@ -210,6 +210,8 @@ enum MapChrome {
     static let controlSize: CGFloat = 48
     static let walkingLight = "#1F6FD1"
     static let walkingDark = "#5AA2FF"
+    /// Readable on the light and dark trip surfaces, including small arrival and wait labels.
+    static let secondaryText = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#C8CDD6") : UIColor(liveHex: "#535862") })
     static let destructive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FF6961") : UIColor(liveHex: "#C4151C") })
     static let positive = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#5EDB86") : UIColor(liveHex: "#1A7F37") })
     /// Apple Maps' green Go action, dark enough for white text.
