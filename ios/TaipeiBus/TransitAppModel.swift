@@ -231,8 +231,51 @@ final class TransitAppModel: ObservableObject {
             }
         }
     }
-    private func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
+    func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
         guard planner.started, !planner.arrived, let option = planner.selected, let step = planner.currentStep else { return nil }
+        // A connector is still a walk or a bike ride until the boarding point is reached.
+        // It must never borrow the next vehicle's countdown as the time to finish walking.
+        if case .walk(let index) = step, option.walks.indices.contains(index) {
+            let leg = option.walks[index]
+            let ride = option.rides.indices.contains(index) ? option.rides[index] : nil
+            let progress = planner.walkingLegIndex == index ? planner.walkingProgress : nil
+            let meters = progress?.hasConfirmedProgress == true ? progress!.remainingDistance : leg.distance ?? .infinity
+            let walking = leg.streetDuration ?? leg.duration
+            let seconds = progress?.hasConfirmedProgress == true ? progress!.remainingSeconds : walking
+            let atBoarding = leg.bike == nil && !leg.internalTransfer && meters <= 30
+                && (progress?.isFresh(at: now) == true || (walking ?? .infinity) <= 45)
+            if ride == nil || !atBoarding {
+                var phase: RideActivityAttributes.ContentState.Phase = leg.internalTransfer ? .transferring : .walking
+                var headline = ride?.boarding.localizedName ?? planner.destination?.localizedName ?? ""
+                var detail = leg.stationInstruction ?? (ride == nil ? AppText.text("步行前往目的地") : AppText.text("步行至 %@", headline))
+                var remaining = seconds
+                if let bike = leg.bike {
+                    let phaseNow = planner.cyclingPhase(at: index) ?? .toPickup
+                    let remainingMeters = meters.isFinite ? meters : bike.totalMeters
+                    switch phaseNow {
+                    case .toPickup:
+                        headline = bike.pickup.localizedName
+                        detail = AppText.text("走到 %@ 借 YouBike", headline)
+                        remaining = bike.toPickupSeconds * min(1, max(0, remainingMeters - bike.rideMeters - bike.fromDropoffMeters) / max(1, bike.toPickupMeters))
+                    case .riding:
+                        phase = .cycling; headline = bike.dropoff.localizedName
+                        detail = AppText.text("騎到 %@ 還車", headline)
+                        remaining = bike.rideSeconds * min(1, max(0, remainingMeters - bike.fromDropoffMeters) / max(1, bike.rideMeters))
+                    case .fromDropoff:
+                        detail = AppText.text("已還車，步行到 %@", headline)
+                        remaining = bike.fromDropoffSeconds * min(1, max(0, remainingMeters) / max(1, bike.fromDropoffMeters))
+                    }
+                } else if leg.internalTransfer { remaining = leg.duration }
+                let target = remaining.flatMap { $0.isFinite && $0 > 0 ? now.addingTimeInterval($0) : nil }
+                // Indoor transfers use the station instructions; do not require an underground GPS fix.
+                let expiry = leg.internalTransfer ? now.addingTimeInterval(120)
+                    : min(now.addingTimeInterval(120), progress?.confirmedAt?.addingTimeInterval(120) ?? now.addingTimeInterval(120))
+                return .init(phase: phase, sign: phase == .cycling ? .cycling : .walking,
+                    headline: headline, detail: detail, target: target, status: AppText.text("預估時間"),
+                    stopsLeft: nil, totalStops: nil, updatedAt: now,
+                    symbol: phase == .cycling ? "bicycle" : "figure.walk", freshUntil: expiry)
+            }
+        }
         switch step {
         case .walk(let index) where option.rides.indices.contains(index):
             let ride = option.rides[index]
@@ -252,23 +295,18 @@ final class TransitAppModel: ObservableObject {
             return .init(phase: .waiting, sign: RouteSign(ride.route),
                          headline: AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction)),
                          detail: ride.boarding.localizedName, target: target, status: status,
-                         stopsLeft: nil, totalStops: nil, updatedAt: now)
+                         stopsLeft: nil, totalStops: nil, updatedAt: now,
+                         symbol: ride.route.mode == .bus ? "bus.fill" : "tram.fill", freshUntil: now.addingTimeInterval(120))
         case .ride(let index) where option.rides.indices.contains(index):
             let ride = option.rides[index]
             let left = ride.route.mode == .bus ? onboardStops(for: ride, at: now).count : metroRemaining(ride, at: now).stops.count
             let seconds = onboardSecondsToAlight(ride, at: now)
             return .init(phase: .riding, sign: RouteSign(ride.route), headline: ride.alighting.localizedName,
                          detail: AppText.remainingStops(left), target: seconds.map { now.addingTimeInterval($0) },
-                         status: nil, stopsLeft: left, totalStops: ride.stopCount, updatedAt: now)
-        default:
-            let walk = journeyDuration(option, at: now)?.totalSeconds
-            // The last leg can be ridden rather than walked; say which, and where the bike goes back.
-            var cycling: String?
-            if case .walk(let index) = step { cycling = planner.cyclingInstruction(at: index) }
-            return .init(phase: .walking, sign: cycling == nil ? .walking : .cycling,
-                         headline: planner.destination?.localizedName ?? "",
-                         detail: cycling ?? AppText.text("步行前往目的地"), target: walk.map { now.addingTimeInterval($0) },
-                         status: nil, stopsLeft: nil, totalStops: nil, updatedAt: now)
+                         status: seconds == nil ? AppText.text("依行程進度") : AppText.text("預估時間"),
+                         stopsLeft: left, totalStops: ride.stopCount, updatedAt: now,
+                         symbol: ride.route.mode == .bus ? "bus.fill" : "tram.fill", freshUntil: now.addingTimeInterval(120))
+        default: return nil
         }
     }
     private func openPendingSavedJourney() {

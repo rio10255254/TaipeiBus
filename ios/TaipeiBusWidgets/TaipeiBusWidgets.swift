@@ -147,42 +147,37 @@ struct RideLiveActivity: Widget {
             let language = AppLanguage(rawValue: context.attributes.language) ?? .traditionalChinese
             return DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    RouteSignView(sign: state.sign, size: 16).padding(.leading, 4).padding(.top, 4)
+                    RouteSignView(sign: state.sign, size: 14).frame(maxWidth: 100).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    RideCountdown(state: state, language: language, size: 24, stale: context.isStale).padding(.trailing, 4)
+                    RideCountdown(state: state, language: language, size: 24, stale: context.isStale)
+                        .frame(maxWidth: 130).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(state.headline).font(.headline).lineLimit(1)
+                    Text(RideActivityPresentation(state: state, language: language).phaseTitle)
+                        .font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
-                    VStack(spacing: 6) {
-                        if let left = state.stopsLeft, let total = state.totalStops, total > 0 {
-                            ProgressView(value: Double(max(0, total - left)), total: Double(total)).tint(Color(signHex: state.sign.color))
-                        }
-                        HStack {
-                            Text(state.detail).font(.subheadline.weight(.medium)).lineLimit(1)
-                            Spacer()
-                            if let status = state.status, state.target != nil {
-                                Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }
+                    TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
+                        RideActivityDetails(presentation: RideActivityPresentation(state: state, language: language,
+                            systemStale: context.isStale, now: timeline.date))
                     }.padding(.horizontal, 4)
                 }
             } compactLeading: {
-                RouteSignView(sign: state.sign, size: 12)
+                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
+                    RideIslandLeading(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale, now: timeline.date))
+                }
             } compactTrailing: {
-                if state.phase == .riding, let left = state.stopsLeft {
-                    Text(AppText.stops(left, language: language)).font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
-                } else if !context.isStale, let target = state.target, target > state.updatedAt {
-                    Text(timerInterval: state.updatedAt...target, countsDown: true)
-                        .font(.system(size: 14, weight: .bold, design: .rounded)).monospacedDigit()
-                        .frame(maxWidth: 52)
-                } else {
-                    Image(systemName: state.phase == .walking ? "figure.walk" : "bus.fill")
+                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
+                    RideIslandTrailing(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale, now: timeline.date))
                 }
             } minimal: {
-                Text(state.sign.text).font(.system(size: 11, weight: .bold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.5)
+                TimelineView(.periodic(from: state.updatedAt, by: 15)) { timeline in
+                    RideIslandMinimal(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale, now: timeline.date))
+                }
             }
             .widgetURL(URL(string: "taipeibus://journey"))
             .keylineTint(Color(signHex: state.sign.color))

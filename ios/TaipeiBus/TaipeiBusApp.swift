@@ -46,7 +46,9 @@ struct TaipeiBusApp: App {
 
     @ViewBuilder private var root: some View {
 #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--preview-widgets") {
+        if ProcessInfo.processInfo.arguments.contains("--preview-island") {
+            IslandPreviewGallery(language: model.language).environment(\.locale, model.language.locale)
+        } else if ProcessInfo.processInfo.arguments.contains("--preview-widgets") {
             WidgetPreviewGallery(language: model.language).environment(\.locale, model.language.locale)
         } else { home }
 #else

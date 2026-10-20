@@ -766,5 +766,12 @@
   "總時間已包含步行、候車、進出站及取還車；不需另外相加。": "Total time already includes walking, waiting, station access and bike handling.",
   "關閉時間說明": "Close timing details",
   "稍後更新": "Try again shortly",
-  "介面驗證用行程 · 非即時班次": "Interface test trip · not live service"
+  "介面驗證用行程 · 非即時班次": "Interface test trip · not live service",
+  "騎車前往": "Cycle to",
+  "點一下更新": "Tap to refresh",
+  "留意來車": "Watch for arrival",
+  "留意下車站": "Watch for your stop",
+  "確認目前進度": "Check progress",
+  "預估時間": "Estimated time",
+  "依行程進度": "Based on trip progress"
 }

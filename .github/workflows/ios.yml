@@ -74,7 +74,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['dynamic-island', 'all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -154,7 +154,7 @@ jobs:
             ${{ runner.temp }}/billing.xcresult
           retention-days: 14
   simulator:
-    if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe'
+    if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe' && inputs.usability_scope != 'dynamic-island'
     runs-on: macos-15
     timeout-minutes: ${{ inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
@@ -1177,3 +1177,55 @@ jobs:
             ${{ runner.temp }}/usability-no-location.log
           if-no-files-found: ignore
           retention-days: 7
+
+  dynamic_island:
+    if: github.event_name == 'workflow_dispatch' && inputs.usability_scope == 'dynamic-island'
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and verify trip state and serialized activity lifecycle
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          ruby ios/billing/setup.rb
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-island com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusBilling \
+            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/island-state.xcresult" \
+            -only-testing:TaipeiBusBillingTests/LiveActivityTests \
+            -only-testing:TaipeiBusBillingTests/ContinuousNavigationTests \
+            -only-testing:TaipeiBusBillingTests/NavigationLifecycleTests \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/island-state.log"
+      - name: Exercise actual system island and bilingual shared layouts
+        run: |
+          set -euo pipefail
+          ruby ios/usability/setup.rb
+          for appearance in light dark; do
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance "$appearance"
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+              -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+              -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests \
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/island-$appearance.log"
+          done
+      - name: Export visual evidence
+        if: always()
+        run: |
+          for appearance in light dark; do
+            if [ -d "$RUNNER_TEMP/island-$appearance.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/island-$appearance.xcresult" --output-path "$RUNNER_TEMP/island-$appearance-screenshots"
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dynamic-island-verification
+          path: |
+            ${{ runner.temp }}/island-*.log
+            ${{ runner.temp }}/island-*-screenshots
+          retention-days: 14

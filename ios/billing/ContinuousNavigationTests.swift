@@ -73,6 +73,55 @@ import XCTest
         model.planner.begin()
         return (model,metadata,option)
     }
+    func testLiveActivityShowsCurrentAccessWalkBeforeWaitingAndThenRide() throws {
+        let date = Date(), (model, _, _) = makeModel(at: date)
+        defer { model.finishJourney() }
+        let walk = try XCTUnwrap(model.rideActivityState(at: date))
+        XCTAssertEqual(walk.phase, .walking)
+        XCTAssertEqual(try XCTUnwrap(walk.target).timeIntervalSince(date), 600, accuracy: 1)
+        XCTAssertEqual(walk.headline, "站0")
+        model.planner.updateWalking(index: 0, coordinate: point(-10), accuracy: 5, timestamp: date, now: date)
+        XCTAssertEqual(model.rideActivityState(at: date)?.phase, .waiting)
+        model.boardCurrentRide(at: date)
+        XCTAssertEqual(model.rideActivityState(at: date)?.phase, .riding)
+        XCTAssertNotNil(model.rideActivityState(at: date)?.stopsLeft)
+    }
+    func testLiveActivityTracksAllThreeBikeConnectorPhasesBeforeTransit() throws {
+        let date = Date(), model = TransitAppModel()
+        defer { model.finishJourney() }
+        var (metadata, option) = fixture()
+        option.walks[0].bike = BikeLeg(pickup: BikeStation(id: "p", name: "借車站", coordinate: point(-600), capacity: 20),
+            dropoff: BikeStation(id: "d", name: "還車站", coordinate: point(-100), capacity: 20), bikes: 5, docks: 8, handlingSeconds: 60,
+            toPickupMeters: 200, toPickupSeconds: 150, rideMeters: 500, rideSeconds: 120, fromDropoffMeters: 100, fromDropoffSeconds: 80)
+        model.auditNavigation(metadata: metadata, snapshot: TransitSnapshot(), at: date)
+        model.planner.auditLoadChoices([option], from: TravelPlace(name: "起點", address: "", coordinate: point(-800)),
+            to: TravelPlace(name: "終點", address: "", coordinate: point(2000)))
+        model.planner.begin()
+        XCTAssertEqual(model.rideActivityState(at: date)?.phase, .walking)
+        XCTAssertEqual(model.rideActivityState(at: date)?.headline, "借車站")
+        model.planner.updateWalking(index: 0, coordinate: point(-400), accuracy: 5, timestamp: date, now: date)
+        let riding = try XCTUnwrap(model.rideActivityState(at: date))
+        XCTAssertEqual(riding.phase, .cycling); XCTAssertEqual(riding.headline, "還車站")
+        XCTAssertEqual(try XCTUnwrap(riding.target).timeIntervalSince(date), 72, accuracy: 3)
+        let later = date.addingTimeInterval(60)
+        model.planner.updateWalking(index: 0, coordinate: point(-50), accuracy: 5, timestamp: later, now: later)
+        XCTAssertEqual(model.rideActivityState(at: later)?.phase, .walking)
+        XCTAssertEqual(model.rideActivityState(at: later)?.headline, "站0")
+    }
+    func testLiveActivityIndoorTransferIsNotMistakenForWaitingOrCycling() throws {
+        let date = Date(), model = TransitAppModel()
+        defer { model.finishJourney() }
+        var (metadata, option) = fixture()
+        option.walks[0].internalTransfer = true
+        option.walks[0].stationInstruction = "前往轉乘月台"
+        model.auditNavigation(metadata: metadata, snapshot: TransitSnapshot(), at: date)
+        model.planner.auditLoadChoices([option], from: TravelPlace(name: "起點", address: "", coordinate: point(-800)),
+            to: TravelPlace(name: "終點", address: "", coordinate: point(2000)))
+        model.planner.begin()
+        let state = try XCTUnwrap(model.rideActivityState(at: date))
+        XCTAssertEqual(state.phase, .transferring)
+        XCTAssertEqual(state.detail, "前往轉乘月台")
+    }
     func testStaleWalkingKeepsTheSameRemainingTimeAndClosingMapDoesNotResetIt() throws {
         let date = Date(), (model,_,option) = makeModel(at:date)
         model.planner.updateWalking(index:0,coordinate:point(-200),accuracy:5,timestamp:date,now:date)

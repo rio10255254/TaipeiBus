@@ -17,6 +17,7 @@ tests.source_build_phase.add_file_reference(group.new_file('FeedRecoveryTests.sw
 tests.source_build_phase.add_file_reference(group.new_file('DirectionsBudgetTests.swift')) unless existing.include?('DirectionsBudgetTests.swift')
 tests.source_build_phase.add_file_reference(group.new_file('ContinuousNavigationTests.swift')) unless existing.include?('ContinuousNavigationTests.swift')
 tests.source_build_phase.add_file_reference(group.new_file('NavigationLifecycleTests.swift')) unless existing.include?('NavigationLifecycleTests.swift')
+tests.source_build_phase.add_file_reference(group.new_file('LiveActivityTests.swift')) unless existing.include?('LiveActivityTests.swift')
 resources = tests.resources_build_phase.files.map { |value| value.file_ref&.path }
 tests.resources_build_phase.add_file_reference(group.new_file('ProProducts.storekit')) unless resources.include?('ProProducts.storekit')
 tests.build_configurations.each do |config|
