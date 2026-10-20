@@ -26,6 +26,7 @@ public struct JourneyDuration: Equatable, Sendable {
         public enum Kind: String, Sendable { case walking, station, waiting, transit, cycling, handling }
         public let kind: Kind
         public let seconds: Double
+        public var unconfirmed = false
         public var id: Kind { kind }
         public var title: String {
             switch kind {
@@ -37,7 +38,9 @@ public struct JourneyDuration: Equatable, Sendable {
             case .handling: return AppText.text("取還車")
             }
         }
-        public var durationLabel: String { AppText.text("約 %@ 分鐘", max(1, Int(ceil(seconds / 60)))) }
+        public var durationLabel: String {
+            unconfirmed ? AppText.text("候車待確認") : AppText.text("約 %@ 分鐘", max(1, Int(ceil(seconds / 60))))
+        }
     }
     /// A partition of the elapsed time, including bike handling and indoor access exactly once.
     public var components: [Component] {
@@ -45,7 +48,7 @@ public struct JourneyDuration: Equatable, Sendable {
         let handling = min(cycling, max(0, cyclingHandlingSeconds))
         let station = min(max(0, walkingSeconds - cycling), max(0, stationSeconds))
         return [Component(kind: .walking, seconds: max(0, walkingSeconds - cycling - station)),
-                Component(kind: .station, seconds: station), Component(kind: .waiting, seconds: waitingSeconds),
+                Component(kind: .station, seconds: station), Component(kind: .waiting, seconds: waitingSeconds, unconfirmed: unknownWaits > 0),
                 Component(kind: .transit, seconds: ridingSeconds), Component(kind: .cycling, seconds: cycling - handling),
                 Component(kind: .handling, seconds: handling)].filter { $0.seconds > 0 }
     }

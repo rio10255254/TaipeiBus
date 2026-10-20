@@ -39,6 +39,8 @@ final class JourneyPresentationTests: XCTestCase {
         let time = JourneyDuration(riding: [600], walking: [120, 60], arrivals: [nil])
         XCTAssertGreaterThan(time.unknownWaits, 0)
         XCTAssertFalse(time.expectedArrivalLabel.contains(":"))
+        XCTAssertEqual(time.components.first { $0.kind == .waiting }?.durationLabel, time.waitingLabel,
+                       "A comparison-only fallback must never be presented as a confirmed wait in the time explanation")
         XCTAssertEqual(time.components.reduce(0) { $0 + $1.seconds }, time.totalSeconds, accuracy: 0.001)
     }
 }
