@@ -15,7 +15,7 @@ extension JourneyUsabilityTestBase {
         guard let counts = islandColors(crop) else { return nil }
         return (screenshot, counts.light, counts.dark)
     }
-    private func islandColors(_ crop: CGImage) -> (light: Int, dark: Double)? {
+    private func islandColors(_ crop: CGImage) -> (light: Int, dark: Double, black: Int, blue: Int)? {
         var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
         let decoded = pixels.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(data: buffer.baseAddress, width: crop.width, height: crop.height,
@@ -25,13 +25,37 @@ extension JourneyUsabilityTestBase {
             return true
         }
         guard decoded else { return nil }
-        var dark = 0, light = 0
+        var dark = 0, light = 0, black = 0, blue = 0
         for i in stride(from: 0, to: pixels.count, by: 4) {
             let r = Int(pixels[i]), g = Int(pixels[i+1]), b = Int(pixels[i+2])
             if max(r, max(g, b)) < 55 { dark += 1 }
             if min(r, min(g, b)) > 135 { light += 1 }
+            if max(r, max(g, b)) < 12 { black += 1 }
+            if b > 120 && b > r + 45 && b > g + 25 { blue += 1 }
         }
-        return (light, Double(dark) / Double(crop.width * crop.height))
+        return (light, Double(dark) / Double(crop.width * crop.height), black, blue)
+    }
+    /// Compare against this device's idle Home Screen in the same appearance.
+    /// Absolute dark/white counts also detect dark wallpaper and the clock edge,
+    /// so they cannot establish that an activity remains after End.
+    func systemIslandFootprint() -> (black: Int, blue: Int)? {
+        guard let full = UIImage(data: XCUIScreen.main.screenshot().pngRepresentation)?.cgImage else { return nil }
+        let width = CGFloat(full.width), height = CGFloat(full.height)
+        let rect = CGRect(x: width * 0.25, y: height * 0.005,
+            width: width * 0.53, height: height * 0.065).integral
+        guard let crop = full.cropping(to: rect), let colors = islandColors(crop) else { return nil }
+        return (colors.black, colors.blue)
+    }
+    private func sameIdleFootprint(_ current: (black: Int, blue: Int), _ idle: (black: Int, blue: Int)) -> Bool {
+        abs(current.black - idle.black) <= max(60, idle.black / 50) && abs(current.blue - idle.blue) <= 60
+    }
+    func systemIslandMatchesIdle(_ idle: (black: Int, blue: Int)) -> Bool {
+        guard let current = systemIslandFootprint() else { return false }
+        return sameIdleFootprint(current, idle)
+    }
+    func systemIslandDiffersFromIdle(_ idle: (black: Int, blue: Int)) -> Bool {
+        guard let current = systemIslandFootprint() else { return false }
+        return !sameIdleFootprint(current, idle)
     }
     func hasVisibleSystemIsland(_ board: XCUIApplication) -> Bool {
         let expanded = board.staticTexts["捷運內湖站"].firstMatch
