@@ -817,9 +817,9 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var previewNotice: String?
 #endif
 
-    init(service: TransitService = TransitService(), rideActivity: RideActivityController? = nil) {
+    init(service: TransitService = TransitService(), rideActivity controller: RideActivityController? = nil) {
         self.service = service
-        self.rideActivity = rideActivity ?? RideActivityController()
+        self.rideActivity = controller ?? RideActivityController()
         let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
         var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
 #if DEBUG
