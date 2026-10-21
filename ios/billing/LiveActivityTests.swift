@@ -346,6 +346,27 @@ import ActivityKit
         XCTAssertEqual(store.sessions.count, 1); XCTAssertEqual(store.created.count, 2)
         XCTAssertTrue(value.isRunning)
     }
+    func testOnlyEndedAndDismissedActivitiesAreFinal() {
+        XCTAssertTrue(RideActivityController.needsEnding(.active))
+        XCTAssertTrue(RideActivityController.needsEnding(.stale))
+        XCTAssertFalse(RideActivityController.needsEnding(.ended))
+        XCTAssertFalse(RideActivityController.needsEnding(.dismissed))
+    }
+    func testDiagnosticsCountNativeActivitiesWithoutPlaceNames() async throws {
+        let store = FakeRideStore()
+        let attributes = RideActivityAttributes(destination: "內湖", language: AppLanguage.traditionalChinese.rawValue)
+        _ = try store.start(attributes, content: ActivityContent(state: state(), staleDate: now.addingTimeInterval(120)))
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        var events: [String] = []
+        controller.onDiagnostic = { events.append($0) }
+        XCTAssertEqual(controller.nativeSummary, "native=1[active] ending=0")
+        controller.update(state("walking"), destination: "公館", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(controller.nativeSummary, "native=1[active] ending=0", "The previous trip's island is ended before the replacement")
+        XCTAssertTrue(events.contains("island ended ended"))
+        XCTAssertTrue(events.contains("island started walking native=1[active] ending=0"))
+        XCTAssertFalse(events.contains { $0.contains("內湖") || $0.contains("公館") })
+    }
     func testRevokingAndRestoringPermissionDoesNotRequireAChangedRoute() async {
         let store = FakeRideStore(), snapshot = state()
         let controller = RideActivityController(store: store, now: { [now] in now })
@@ -497,7 +518,8 @@ import ActivityKit
     private(set) var sessionReads = 0
     var sessions: [any RideActivitySession] {
         sessionReads += 1
-        return created.filter { $0.activityState == .active || $0.activityState == .stale }
+        // Like ActivityKit, list every activity until it reaches a final state.
+        return created.filter { RideActivityController.needsEnding($0.activityState) }
     }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession {
         let value = FakeRideSession(attributes: attributes, content: content)

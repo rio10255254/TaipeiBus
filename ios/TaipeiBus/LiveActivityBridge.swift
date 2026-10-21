@@ -79,7 +79,7 @@ struct RideIslandNoticePolicy {
         await value.update(content, alertConfiguration: alert)
     }
     func end() async {
-        guard value.activityState == .active || value.activityState == .stale else { return }
+        guard RideActivityController.needsEnding(value.activityState) else { return }
         await value.end(nil, dismissalPolicy: .immediate)
     }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
@@ -149,6 +149,16 @@ struct RideIslandNoticePolicy {
         store.allowed && desired != nil && !stoppedByUser && activity.map { $0.activityState == .active || $0.activityState == .stale } == true
     }
     var onAvailabilityChange: (() -> Void)?
+    /// Lifecycle events for the shareable diagnostics report; no places or coordinates.
+    var onDiagnostic: ((String) -> Void)?
+    /// Only `.ended` and `.dismissed` are final. Any other state, including one a newer iOS
+    /// adds, can still occupy an island slot and must be ended rather than skipped.
+    nonisolated static func needsEnding(_ state: ActivityState) -> Bool { state != .ended && state != .dismissed }
+    /// This app's activities iOS still lists, e.g. "native=1[active] ending=0".
+    var nativeSummary: String {
+        let listed = store.sessions.filter { Self.needsEnding($0.activityState) }
+        return "native=\(listed.count)[\(listed.map { "\($0.activityState)" }.joined(separator: ","))] ending=\(retirements.count)"
+    }
 
     init(store: (any RideActivityStore)? = nil, now: @escaping () -> Date = Date.init,
          beginBackgroundTask: (@MainActor () -> any RideActivityBackgroundTask)? = nil) {
@@ -191,7 +201,7 @@ struct RideIslandNoticePolicy {
         guard recheckSystem || desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
         var sessions = store.sessions
         if let activity, !sessions.contains(where: { $0.id == activity.id }) { sessions.append(activity) }
-        let active = sessions.filter { $0.activityState == .active || $0.activityState == .stale }
+        let active = sessions.filter { Self.needsEnding($0.activityState) }
         retiredIDs.formUnion(active.map(\.id))
         // A terminal callback already queued by the old activity must not dismiss
         // a journey that the user starts immediately after this one.
@@ -218,7 +228,7 @@ struct RideIslandNoticePolicy {
     }
     private func retire(_ session: any RideActivitySession) {
         guard retirements[session.id] == nil else { return }
-        guard session.activityState == .active || session.activityState == .stale else {
+        guard Self.needsEnding(session.activityState) else {
             retiredIDs.remove(session.id); return
         }
         retiredIDs.insert(session.id)
@@ -227,6 +237,7 @@ struct RideIslandNoticePolicy {
         let backgroundTask = beginBackgroundTask()
         retirements[session.id] = Task { [weak self] in
             await session.end()
+            self?.onDiagnostic?("island ended \(session.activityState)")
             backgroundTask.finish()
             self?.retirements.removeValue(forKey: session.id)
             self?.retiredIDs.remove(session.id)
@@ -267,10 +278,12 @@ struct RideIslandNoticePolicy {
                     // cancels the first system render without providing new data.
                     activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
+                    onDiagnostic?("island started \(next.state.phase.rawValue) \(nativeSummary)")
                 } catch {
                     let failure = error as NSError
                     logger.error("Activity request failed: domain=\(failure.domain, privacy: .public) code=\(failure.code, privacy: .public)")
                     debugState = "unavailable"
+                    onDiagnostic?("island request_failed domain=\(failure.domain) code=\(failure.code)")
                 }
             }
             if let current = activity {
@@ -307,7 +320,8 @@ struct RideIslandNoticePolicy {
         stateTask = session.observe { [weak self] state in
             guard let self, activity?.id == session.id else { return }
             if state == .dismissed || state == .ended {
-                stoppedByUser = true; debugState = "dismissed"; onAvailabilityChange?()
+                stoppedByUser = true; debugState = "dismissed"; onDiagnostic?("island dismissed_by_system_or_user \(state)")
+                onAvailabilityChange?()
             }
         }
     }
@@ -441,12 +455,13 @@ final class CommuteWidgetBridge {
         wantsLocation = true
         location.onAuthorizationChange = { [weak self] in
             guard let self else { return }
-            location.setBackgroundNavigation(wantsLocation)
+            location.setBackgroundNavigation(wantsLocation, activityVisible: wantsLocation)
             objectWillChange.send()
         }
         location.onNavigationUpdate = { [weak self] in self?.objectWillChange.send() }
         location.setActive(true); location.setWalkingNavigation(true)
-        location.request(); location.setBackgroundNavigation(true)
+        // The gallery starts its system activity together with location, as a trip does.
+        location.request(); location.setBackgroundNavigation(true, activityVisible: true)
         objectWillChange.send()
     }
     func stopLocation() {

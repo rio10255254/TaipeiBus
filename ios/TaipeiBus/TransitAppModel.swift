@@ -91,6 +91,19 @@ final class TransitAppModel: ObservableObject {
         case .requiresPro: return AppText.text("Pro 功能")
         }
     }
+    /// Where iOS can place the trip in the Dynamic Island, as far as location permission decides.
+    var islandPlacementStatus: String? {
+        guard purchases.hasPro, rideActivityOn, location.navigationPermission == .allowed else { return nil }
+        if location.alwaysAuthorized { return AppText.text("定位為「永遠」：導航時不顯示藍色定位標示，行程可使用中央長條。") }
+        if location.activityBackedFailed {
+            return AppText.text("這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。")
+        }
+        return AppText.text("導航時改由動態島維持背景更新，以避免藍色定位標示。若行程仍只在右側小圈顯示，可將定位改為「永遠」。")
+    }
+    var canUpgradeToAlwaysLocation: Bool { islandPlacementStatus != nil && !location.alwaysAuthorized }
+    func requestAlwaysLocation() {
+        if !location.requestAlwaysAuthorization() { openAppSettings() }
+    }
     func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
@@ -181,7 +194,8 @@ final class TransitAppModel: ObservableObject {
                                 language: language, enabled: purchases.hasPro && rideActivityOn,
                                 presentImportantUpdates: UIApplication.shared.applicationState == .background,
                                 alightingAlerts: alightReminderActive)
-            location.setBackgroundNavigation(journeyInBackground)
+            // The trip's own Live Activity keeps the app in use while it runs, without the indicator.
+            location.setBackgroundNavigation(journeyInBackground, activityVisible: rideActivity.isRunning)
             updateAlightReminder()
         }
         let activityState = navigationReadiness.liveActivity(enabled: rideActivityOn,
@@ -850,7 +864,7 @@ final class TransitAppModel: ObservableObject {
         purchases.onAccessChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onPermissionChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onOpenJourney = { [weak self] in self?.resumeCurrentJourney() }
-        location.onAuthorizationChange = { [weak self] in self?.synchronizeNavigationState() }
+        location.onAuthorizationChange = { [weak self] in self?.objectWillChange.send(); self?.synchronizeNavigationState() }
         rideActivity.canPresentNotice = { [weak self] notice, state in
             guard notice.kind == .alighting else { return true }
             guard let self, let id = state.rideIdentifier, self.alightReminderActive else { return false }
@@ -861,6 +875,8 @@ final class TransitAppModel: ObservableObject {
                   let self, self.alightReminderActive else { return }
             self.alightReminder.presentedInActivity(rideID: id)
         }
+        rideActivity.onDiagnostic = { JourneyDiagnostics.shared.record($0) }
+        location.onDiagnostic = { JourneyDiagnostics.shared.record($0) }
         rideActivity.onAvailabilityChange = { [weak self] in
             self?.objectWillChange.send(); self?.synchronizeNavigationState()
         }
@@ -918,6 +934,7 @@ final class TransitAppModel: ObservableObject {
         } }
         synchronizeNavigationState()
         location.setActive(active)
+        recordIslandDiagnostics(active ? "foreground" : "leave")
         if !active {
             clearJourneySuggestion(); alternativeCheckedAt = .distantPast
             updateLiveSurfaces()
@@ -1852,7 +1869,13 @@ final class TransitAppModel: ObservableObject {
         boardedAt = nil; anchorBoardedVehicle()
     }
     func alight() { clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; following = false; planner.advance(); anchorBoardedVehicle() }
-    func finishJourney() { clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
+    /// What a physical phone actually holds when the island looks wrong: how many of this
+    /// app's activities iOS still lists, and whether background location asked for the indicator.
+    private func recordIslandDiagnostics(_ moment: String) {
+        JourneyDiagnostics.shared.record("island \(moment) trip=\(planner.started && !planner.arrived) \(rideActivity.nativeSummary)"
+            + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation) indicator=\(location.backgroundIndicator) activity_backed=\(location.activityBacked)")
+    }
+    func finishJourney() { defer { recordIslandDiagnostics("end") }; clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {

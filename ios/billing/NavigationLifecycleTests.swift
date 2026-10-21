@@ -121,6 +121,69 @@ import StoreKitTest
         XCTAssertTrue(store.sessions.isEmpty)
         XCTAssertEqual(store.created.count, 1, "A late permission refresh or old island link must not begin another trip")
     }
+    private func startedWithActivity() async throws -> (TransitAppModel, FakeRideStore, RideActivityController) {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store)
+        let value = model(rideActivity: controller)
+        await unlock(value)
+        value.rideActivityOn = true; value.planner.begin()
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(value.liveActivityRunning)
+        return (value, store, controller)
+    }
+    func testVisibleLiveActivityKeepsBackgroundLocationWithoutTheIndicator() async throws {
+        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
+        let (value, store, controller) = try await startedWithActivity()
+        let session = try XCTUnwrap(store.created.first)
+        XCTAssertTrue(value.location.backgroundNavigation, "Background updates still keep the island current")
+        XCTAssertTrue(value.location.activityBacked)
+        XCTAssertFalse(value.location.backgroundIndicator,
+            "A second island item would move the trip from the central compact island to the detached circle")
+        session.dismiss()
+        XCTAssertTrue(value.location.backgroundNavigation, "The alighting reminder still needs background location")
+        XCTAssertFalse(value.location.activityBacked)
+        XCTAssertTrue(value.location.backgroundIndicator, "Without a visible activity, the indicator keeps the app in use")
+        value.finishJourney()
+        await controller.waitForPendingChanges()
+        XCTAssertFalse(value.location.backgroundNavigation); XCTAssertFalse(value.location.backgroundIndicator)
+        XCTAssertFalse(value.location.activityBacked)
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
+    func testAlwaysPermissionHidesTheIndicatorWithClassicBackgroundUpdates() async throws {
+        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store)
+        let value = model(rideActivity: controller)
+        value.location.auditAlwaysAuthorized = true
+        await unlock(value)
+        value.rideActivityOn = true; value.planner.begin()
+        await controller.waitForPendingChanges()
+        let session = try XCTUnwrap(store.created.first)
+        XCTAssertTrue(value.location.backgroundNavigation)
+        XCTAssertFalse(value.location.activityBacked, "Always keeps the documented classic background updates")
+        XCTAssertFalse(value.location.backgroundIndicator, "Always lets the app hide the indicator while the trip is in the island")
+        XCTAssertFalse(value.canUpgradeToAlwaysLocation)
+        session.dismiss()
+        XCTAssertTrue(value.location.backgroundIndicator, "Without a visible trip, background use stays visible")
+    }
+    func testSilentBackgroundFallsBackToTheIndicatorForThisAndLaterTrips() async throws {
+        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
+        defer { UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey) }
+        let (value, _, controller) = try await startedWithActivity()
+        XCTAssertTrue(value.location.activityBacked)
+        value.location.setActive(false)
+        // A short visit away is not evidence: the rider may simply be standing at the stop.
+        value.location.checkActivityBackedDelivery(now: Date().addingTimeInterval(60))
+        XCTAssertTrue(value.location.activityBacked)
+        value.location.setActive(false)
+        value.location.checkActivityBackedDelivery(now: Date().addingTimeInterval(200))
+        XCTAssertFalse(value.location.activityBacked)
+        XCTAssertTrue(value.location.backgroundNavigation); XCTAssertTrue(value.location.backgroundIndicator)
+        value.finishJourney(); await controller.waitForPendingChanges()
+        let (next, _, _) = try await startedWithActivity()
+        XCTAssertFalse(next.location.activityBacked, "A phone that did not deliver updates keeps using the indicator")
+        XCTAssertTrue(next.location.backgroundIndicator)
+    }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()
         let selected = value.planner.selectedID
