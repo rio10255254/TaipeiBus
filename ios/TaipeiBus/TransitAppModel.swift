@@ -175,7 +175,9 @@ final class TransitAppModel: ObservableObject {
             location.setWalkingNavigation(stationWalk.isActive); location.setRidingNavigation(false)
         } else {
             rideActivity.update(rideActivityState(at: Date()), destination: planner.destination?.localizedName ?? "",
-                                language: language, enabled: purchases.hasPro && rideActivityOn)
+                                language: language, enabled: purchases.hasPro && rideActivityOn,
+                                presentImportantUpdates: UIApplication.shared.applicationState == .background,
+                                alightingAlerts: alightReminderActive)
             location.setBackgroundNavigation(journeyInBackground)
             updateAlightReminder()
         }
@@ -232,6 +234,52 @@ final class TransitAppModel: ObservableObject {
         }
     }
     func rideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
+        guard var state = baseRideActivityState(at: now), let option = planner.selected, let step = planner.currentStep else { return nil }
+        let index: Int
+        switch step { case .walk(let i), .ride(let i): index = i }
+        let ride = option.rides.indices.contains(index) ? option.rides[index] : nil
+        state.rideIdentifier = ride?.id
+        state.stepIdentifier = "\(index):\(state.phase.rawValue):" + (ride?.id ?? "final")
+        if case .walk = step, option.walks.indices.contains(index) {
+            let leg = option.walks[index]
+            var meters = planner.walkingLegIndex == index ? planner.walkingProgress?.remainingDistance : nil
+            meters = meters ?? leg.distance
+            if let bike = leg.bike {
+                let current = meters ?? bike.totalMeters
+                switch planner.cyclingPhase(at: index) ?? .toPickup {
+                case .toPickup:
+                    state.stepIdentifier! += ":pickup"
+                    meters = max(0, current - bike.rideMeters - bike.fromDropoffMeters)
+                    state.nextInstruction = AppText.text("借車後，騎至 %@ 還車", bike.dropoff.localizedName)
+                case .riding:
+                    meters = max(0, current - bike.fromDropoffMeters)
+                    state.nextInstruction = ride.map { AppText.text("還車後，前往 %@", $0.boarding.localizedName) }
+                        ?? AppText.text("還車後，步行前往目的地")
+                case .fromDropoff:
+                    state.stepIdentifier! += ":dropoff"
+                    state.nextInstruction = ride.map { AppText.text("接著搭乘 %@", $0.route.localizedName) }
+                }
+            } else if state.phase == .walking, let ride {
+                state.detail = AppText.text("接著搭乘 %@，往 %@", ride.route.localizedName, ride.route.localizedDestination(direction: ride.direction))
+            }
+            if state.phase != .waiting, !leg.internalTransfer { state.remainingMeters = meters }
+            if state.phase == .waiting, let ride {
+                state.headline = ride.boarding.localizedName
+                state.detail = AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction))
+            }
+        } else if case .ride = step {
+            if option.rides.indices.contains(index + 1) {
+                let next = option.rides[index + 1]
+                state.nextInstruction = AppText.text("下車後轉乘 %@，往 %@", next.route.localizedName, next.route.localizedDestination(direction: next.direction))
+            } else if option.walks.indices.contains(index + 1), let bike = option.walks[index + 1].bike {
+                state.nextInstruction = AppText.text("下車後，前往 %@ 借車", bike.pickup.localizedName)
+            } else {
+                state.nextInstruction = AppText.text("下車後步行至 %@", planner.destination?.localizedName ?? "")
+            }
+        }
+        return state
+    }
+    private func baseRideActivityState(at now: Date) -> RideActivityAttributes.ContentState? {
         guard planner.started, !planner.arrived, let option = planner.selected, let step = planner.currentStep else { return nil }
         // A connector is still a walk or a bike ride until the boarding point is reached.
         // It must never borrow the next vehicle's countdown as the time to finish walking.
@@ -799,6 +847,15 @@ final class TransitAppModel: ObservableObject {
         alightReminder.onPermissionChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onOpenJourney = { [weak self] in self?.resumeCurrentJourney() }
         location.onAuthorizationChange = { [weak self] in self?.synchronizeNavigationState() }
+        rideActivity.canPresentNotice = { [weak self] notice, state in
+            guard notice.kind == .alighting else { return true }
+            guard let self, let id = state.rideIdentifier, self.alightReminderActive else { return false }
+            return self.alightReminder.canPresentInActivity(rideID: id, now: Date())
+        }
+        rideActivity.didPresentNotice = { [weak self] notice, state in
+            guard notice.kind == .alighting, let id = state.rideIdentifier else { return }
+            self?.alightReminder.presentedInActivity(rideID: id)
+        }
         rideActivity.onAvailabilityChange = { [weak self] in
             self?.objectWillChange.send(); self?.synchronizeNavigationState()
         }
@@ -846,7 +903,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     func setActive(_ active: Bool) {
-        guard isActive != active else { return }
+        guard isActive != active else { if !active { synchronizeNavigationState() }; return }
         isActive = active
         JourneyDiagnostics.shared.record(active ? "scene_active" : "scene_inactive")
         if active { Task { [weak self] in

@@ -36,6 +36,11 @@ struct RideActivityAttributes: ActivityAttributes {
         /// Optional additions keep already-running activities decodable after an app update.
         var symbol: String? = nil
         var freshUntil: Date? = nil
+        var stepIdentifier: String? = nil
+        var rideIdentifier: String? = nil
+        var nextInstruction: String? = nil
+        var remainingMeters: Double? = nil
+        var stepKey: String { stepIdentifier ?? [phase.rawValue, sign.text, headline].joined(separator: ":") }
         /// ActivityKit asks the extension to redraw at this deadline. No view-local
         /// periodic schedule is needed to stop an expired countdown.
         var updateDeadline: Date {
@@ -86,6 +91,23 @@ struct RideActivityPresentation {
         case .transferring: return AppText.text("轉乘", language: language)
         }
     }
+    var metricCaption: String {
+        switch state.phase {
+        case .waiting: return AppText.text("距離到站", language: language)
+        case .riding: return AppText.text("距離下車", language: language)
+        case .cycling: return AppText.text("距離還車", language: language)
+        case .walking, .transferring: return AppText.text("預估抵達", language: language)
+        }
+    }
+    var secondaryMetric: String? {
+        guard !stale else { return nil }
+        if let left = state.stopsLeft { return AppText.stops(max(0, left), language: language) }
+        if let meters = state.remainingMeters, meters.isFinite {
+            return meters < 1000 ? "\(Int(max(0, meters).rounded())) m" : String(format: "%.1f km", meters / 1000)
+        }
+        return nil
+    }
+    var relevance: Double { stale ? 0 : alightingSoon ? 100 : state.phase == .riding ? 80 : 60 }
     var status: String {
         if stale {
             if state.phase == .waiting, state.target.map({ $0 <= now }) == true {

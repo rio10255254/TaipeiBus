@@ -284,6 +284,20 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
         // Already inside the lead time: it fires now, once for this ride.
         if secondsToAlight <= Self.leadSeconds { announced.insert(rideID) }
     }
+    /// Keep the already-scheduled local alert when it has fired or is within five seconds.
+    /// A delivered island alert otherwise takes ownership of this one reminder.
+    func canPresentInActivity(rideID: String, now: Date) -> Bool {
+        guard permission == .allowed, !announced.contains(rideID) else { return false }
+        if let scheduled, scheduled.rideID == rideID, scheduled.fireAt <= now.addingTimeInterval(5) { return false }
+        return true
+    }
+    func presentedInActivity(rideID: String) {
+        announced.insert(rideID)
+        if scheduled?.rideID == rideID {
+            UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.identifier])
+            scheduled = nil
+        }
+    }
     func cancel() {
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])

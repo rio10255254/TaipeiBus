@@ -246,16 +246,19 @@ struct RideIslandLeading: View {
 struct RideIslandTrailing: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        Group {
-            if presentation.state.phase != .riding, let target = presentation.target {
+        VStack(alignment: .trailing, spacing: 0) {
+            if let target = presentation.target {
                 Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
                     .font(.system(size: 13, weight: .bold, design: .rounded)).monospacedDigit()
                     .multilineTextAlignment(.trailing)
             } else if let text = presentation.compactText {
-                Text(text).font(.system(size: 13, weight: .bold, design: .rounded))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                Text(text).font(.system(size: 13, weight: .bold, design: .rounded)).lineLimit(1)
             } else {
                 Image(systemName: presentation.symbol).font(.system(size: 15, weight: .semibold))
+            }
+            if let secondary = presentation.secondaryMetric {
+                Text(secondary).font(.system(size: 10, weight: .medium, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.85)
             }
         }
         .frame(maxWidth: 58)
@@ -290,8 +293,10 @@ struct RideCountdown: View {
     let language: AppLanguage
     var size: CGFloat = 28
     var stale = false
+    var showsCaption = false
     var body: some View {
         let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
+        VStack(alignment: .trailing, spacing: 1) {
         if let target = value.target {
             Text(timerInterval: state.updatedAt...target, countsDown: true, showsHours: false)
                 .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
@@ -300,23 +305,40 @@ struct RideCountdown: View {
             Text(value.status).font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
                 .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
         }
+        if showsCaption, value.target != nil {
+            Text(value.metricCaption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+        }
+        }
     }
 }
 
 struct RideActivityDetails: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(presentation.state.headline).font(.headline).lineLimit(2)
+        VStack(alignment: .leading, spacing: 5) {
+            Text(presentation.state.headline).font(.headline).lineLimit(2).minimumScaleFactor(0.85)
             if let progress = presentation.progress {
-                ProgressView(value: progress).tint(presentation.alightingSoon ? .orange : Color(signHex: presentation.state.sign.color))
-                    .accessibilityLabel(presentation.compactText ?? presentation.phaseTitle)
+                HStack(spacing: 10) {
+                    Text(AppText.remainingStops(max(0, presentation.state.stopsLeft ?? 0), language: presentation.language))
+                        .font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
+                    ProgressView(value: progress)
+                        .tint(presentation.alightingSoon ? .orange : Color(signHex: presentation.state.sign.color))
+                }
+            } else if let distance = presentation.secondaryMetric {
+                Text(distance).font(.subheadline.weight(.semibold))
             }
-            Text(presentation.stale ? presentation.status : presentation.state.detail)
-                .font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-            if !presentation.stale, let status = presentation.state.status, presentation.state.target != nil,
-               status != presentation.state.detail {
-                Text(status).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            if presentation.stale {
+                Text(presentation.status).font(.subheadline).foregroundStyle(.secondary)
+            } else {
+                if presentation.state.stopsLeft == nil {
+                    Text(presentation.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                }
+                if let next = presentation.state.nextInstruction {
+                    Text(next).font(.caption).lineLimit(2)
+                }
+                if let source = presentation.state.status, presentation.state.target != nil, source != presentation.state.detail {
+                    Text(source).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -339,7 +361,7 @@ struct RideActivityLockView: View {
                     Text(value.alightingSoon ? AppText.text("準備下車", language: language) : value.phaseTitle)
                         .font(.subheadline.weight(.semibold)).lineLimit(1)
                     Spacer(minLength: 4)
-                    RideCountdown(state: state, language: language, size: 24, stale: stale)
+                    RideCountdown(state: state, language: language, size: 24, stale: stale, showsCaption: true)
                         .frame(maxWidth: 130, alignment: .trailing)
                 }
                 RideActivityDetails(presentation: value)

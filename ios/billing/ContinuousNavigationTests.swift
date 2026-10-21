@@ -85,6 +85,8 @@ import XCTest
         model.boardCurrentRide(at: date)
         XCTAssertEqual(model.rideActivityState(at: date)?.phase, .riding)
         XCTAssertNotNil(model.rideActivityState(at: date)?.stopsLeft)
+        XCTAssertNotNil(model.rideActivityState(at: date)?.stepIdentifier)
+        XCTAssertNotNil(model.rideActivityState(at: date)?.nextInstruction)
     }
     func testLiveActivityTracksAllThreeBikeConnectorPhasesBeforeTransit() throws {
         let date = Date(), model = TransitAppModel()
