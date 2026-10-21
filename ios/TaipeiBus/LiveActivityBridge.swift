@@ -154,9 +154,11 @@ struct RideIslandNoticePolicy {
     /// Only `.ended` and `.dismissed` are final. Any other state, including one a newer iOS
     /// adds, can still occupy an island slot and must be ended rather than skipped.
     nonisolated static func needsEnding(_ state: ActivityState) -> Bool { state != .ended && state != .dismissed }
+    private var listedSessions: [any RideActivitySession] { store.sessions.filter { Self.needsEnding($0.activityState) } }
+    var nativeCount: Int { listedSessions.count }
     /// This app's activities iOS still lists, e.g. "native=1[active] ending=0".
     var nativeSummary: String {
-        let listed = store.sessions.filter { Self.needsEnding($0.activityState) }
+        let listed = listedSessions
         return "native=\(listed.count)[\(listed.map { "\($0.activityState)" }.joined(separator: ","))] ending=\(retirements.count)"
     }
 

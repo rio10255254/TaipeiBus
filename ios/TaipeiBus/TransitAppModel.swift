@@ -91,16 +91,14 @@ final class TransitAppModel: ObservableObject {
         case .requiresPro: return AppText.text("Pro 功能")
         }
     }
-    /// Where iOS can place the trip in the Dynamic Island, as far as location permission decides.
+    /// Advice appears only once this phone needed the classic indicator during a trip; Always is
+    /// then the documented way to keep background updates without it.
     var islandPlacementStatus: String? {
-        guard purchases.hasPro, rideActivityOn, location.navigationPermission == .allowed else { return nil }
-        if location.alwaysAuthorized { return AppText.text("定位為「永遠」：導航時不顯示藍色定位標示，行程可使用中央長條。") }
-        if location.activityBackedFailed {
-            return AppText.text("這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。")
-        }
-        return AppText.text("導航時改由動態島維持背景更新，以避免藍色定位標示。若行程仍只在右側小圈顯示，可將定位改為「永遠」。")
+        guard purchases.hasPro, rideActivityOn, location.navigationPermission == .allowed,
+              !location.alwaysAuthorized, location.activityBackedFailed else { return nil }
+        return AppText.text("這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。")
     }
-    var canUpgradeToAlwaysLocation: Bool { islandPlacementStatus != nil && !location.alwaysAuthorized }
+    var canUpgradeToAlwaysLocation: Bool { islandPlacementStatus != nil }
     func requestAlwaysLocation() {
         if !location.requestAlwaysAuthorization() { openAppSettings() }
     }
@@ -1872,6 +1870,8 @@ final class TransitAppModel: ObservableObject {
     /// What a physical phone actually holds when the island looks wrong: how many of this
     /// app's activities iOS still lists, and whether background location asked for the indicator.
     private func recordIslandDiagnostics(_ moment: String) {
+        // Scene changes while browsing are not island events; keep the short log for trips.
+        guard moment == "end" || planner.started || rideActivity.nativeCount > 0 else { return }
         JourneyDiagnostics.shared.record("island \(moment) trip=\(planner.started && !planner.arrived) \(rideActivity.nativeSummary)"
             + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation) indicator=\(location.backgroundIndicator) activity_backed=\(location.activityBacked)")
     }

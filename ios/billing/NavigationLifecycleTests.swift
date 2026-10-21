@@ -166,23 +166,26 @@ import StoreKitTest
         session.dismiss()
         XCTAssertTrue(value.location.backgroundIndicator, "Without a visible trip, background use stays visible")
     }
-    func testSilentBackgroundFallsBackToTheIndicatorForThisAndLaterTrips() async throws {
+    func testWaitingSilentlyKeepsTheActivityPathAndARealFailureIsRememberedPerSystemVersion() async throws {
         UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
         defer { UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey) }
         let (value, _, controller) = try await startedWithActivity()
         XCTAssertTrue(value.location.activityBacked)
-        value.location.setActive(false)
-        // A short visit away is not evidence: the rider may simply be standing at the stop.
-        value.location.checkActivityBackedDelivery(now: Date().addingTimeInterval(60))
+        // A rider standing at the stop produces no location events; that is not a failure.
+        value.location.setActive(false); value.location.setActive(true)
         XCTAssertTrue(value.location.activityBacked)
-        value.location.setActive(false)
-        value.location.checkActivityBackedDelivery(now: Date().addingTimeInterval(200))
+        XCTAssertNil(value.islandPlacementStatus, "No permission advice while the activity path works")
+        value.location.fallBackFromActivity("insufficiently_in_use")
         XCTAssertFalse(value.location.activityBacked)
         XCTAssertTrue(value.location.backgroundNavigation); XCTAssertTrue(value.location.backgroundIndicator)
+        XCTAssertNotNil(value.islandPlacementStatus); XCTAssertTrue(value.canUpgradeToAlwaysLocation)
         value.finishJourney(); await controller.waitForPendingChanges()
-        let (next, _, _) = try await startedWithActivity()
-        XCTAssertFalse(next.location.activityBacked, "A phone that did not deliver updates keeps using the indicator")
-        XCTAssertTrue(next.location.backgroundIndicator)
+        let (next, _, nextController) = try await startedWithActivity()
+        XCTAssertFalse(next.location.activityBacked, "The same iOS version keeps using classic updates")
+        next.finishJourney(); await nextController.waitForPendingChanges()
+        UserDefaults.standard.set(LocationService.systemMajorVersion - 1, forKey: LocationService.activityBackedFailedKey)
+        let (updated, _, _) = try await startedWithActivity()
+        XCTAssertTrue(updated.location.activityBacked, "A failure on an earlier iOS is tried again")
     }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()

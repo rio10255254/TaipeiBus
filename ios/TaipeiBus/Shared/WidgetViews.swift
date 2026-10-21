@@ -267,25 +267,40 @@ struct RideIslandTrailing: View {
     }
 }
 
+/// Route colours are chosen for light map signs; very dark ones disappear on the black island.
+func rideIslandTint(_ presentation: RideActivityPresentation) -> Color {
+    if presentation.alightingSoon { return .orange }
+    let value = UInt32(presentation.state.sign.color.trimmingCharacters(in: CharacterSet(charactersIn: "#")), radix: 16) ?? 0x1F6FD1
+    let luminance = 0.2126 * Double((value >> 16) & 0xFF) + 0.7152 * Double((value >> 8) & 0xFF) + 0.0722 * Double(value & 0xFF)
+    return luminance < 70 ? .white : Color(signHex: presentation.state.sign.color)
+}
+
 struct RideIslandMinimal: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        // No long route names squeezed into the detached circle. Identify the current action
-        // and show a count only while it is fresh; the expanded view retains the full route.
-        VStack(spacing: 0) {
-            Image(systemName: presentation.symbol)
-                .font(.system(size: presentation.target == nil || presentation.alightingSoon ? 16 : 9, weight: .semibold))
-            if let target = presentation.target, !presentation.alightingSoon {
-                Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
-                    .font(.system(size: 10, weight: .bold, design: .rounded))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.8).multilineTextAlignment(.center)
+        // The detached circle has no room for a clock: "14:05" was truncated to "14:…". Show the
+        // current action, ringed by stops travelled on board, or by the final ten minutes before
+        // the bus or the next point is reached. The system animates the ring between updates.
+        let tint = rideIslandTint(presentation)
+        ZStack {
+            if presentation.alightingSoon {
+                Circle().stroke(tint, lineWidth: 2.5)
+            } else if presentation.state.phase == .riding, let progress = presentation.progress {
+                Circle().stroke(Color.white.opacity(0.22), lineWidth: 2.5)
+                Circle().trim(from: 0, to: progress).stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            } else if let target = presentation.target {
+                ProgressView(timerInterval: target.addingTimeInterval(-600)...target, countsDown: true,
+                             label: { EmptyView() }, currentValueLabel: { EmptyView() })
+                    .progressViewStyle(.circular).tint(tint)
             }
+            Image(systemName: presentation.symbol)
+                .font(.system(size: presentation.alightingSoon ? 12 : 10, weight: .bold))
+                .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
         }
-        .frame(width: 24, height: 26)
-        .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
+        .frame(width: 24, height: 24)
         .accessibilityElement(children: .ignore).accessibilityLabel(presentation.accessibilityLabel)
     }
-
 }
 
 struct RideCountdown: View {
@@ -321,8 +336,15 @@ struct RideActivityDetails: View {
                 HStack(spacing: 10) {
                     Text(AppText.remainingStops(max(0, presentation.state.stopsLeft ?? 0), language: presentation.language))
                         .font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
-                    ProgressView(value: progress)
-                        .tint(presentation.alightingSoon ? .orange : Color(signHex: presentation.state.sign.color))
+                    // The default bar's track vanishes on the black island and the Lock Screen.
+                    Capsule().fill(Color.primary.opacity(0.18)).frame(height: 5)
+                        .overlay(alignment: .leading) {
+                            GeometryReader { box in
+                                Capsule().fill(rideIslandTint(presentation))
+                                    .frame(width: max(5, box.size.width * progress))
+                            }
+                        }
+                        .accessibilityHidden(true)
                 }
             } else if let distance = presentation.secondaryMetric {
                 Text(distance).font(.subheadline.weight(.semibold))
