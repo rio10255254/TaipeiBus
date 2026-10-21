@@ -61,7 +61,10 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
             XCUIDevice.shared.press(.home); sleep(4)
             let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-            waitForSystemIsland(board)
+            // Reproduce the reported action even if the compact frame is blank.
+            // Requiring readable compact text first would prevent us from testing
+            // whether a long press itself produces the persistent black capsule.
+            capture("island-initial-" + scenario + "-before-expansion")
             board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
             let headline = board.staticTexts["捷運內湖站"].firstMatch
             XCTAssertTrue(headline.waitForExistence(timeout: 20), "A past deadline must not leave a black shell")
@@ -70,6 +73,9 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
                 XCTAssertTrue(board.staticTexts["點一下更新"].firstMatch.exists)
             }
             capture("island-initial-" + scenario)
+            XCUIDevice.shared.press(.home); sleep(2)
+            waitForSystemIsland(board)
+            capture("island-initial-" + scenario + "-after-collapse")
             app.activate(); endSystemActivity(app)
         }
     }
