@@ -7,6 +7,10 @@ on:
         description: 'Repeat the already-passed older SDK comparison as well as the current SDK'
         type: boolean
         default: false
+      legacy_only:
+        description: 'Verify the shipping SDK app on iOS 27 without recompiling an unused SDK 27 app'
+        type: boolean
+        default: false
   push:
     branches: ['codex/island-rendering-recovery']
     paths: ['.github/workflows/island-compatibility.yml']
@@ -16,12 +20,12 @@ permissions:
 
 concurrency:
   # Keep the failing baseline's screenshots while its corrected successor runs.
-  group: island-compatibility-${{ github.ref }}-${{ github.sha }}
+  group: island-compatibility-${{ github.ref }}-${{ github.sha }}-${{ inputs.legacy_only && 'legacy' || inputs.compare_legacy && 'both' || 'current' }}
   cancel-in-progress: true
 
 jobs:
   legacy_app:
-    if: inputs.compare_legacy == true
+    if: inputs.compare_legacy == true || inputs.legacy_only == true
     runs-on: macos-15
     timeout-minutes: 20
     env:
@@ -56,7 +60,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        source_sdk: ${{ fromJSON(inputs.compare_legacy && '["legacy","current"]' || '["current"]') }}
+        source_sdk: ${{ fromJSON(inputs.legacy_only && '["legacy"]' || inputs.compare_legacy && '["legacy","current"]' || '["current"]') }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
     steps:
@@ -73,7 +77,14 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           gem install xcodeproj -v 1.27.0 --no-document --user-install
-          ruby ios/usability/setup.rb
+          if [ '${{ matrix.source_sdk }}' = legacy ]; then
+            mkdir -p "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator"
+            ditto -x -k "$RUNNER_TEMP/legacy-island/legacy-island-app.zip" "$RUNNER_TEMP/LegacyUnpacked"
+            ditto "$RUNNER_TEMP/LegacyUnpacked/TaipeiBus.app" "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app"
+            BUS_ISLAND_DRIVER_ONLY=true ruby ios/usability/setup.rb
+          else
+            ruby ios/usability/setup.rb
+          fi
           xcrun simctl list runtimes -j | tee "$RUNNER_TEMP/island-runtimes.json"
           runtime=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/island-runtimes.json")); r=[r for r in d["runtimes"] if r["isAvailable"] and r["name"].startswith("iOS") and r["version"].startswith("27.0")]; assert r,"An actual iOS 27.0 runtime is required"; print(r[0]["identifier"])')
           device=$(xcrun simctl create TaipeiBus-ios27 com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro "$runtime")
@@ -91,19 +102,12 @@ jobs:
           BUS_ISLAND_SOURCE_SDK: ${{ matrix.source_sdk }}
         run: |
           set -euo pipefail
-          if [ "$BUS_ISLAND_SOURCE_SDK" = legacy ]; then
-            ditto -x -k "$RUNNER_TEMP/legacy-island/legacy-island-app.zip" "$RUNNER_TEMP/LegacyUnpacked"
-          fi
           python3 - <<'PY'
-          import json, os, plistlib, shutil
+          import json, os, plistlib
           from pathlib import Path
           root = Path(os.environ['RUNNER_TEMP']).resolve()
           app = root/'Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app'
-          if os.environ['BUS_ISLAND_SOURCE_SDK'] == 'legacy':
-              backup = app.with_name('TaipeiBusSDK27-reference.app')
-              assert app.resolve().is_relative_to(root) and not backup.exists()
-              app.rename(backup)
-              shutil.copytree(root/'LegacyUnpacked/TaipeiBus.app', app)
+          assert app.resolve().is_relative_to(root)
           report = {'source_sdk': os.environ['BUS_ISLAND_SOURCE_SDK'], 'bundles': []}
           for bundle in [app, app/'PlugIns/TaipeiBusWidgets.appex']:
               info = plistlib.loads((bundle/'Info.plist').read_bytes())
@@ -156,6 +160,7 @@ jobs:
             ${{ runner.temp }}/island-crashes
 
   navigation:
+    if: inputs.legacy_only != true
     runs-on: xcode-27
     timeout-minutes: 30
     env:
