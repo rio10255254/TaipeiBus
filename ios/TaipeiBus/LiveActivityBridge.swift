@@ -1,4 +1,5 @@
 import ActivityKit
+import UIKit
 import SwiftUI
 import WidgetKit
 import TransitCore

@@ -85,7 +85,7 @@ struct RideActivityPresentation {
     var phaseTitle: String {
         switch state.phase {
         case .waiting: return AppText.text("等車", language: language)
-        case .riding: return AppText.text("下車站", language: language)
+        case .riding: return AppText.text("搭乘中", language: language)
         case .walking: return AppText.text("步行前往", language: language)
         case .cycling: return AppText.text("騎車前往", language: language)
         case .transferring: return AppText.text("轉乘", language: language)
