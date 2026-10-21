@@ -134,7 +134,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     // MARK: Live Activity and Home Screen widget (Pro)
-    let rideActivity = RideActivityController()
+    let rideActivity: RideActivityController
     let commuteWidget = CommuteWidgetBridge()
     /// The saved trip whose plan is on screen; its first ride is what the widget will watch.
     private var activeSavedJourneyID: UUID?
@@ -817,8 +817,9 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var previewNotice: String?
 #endif
 
-    init(service: TransitService = TransitService()) {
+    init(service: TransitService = TransitService(), rideActivity: RideActivityController? = nil) {
         self.service = service
+        self.rideActivity = rideActivity ?? RideActivityController()
         let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
         var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
 #if DEBUG

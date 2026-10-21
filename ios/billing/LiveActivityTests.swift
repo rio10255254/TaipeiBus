@@ -231,7 +231,11 @@ import ActivityKit
     }
     func testReplacementWaitsForRetirementButNotForAnObsoleteUpdate() async {
         let store = FakeRideStore()
-        let controller = RideActivityController(store: store, now: { [now] in now })
+        let background = FakeRideBackgroundTask()
+        var backgroundStarts = 0
+        let controller = RideActivityController(store: store, now: { [now] in now }, beginBackgroundTask: {
+            backgroundStarts += 1; return background
+        })
         controller.update(state(), destination: "A", language: .english, enabled: true)
         await controller.waitForPendingChanges()
         let old = store.created[0]
@@ -242,6 +246,7 @@ import ActivityKit
             try? await Task.sleep(for: .milliseconds(5))
         }
         controller.endAll()
+        XCTAssertEqual(backgroundStarts, 1, "End must acquire its background allowance before returning to the scene")
         controller.update(state("waiting"), destination: "B", language: .english, enabled: true)
         for _ in 0..<100 {
             if old.endPending != nil { break }
@@ -249,6 +254,7 @@ import ActivityKit
         }
         let endStartedWithoutOldUpdate = old.endPending != nil
         XCTAssertEqual(store.created.count, 1, "A replacement must wait until the old activity ends")
+        XCTAssertEqual(background.finishCount, 0)
         old.holdEnd = false; old.endPending?.resume(); old.endPending = nil
         for _ in 0..<100 {
             if store.created.count == 2 { break }
@@ -260,9 +266,23 @@ import ActivityKit
         XCTAssertTrue(endStartedWithoutOldUpdate)
         XCTAssertTrue(replacementStartedWithoutOldUpdate)
         XCTAssertEqual(old.endCount, 1)
+        XCTAssertEqual(backgroundStarts, 1)
+        XCTAssertEqual(background.finishCount, 1, "The finite background allowance must be released once dismissal finishes")
         XCTAssertEqual(store.sessions.count, 1)
         XCTAssertEqual(store.created.last?.attributes.destination, "B")
         XCTAssertTrue(controller.isRunning)
+    }
+    func testSceneCleanupFindsAnOrphanEvenAfterTheInitialEmptyCleanup() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        let attributes = RideActivityAttributes(destination: "Previous navigation", language: AppLanguage.english.rawValue)
+        _ = try store.start(attributes, content: ActivityContent(state: state(), staleDate: now.addingTimeInterval(120)))
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(store.sessions.isEmpty, "An idle controller must still inspect native activities restored later")
+        XCTAssertEqual(store.created[0].endCount, 1)
     }
     func testImmediateRestartToSameDestinationFinishesPreviousSession() async {
         let store = FakeRideStore()
@@ -457,7 +477,7 @@ import ActivityKit
 
 }
 
-@MainActor private final class FakeRideStore: RideActivityStore {
+@MainActor final class FakeRideStore: RideActivityStore {
     var allowed = true
     var created: [FakeRideSession] = []
     var events: [String] = []
@@ -469,7 +489,7 @@ import ActivityKit
         return value
     }
 }
-@MainActor private final class FakeRideSession: RideActivitySession {
+@MainActor final class FakeRideSession: RideActivitySession {
     let id = UUID().uuidString
     let attributes: RideActivityAttributes
     var activityState = ActivityState.active
@@ -502,4 +522,8 @@ import ActivityKit
         observer = change
         return Task {}
     }
+}
+@MainActor private final class FakeRideBackgroundTask: RideActivityBackgroundTask {
+    var finishCount = 0
+    func finish() { finishCount += 1 }
 }

@@ -17,7 +17,7 @@ import StoreKitTest
         session.clearTransactions(); session = nil
     }
     private func point(_ meters: Double) -> Coordinate { Coordinate(latitude: 25.04, longitude: 121.55 + meters / 100_750) }
-    private func model(mode: TransportMode = .bus) -> TransitAppModel {
+    private func model(mode: TransportMode = .bus, rideActivity: RideActivityController? = nil) -> TransitAppModel {
         var metadata = TransitMetadata()
         var route = BusRoute(id: "route", parentID: "family", name: "284", variantName: "", departure: "起點", destination: "終點")
         route.mode = mode
@@ -32,7 +32,7 @@ import StoreKitTest
             WalkingLeg(from: point(-100), to: point(0), coordinates: [point(-100), point(0)], distance: 100, duration: 90),
             WalkingLeg(from: point(2_000), to: point(2_000), distance: 0, duration: 0)
         ])
-        let model = TransitAppModel(); models.append(model)
+        let model = TransitAppModel(rideActivity: rideActivity); models.append(model)
         model.rideActivityOn = false; model.alightReminderOn = true
         let now = Date()
         model.auditNavigation(metadata: metadata, snapshot: TransitSnapshot(sourceUpdatedAt: now,
@@ -84,6 +84,42 @@ import StoreKitTest
         XCTAssertFalse(value.location.backgroundNavigation)
         await refresh.value
         XCTAssertFalse(value.location.backgroundNavigation); XCTAssertFalse(value.planner.started)
+    }
+    func testEndingTheRealPlannerAndLeavingDoesNotRestoreItsBlockedActivity() async {
+        let store = FakeRideStore()
+        // Use the same controller as the app, with only the system adapter delayed.
+        let controller = RideActivityController(store: store)
+        let value = model(rideActivity: controller)
+        await unlock(value)
+        value.rideActivityOn = true; value.planner.begin()
+        await controller.waitForPendingChanges()
+        guard let old = store.created.first else { return XCTFail("The started planner must create its native activity") }
+        old.holdUpdate = true
+        value.boardCurrentRide()
+        for _ in 0..<100 {
+            if old.updatePending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(old.updatePending)
+        let refresh = Task { await value.purchases.refreshAccess() }
+        value.finishJourney()
+        value.synchronizeNavigationState()
+        for _ in 0..<100 {
+            if old.endCount > 0 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let endedWithoutOldUpdate = old.endCount
+        old.updatePending?.resume(); old.updatePending = nil
+        await refresh.value; await controller.waitForPendingChanges()
+        value.open(URL(string: "taipeibus://journey")!)
+        value.updateLiveSurfaces()
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(endedWithoutOldUpdate, 1)
+        XCTAssertFalse(value.planner.started)
+        XCTAssertFalse(value.location.backgroundNavigation)
+        XCTAssertFalse(value.liveActivityRunning)
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.created.count, 1, "A late permission refresh or old island link must not begin another trip")
     }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()

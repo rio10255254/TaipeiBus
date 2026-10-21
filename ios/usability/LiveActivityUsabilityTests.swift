@@ -136,6 +136,44 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         endSystemActivity(app)
         XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
     }
+    func testEndingBeforeHomeDoesNotReappearAfterRepeatedForegroundTransitions() {
+        for walking in [true, false] {
+            launch(["--preview-island", "--island-auto-expand"] + (walking ? ["--island-walking"] : []))
+            let start = button("island-system-start")
+            for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(start.isHittable); start.tap()
+            let status = app.staticTexts["island-system-status"]
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                status.exists && status.label.hasPrefix("started:")
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+            XCUIDevice.shared.press(.home)
+            let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            waitForSystemIsland(board)
+            app.activate()
+            let end = button("island-system-end")
+            for _ in 0..<4 { if end.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(end.isHittable); end.tap()
+            // Reproduce the quick Home gesture without waiting for the app's
+            // "ended" label. Ending must survive scene departure on its own.
+            XCUIDevice.shared.press(.home)
+            let absent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                !self.hasVisibleSystemIsland(board)
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [absent], timeout: 15), .completed)
+            sleep(3)
+            XCTAssertFalse(hasVisibleSystemIsland(board))
+            capture(walking ? "walking-end-immediate-home" : "transit-end-immediate-home")
+            for _ in 0..<2 {
+                app.activate()
+                XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
+                XCUIDevice.shared.press(.home); sleep(2)
+                XCTAssertFalse(hasVisibleSystemIsland(board), "Foreground/background callbacks must not recreate the ended activity")
+            }
+            app.terminate(); sleep(2)
+            XCTAssertFalse(hasVisibleSystemIsland(board))
+        }
+    }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {
             launch(["--preview-island"] + (english ? ["--test-language", "en"] : []))

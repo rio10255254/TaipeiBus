@@ -160,6 +160,7 @@ jobs:
               -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingGuidanceAppearsOnTheActualSystemIsland \
               -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testInitiallyStaleOrDueNavigationStillRendersGuidance \
               -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testTerminatedAppGuidanceSurvivesReopeningWithoutDuplicateActivities \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testEndingBeforeHomeDoesNotReappearAfterRepeatedForegroundTransitions \
               -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
               | tee "$RUNNER_TEMP/island-$appearance.log"
           done
