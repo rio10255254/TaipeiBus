@@ -284,6 +284,19 @@ import ActivityKit
         XCTAssertTrue(store.sessions.isEmpty, "An idle controller must still inspect native activities restored later")
         XCTAssertEqual(store.created[0].endCount, 1)
     }
+    func testIdleRefreshesDoNotRepeatedlyEnumerateNativeActivities() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(nil, destination: "", language: .english, enabled: false)
+        await controller.waitForPendingChanges()
+        let idleReads = store.sessionReads
+        for _ in 0..<50 { controller.update(nil, destination: "", language: .english, enabled: false) }
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.sessionReads, idleReads, "Background cleanup must not add system lookups to every GPS/feed refresh")
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        XCTAssertGreaterThan(store.sessionReads, idleReads, "An explicit End or scene transition must still discover restored activities")
+    }
     func testImmediateRestartToSameDestinationFinishesPreviousSession() async {
         let store = FakeRideStore()
         let value = RideActivityController(store: store, now: { [now] in now })
@@ -481,7 +494,11 @@ import ActivityKit
     var allowed = true
     var created: [FakeRideSession] = []
     var events: [String] = []
-    var sessions: [any RideActivitySession] { created.filter { $0.activityState == .active || $0.activityState == .stale } }
+    private(set) var sessionReads = 0
+    var sessions: [any RideActivitySession] {
+        sessionReads += 1
+        return created.filter { $0.activityState == .active || $0.activityState == .stale }
+    }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession {
         let value = FakeRideSession(attributes: attributes, content: content)
         value.didEnd = { [weak self] in self?.events.append("end:" + attributes.destination) }

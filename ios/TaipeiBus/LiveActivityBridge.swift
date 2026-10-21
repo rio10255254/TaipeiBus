@@ -172,7 +172,7 @@ struct RideIslandNoticePolicy {
     }
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool,
                 presentImportantUpdates: Bool = false, alightingAlerts: Bool = false) {
-        guard enabled, let state else { endAll(); return }
+        guard enabled, let state else { endAll(recheckSystem: false); return }
         guard !stoppedByUser else { return }
         let permissionChanged = lastAllowed != store.allowed
         lastAllowed = store.allowed
@@ -185,11 +185,13 @@ struct RideIslandNoticePolicy {
         desired = Desired(state: state, attributes: attributes, presentImportantUpdates: presentImportantUpdates, alightingAlerts: alightingAlerts)
         revision += 1; mayHaveActivities = true; schedule()
     }
-    func endAll() {
+    func endAll(recheckSystem: Bool = true) {
+        // Nil GPS/feed updates can arrive every second while browsing. Reserve
+        // native re-enumeration for a real End or foreground/background transition.
+        guard recheckSystem || desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
         var sessions = store.sessions
         if let activity, !sessions.contains(where: { $0.id == activity.id }) { sessions.append(activity) }
         let active = sessions.filter { $0.activityState == .active || $0.activityState == .stale }
-        guard desired != nil || activity != nil || mayHaveActivities || !active.isEmpty else { stoppedByUser = false; return }
         retiredIDs.formUnion(active.map(\.id))
         // A terminal callback already queued by the old activity must not dismiss
         // a journey that the user starts immediately after this one.
