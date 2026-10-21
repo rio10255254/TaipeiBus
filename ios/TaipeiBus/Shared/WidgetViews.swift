@@ -286,15 +286,16 @@ struct RideGlowRing: View {
     var lineWidth: CGFloat = 4
     var body: some View {
         let tint = rideIslandTint(presentation)
+        let glow = tint.opacity(0.85)
         ZStack {
             Circle().stroke(Color.primary.opacity(0.14), lineWidth: lineWidth)
             if presentation.alightingSoon {
-                Circle().stroke(tint, lineWidth: lineWidth).shadow(color: tint.opacity(0.85), radius: lineWidth * 1.5)
+                Circle().stroke(tint, lineWidth: lineWidth).shadow(color: glow, radius: lineWidth * 1.5)
             } else if let target = presentation.target {
                 ProgressView(timerInterval: target.addingTimeInterval(-rideRingWindow)...target, countsDown: true,
                              label: { EmptyView() }, currentValueLabel: { EmptyView() })
                     .progressViewStyle(.circular).tint(tint)
-                    .shadow(color: tint.opacity(0.85), radius: lineWidth * 1.5)
+                    .shadow(color: glow, radius: lineWidth * 1.5)
             }
         }
     }
@@ -304,9 +305,18 @@ struct RideIslandMinimal: View {
     let presentation: RideActivityPresentation
     var body: some View {
         // The detached circle has no room for a clock ("14:05" became "14:…"): the action symbol
-        // inside the same glowing countdown ring as the expanded island.
+        // inside a ring drawn at the latest update, over the same ten-minute window. Plain shapes
+        // render reliably here; the system-driven ring stays in the roomier presentations.
+        let tint = rideIslandTint(presentation)
+        let remaining: Double? = presentation.alightingSoon ? 1 : presentation.target.map {
+            min(1, max(0, $0.timeIntervalSince(presentation.now) / rideRingWindow))
+        }
         ZStack {
-            RideGlowRing(presentation: presentation, lineWidth: 2.5)
+            Circle().stroke(Color.white.opacity(0.22), lineWidth: 2.5)
+            if let remaining {
+                Circle().trim(from: 0, to: remaining).stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
             Image(systemName: presentation.symbol)
                 .font(.system(size: presentation.alightingSoon ? 12 : 10, weight: .bold))
                 .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
@@ -321,6 +331,8 @@ struct RideIslandMinimal: View {
 struct RideCountdownRing: View {
     let presentation: RideActivityPresentation
     var diameter: CGFloat = 64
+    /// The expanded island names the countdown in its title, keeping the region short.
+    var showsCaption = true
     var body: some View {
         VStack(spacing: 4) {
             ZStack {
@@ -337,7 +349,7 @@ struct RideCountdownRing: View {
             }
             .frame(width: diameter, height: diameter)
             // A stale status is already in the details beside the ring.
-            if presentation.target != nil || !presentation.stale {
+            if showsCaption, presentation.target != nil || !presentation.stale {
                 Text(presentation.target != nil ? presentation.metricCaption : presentation.status)
                     .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                     .lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: diameter + 36)
@@ -348,10 +360,12 @@ struct RideCountdownRing: View {
 
 struct RideActivityDetails: View {
     let presentation: RideActivityPresentation
+    /// The expanded island has a fixed height limit; keep one line each and omit the source.
+    var compact = false
     var body: some View {
         let state = presentation.state
         VStack(alignment: .leading, spacing: 4) {
-            Text(state.headline).font(.headline).lineLimit(2).minimumScaleFactor(0.85)
+            Text(state.headline).font(.headline).lineLimit(compact ? 1 : 2).minimumScaleFactor(0.85)
             if presentation.stale {
                 Text(presentation.status).font(.subheadline).foregroundStyle(.secondary)
             } else {
@@ -360,15 +374,18 @@ struct RideActivityDetails: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.primary)
                 } else if let distance = presentation.secondaryMetric {
-                    Text(distance + " · " + state.detail).font(.subheadline).lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(distance).font(.subheadline.weight(.semibold))
+                        Text(state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 } else {
                     Text(state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
                 if let next = state.nextInstruction {
-                    Text(next).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(next).font(.caption).foregroundStyle(.secondary).lineLimit(compact ? 1 : 2)
                 }
                 // Say when a time is an estimate, e.g. "班距推估" for a metro headway.
-                if let source = state.status, state.target != nil, source != state.detail {
+                if !compact, let source = state.status, state.target != nil, source != state.detail {
                     Text(source).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }

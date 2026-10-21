@@ -551,11 +551,12 @@ struct IslandPreviewGallery: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         RideActivityBadge(state: state)
-                        Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
+                        Text(value.phaseTitle + (value.target != nil ? " · " + value.metricCaption : ""))
+                            .font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
-                        RideCountdownRing(presentation: value, diameter: 54)
+                        RideCountdownRing(presentation: value, diameter: 46, showsCaption: false)
                     }
-                    RideActivityDetails(presentation: value)
+                    RideActivityDetails(presentation: value, compact: true)
                 }.padding(16).frame(maxWidth: .infinity).background(.black, in: RoundedRectangle(cornerRadius: 32))
                     .environment(\.colorScheme, .dark).foregroundStyle(.white).accessibilityIdentifier("island-expanded")
                 RideActivityLockView(state: state, attributes: .init(destination: state.headline, language: language.rawValue))
