@@ -111,7 +111,7 @@ jobs:
         run: |
           set -euo pipefail
           xcrun simctl spawn "$BUS_SIM_DEVICE" log stream --style compact --level debug \
-            --predicate 'process == "chronod" OR process == "TaipeiBusWidgets" OR process == "liveactivitiesd" OR subsystem BEGINSWITH "com.apple.WidgetKit"' \
+            --predicate 'process == "TaipeiBus" OR process == "chronod" OR process == "TaipeiBusWidgets" OR process == "liveactivitiesd" OR subsystem BEGINSWITH "com.apple.WidgetKit"' \
             > "$RUNNER_TEMP/island-system-runtime.log" 2>&1 &
           island_log_pid=$!
           trap 'kill "$island_log_pid" 2>/dev/null || true' EXIT
