@@ -20,6 +20,11 @@ struct TaipeiBusApp: App {
             root
                 .onOpenURL { model.open($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
+#if DEBUG || ISLAND_RENDER_AUDIT
+                    // The gallery owns a separate real activity controller.
+                    // Do not let an empty home-screen model clean up its session.
+                    if ProcessInfo.processInfo.arguments.contains("--preview-island") { return }
+#endif
                     model.setActive(phase == .active)
                     if phase == .active { Task { await checkForUpdate() }; Task { await tuning.refresh() } }
                 }

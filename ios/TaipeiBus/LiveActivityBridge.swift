@@ -267,7 +267,7 @@ struct RideIslandNoticePolicy {
         guard let a = old.target, let b = new.target else { return false }
         return abs(a.timeIntervalSince(b)) >= 20
     }
-#if DEBUG
+#if DEBUG || ISLAND_RENDER_AUDIT
     func waitForPendingChanges() async { while let task = worker { await task.value } }
 #endif
 }
@@ -460,7 +460,10 @@ struct IslandPreviewGallery: View {
                         message = "two-activities"
                     } catch { message = "second-failed" }
                 }.accessibilityIdentifier("island-system-second")
-                Button("End test activities") { controller.endAll(); message = "ended" }.accessibilityIdentifier("island-system-end")
+                Button("End test activities") {
+                    controller.endAll(); message = "ending"
+                    Task { await controller.waitForPendingChanges(); message = "ended" }
+                }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
             }.padding(16)
         }

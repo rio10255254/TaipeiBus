@@ -160,6 +160,9 @@ final class TransitAppModel: ObservableObject {
     private var synchronizingNavigation = false
     /// Starts/stops on the user's transition, independently of provider refresh or SwiftUI.
     func synchronizeNavigationState(publishLocation: Bool = false) {
+#if DEBUG || ISLAND_RENDER_AUDIT
+        if ProcessInfo.processInfo.arguments.contains("--preview-island") { return }
+#endif
         guard !synchronizingNavigation else { return }
         synchronizingNavigation = true
         defer { synchronizingNavigation = false }

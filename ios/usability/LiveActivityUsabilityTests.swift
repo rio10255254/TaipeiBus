@@ -2,6 +2,15 @@ import XCTest
 import UIKit
 
 final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
+    private func endSystemActivity(_ target: XCUIApplication) {
+        target.buttons["island-system-end"].tap()
+        let status = target.staticTexts["island-system-status"]
+        let ended = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && status.label == "ended"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ended], timeout: 20), .completed,
+            "The previous native activity must finish ending before the test terminates its app")
+    }
     func testInitiallyStaleOrDueNavigationStillRendersGuidance() {
         for scenario in ["stale", "due"] {
             launch(["--preview-island", "--island-scenario", scenario])
@@ -23,7 +32,7 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
                 XCTAssertTrue(board.staticTexts["點一下更新"].firstMatch.exists)
             }
             capture("island-initial-" + scenario)
-            app.activate(); button("island-system-end").tap()
+            app.activate(); endSystemActivity(app)
         }
     }
     func testWalkingGuidanceAppearsOnTheActualSystemIsland() {
@@ -45,7 +54,7 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             "The walking route must render its real guidance, not only create an activity shell")
         assertIslandPixels(board.staticTexts["捷運內湖站"].firstMatch)
         capture("walking-real-system-expanded")
-        app.activate(); button("island-system-end").tap()
+        app.activate(); endSystemActivity(app)
     }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {
@@ -108,8 +117,8 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         capture("central-island-automatic-with-other-activity")
         app.activate()
         for _ in 0..<3 { if button("island-system-end").isHittable { break }; app.swipeUp() }
-        button("island-system-end").tap()
-        companion.activate(); companion.buttons["island-system-end"].tap()
+        endSystemActivity(app)
+        companion.activate(); endSystemActivity(companion)
     }
     func testSystemCompactAndTwoActivityPresentationsAndEnd() {
         launch(["--preview-island"])
@@ -152,12 +161,12 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         let tree = XCTAttachment(string: springboard.debugDescription)
         tree.name = "island-two-apps-springboard"; tree.lifetime = .keepAlways; add(tree)
         app.activate()
-        button("island-system-end").tap()
+        endSystemActivity(app)
         XCTAssertEqual(status.label, "ended")
         XCUIDevice.shared.press(.home); sleep(3)
         capture("island-ended-other-app-remains")
         companion.activate()
-        companion.buttons["island-system-end"].tap()
+        endSystemActivity(companion)
         XCUIDevice.shared.press(.home); sleep(3)
         capture("island-real-system-ended")
         app.activate()
