@@ -276,26 +276,35 @@ func rideIslandTint(_ presentation: RideActivityPresentation) -> Color {
 }
 
 /// The final ten minutes drain the ring. Further away it stays full, so a fresh trip does not
-/// look nearly finished; the system animates the ring without app updates.
+/// look nearly finished.
 let rideRingWindow: TimeInterval = 600
 
-/// A countdown ring on a halo in the route colour. Live Activities cannot run their own
-/// animations, so the motion is the system-driven ring rather than a spinning effect. The halo
-/// is a wide translucent stroke: a shadow on the timed ring delayed the island's first render.
+/// Share of the ten-minute window left at the latest update; full when alighting is due.
+func rideRingRemaining(_ presentation: RideActivityPresentation) -> Double? {
+    if presentation.alightingSoon { return 1 }
+    return presentation.target.map { min(1, max(0, $0.timeIntervalSince(presentation.now) / rideRingWindow)) }
+}
+
+/// A countdown ring on a halo in the route colour. Live Activities cannot animate on their own,
+/// and the system-timed ProgressView delayed island rendering whenever two activities were
+/// shown, so the ring is plain shapes advanced by each update while the time inside keeps
+/// counting on its own.
 struct RideGlowRing: View {
     let presentation: RideActivityPresentation
     var lineWidth: CGFloat = 4
+    /// The detached circle has no room around it for the halo.
+    var halo = true
     var body: some View {
         let tint = rideIslandTint(presentation)
-        let active = presentation.alightingSoon || presentation.target != nil
+        let remaining = rideRingRemaining(presentation)
+        let glowing = halo && remaining != nil
         ZStack {
-            Circle().stroke(active ? tint.opacity(0.22) : Color.primary.opacity(0.14), lineWidth: lineWidth * (active ? 2.6 : 1))
-            if presentation.alightingSoon {
-                Circle().stroke(tint, lineWidth: lineWidth)
-            } else if let target = presentation.target {
-                ProgressView(timerInterval: target.addingTimeInterval(-rideRingWindow)...target, countsDown: true,
-                             label: { EmptyView() }, currentValueLabel: { EmptyView() })
-                    .progressViewStyle(.circular).tint(tint)
+            Circle().stroke(glowing ? tint.opacity(0.22) : Color.primary.opacity(0.14),
+                            lineWidth: lineWidth * (glowing ? 2.6 : 1))
+            if let remaining {
+                Circle().trim(from: 0, to: remaining)
+                    .stroke(tint, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
             }
         }
     }
@@ -305,18 +314,9 @@ struct RideIslandMinimal: View {
     let presentation: RideActivityPresentation
     var body: some View {
         // The detached circle has no room for a clock ("14:05" became "14:…"): the action symbol
-        // inside a ring drawn at the latest update, over the same ten-minute window. Plain shapes
-        // render reliably here; the system-driven ring stays in the roomier presentations.
-        let tint = rideIslandTint(presentation)
-        let remaining: Double? = presentation.alightingSoon ? 1 : presentation.target.map {
-            min(1, max(0, $0.timeIntervalSince(presentation.now) / rideRingWindow))
-        }
+        // inside the same countdown ring as the expanded island.
         ZStack {
-            Circle().stroke(Color.white.opacity(0.22), lineWidth: 2.5)
-            if let remaining {
-                Circle().trim(from: 0, to: remaining).stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-            }
+            RideGlowRing(presentation: presentation, lineWidth: 2.5, halo: false)
             Image(systemName: presentation.symbol)
                 .font(.system(size: presentation.alightingSoon ? 12 : 10, weight: .bold))
                 .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
