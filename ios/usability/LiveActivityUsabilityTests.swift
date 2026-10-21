@@ -136,6 +136,87 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         endSystemActivity(app)
         XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
     }
+    func testEndingBeforeHomeDoesNotReappearAfterRepeatedForegroundTransitions() {
+        for walking in [true, false] {
+            launch(["--preview-island", "--island-auto-expand"] + (walking ? ["--island-walking"] : []))
+            XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
+            XCUIDevice.shared.press(.home); sleep(2)
+            guard let idle = systemIslandFootprint() else { return XCTFail("The idle Home Screen must be captured") }
+            capture(walking ? "walking-idle-before-start" : "transit-idle-before-start")
+            app.activate()
+            let start = button("island-system-start")
+            for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(start.isHittable); start.tap()
+            let status = app.staticTexts["island-system-status"]
+            let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                status.exists && status.label.hasPrefix("started:")
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+            XCUIDevice.shared.press(.home)
+            let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.systemIslandDiffersFromIdle(idle)
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 15), .completed)
+            app.activate()
+            let end = button("island-system-end")
+            for _ in 0..<4 { if end.isHittable { break }; app.swipeUp() }
+            XCTAssertTrue(end.isHittable); end.tap()
+            // Reproduce the quick Home gesture without waiting for the app's
+            // "ended" label. Ending must survive scene departure on its own.
+            XCUIDevice.shared.press(.home)
+            let absent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                self.systemIslandMatchesIdle(idle)
+            }, object: nil)
+            XCTAssertEqual(XCTWaiter.wait(for: [absent], timeout: 15), .completed)
+            sleep(3)
+            XCTAssertTrue(systemIslandMatchesIdle(idle))
+            capture(walking ? "walking-end-immediate-home" : "transit-end-immediate-home")
+            for _ in 0..<2 {
+                app.activate()
+                XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
+                XCUIDevice.shared.press(.home); sleep(2)
+                XCTAssertTrue(systemIslandMatchesIdle(idle), "Foreground/background callbacks must not recreate the ended activity")
+            }
+            app.terminate(); sleep(2)
+            XCTAssertTrue(systemIslandMatchesIdle(idle))
+        }
+    }
+    func testWalkingIslandWithRealBackgroundLocationAndEnd() {
+        launch(["--preview-island", "--island-walking", "--island-background-location"])
+        XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
+        XCUIDevice.shared.press(.home); sleep(2)
+        guard let idle = systemIslandFootprint() else { return XCTFail("The idle Home Screen must be captured") }
+        capture("background-location-idle-before-start")
+        app.activate()
+        let start = button("island-system-start")
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(start.isHittable); start.tap()
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = board.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'While Using' OR label CONTAINS '使用'")).firstMatch
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
+        let location = app.staticTexts["island-location-status"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            location.exists && location.label == "background-location-with-fix"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed,
+            "Use the real location manager and a real simulated device fix, rather than an authorization override")
+        XCTAssertEqual(app.staticTexts["island-system-count"].label, "1")
+        XCUIDevice.shared.press(.home); sleep(5)
+        XCTAssertTrue(systemIslandDiffersFromIdle(idle))
+        capture("walking-with-background-location")
+        let tree = XCTAttachment(string: board.debugDescription)
+        tree.name = "walking-with-background-location-system-elements"; tree.lifetime = .keepAlways; add(tree)
+        app.activate()
+        endSystemActivity(app)
+        XCUIDevice.shared.press(.home); sleep(4)
+        let absent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.systemIslandMatchesIdle(idle)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [absent], timeout: 15), .completed,
+            "Ending the trip must retire both guidance and background location")
+        capture("ended-with-background-location")
+    }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {
             launch(["--preview-island"] + (english ? ["--test-language", "en"] : []))

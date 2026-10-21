@@ -200,6 +200,103 @@ import ActivityKit
         XCTAssertEqual(store.created.last?.content.state.phase, .walking)
         XCTAssertEqual(old.activityState, .ended)
     }
+    func testEndingDoesNotWaitForAnInFlightNativeUpdate() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = store.created[0]
+        old.holdUpdate = true
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.updatePending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(old.updatePending)
+        controller.endAll()
+        // Leaving the app synchronizes the finished planner again. Neither that
+        // callback nor a blocked ETA update may postpone the native dismissal.
+        controller.update(nil, destination: "", language: .english, enabled: false)
+        for _ in 0..<100 {
+            if old.endCount > 0 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let endedBeforeUpdateReturned = old.endCount
+        old.updatePending?.resume(); old.updatePending = nil
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(endedBeforeUpdateReturned, 1, "End must reach the system without waiting for an older update")
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.created.count, 1)
+        XCTAssertFalse(controller.isRunning)
+    }
+    func testReplacementWaitsForRetirementButNotForAnObsoleteUpdate() async {
+        let store = FakeRideStore()
+        let background = FakeRideBackgroundTask()
+        var backgroundStarts = 0
+        let controller = RideActivityController(store: store, now: { [now] in now }, beginBackgroundTask: {
+            backgroundStarts += 1; return background
+        })
+        controller.update(state(), destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = store.created[0]
+        old.holdUpdate = true; old.holdEnd = true
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.updatePending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        controller.endAll()
+        XCTAssertEqual(backgroundStarts, 1, "End must acquire its background allowance before returning to the scene")
+        controller.update(state("waiting"), destination: "B", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.endPending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let endStartedWithoutOldUpdate = old.endPending != nil
+        XCTAssertEqual(store.created.count, 1, "A replacement must wait until the old activity ends")
+        XCTAssertEqual(background.finishCount, 0)
+        old.holdEnd = false; old.endPending?.resume(); old.endPending = nil
+        for _ in 0..<100 {
+            if store.created.count == 2 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let replacementStartedWithoutOldUpdate = store.created.count == 2
+        old.updatePending?.resume(); old.updatePending = nil
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(endStartedWithoutOldUpdate)
+        XCTAssertTrue(replacementStartedWithoutOldUpdate)
+        XCTAssertEqual(old.endCount, 1)
+        XCTAssertEqual(backgroundStarts, 1)
+        XCTAssertEqual(background.finishCount, 1, "The finite background allowance must be released once dismissal finishes")
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.created.last?.attributes.destination, "B")
+        XCTAssertTrue(controller.isRunning)
+    }
+    func testSceneCleanupFindsAnOrphanEvenAfterTheInitialEmptyCleanup() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        let attributes = RideActivityAttributes(destination: "Previous navigation", language: AppLanguage.english.rawValue)
+        _ = try store.start(attributes, content: ActivityContent(state: state(), staleDate: now.addingTimeInterval(120)))
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(store.sessions.isEmpty, "An idle controller must still inspect native activities restored later")
+        XCTAssertEqual(store.created[0].endCount, 1)
+    }
+    func testIdleRefreshesDoNotRepeatedlyEnumerateNativeActivities() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(nil, destination: "", language: .english, enabled: false)
+        await controller.waitForPendingChanges()
+        let idleReads = store.sessionReads
+        for _ in 0..<50 { controller.update(nil, destination: "", language: .english, enabled: false) }
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.sessionReads, idleReads, "Background cleanup must not add system lookups to every GPS/feed refresh")
+        controller.endAll()
+        await controller.waitForPendingChanges()
+        XCTAssertGreaterThan(store.sessionReads, idleReads, "An explicit End or scene transition must still discover restored activities")
+    }
     func testImmediateRestartToSameDestinationFinishesPreviousSession() async {
         let store = FakeRideStore()
         let value = RideActivityController(store: store, now: { [now] in now })
@@ -393,11 +490,15 @@ import ActivityKit
 
 }
 
-@MainActor private final class FakeRideStore: RideActivityStore {
+@MainActor final class FakeRideStore: RideActivityStore {
     var allowed = true
     var created: [FakeRideSession] = []
     var events: [String] = []
-    var sessions: [any RideActivitySession] { created.filter { $0.activityState == .active || $0.activityState == .stale } }
+    private(set) var sessionReads = 0
+    var sessions: [any RideActivitySession] {
+        sessionReads += 1
+        return created.filter { $0.activityState == .active || $0.activityState == .stale }
+    }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession {
         let value = FakeRideSession(attributes: attributes, content: content)
         value.didEnd = { [weak self] in self?.events.append("end:" + attributes.destination) }
@@ -405,7 +506,7 @@ import ActivityKit
         return value
     }
 }
-@MainActor private final class FakeRideSession: RideActivitySession {
+@MainActor final class FakeRideSession: RideActivitySession {
     let id = UUID().uuidString
     let attributes: RideActivityAttributes
     var activityState = ActivityState.active
@@ -415,6 +516,8 @@ import ActivityKit
     var holdUpdate = false
     var updatePending: CheckedContinuation<Void, Never>?
     var endCount = 0
+    var holdEnd = false
+    var endPending: CheckedContinuation<Void, Never>?
     var didEnd: (() -> Void)?
     var observer: (@MainActor (ActivityState) -> Void)?
     init(attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) {
@@ -427,11 +530,17 @@ import ActivityKit
         if let notice { notices.append(notice) }
     }
     func end() async {
-        endCount += 1; activityState = .ended; didEnd?(); observer?(.ended)
+        endCount += 1
+        if holdEnd { await withCheckedContinuation { endPending = $0 } }
+        activityState = .ended; didEnd?(); observer?(.ended)
     }
     func dismiss() { activityState = .dismissed; observer?(.dismissed) }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         observer = change
         return Task {}
     }
+}
+@MainActor private final class FakeRideBackgroundTask: RideActivityBackgroundTask {
+    var finishCount = 0
+    func finish() { finishCount += 1 }
 }

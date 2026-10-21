@@ -94,8 +94,27 @@ struct RideIslandNoticePolicy {
     }
 }
 
-/// One serialized lifecycle: finish the previous island before starting its replacement.
-/// Updates received during an await are coalesced to the latest trip, never replayed out of order.
+@MainActor protocol RideActivityBackgroundTask: AnyObject {
+    func finish()
+}
+/// Ending a journey also turns off background location. Keep just the native
+/// dismissal alive if the rider immediately returns to the Home Screen.
+@MainActor private final class SystemRideBackgroundTask: RideActivityBackgroundTask {
+    private var identifier = UIBackgroundTaskIdentifier.invalid
+    init() {
+        identifier = UIApplication.shared.beginBackgroundTask(withName: "Finish navigation activity") { [weak self] in
+            Task { @MainActor in self?.finish() }
+        }
+    }
+    func finish() {
+        guard identifier != .invalid else { return }
+        let value = identifier; identifier = .invalid
+        UIApplication.shared.endBackgroundTask(value)
+    }
+}
+
+/// End can preempt an obsolete update. A replacement still waits until every
+/// previous island finishes ending, so late native callbacks cannot create duplicates.
 @MainActor final class RideActivityController {
     private let logger = Logger(subsystem: "com.rio10255254.TaipeiBus", category: "RideActivity")
     typealias State = RideActivityAttributes.ContentState
@@ -107,6 +126,7 @@ struct RideIslandNoticePolicy {
     }
     private let store: any RideActivityStore
     private let now: () -> Date
+    private let beginBackgroundTask: @MainActor () -> any RideActivityBackgroundTask
     private var activity: (any RideActivitySession)?
     private var desired: Desired?
     private var pushed: State?
@@ -115,6 +135,8 @@ struct RideIslandNoticePolicy {
     var didPresentNotice: ((RideIslandNotice, State) -> Void)?
     private var revision = 0
     private var worker: Task<Void, Never>?
+    private var workerID: UUID?
+    private var retirements: [String: Task<Void, Never>] = [:]
     private var mayHaveActivities = true
     private var retiredIDs = Set<String>()
     private var stoppedByUser = false
@@ -128,9 +150,11 @@ struct RideIslandNoticePolicy {
     }
     var onAvailabilityChange: (() -> Void)?
 
-    init(store: (any RideActivityStore)? = nil, now: @escaping () -> Date = Date.init) {
+    init(store: (any RideActivityStore)? = nil, now: @escaping () -> Date = Date.init,
+         beginBackgroundTask: (@MainActor () -> any RideActivityBackgroundTask)? = nil) {
         self.store = store ?? SystemRideStore()
         self.now = now
+        self.beginBackgroundTask = beginBackgroundTask ?? { SystemRideBackgroundTask() }
         if store == nil {
             authorizationTask = Task { [weak self] in
                 for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
@@ -148,7 +172,7 @@ struct RideIslandNoticePolicy {
     }
     func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool,
                 presentImportantUpdates: Bool = false, alightingAlerts: Bool = false) {
-        guard enabled, let state else { endAll(); return }
+        guard enabled, let state else { endAll(recheckSystem: false); return }
         guard !stoppedByUser else { return }
         let permissionChanged = lastAllowed != store.allowed
         lastAllowed = store.allowed
@@ -161,28 +185,60 @@ struct RideIslandNoticePolicy {
         desired = Desired(state: state, attributes: attributes, presentImportantUpdates: presentImportantUpdates, alightingAlerts: alightingAlerts)
         revision += 1; mayHaveActivities = true; schedule()
     }
-    func endAll() {
-        guard desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
-        retiredIDs.formUnion(store.sessions.map(\.id))
-        if let activity { retiredIDs.insert(activity.id) }
+    func endAll(recheckSystem: Bool = true) {
+        // Nil GPS/feed updates can arrive every second while browsing. Reserve
+        // native re-enumeration for a real End or foreground/background transition.
+        guard recheckSystem || desired != nil || activity != nil || mayHaveActivities else { stoppedByUser = false; return }
+        var sessions = store.sessions
+        if let activity, !sessions.contains(where: { $0.id == activity.id }) { sessions.append(activity) }
+        let active = sessions.filter { $0.activityState == .active || $0.activityState == .stale }
+        retiredIDs.formUnion(active.map(\.id))
         // A terminal callback already queued by the old activity must not dismiss
         // a journey that the user starts immediately after this one.
         stateTask?.cancel(); stateTask = nil; activity = nil
         desired = nil; stoppedByUser = false; pushed = nil; noticePolicy = RideIslandNoticePolicy(); debugState = "ended"
-        revision += 1; schedule()
+        revision += 1
+        // ActivityKit updates may remain suspended. Cancel their ownership, not
+        // the native retirement, and submit End independently of those awaits.
+        worker?.cancel(); worker = nil; workerID = nil
+        for session in active { retire(session) }
+        schedule()
     }
     private func schedule() {
         guard worker == nil else { return }
+        let id = UUID(); workerID = id
         worker = Task { [weak self] in
             guard let self else { return }
             let wasRunning = isRunning, oldDebug = debugState
             await reconcile()
-            worker = nil
+            guard workerID == id else { return }
+            worker = nil; workerID = nil
             if wasRunning != isRunning || oldDebug != debugState { onAvailabilityChange?() }
         }
     }
+    private func retire(_ session: any RideActivitySession) {
+        guard retirements[session.id] == nil else { return }
+        guard session.activityState == .active || session.activityState == .stale else {
+            retiredIDs.remove(session.id); return
+        }
+        retiredIDs.insert(session.id)
+        // Acquire the finite background allowance synchronously, before End can
+        // disable navigation location or the scene can leave the foreground.
+        let backgroundTask = beginBackgroundTask()
+        retirements[session.id] = Task { [weak self] in
+            await session.end()
+            backgroundTask.finish()
+            self?.retirements.removeValue(forKey: session.id)
+            self?.retiredIDs.remove(session.id)
+        }
+    }
+    private func waitForRetirements() async {
+        for task in Array(retirements.values) { await task.value }
+    }
     private func reconcile() async {
         while !Task.isCancelled {
+            await waitForRetirements()
+            guard !Task.isCancelled else { return }
             let version = revision
             let next = store.allowed && !stoppedByUser ? desired : nil
             var sessions = store.sessions
@@ -193,9 +249,10 @@ struct RideIslandNoticePolicy {
             // Detach the observer before intentional end events; those are not a user dismissal.
             if activity?.id != matching?.id { stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil }
             for session in sessions where session.id != matching?.id {
-                if session.activityState == .active || session.activityState == .stale { await session.end() }
-                retiredIDs.remove(session.id)
+                retire(session)
             }
+            await waitForRetirements()
+            guard !Task.isCancelled else { return }
             guard version == revision else { continue }
             guard let next else {
                 activity = nil; pushed = nil; mayHaveActivities = false
@@ -228,6 +285,7 @@ struct RideIslandNoticePolicy {
                 }
                 if notice != nil || (pushed.map { Self.changed($0, next.state) || next.state.updatedAt.timeIntervalSince($0.updatedAt) >= 30 } ?? true) {
                     await current.update(content(next.state), notice: notice)
+                    guard !Task.isCancelled else { return }
                     if let notice, activity?.id == current.id,
                        current.activityState == .active || current.activityState == .stale,
                        desired?.state.stepKey == next.state.stepKey {
@@ -375,6 +433,32 @@ final class CommuteWidgetBridge {
 #if DEBUG || ISLAND_RENDER_AUDIT
 @MainActor private final class IslandPreviewActivity: ObservableObject {
     let controller = RideActivityController()
+    let location = LocationService()
+    let usesLocation = ProcessInfo.processInfo.arguments.contains("--island-background-location")
+    private var wantsLocation = false
+    func startLocation() {
+        guard usesLocation else { return }
+        wantsLocation = true
+        location.onAuthorizationChange = { [weak self] in
+            guard let self else { return }
+            location.setBackgroundNavigation(wantsLocation)
+            objectWillChange.send()
+        }
+        location.onNavigationUpdate = { [weak self] in self?.objectWillChange.send() }
+        location.setActive(true); location.setWalkingNavigation(true)
+        location.request(); location.setBackgroundNavigation(true)
+        objectWillChange.send()
+    }
+    func stopLocation() {
+        guard usesLocation else { return }
+        wantsLocation = false
+        location.setBackgroundNavigation(false); location.setWalkingNavigation(false); location.setActive(false)
+        objectWillChange.send()
+    }
+    func setSceneActive(_ active: Bool) {
+        guard usesLocation else { return }
+        location.setActive(active && wantsLocation)
+    }
 }
 
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
@@ -463,6 +547,7 @@ struct IslandPreviewGallery: View {
                     reference = Date(); message = "starting"
                     controller.onAvailabilityChange = { message = controller.debugState }
                     controller.update(state, destination: "Island verification", language: language, enabled: true)
+                    activity.startLocation()
                 }.accessibilityIdentifier("island-system-start")
                 Button("Add second test activity") {
                     do {
@@ -473,20 +558,27 @@ struct IslandPreviewGallery: View {
                 }.accessibilityIdentifier("island-system-second")
                 Button("End test activities") {
                     controller.endAll(); message = "ending"
+                    activity.stopLocation()
                     Task { await controller.waitForPendingChanges(); message = "ended" }
                 }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
                 Text(String(Activity<RideActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale }.count))
                     .accessibilityIdentifier("island-system-count")
+                if activity.usesLocation {
+                    Text(activity.location.backgroundNavigation && activity.location.usableCoordinate != nil ? "background-location-with-fix" : "location-stopped-or-waiting")
+                        .accessibilityIdentifier("island-location-status")
+                }
             }.padding(16)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            activity.setSceneActive(false)
             guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             var current = state; current.updatedAt = Date(); current.freshUntil = Date().addingTimeInterval(120)
             controller.update(current, destination: "Island verification", language: language, enabled: true,
                 presentImportantUpdates: true, alightingAlerts: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            activity.setSceneActive(true)
             guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             controller.update(state, destination: "Island verification", language: language, enabled: true)
         }

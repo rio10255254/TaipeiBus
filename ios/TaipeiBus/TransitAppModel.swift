@@ -134,7 +134,7 @@ final class TransitAppModel: ObservableObject {
     }
 
     // MARK: Live Activity and Home Screen widget (Pro)
-    let rideActivity = RideActivityController()
+    let rideActivity: RideActivityController
     let commuteWidget = CommuteWidgetBridge()
     /// The saved trip whose plan is on screen; its first ride is what the widget will watch.
     private var activeSavedJourneyID: UUID?
@@ -173,7 +173,7 @@ final class TransitAppModel: ObservableObject {
         updateWalkingLocation(); anchorBoardedVehicle(publish: publishLocation)
         if !planner.started || planner.arrived {
             if !planner.started { boardedAt = nil; boardedVehicle = nil }
-            alightReminder.cancel(); rideActivity.endAll()
+            alightReminder.cancel(); rideActivity.endAll(recheckSystem: false)
             location.setBackgroundNavigation(false)
             location.setWalkingNavigation(stationWalk.isActive); location.setRidingNavigation(false)
         } else {
@@ -817,8 +817,9 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var previewNotice: String?
 #endif
 
-    init(service: TransitService = TransitService()) {
+    init(service: TransitService = TransitService(), rideActivity controller: RideActivityController? = nil) {
         self.service = service
+        self.rideActivity = controller ?? RideActivityController()
         let saved = UserDefaults.standard.string(forKey: AppLanguage.preferenceKey).flatMap(AppLanguage.init(rawValue:))
         var chosen = saved ?? AppLanguage.deviceDefault(Locale.preferredLanguages)
 #if DEBUG
@@ -909,6 +910,7 @@ final class TransitAppModel: ObservableObject {
     func setActive(_ active: Bool) {
         guard isActive != active else { if !active { synchronizeNavigationState() }; return }
         isActive = active
+        if !planner.started || planner.arrived { rideActivity.endAll() }
         JourneyDiagnostics.shared.record(active ? "scene_active" : "scene_inactive")
         if active { Task { [weak self] in
             await self?.refreshNavigationPermissions()
