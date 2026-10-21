@@ -108,9 +108,7 @@ struct TransitHomeView: View {
                     let state: [String: Any] = ["started": planner.started, "step": planner.stepIndex,
                         "background": location.backgroundNavigation, "pro": purchases.hasPro,
                         "notifications": model.navigationReadiness.notifications.rawValue,
-                        "reminderReady": model.alightReminderActive, "liveActivity": model.liveActivityRunning,
-                        "activityHeadline": model.rideActivityState(at: Date())?.headline ?? "",
-                        "activityPhase": model.rideActivityState(at: Date())?.phase.rawValue ?? ""]
+                        "reminderReady": model.alightReminderActive, "liveActivity": model.liveActivityRunning]
                     let data = try? JSONSerialization.data(withJSONObject: state, options: [.sortedKeys])
                     Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
                         .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
