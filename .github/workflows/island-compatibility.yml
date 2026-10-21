@@ -1,0 +1,184 @@
+name: iOS 27 island compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      compare_legacy:
+        description: 'Repeat the already-passed older SDK comparison as well as the current SDK'
+        type: boolean
+        default: false
+      legacy_only:
+        description: 'Verify the shipping SDK app on iOS 27 without recompiling an unused SDK 27 app'
+        type: boolean
+        default: false
+      reuse_legacy_run:
+        description: 'Optional existing app artifact; source equality is verified before reuse'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Keep the failing baseline's screenshots while its corrected successor runs.
+  group: island-compatibility-${{ github.ref }}-${{ github.sha }}-${{ inputs.legacy_only && 'legacy' || inputs.compare_legacy && 'both' || 'current' }}
+  cancel-in-progress: true
+
+jobs:
+  legacy_app:
+    if: inputs.compare_legacy == true || inputs.legacy_only == true
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify that a reused application has identical production sources
+        if: inputs.reuse_legacy_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_legacy_run }}
+        run: |
+          set -euo pipefail
+          [[ "$REUSE_RUN_ID" =~ ^[0-9]+$ ]]
+          previous_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID" --jq .head_sha)
+          [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --depth=1 origin "$previous_sha"
+          git diff --exit-code "$previous_sha" HEAD -- ios/TaipeiBus ios/TaipeiBusWidgets ios/TransitCore ios/TaipeiBus.xcodeproj
+          echo "Identical production sources verified at $previous_sha"
+      - uses: actions/download-artifact@v4
+        if: inputs.reuse_legacy_run != ''
+        with:
+          name: island-legacy-sdk-app
+          path: ${{ runner.temp }}
+          run-id: ${{ inputs.reuse_legacy_run }}
+          github-token: ${{ github.token }}
+      - name: Build the currently shipped SDK as an ARM simulator application
+        if: inputs.reuse_legacy_run == ''
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/LegacyIsland" ARCHS=arm64 ONLY_ACTIVE_ARCH=YES \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ISLAND_RENDER_AUDIT' \
+            CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/legacy-island-build.log"
+          ditto -c -k --sequesterRsrc --keepParent \
+            "$RUNNER_TEMP/LegacyIsland/Build/Products/Release-iphonesimulator/TaipeiBus.app" \
+            "$RUNNER_TEMP/legacy-island-app.zip"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: island-legacy-sdk-app
+          path: |
+            ${{ runner.temp }}/legacy-island-app.zip
+            ${{ runner.temp }}/legacy-island-build.log
+
+  render:
+    needs: legacy_app
+    if: always() && !cancelled() && (needs.legacy_app.result == 'success' || needs.legacy_app.result == 'skipped')
+    runs-on: xcode-27
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        source_sdk: ${{ fromJSON(inputs.legacy_only && '["legacy"]' || inputs.compare_legacy && '["legacy","current"]' || '["current"]') }}
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the Metal compiler component required by the app
+        run: xcodebuild -downloadComponent MetalToolchain
+      - uses: actions/download-artifact@v4
+        if: matrix.source_sdk == 'legacy'
+        with:
+          name: island-legacy-sdk-app
+          path: ${{ runner.temp }}/legacy-island
+      - name: Compile the current-system UI driver and select an actual iOS 27 runtime
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          if [ '${{ matrix.source_sdk }}' = legacy ]; then
+            mkdir -p "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator"
+            ditto -x -k "$RUNNER_TEMP/legacy-island/legacy-island-app.zip" "$RUNNER_TEMP/LegacyUnpacked"
+            ditto "$RUNNER_TEMP/LegacyUnpacked/TaipeiBus.app" "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app"
+            BUS_ISLAND_DRIVER_ONLY=true ruby ios/usability/setup.rb
+          else
+            ruby ios/usability/setup.rb
+          fi
+          xcrun simctl list runtimes -j | tee "$RUNNER_TEMP/island-runtimes.json"
+          runtime=$(python3 -c 'import json,os; d=json.load(open(os.environ["RUNNER_TEMP"]+"/island-runtimes.json")); r=[r for r in d["runtimes"] if r["isAvailable"] and r["name"].startswith("iOS") and r["version"].startswith("27.0")]; assert r,"An actual iOS 27.0 runtime is required"; print(r[0]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-ios27 com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Release -destination "platform=iOS Simulator,id=$device" \
+            -derivedDataPath "$RUNNER_TEMP/Island27" \
+            'SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ISLAND_RENDER_AUDIT' \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing \
+            | tee "$RUNNER_TEMP/island-ui-build.log"
+      - name: Install the selected SDK application without changing the iOS 27 UI driver
+        env:
+          BUS_ISLAND_SOURCE_SDK: ${{ matrix.source_sdk }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, os, plistlib
+          from pathlib import Path
+          root = Path(os.environ['RUNNER_TEMP']).resolve()
+          app = root/'Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app'
+          assert app.resolve().is_relative_to(root)
+          report = {'source_sdk': os.environ['BUS_ISLAND_SOURCE_SDK'], 'bundles': []}
+          for bundle in [app, app/'PlugIns/TaipeiBusWidgets.appex']:
+              info = plistlib.loads((bundle/'Info.plist').read_bytes())
+              report['bundles'].append({k:info.get(k) for k in ['CFBundleIdentifier','DTSDKName','DTXcode','MinimumOSVersion']})
+              assert (bundle/'TransitCore_TransitCore.bundle/en.json').is_file()
+          (root/'island-build-identity.json').write_text(json.dumps(report,indent=2)+'\n')
+          print(json.dumps(report,indent=2))
+          PY
+          python3 ios/usability/install-island-companion.py \
+            "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app" \
+            "$RUNNER_TEMP/IslandCompanion.app" "$BUS_SIM_DEVICE"
+      - name: Verify real system content on iOS 27 and collect renderer output
+        run: |
+          set -euo pipefail
+          xcrun simctl spawn "$BUS_SIM_DEVICE" log stream --style compact --level debug \
+            --predicate 'process == "TaipeiBus" OR process == "chronod" OR process == "TaipeiBusWidgets" OR process == "liveactivitiesd" OR subsystem BEGINSWITH "com.apple.WidgetKit"' \
+            > "$RUNNER_TEMP/island-system-runtime.log" 2>&1 &
+          island_log_pid=$!
+          trap 'kill "$island_log_pid" 2>/dev/null || true' EXIT
+          for appearance in light dark; do
+            xcrun simctl ui "$BUS_SIM_DEVICE" appearance "$appearance"
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+              -configuration Release -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+              -derivedDataPath "$RUNNER_TEMP/Island27" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testSystemCompactAndTwoActivityPresentationsAndEnd \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testNavigationIntroductionAutomaticallyUsesTheExpandedIsland \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingGuidanceAppearsOnTheActualSystemIsland \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testInitiallyStaleOrDueNavigationStillRendersGuidance \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testTerminatedAppGuidanceSurvivesReopeningWithoutDuplicateActivities \
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
+              | tee "$RUNNER_TEMP/island-$appearance.log"
+          done
+      - name: Preserve actual system screenshots and extension crashes
+        if: always()
+        run: |
+          for appearance in light dark; do
+            if [ -d "$RUNNER_TEMP/island-$appearance.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/island-$appearance.xcresult" --output-path "$RUNNER_TEMP/island-$appearance-screenshots"
+            fi
+          done
+          mkdir -p "$RUNNER_TEMP/island-crashes"
+          find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -name 'TaipeiBusWidgets*' -exec cp '{}' "$RUNNER_TEMP/island-crashes/" \; || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: island-ios27-${{ matrix.source_sdk }}
+          path: |
+            ${{ runner.temp }}/island-*.log
+            ${{ runner.temp }}/island-*.json
+            ${{ runner.temp }}/island-*-screenshots
+            ${{ runner.temp }}/island-crashes

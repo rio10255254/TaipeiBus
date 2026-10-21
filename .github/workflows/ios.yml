@@ -30,6 +30,14 @@ on:
         description: 'Rerun island visual checks after hosted lifecycle tests have passed'
         type: boolean
         default: false
+      island_state_only:
+        description: 'Run hosted island and navigation regressions without repeating system screenshots'
+        type: boolean
+        default: false
+      island_release:
+        description: 'Verify island rendering with Release optimization and an audit-only app entry'
+        type: boolean
+        default: false
       native_suite:
         description: 'All hosted checks, or feature regressions after the live walking suite has passed'
         type: choice
@@ -1191,6 +1199,10 @@ jobs:
       - name: Compile and verify trip state and serialized activity lifecycle
         run: |
           set -euo pipefail
+          if [ '${{ inputs.island_ui_only }}' = 'true' ] && [ '${{ inputs.island_state_only }}' = 'true' ]; then
+            echo 'Choose either hosted-only or UI-only island verification, not both.' >&2
+            exit 1
+          fi
           gem install xcodeproj -v 1.27.0 --no-document --user-install
           ruby ios/billing/setup.rb
           runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; a=[x for x in json.load(sys.stdin)["runtimes"] if x["isAvailable"] and "iOS" in x["name"]]; print(sorted(a,key=lambda x:tuple(map(int,x["version"].split("."))))[-1]["identifier"])')
@@ -1207,25 +1219,38 @@ jobs:
             -only-testing:TaipeiBusBillingTests/NavigationLifecycleTests \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/island-state.log"
       - name: Exercise actual system island and bilingual shared layouts
+        if: inputs.island_state_only != true
         run: |
           set -euo pipefail
           ruby ios/usability/setup.rb
+          configuration=Debug
+          audit_flags=()
+          if [ '${{ inputs.island_release }}' = 'true' ]; then
+            configuration=Release
+            audit_flags+=('SWIFT_ACTIVE_COMPILATION_CONDITIONS=$(inherited) ISLAND_RENDER_AUDIT')
+          fi
+          xcrun simctl list runtimes -j > "$RUNNER_TEMP/island-runtimes.json"
+          xcrun simctl spawn "$BUS_SIM_DEVICE" log stream --style compact --level debug \
+            --predicate 'process == "TaipeiBus" OR process == "chronod" OR process == "TaipeiBusWidgets" OR process == "liveactivitiesd" OR subsystem BEGINSWITH "com.apple.WidgetKit"' \
+            > "$RUNNER_TEMP/island-system-runtime.log" 2>&1 &
+          island_log_pid=$!
+          trap 'kill "$island_log_pid" 2>/dev/null || true' EXIT
           selection=('-only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests')
           if [ -n "$BUS_UI_TEST_FILTER" ]; then
             selection=("-only-testing:TaipeiBusUsabilityTests/$BUS_UI_TEST_FILTER")
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
-            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -configuration "$configuration" -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
-            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing \
+            "${audit_flags[@]}" -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build-for-testing \
             | tee "$RUNNER_TEMP/island-ui-build.log"
           python3 ios/usability/install-island-companion.py \
-            "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app" \
+            "$RUNNER_TEMP/BusBuild/Build/Products/$configuration-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/IslandCompanion.app" "$BUS_SIM_DEVICE"
           for appearance in light dark; do
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance "$appearance"
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
-              -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+              -configuration "$configuration" -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
               -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
               "${selection[@]}" \
               -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building | tee "$RUNNER_TEMP/island-$appearance.log"
@@ -1244,5 +1269,6 @@ jobs:
           name: dynamic-island-verification
           path: |
             ${{ runner.temp }}/island-*.log
+            ${{ runner.temp }}/island-runtimes.json
             ${{ runner.temp }}/island-*-screenshots
           retention-days: 14

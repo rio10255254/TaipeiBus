@@ -33,6 +33,17 @@ end
 scheme = Xcodeproj::XCScheme.new
 scheme.configure_with_targets(app, tests, launch_target: true)
 scheme.test_action.build_configuration = 'Debug'
+if ENV['BUS_ISLAND_DRIVER_ONLY'] == 'true'
+  # The production-SDK app has already been built and copied into Products.
+  # Compile only the current-OS XCTest driver, preserving its target app path.
+  tests.dependencies.select { |dependency| dependency.target == app }.each(&:remove_from_project)
+  scheme.build_action.xml_element.attributes['buildImplicitDependencies'] = 'NO'
+  scheme.build_action.xml_element.elements.to_a('BuildActionEntries/BuildActionEntry').each do |entry|
+    reference = entry.elements['BuildableReference']
+    entry.parent.delete_element(entry) if reference&.attributes&.[]('BlueprintIdentifier') == app.uuid
+  end
+  project.save
+end
 if ENV['BUS_VERIFY_PRO_UI'] == 'true'
   reference = scheme.launch_action.xml_element.add_element('StoreKitConfigurationFileReference')
   reference.add_attribute('identifier','../../billing/ProProducts.storekit')

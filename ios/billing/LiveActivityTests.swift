@@ -48,6 +48,39 @@ import ActivityKit
         value.target = now.addingTimeInterval(600)
         XCTAssertEqual(value.updateDeadline, now.addingTimeInterval(120))
     }
+    func testInitialExpiredSourceHasNoPastNativeDeadlineAndRetainsStaleGuidance() async throws {
+        let store = FakeRideStore(), sample = state("stale")
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let content = try XCTUnwrap(store.created.first?.content)
+        XCTAssertNil(content.staleDate)
+        XCTAssertEqual(content.state.freshUntil, sample.freshUntil)
+        let presentation = RideActivityPresentation(state: content.state, language: .traditionalChinese, now: now)
+        XCTAssertTrue(presentation.stale); XCTAssertNil(presentation.target); XCTAssertNil(presentation.progress)
+        XCTAssertEqual(presentation.status, "點一下更新")
+        XCTAssertNil(RideIslandNoticePolicy().candidate(content.state, language: .traditionalChinese, alighting: true, now: now))
+    }
+    func testInitialElapsedCountdownKeepsItsDueMeaningWithoutAnExpiredNativeDeadline() async throws {
+        let store = FakeRideStore()
+        let value = RideActivityController(store: store, now: { [now] in now })
+        value.update(state("due"), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await value.waitForPendingChanges()
+        let content = try XCTUnwrap(store.created.first?.content)
+        XCTAssertEqual(content.staleDate, now.addingTimeInterval(120))
+        let presentation = RideActivityPresentation(state: content.state, language: .traditionalChinese, now: now)
+        XCTAssertTrue(presentation.due); XCTAssertFalse(presentation.stale); XCTAssertNil(presentation.target)
+        XCTAssertEqual(presentation.status, "留意來車")
+        XCTAssertTrue(RideActivityPresentation(state: content.state, language: .traditionalChinese,
+            now: now.addingTimeInterval(121)).stale)
+    }
+    func testFreshNativeContentRetainsItsFutureExpiry() async throws {
+        let store = FakeRideStore(), sample = state("waiting")
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(try XCTUnwrap(store.created.first?.content).staleDate, sample.updateDeadline)
+    }
     func testOneStopUsesAlightingCueWhileTimeAndStopCountRemainAvailableWhenExpanded() {
         let value = RideActivityPresentation(state: state("alighting"), language: .traditionalChinese, now: now)
         XCTAssertTrue(value.alightingSoon)
@@ -89,6 +122,53 @@ import ActivityKit
         XCTAssertFalse(value.isRunning, "Stopping must take effect before the asynchronous system call completes")
         await value.waitForPendingChanges()
         XCTAssertTrue(store.sessions.isEmpty)
+    }
+    func testInitialNativeRenderIsNotCancelledByAnIdenticalPublication() async throws {
+        let store = FakeRideStore(), sample = state("waiting")
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let session = try XCTUnwrap(store.created.first)
+        XCTAssertEqual(session.updateCount, 0, "The native request already contains the complete initial payload")
+        XCTAssertTrue(session.notices.isEmpty, "An initial snapshot is not an alert")
+        for _ in 0..<20 {
+            controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        }
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(session.updateCount, 0)
+        XCTAssertEqual(store.created.count, 1)
+    }
+    func testAnAlreadyTerminalSessionIsNotEndedASecondTime() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = try XCTUnwrap(store.created.first)
+        old.activityState = .ended
+        controller.update(state("walking"), destination: "公館", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(old.endCount, 0); XCTAssertEqual(store.created.count, 2)
+        XCTAssertTrue(controller.isRunning)
+    }
+    func testDismissalDuringANativeUpdateCannotRestartTheActivity() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state("waiting"), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let session = try XCTUnwrap(store.created.first)
+        session.holdUpdate = true
+        controller.update(state("riding"), destination: "內湖", language: .traditionalChinese, enabled: true)
+        for _ in 0..<100 {
+            if store.created.first?.updatePending != nil { break }
+            await Task.yield()
+        }
+        let pending = try XCTUnwrap(session.updatePending)
+        session.dismiss(); session.holdUpdate = false; session.updatePending = nil; pending.resume()
+        await controller.waitForPendingChanges()
+        XCTAssertFalse(controller.isRunning); XCTAssertEqual(controller.debugState, "dismissed")
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.created.count, 1)
     }
     func testDestinationAndLanguageReplaceInsteadOfLeavingTwoIslands() async {
         let store = FakeRideStore()
@@ -247,7 +327,9 @@ import ActivityKit
         value.update(state("waiting"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
         await value.waitForPendingChanges()
         XCTAssertTrue(store.created[0].notices.isEmpty)
-        XCTAssertEqual(store.created[0].content.relevanceScore, 0)
+        XCTAssertEqual(store.created[0].content.relevanceScore, 10)
+        XCTAssertLessThan(store.created[0].content.relevanceScore,
+            RideActivityPresentation(state: state("waiting"), language: .english, now: now).relevance)
     }
     func testAlightingNoticeIsOnceAndHonorsTheReminderPreference() {
         var policy = RideIslandNoticePolicy(), current = state("riding")
@@ -329,19 +411,24 @@ import ActivityKit
     var activityState = ActivityState.active
     var content: ActivityContent<RideActivityAttributes.ContentState>
     var notices: [RideIslandNotice] = []
+    var updateCount = 0
     var holdUpdate = false
     var updatePending: CheckedContinuation<Void, Never>?
+    var endCount = 0
     var didEnd: (() -> Void)?
     var observer: (@MainActor (ActivityState) -> Void)?
     init(attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) {
         self.attributes = attributes; self.content = content
     }
     func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async {
+        updateCount += 1
         if holdUpdate { await withCheckedContinuation { updatePending = $0 } }
         self.content = content
         if let notice { notices.append(notice) }
     }
-    func end() async { activityState = .ended; didEnd?(); observer?(.ended) }
+    func end() async {
+        endCount += 1; activityState = .ended; didEnd?(); observer?(.ended)
+    }
     func dismiss() { activityState = .dismissed; observer?(.dismissed) }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         observer = change

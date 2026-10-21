@@ -136,6 +136,8 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
             require(group in groups, f"{bundle.name} is not signed with the shared keychain group.")
         print(f"Widget extension and shared keychain group verified: {group.split('.', 1)[1]}")
     executable = (app / info["CFBundleExecutable"]).read_bytes()
+    require(b"--preview-island" not in executable and b"--island-walking" not in executable,
+            "Island rendering audit controls must never enter the distributed app.")
     require(b"--preview-capture" not in executable, "Debug preview flags leaked into the Release binary.")
     require(b"--preview-metro-fixture" not in executable and b"--preview-mixed-planning" not in executable and b"QA-TRAIN-01" not in executable,
             "Metro verification fixtures must never enter the distributed app.")

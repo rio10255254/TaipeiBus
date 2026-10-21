@@ -1,5 +1,6 @@
 import ActivityKit
 import UIKit
+import OSLog
 import SwiftUI
 import WidgetKit
 import TransitCore
@@ -77,7 +78,10 @@ struct RideIslandNoticePolicy {
         }
         await value.update(content, alertConfiguration: alert)
     }
-    func end() async { await value.end(nil, dismissalPolicy: .immediate) }
+    func end() async {
+        guard value.activityState == .active || value.activityState == .stale else { return }
+        await value.end(nil, dismissalPolicy: .immediate)
+    }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         Task { for await state in value.activityStateUpdates { guard !Task.isCancelled else { return }; change(state) } }
     }
@@ -93,6 +97,7 @@ struct RideIslandNoticePolicy {
 /// One serialized lifecycle: finish the previous island before starting its replacement.
 /// Updates received during an await are coalesced to the latest trip, never replayed out of order.
 @MainActor final class RideActivityController {
+    private let logger = Logger(subsystem: "com.rio10255254.TaipeiBus", category: "RideActivity")
     typealias State = RideActivityAttributes.ContentState
     private struct Desired {
         var state: State
@@ -187,7 +192,10 @@ struct RideIslandNoticePolicy {
             }
             // Detach the observer before intentional end events; those are not a user dismissal.
             if activity?.id != matching?.id { stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil }
-            for session in sessions where session.id != matching?.id { await session.end(); retiredIDs.remove(session.id) }
+            for session in sessions where session.id != matching?.id {
+                if session.activityState == .active || session.activityState == .stale { await session.end() }
+                retiredIDs.remove(session.id)
+            }
             guard version == revision else { continue }
             guard let next else {
                 activity = nil; pushed = nil; mayHaveActivities = false
@@ -198,9 +206,15 @@ struct RideIslandNoticePolicy {
             if activity == nil {
                 do {
                     let created = try store.start(next.attributes, content: content(next.state))
+                    // Request already includes this payload. Publishing it again
+                    // cancels the first system render without providing new data.
                     activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
-                } catch { debugState = "unavailable" }
+                } catch {
+                    let failure = error as NSError
+                    logger.error("Activity request failed: domain=\(failure.domain, privacy: .public) code=\(failure.code, privacy: .public)")
+                    debugState = "unavailable"
+                }
             }
             if let current = activity {
                 // An old source timestamp cannot certify its own freshness, especially
@@ -221,6 +235,9 @@ struct RideIslandNoticePolicy {
                         didPresentNotice?(notice, next.state)
                     }
                     guard version == revision else { continue }
+                    guard current.activityState == .active || current.activityState == .stale else {
+                        stoppedByUser = true; debugState = "dismissed"; return
+                    }
                     pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
                 }
             }
@@ -240,8 +257,15 @@ struct RideIslandNoticePolicy {
         a.destination == b.destination && a.language == b.language
     }
     private func content(_ state: State) -> ActivityContent<State> {
-        ActivityContent(state: state, staleDate: state.updateDeadline,
-            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: now()).relevance)
+        let presentedAt = now()
+        let sourceExpiry = state.freshUntil ?? state.updatedAt.addingTimeInterval(120)
+        let deadline = [state.updateDeadline, sourceExpiry].filter { $0 > presentedAt }.min()
+        // An already-expired native deadline can skip the initial system view.
+        // Source freshness remains in the payload and the shared presentation
+        // still shows its stale/due guidance immediately. Only ask ActivityKit
+        // to schedule a future transition when there is one left to perform.
+        return ActivityContent(state: state, staleDate: deadline,
+            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: presentedAt).relevance)
     }
     private static func changed(_ old: State, _ new: State) -> Bool {
         if let before = old.freshUntil, let after = new.freshUntil,
@@ -254,7 +278,7 @@ struct RideIslandNoticePolicy {
         guard let a = old.target, let b = new.target else { return false }
         return abs(a.timeIntervalSince(b)) >= 20
     }
-#if DEBUG
+#if DEBUG || ISLAND_RENDER_AUDIT
     func waitForPendingChanges() async { while let task = worker { await task.value } }
 #endif
 }
@@ -348,13 +372,25 @@ final class CommuteWidgetBridge {
     }
 }
 
-#if DEBUG
+#if DEBUG || ISLAND_RENDER_AUDIT
+@MainActor private final class IslandPreviewActivity: ObservableObject {
+    let controller = RideActivityController()
+}
+
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
 struct IslandPreviewGallery: View {
     let language: AppLanguage
-    @State private var selected = ProcessInfo.processInfo.arguments.contains("--island-companion") ? 4 : 0
+    @State private var selected: Int = {
+        let args = ProcessInfo.processInfo.arguments
+        if let flag = args.firstIndex(of: "--island-scenario"), args.indices.contains(flag + 1) {
+            if args[flag + 1] == "stale" { return 6 }
+            if args[flag + 1] == "due" { return 7 }
+        }
+        return args.contains("--island-companion") ? 4 : args.contains("--island-walking") ? 3 : 0
+    }()
     @State private var reference = Date()
-    @State private var controller = RideActivityController()
+    @StateObject private var activity = IslandPreviewActivity()
+    private var controller: RideActivityController { activity.controller }
     @State private var message = ""
     private let names = ["waiting", "riding", "alighting", "walking", "cycling", "transfer", "stale", "due", "long"]
     private var state: RideActivityAttributes.ContentState {
@@ -424,6 +460,7 @@ struct IslandPreviewGallery: View {
                 RideActivityLockView(state: state, attributes: .init(destination: state.headline, language: language.rawValue))
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)).accessibilityIdentifier("island-lock")
                 Button("Start system activity") {
+                    reference = Date(); message = "starting"
                     controller.onAvailabilityChange = { message = controller.debugState }
                     controller.update(state, destination: "Island verification", language: language, enabled: true)
                 }.accessibilityIdentifier("island-system-start")
@@ -434,8 +471,13 @@ struct IslandPreviewGallery: View {
                         message = "two-activities"
                     } catch { message = "second-failed" }
                 }.accessibilityIdentifier("island-system-second")
-                Button("End test activities") { controller.endAll(); message = "ended" }.accessibilityIdentifier("island-system-end")
+                Button("End test activities") {
+                    controller.endAll(); message = "ending"
+                    Task { await controller.waitForPendingChanges(); message = "ended" }
+                }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
+                Text(String(Activity<RideActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale }.count))
+                    .accessibilityIdentifier("island-system-count")
             }.padding(16)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
