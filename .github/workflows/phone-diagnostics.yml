@@ -1,0 +1,46 @@
+name: Windows phone display diagnostics
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['codex/island-rendering-recovery']
+    paths: ['tools/phone-diagnostics/**', '.github/workflows/phone-diagnostics.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12.10'
+      - name: Verify the report filter and package the portable reader
+        shell: pwsh
+        run: |
+          python -m unittest discover -s tools/phone-diagnostics -p test_capture.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Report tests failed' }
+          python tools/phone-diagnostics/build_bundle.py --output "$env:RUNNER_TEMP/TaipeiBus-Phone-Check"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaging failed' }
+      - name: Verify the official runtime and run the complete portable program
+        shell: pwsh
+        run: |
+          $reader = "$env:RUNNER_TEMP/TaipeiBus-Phone-Check"
+          $signature = Get-AuthenticodeSignature "$reader/runtime/python.exe"
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Python Software Foundation') { throw 'Unexpected Python signature' }
+          & "$reader/runtime/python.exe" -X utf8 -c "from pymobiledevice3.lockdown import create_using_usbmux; from pymobiledevice3.services.installation_proxy import InstallationProxyService; from pymobiledevice3.services.os_trace import OsTraceService; from pymobiledevice3.usbmux import list_devices; print('All device reader imports passed')"
+          if ($LASTEXITCODE -ne 0) { throw 'Portable imports failed' }
+          & "$reader/runtime/python.exe" -X utf8 "$reader/capture.py" --unattended --seconds 5 --output "$env:RUNNER_TEMP/PhoneReaderSmokeTest"
+          if ($LASTEXITCODE -ne 2) { throw 'Expected a structured no-device result on the hosted runner' }
+          $report = Get-ChildItem "$env:RUNNER_TEMP/PhoneReaderSmokeTest" -Filter summary.json -Recurse | Select-Object -First 1
+          $result = Get-Content $report.FullName -Raw | ConvertFrom-Json
+          if ($result.stage -ne 'usb-discovery' -or $result.retained_records -ne 0) { throw 'Unexpected device report' }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: TaipeiBus-Phone-Check
+          path: ${{ runner.temp }}/TaipeiBus-Phone-Check/
+          retention-days: 7
