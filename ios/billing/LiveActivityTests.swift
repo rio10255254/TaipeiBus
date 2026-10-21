@@ -67,10 +67,12 @@ import ActivityKit
         value.update(state("due"), destination: "內湖", language: .traditionalChinese, enabled: true)
         await value.waitForPendingChanges()
         let content = try XCTUnwrap(store.created.first?.content)
-        XCTAssertNil(content.staleDate)
+        XCTAssertEqual(content.staleDate, now.addingTimeInterval(120))
         let presentation = RideActivityPresentation(state: content.state, language: .traditionalChinese, now: now)
         XCTAssertTrue(presentation.due); XCTAssertFalse(presentation.stale); XCTAssertNil(presentation.target)
         XCTAssertEqual(presentation.status, "留意來車")
+        XCTAssertTrue(RideActivityPresentation(state: content.state, language: .traditionalChinese,
+            now: now.addingTimeInterval(121)).stale)
     }
     func testFreshNativeContentRetainsItsFutureExpiry() async throws {
         let store = FakeRideStore(), sample = state("waiting")
