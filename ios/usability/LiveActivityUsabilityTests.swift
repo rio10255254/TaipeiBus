@@ -56,7 +56,7 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         capture("walking-real-system-compact")
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         waitForSystemIsland(board)
-            board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
         XCTAssertTrue(board.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20))
         XCTAssertTrue(board.staticTexts["450 m"].firstMatch.exists,
             "The walking route must render its real guidance, not only create an activity shell")
@@ -142,8 +142,8 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         capture("island-real-system-compact")
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         // Use the physical screen coordinates, since SpringBoard is not the app's test window.
-        springwaitForSystemIsland(board)
-            board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        waitForSystemIsland(springboard)
+        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
         XCTAssertTrue(springboard.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20),
                       "An expanded black shell without trip content is not a successful expansion")
         assertIslandPixels(springboard.staticTexts["捷運內湖站"].firstMatch)

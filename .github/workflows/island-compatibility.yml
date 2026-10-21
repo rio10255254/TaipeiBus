@@ -11,9 +11,14 @@ on:
         description: 'Verify the shipping SDK app on iOS 27 without recompiling an unused SDK 27 app'
         type: boolean
         default: false
+      reuse_legacy_run:
+        description: 'Optional existing app artifact; source equality is verified before reuse'
+        type: string
+        default: ''
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   # Keep the failing baseline's screenshots while its corrected successor runs.
@@ -29,7 +34,28 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Verify that a reused application has identical production sources
+        if: inputs.reuse_legacy_run != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REUSE_RUN_ID: ${{ inputs.reuse_legacy_run }}
+        run: |
+          set -euo pipefail
+          [[ "$REUSE_RUN_ID" =~ ^[0-9]+$ ]]
+          previous_sha=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$REUSE_RUN_ID" --jq .head_sha)
+          [[ "$previous_sha" =~ ^[0-9a-f]{40}$ ]]
+          git fetch --depth=1 origin "$previous_sha"
+          git diff --exit-code "$previous_sha" HEAD -- ios/TaipeiBus ios/TaipeiBusWidgets ios/TransitCore ios/TaipeiBus.xcodeproj
+          echo "Identical production sources verified at $previous_sha"
+      - uses: actions/download-artifact@v4
+        if: inputs.reuse_legacy_run != ''
+        with:
+          name: island-legacy-sdk-app
+          path: ${{ runner.temp }}
+          run-id: ${{ inputs.reuse_legacy_run }}
+          github-token: ${{ github.token }}
       - name: Build the currently shipped SDK as an ARM simulator application
+        if: inputs.reuse_legacy_run == ''
         run: |
           set -euo pipefail
           xcodebuild -version
