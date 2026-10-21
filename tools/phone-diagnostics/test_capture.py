@@ -1,4 +1,5 @@
 import json
+from collections import deque
 from pathlib import Path
 import tempfile
 import unittest
@@ -32,6 +33,29 @@ class CaptureTests(unittest.TestCase):
                 self.assertEqual(set(z.namelist()), {"summary.json", "rendering.jsonl"})
                 self.assertEqual(json.loads(z.read("summary.json"))["status"], "captured")
                 self.assertIn(b"Archive was nil", z.read("rendering.jsonl"))
+
+    def test_main_app_network_traffic_cannot_crowd_out_the_rendering_failure(self):
+        records = deque(maxlen=20000)
+        for _ in range(30000):
+            record = filtered_record("TaipeiBus", "URLSession received map response", "INFO", "now")
+            if record:
+                records.append(record)
+        self.assertEqual(len(records), 0)
+        record = filtered_record("TaipeiBus", "Starting activity", "INFO", "now", "com.apple.ActivityKit")
+        self.assertIsNotNone(record)
+        records.append(filtered_record("chronod", "TaipeiBusWidgets Archive was nil", "ERROR", "now"))
+        self.assertIn("Archive was nil", records[-1]["message"])
+
+    def test_bounded_capture_retains_the_final_reproduction(self):
+        records = deque(maxlen=20000)
+        for i in range(30000):
+            records.append({"message": str(i)})
+        with tempfile.TemporaryDirectory() as directory:
+            archive = write_report(Path(directory) / "report", {}, records)
+            with zipfile.ZipFile(archive) as z:
+                values = z.read("rendering.jsonl").decode().splitlines()
+                self.assertEqual(len(values), 20000)
+                self.assertEqual(json.loads(values[-1])["message"], "29999")
 
 
 if __name__ == "__main__":

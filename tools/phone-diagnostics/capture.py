@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+from collections import deque
 from datetime import datetime, timezone
 import json
 import logging
@@ -36,9 +37,14 @@ def redact(message: str) -> str:
     return message[:1800]
 
 
-def filtered_record(process: str, message: str, level: str, timestamp: str) -> dict | None:
+def filtered_record(process: str, message: str, level: str, timestamp: str,
+                    subsystem: str = "", category: str = "") -> dict | None:
     own_app = process in {"TaipeiBus", "TaipeiBusWidgets"}
     references_app = "taipeibus" in message.lower()
+    if process == "TaipeiBus" and level not in {"ERROR", "FAULT"}:
+        context = (message + " " + subsystem + " " + category).lower()
+        if not any(word in context for word in ("activitykit", "liveactivit", "rideactivity", "widgetkit", "chronokit")):
+            return None
     if not own_app and not (process in SYSTEM_RENDERERS and references_app):
         # A renderer may omit the app identity when it fails. Preserve only the
         # recognized generic failure phrase, never another app's raw message.
@@ -64,7 +70,7 @@ def write_report(root: Path, metadata: dict, records: list[dict]) -> Path:
     return archive
 
 
-async def capture(seconds: int, metadata: dict, records: list[dict], unattended: bool) -> None:
+async def capture(seconds: int, metadata: dict, records: deque, unattended: bool) -> None:
     from pymobiledevice3.usbmux import list_devices
     from pymobiledevice3.lockdown import create_using_usbmux
     from pymobiledevice3.services.installation_proxy import InstallationProxyService
@@ -103,8 +109,11 @@ async def capture(seconds: int, metadata: dict, records: list[dict], unattended:
                 async with asyncio.timeout(seconds):
                     async for entry in service.syslog():
                         process = entry.filename.replace("\\", "/").rsplit("/", 1)[-1]
-                        record = filtered_record(process, entry.message, entry.level.name, entry.timestamp.isoformat())
-                        if record and len(records) < 20000:
+                        label = entry.label
+                        record = filtered_record(process, entry.message, entry.level.name, entry.timestamp.isoformat(),
+                            label.subsystem if label else "", label.category if label else "")
+                        if record:
+                            metadata["matching_records_seen"] = metadata.get("matching_records_seen", 0) + 1
                             records.append(record)
             except TimeoutError:
                 pass
@@ -124,8 +133,10 @@ def main() -> int:
     # and selected status ourselves; do not tee raw library output into reports.
     logging.disable(logging.CRITICAL)
     print("台北公車 · 動態島顯示檢查\n只讀取紀錄，不會備份、修改或上傳手機資料。", flush=True)
-    metadata = {"tool_version": 1, "status": "not_started", "library": "pymobiledevice3 11.40.2"}
-    records: list[dict] = []
+    metadata = {"tool_version": 2, "status": "not_started", "library": "pymobiledevice3 11.40.2"}
+    # Keep the reproduction at the end even on a noisy device. Network/map
+    # informational traffic from the main app is excluded above.
+    records = deque(maxlen=20000)
     try:
         asyncio.run(capture(args.seconds, metadata, records, args.unattended))
     except KeyboardInterrupt:
