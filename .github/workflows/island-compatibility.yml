@@ -15,6 +15,10 @@ on:
         description: 'Optional existing app artifact; source equality is verified before reuse'
         type: string
         default: ''
+      location_probe_only:
+        description: 'Focus on actual background location together with the native walking island'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -143,6 +147,8 @@ jobs:
             "$RUNNER_TEMP/Island27/Build/Products/Release-iphonesimulator/TaipeiBus.app" \
             "$RUNNER_TEMP/IslandCompanion.app" "$BUS_SIM_DEVICE"
       - name: Verify real system content on iOS 27 and collect renderer output
+        env:
+          BUS_LOCATION_PROBE_ONLY: ${{ inputs.location_probe_only }}
         run: |
           set -euo pipefail
           xcrun simctl spawn "$BUS_SIM_DEVICE" log stream --style compact --level debug \
@@ -150,17 +156,25 @@ jobs:
             > "$RUNNER_TEMP/island-system-runtime.log" 2>&1 &
           island_log_pid=$!
           trap 'kill "$island_log_pid" 2>/dev/null || true' EXIT
+          xcrun simctl location "$BUS_SIM_DEVICE" set 25.0180,121.5450
+          selection=(
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testSystemCompactAndTwoActivityPresentationsAndEnd
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testNavigationIntroductionAutomaticallyUsesTheExpandedIsland
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingGuidanceAppearsOnTheActualSystemIsland
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testInitiallyStaleOrDueNavigationStillRendersGuidance
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testTerminatedAppGuidanceSurvivesReopeningWithoutDuplicateActivities
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testEndingBeforeHomeDoesNotReappearAfterRepeatedForegroundTransitions
+            -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingIslandWithRealBackgroundLocationAndEnd
+          )
+          if [ "$BUS_LOCATION_PROBE_ONLY" = true ]; then
+            selection=(-only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingIslandWithRealBackgroundLocationAndEnd)
+          fi
           for appearance in light dark; do
             xcrun simctl ui "$BUS_SIM_DEVICE" appearance "$appearance"
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
               -configuration Release -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
               -derivedDataPath "$RUNNER_TEMP/Island27" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testSystemCompactAndTwoActivityPresentationsAndEnd \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testNavigationIntroductionAutomaticallyUsesTheExpandedIsland \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingGuidanceAppearsOnTheActualSystemIsland \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testInitiallyStaleOrDueNavigationStillRendersGuidance \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testTerminatedAppGuidanceSurvivesReopeningWithoutDuplicateActivities \
-              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testEndingBeforeHomeDoesNotReappearAfterRepeatedForegroundTransitions \
+              "${selection[@]}" \
               -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
               | tee "$RUNNER_TEMP/island-$appearance.log"
           done

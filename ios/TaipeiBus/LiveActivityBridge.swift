@@ -433,6 +433,32 @@ final class CommuteWidgetBridge {
 #if DEBUG || ISLAND_RENDER_AUDIT
 @MainActor private final class IslandPreviewActivity: ObservableObject {
     let controller = RideActivityController()
+    let location = LocationService()
+    let usesLocation = ProcessInfo.processInfo.arguments.contains("--island-background-location")
+    private var wantsLocation = false
+    func startLocation() {
+        guard usesLocation else { return }
+        wantsLocation = true
+        location.onAuthorizationChange = { [weak self] in
+            guard let self else { return }
+            location.setBackgroundNavigation(wantsLocation)
+            objectWillChange.send()
+        }
+        location.onNavigationUpdate = { [weak self] in self?.objectWillChange.send() }
+        location.setActive(true); location.setWalkingNavigation(true)
+        location.request(); location.setBackgroundNavigation(true)
+        objectWillChange.send()
+    }
+    func stopLocation() {
+        guard usesLocation else { return }
+        wantsLocation = false
+        location.setBackgroundNavigation(false); location.setWalkingNavigation(false); location.setActive(false)
+        objectWillChange.send()
+    }
+    func setSceneActive(_ active: Bool) {
+        guard usesLocation else { return }
+        location.setActive(active && wantsLocation)
+    }
 }
 
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
@@ -521,6 +547,7 @@ struct IslandPreviewGallery: View {
                     reference = Date(); message = "starting"
                     controller.onAvailabilityChange = { message = controller.debugState }
                     controller.update(state, destination: "Island verification", language: language, enabled: true)
+                    activity.startLocation()
                 }.accessibilityIdentifier("island-system-start")
                 Button("Add second test activity") {
                     do {
@@ -531,20 +558,27 @@ struct IslandPreviewGallery: View {
                 }.accessibilityIdentifier("island-system-second")
                 Button("End test activities") {
                     controller.endAll(); message = "ending"
+                    activity.stopLocation()
                     Task { await controller.waitForPendingChanges(); message = "ended" }
                 }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
                 Text(String(Activity<RideActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale }.count))
                     .accessibilityIdentifier("island-system-count")
+                if activity.usesLocation {
+                    Text(activity.location.backgroundNavigation && activity.location.usableCoordinate != nil ? "background-location-with-fix" : "location-stopped-or-waiting")
+                        .accessibilityIdentifier("island-location-status")
+                }
             }.padding(16)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            activity.setSceneActive(false)
             guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             var current = state; current.updatedAt = Date(); current.freshUntil = Date().addingTimeInterval(120)
             controller.update(current, destination: "Island verification", language: language, enabled: true,
                 presentImportantUpdates: true, alightingAlerts: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            activity.setSceneActive(true)
             guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             controller.update(state, destination: "Island verification", language: language, enabled: true)
         }

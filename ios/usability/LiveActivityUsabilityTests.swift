@@ -174,6 +174,32 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertFalse(hasVisibleSystemIsland(board))
         }
     }
+    func testWalkingIslandWithRealBackgroundLocationAndEnd() {
+        launch(["--preview-island", "--island-walking", "--island-background-location"])
+        let start = button("island-system-start")
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(start.isHittable); start.tap()
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let allow = board.alerts.buttons.matching(NSPredicate(format: "label CONTAINS[c] 'While Using' OR label CONTAINS '使用'")).firstMatch
+        if allow.waitForExistence(timeout: 8) { allow.tap() }
+        let location = app.staticTexts["island-location-status"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            location.exists && location.label == "background-location-with-fix"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 25), .completed,
+            "Use the real location manager and a real simulated device fix, rather than an authorization override")
+        XCTAssertEqual(app.staticTexts["island-system-count"].label, "1")
+        XCUIDevice.shared.press(.home); sleep(5)
+        waitForSystemIsland(board)
+        capture("walking-with-background-location")
+        let tree = XCTAttachment(string: board.debugDescription)
+        tree.name = "walking-with-background-location-system-elements"; tree.lifetime = .keepAlways; add(tree)
+        app.activate()
+        endSystemActivity(app)
+        XCUIDevice.shared.press(.home); sleep(4)
+        XCTAssertFalse(hasVisibleSystemIsland(board), "Ending the trip must retire both guidance and background location")
+        capture("ended-with-background-location")
+    }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {
             launch(["--preview-island"] + (english ? ["--test-language", "en"] : []))
