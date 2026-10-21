@@ -2,6 +2,24 @@ import XCTest
 import UIKit
 
 final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
+    override func tearDownWithError() throws {
+        // Preserve the failed system frame before clearing either audit app.
+        try super.tearDownWithError()
+        let companion = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus.IslandCompanion")
+        for target in [app, companion] where target.state != .notRunning {
+            target.activate()
+            let end = target.buttons["island-system-end"]
+            for _ in 0..<3 { if end.isHittable { break }; target.swipeUp() }
+            if end.exists && end.isHittable {
+                end.tap()
+                let status = target.staticTexts["island-system-status"]
+                let stopped = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    status.exists && status.label == "ended"
+                }, object: nil)
+                _ = XCTWaiter.wait(for: [stopped], timeout: 10)
+            }
+        }
+    }
     private func waitForSystemIsland(_ board: XCUIApplication) {
         let guidance = board.descendants(matching: .any)
             .matching(NSPredicate(format: "label CONTAINS %@", "捷運內湖站")).firstMatch
