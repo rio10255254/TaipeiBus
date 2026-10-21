@@ -30,6 +30,10 @@ on:
         description: 'Rerun island visual checks after hosted lifecycle tests have passed'
         type: boolean
         default: false
+      island_state_only:
+        description: 'Run hosted island and navigation regressions without repeating system screenshots'
+        type: boolean
+        default: false
       island_release:
         description: 'Verify island rendering with Release optimization and an audit-only app entry'
         type: boolean
@@ -1211,6 +1215,7 @@ jobs:
             -only-testing:TaipeiBusBillingTests/NavigationLifecycleTests \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test | tee "$RUNNER_TEMP/island-state.log"
       - name: Exercise actual system island and bilingual shared layouts
+        if: inputs.island_state_only != true
         run: |
           set -euo pipefail
           ruby ios/usability/setup.rb
