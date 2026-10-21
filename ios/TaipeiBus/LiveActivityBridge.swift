@@ -457,13 +457,12 @@ final class CommuteWidgetBridge {
         wantsLocation = true
         location.onAuthorizationChange = { [weak self] in
             guard let self else { return }
-            location.setBackgroundNavigation(wantsLocation, activityVisible: wantsLocation)
+            location.setBackgroundNavigation(wantsLocation)
             objectWillChange.send()
         }
         location.onNavigationUpdate = { [weak self] in self?.objectWillChange.send() }
         location.setActive(true); location.setWalkingNavigation(true)
-        // The gallery starts its system activity together with location, as a trip does.
-        location.request(); location.setBackgroundNavigation(true, activityVisible: true)
+        location.request(); location.setBackgroundNavigation(true)
         objectWillChange.send()
     }
     func stopLocation() {

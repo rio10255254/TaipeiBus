@@ -181,8 +181,7 @@ final class TransitAppModel: ObservableObject {
                                 language: language, enabled: purchases.hasPro && rideActivityOn,
                                 presentImportantUpdates: UIApplication.shared.applicationState == .background,
                                 alightingAlerts: alightReminderActive)
-            // The trip's own Live Activity keeps the app in use while it runs, without the indicator.
-            location.setBackgroundNavigation(journeyInBackground, activityVisible: rideActivity.isRunning)
+            location.setBackgroundNavigation(journeyInBackground)
             updateAlightReminder()
         }
         let activityState = navigationReadiness.liveActivity(enabled: rideActivityOn,
@@ -1862,7 +1861,7 @@ final class TransitAppModel: ObservableObject {
         // Scene changes while browsing are not island events; keep the short log for trips.
         guard moment == "end" || planner.started || rideActivity.nativeCount > 0 else { return }
         JourneyDiagnostics.shared.record("island \(moment) trip=\(planner.started && !planner.arrived) \(rideActivity.nativeSummary)"
-            + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation) indicator=\(location.backgroundIndicator) activity_backed=\(location.activityBacked)")
+            + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation)")
     }
     func finishJourney() { defer { recordIslandDiagnostics("end") }; clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 

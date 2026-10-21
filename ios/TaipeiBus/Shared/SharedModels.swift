@@ -136,6 +136,17 @@ struct RideActivityPresentation {
         }
         return minutes.map { AppText.text("%@ 分", $0, language: language) }
     }
+    /// The one figure that fits the detached island circle.
+    var minimalFigure: (value: String, unit: String)? {
+        guard !stale else { return nil }
+        if state.phase == .riding, let left = state.stopsLeft {
+            return ("\(max(0, left))", AppText.text("站", language: language))
+        }
+        if let meters = state.remainingMeters, meters.isFinite, state.phase != .waiting {
+            return meters < 1000 ? ("\(Int(max(0, meters).rounded()))", "m") : (String(format: "%.1f", meters / 1000), "km")
+        }
+        return minutes.map { ("\($0)", AppText.text("分", language: language)) }
+    }
     var progress: Double? {
         guard !stale, let left = state.stopsLeft, let total = state.totalStops, total > 0 else { return nil }
         return min(1, max(0, Double(total - left) / Double(total)))

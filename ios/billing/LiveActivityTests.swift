@@ -346,6 +346,16 @@ import ActivityKit
         XCTAssertEqual(store.sessions.count, 1); XCTAssertEqual(store.created.count, 2)
         XCTAssertTrue(value.isRunning)
     }
+    func testDetachedCircleShowsTheKeyFigureForEachPhase() {
+        func figure(_ scenario: String) -> String? {
+            RideActivityPresentation(state: state(scenario), language: .traditionalChinese, now: now).minimalFigure
+                .map { $0.value + $0.unit }
+        }
+        XCTAssertEqual(figure("riding"), "5站")
+        XCTAssertEqual(figure("walking"), "450m")
+        XCTAssertEqual(figure("waiting"), "4分")
+        XCTAssertNil(figure("stale"), "An expired figure is replaced by the refresh symbol")
+    }
     func testOnlyEndedAndDismissedActivitiesAreFinal() {
         XCTAssertTrue(RideActivityController.needsEnding(.active))
         XCTAssertTrue(RideActivityController.needsEnding(.stale))
