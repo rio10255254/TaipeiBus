@@ -51,6 +51,10 @@ struct TaipeiBusApp: App {
         } else if ProcessInfo.processInfo.arguments.contains("--preview-widgets") {
             WidgetPreviewGallery(language: model.language).environment(\.locale, model.language.locale)
         } else { home }
+#elseif ISLAND_RENDER_AUDIT
+        if ProcessInfo.processInfo.arguments.contains("--preview-island") {
+            IslandPreviewGallery(language: ProcessInfo.processInfo.arguments.contains("en") ? .english : .traditionalChinese)
+        } else { home }
 #else
         home
 #endif

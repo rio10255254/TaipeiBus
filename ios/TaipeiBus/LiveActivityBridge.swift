@@ -348,7 +348,7 @@ final class CommuteWidgetBridge {
     }
 }
 
-#if DEBUG
+#if DEBUG || ISLAND_RENDER_AUDIT
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
 struct IslandPreviewGallery: View {
     let language: AppLanguage
