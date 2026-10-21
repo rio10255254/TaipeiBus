@@ -28,7 +28,19 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             "The compact system activity must be present before a long press can expand it")
     }
     private func endSystemActivity(_ target: XCUIApplication) {
-        target.buttons["island-system-end"].tap()
+        // The companion's longer English preview can leave End below the fold.
+        // Bring it into the stable viewport instead of tapping a stale hit point.
+        target.swipeUp()
+        let end = target.buttons["island-system-end"]
+        for _ in 0..<4 {
+            if end.isHittable && end.frame.maxY < target.frame.maxY - 20 { break }
+            target.swipeUp()
+        }
+        XCTAssertTrue(end.isHittable && end.frame.maxY < target.frame.maxY - 20,
+            "The end button must be visible before tapping it")
+        let tree = XCTAttachment(string: target.debugDescription)
+        tree.name = "native-end-button-elements"; tree.lifetime = .keepAlways; add(tree)
+        end.tap()
         let status = target.staticTexts["island-system-status"]
         let ended = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             status.exists && status.label == "ended"
@@ -82,6 +94,41 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         assertIslandPixels(board.staticTexts["捷運內湖站"].firstMatch)
         capture("walking-real-system-expanded")
         app.activate(); endSystemActivity(app)
+    }
+    func testTerminatedAppGuidanceSurvivesReopeningWithoutDuplicateActivities() {
+        launch(["--preview-island"])
+        let start = button("island-system-start")
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        start.tap()
+        let status = app.staticTexts["island-system-status"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && status.label.hasPrefix("started:")
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        XCUIDevice.shared.press(.home)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        waitForSystemIsland(board)
+        app.terminate()
+        sleep(3)
+        board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        let headline = board.staticTexts["捷運內湖站"].firstMatch
+        XCTAssertTrue(headline.waitForExistence(timeout: 20),
+            "Terminating the app must leave readable system guidance, not an empty capsule")
+        assertIslandPixels(headline)
+        capture("island-terminated-app")
+
+        launch(["--preview-island"])
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        start.tap()
+        let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && (status.label.hasPrefix("started:") || status.label.hasPrefix("updated:"))
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed)
+        XCTAssertEqual(app.staticTexts["island-system-count"].label, "1",
+            "Reopening must adopt or replace the old native activity without duplicating it")
+        capture("island-reopened-one-activity")
+        endSystemActivity(app)
+        XCTAssertEqual(app.staticTexts["island-system-count"].label, "0")
     }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {

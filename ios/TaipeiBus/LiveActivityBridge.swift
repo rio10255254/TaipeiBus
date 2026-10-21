@@ -65,36 +65,6 @@ struct RideIslandNoticePolicy {
     var sessions: [any RideActivitySession] { get }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession
 }
-@MainActor private final class RideRetirementCompletion {
-    private var waiting: CheckedContinuation<Void, Never>?
-    private var observation: Task<Void, Never>?
-    init(_ waiting: CheckedContinuation<Void, Never>) { self.waiting = waiting }
-    func attach(_ task: Task<Void, Never>) {
-        if waiting == nil { task.cancel() } else { observation = task }
-    }
-    func finish() {
-        guard let waiting else { return }
-        self.waiting = nil; observation?.cancel(); observation = nil
-        waiting.resume()
-    }
-}
-@MainActor private extension RideActivitySession {
-    /// Terminal state is authoritative even when the native end call is still
-    /// awaiting its final acknowledgement. Never end an already terminal item.
-    func retire() async {
-        guard activityState == .active || activityState == .stale else { return }
-        await withCheckedContinuation { continuation in
-            let completion = RideRetirementCompletion(continuation)
-            completion.attach(observe { state in
-                if state == .ended || state == .dismissed { completion.finish() }
-            })
-            Task {
-                await self.end()
-                if self.activityState == .ended || self.activityState == .dismissed { completion.finish() }
-            }
-        }
-    }
-}
 @MainActor private final class SystemRideSession: RideActivitySession {
     let value: Activity<RideActivityAttributes>
     init(_ value: Activity<RideActivityAttributes>) { self.value = value }
@@ -222,7 +192,10 @@ struct RideIslandNoticePolicy {
             }
             // Detach the observer before intentional end events; those are not a user dismissal.
             if activity?.id != matching?.id { stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil }
-            for session in sessions where session.id != matching?.id { await session.retire(); retiredIDs.remove(session.id) }
+            for session in sessions where session.id != matching?.id {
+                if session.activityState == .active || session.activityState == .stale { await session.end() }
+                retiredIDs.remove(session.id)
+            }
             guard version == revision else { continue }
             guard let next else {
                 activity = nil; pushed = nil; mayHaveActivities = false
@@ -230,14 +203,12 @@ struct RideIslandNoticePolicy {
                 return
             }
             if activity == nil, let matching { activity = matching; observe(matching) }
-            var startedNow = false
             if activity == nil {
                 do {
                     let created = try store.start(next.attributes, content: content(next.state))
-                    // Confirm the initial payload through the native update path
-                    // before identical-data suppression begins. A successful
-                    // request alone does not confirm the first rendered frame.
-                    activity = created; pushed = nil; startedNow = true; observe(created)
+                    // Request already includes this payload. Publishing it again
+                    // cancels the first system render without providing new data.
+                    activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
                 } catch {
                     let failure = error as NSError
@@ -267,8 +238,7 @@ struct RideIslandNoticePolicy {
                     guard current.activityState == .active || current.activityState == .stale else {
                         stoppedByUser = true; debugState = "dismissed"; return
                     }
-                    pushed = next.state
-                    debugState = (startedNow ? "started:" : "updated:") + next.state.phase.rawValue
+                    pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
                 }
             }
             if version == revision { return }
@@ -506,6 +476,8 @@ struct IslandPreviewGallery: View {
                     Task { await controller.waitForPendingChanges(); message = "ended" }
                 }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
+                Text(String(Activity<RideActivityAttributes>.activities.filter { $0.activityState == .active || $0.activityState == .stale }.count))
+                    .accessibilityIdentifier("island-system-count")
             }.padding(16)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
