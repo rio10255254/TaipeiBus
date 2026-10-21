@@ -1,6 +1,26 @@
 import XCTest
 
 final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
+    func testWalkingGuidanceAppearsOnTheActualSystemIsland() {
+        launch(["--preview-island", "--island-walking"])
+        let start = button("island-system-start")
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(start.isHittable); start.tap()
+        let status = app.staticTexts["island-system-status"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && status.label == "started:walking"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        XCUIDevice.shared.press(.home); sleep(3)
+        capture("walking-real-system-compact")
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        XCTAssertTrue(board.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20))
+        XCTAssertTrue(board.staticTexts["450 m"].firstMatch.exists,
+            "The walking route must render its real guidance, not only create an activity shell")
+        capture("walking-real-system-expanded")
+        app.activate(); button("island-system-end").tap()
+    }
     func testAllIslandSizesShareTheSameMeaningInBothLanguages() {
         for english in [false, true] {
             launch(["--preview-island"] + (english ? ["--test-language", "en"] : []))

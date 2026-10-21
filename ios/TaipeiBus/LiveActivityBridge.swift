@@ -352,7 +352,8 @@ final class CommuteWidgetBridge {
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
 struct IslandPreviewGallery: View {
     let language: AppLanguage
-    @State private var selected = ProcessInfo.processInfo.arguments.contains("--island-companion") ? 4 : 0
+    @State private var selected = ProcessInfo.processInfo.arguments.contains("--island-companion") ? 4 :
+        ProcessInfo.processInfo.arguments.contains("--island-walking") ? 3 : 0
     @State private var reference = Date()
     @State private var controller = RideActivityController()
     @State private var message = ""
