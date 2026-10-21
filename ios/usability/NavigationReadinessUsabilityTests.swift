@@ -157,7 +157,19 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         waitState("An explicit departure begins the trip", { $0["started"] as? Bool == true })
         let phase = probe()["step"] as? Int
         XCTAssertNotNil(phase)
+        waitState("The real navigation producer starts a native activity", { $0["liveActivity"] as? Bool == true })
+        let headline = probe()["activityHeadline"] as? String ?? ""
+        XCTAssertFalse(headline.isEmpty)
         XCUIDevice.shared.press(.home)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        // Give the native alert its first chance; otherwise inspect the compact
+        // activity through the same long press used on the reported phone.
+        let guidance = board.staticTexts[headline].firstMatch
+        if !guidance.waitForExistence(timeout: 5) {
+            board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        }
+        XCTAssertTrue(guidance.waitForExistence(timeout: 20), "The purchased account's actual navigation must render system content")
+        assertIslandPixels(guidance)
         capture(english ? "navigation-background-english" : "navigation-background-chinese")
         app.activate()
         waitState("Returning keeps the same step", { $0["started"] as? Bool == true && $0["step"] as? Int == phase })
