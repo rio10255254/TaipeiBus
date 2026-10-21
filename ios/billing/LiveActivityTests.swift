@@ -200,6 +200,70 @@ import ActivityKit
         XCTAssertEqual(store.created.last?.content.state.phase, .walking)
         XCTAssertEqual(old.activityState, .ended)
     }
+    func testEndingDoesNotWaitForAnInFlightNativeUpdate() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = store.created[0]
+        old.holdUpdate = true
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.updatePending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTAssertNotNil(old.updatePending)
+        controller.endAll()
+        // Leaving the app synchronizes the finished planner again. Neither that
+        // callback nor a blocked ETA update may postpone the native dismissal.
+        controller.update(nil, destination: "", language: .english, enabled: false)
+        for _ in 0..<100 {
+            if old.endCount > 0 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let endedBeforeUpdateReturned = old.endCount
+        old.updatePending?.resume(); old.updatePending = nil
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(endedBeforeUpdateReturned, 1, "End must reach the system without waiting for an older update")
+        XCTAssertTrue(store.sessions.isEmpty)
+        XCTAssertEqual(store.created.count, 1)
+        XCTAssertFalse(controller.isRunning)
+    }
+    func testReplacementWaitsForRetirementButNotForAnObsoleteUpdate() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = store.created[0]
+        old.holdUpdate = true; old.holdEnd = true
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.updatePending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        controller.endAll()
+        controller.update(state("waiting"), destination: "B", language: .english, enabled: true)
+        for _ in 0..<100 {
+            if old.endPending != nil { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let endStartedWithoutOldUpdate = old.endPending != nil
+        XCTAssertEqual(store.created.count, 1, "A replacement must wait until the old activity ends")
+        old.holdEnd = false; old.endPending?.resume(); old.endPending = nil
+        for _ in 0..<100 {
+            if store.created.count == 2 { break }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let replacementStartedWithoutOldUpdate = store.created.count == 2
+        old.updatePending?.resume(); old.updatePending = nil
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(endStartedWithoutOldUpdate)
+        XCTAssertTrue(replacementStartedWithoutOldUpdate)
+        XCTAssertEqual(old.endCount, 1)
+        XCTAssertEqual(store.sessions.count, 1)
+        XCTAssertEqual(store.created.last?.attributes.destination, "B")
+        XCTAssertTrue(controller.isRunning)
+    }
     func testImmediateRestartToSameDestinationFinishesPreviousSession() async {
         let store = FakeRideStore()
         let value = RideActivityController(store: store, now: { [now] in now })
@@ -415,6 +479,8 @@ import ActivityKit
     var holdUpdate = false
     var updatePending: CheckedContinuation<Void, Never>?
     var endCount = 0
+    var holdEnd = false
+    var endPending: CheckedContinuation<Void, Never>?
     var didEnd: (() -> Void)?
     var observer: (@MainActor (ActivityState) -> Void)?
     init(attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) {
@@ -427,7 +493,9 @@ import ActivityKit
         if let notice { notices.append(notice) }
     }
     func end() async {
-        endCount += 1; activityState = .ended; didEnd?(); observer?(.ended)
+        endCount += 1
+        if holdEnd { await withCheckedContinuation { endPending = $0 } }
+        activityState = .ended; didEnd?(); observer?(.ended)
     }
     func dismiss() { activityState = .dismissed; observer?(.dismissed) }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
