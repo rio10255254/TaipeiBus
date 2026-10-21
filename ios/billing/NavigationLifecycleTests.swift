@@ -121,7 +121,7 @@ import StoreKitTest
         XCTAssertTrue(store.sessions.isEmpty)
         XCTAssertEqual(store.created.count, 1, "A late permission refresh or old island link must not begin another trip")
     }
-    private func startedWithActivity() async throws -> (TransitAppModel, FakeRideStore, RideActivityController) {
+    func testVisibleLiveActivityKeepsTheAppRunningInTheBackground() async throws {
         let store = FakeRideStore()
         let controller = RideActivityController(store: store)
         let value = model(rideActivity: controller)
@@ -129,58 +129,15 @@ import StoreKitTest
         value.rideActivityOn = true; value.planner.begin()
         await controller.waitForPendingChanges()
         XCTAssertTrue(value.liveActivityRunning)
-        return (value, store, controller)
-    }
-    func testVisibleLiveActivityKeepsBackgroundLocationWithoutTheIndicator() async throws {
-        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
-        let (value, store, controller) = try await startedWithActivity()
-        let session = try XCTUnwrap(store.created.first)
-        XCTAssertTrue(value.location.backgroundNavigation, "Background updates still keep the island current")
-        XCTAssertTrue(value.location.activityBacked)
-        XCTAssertFalse(value.location.backgroundIndicator,
-            "A second island item would move the trip from the central compact island to the detached circle")
-        session.dismiss()
-        XCTAssertTrue(value.location.backgroundNavigation, "The alighting reminder still needs background location")
-        XCTAssertFalse(value.location.activityBacked)
-        XCTAssertTrue(value.location.backgroundIndicator, "Without a visible activity, the indicator keeps the app in use")
+        value.location.setActive(false)
+        // A rider standing at the stop produces no location events; classic background updates
+        // still keep the feed refreshing so the island never needs a tap to update.
+        XCTAssertTrue(value.location.backgroundNavigation)
+        XCTAssertTrue(value.journeyInBackground)
         value.finishJourney()
         await controller.waitForPendingChanges()
-        XCTAssertFalse(value.location.backgroundNavigation); XCTAssertFalse(value.location.backgroundIndicator)
-        XCTAssertFalse(value.location.activityBacked)
+        XCTAssertFalse(value.location.backgroundNavigation)
         XCTAssertTrue(store.sessions.isEmpty)
-    }
-    func testReturningActivityStopsClassicUpdatesStartedInTheBackground() async throws {
-        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
-        let (value, store, controller) = try await startedWithActivity()
-        value.location.setActive(false)
-        XCTAssertTrue(value.location.activityBacked); XCTAssertFalse(value.location.updating)
-        // Dismissed while away: the alighting reminder keeps classic updates, behind the arrow.
-        try XCTUnwrap(store.created.first).dismiss()
-        XCTAssertFalse(value.location.activityBacked); XCTAssertTrue(value.location.updating)
-        controller.allowRestart(); value.synchronizeNavigationState()
-        await controller.waitForPendingChanges()
-        XCTAssertTrue(value.liveActivityRunning)
-        XCTAssertTrue(value.location.activityBacked)
-        XCTAssertFalse(value.location.updating, "The blue arrow must not outlive the classic updates it belonged to")
-    }
-    func testWaitingSilentlyKeepsTheActivityPathAndARealFailureIsRememberedPerSystemVersion() async throws {
-        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
-        defer { UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey) }
-        let (value, _, controller) = try await startedWithActivity()
-        XCTAssertTrue(value.location.activityBacked)
-        // A rider standing at the stop produces no location events; that is not a failure.
-        value.location.setActive(false); value.location.setActive(true)
-        XCTAssertTrue(value.location.activityBacked)
-        value.location.fallBackFromActivity("insufficiently_in_use")
-        XCTAssertFalse(value.location.activityBacked)
-        XCTAssertTrue(value.location.backgroundNavigation); XCTAssertTrue(value.location.backgroundIndicator)
-        value.finishJourney(); await controller.waitForPendingChanges()
-        let (next, _, nextController) = try await startedWithActivity()
-        XCTAssertFalse(next.location.activityBacked, "The same iOS version keeps using classic updates")
-        next.finishJourney(); await nextController.waitForPendingChanges()
-        UserDefaults.standard.set(LocationService.systemMajorVersion - 1, forKey: LocationService.activityBackedFailedKey)
-        let (updated, _, _) = try await startedWithActivity()
-        XCTAssertTrue(updated.location.activityBacked, "A failure on an earlier iOS is tried again")
     }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()
