@@ -150,16 +150,19 @@ struct RideLiveActivity: Widget {
                     RideActivityBadge(state: state).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    RideCountdown(state: state, language: language, size: 24, stale: context.isStale, showsCaption: true)
-                        .frame(maxWidth: 130).padding(.trailing, 4)
+                    RideCountdownRing(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale), diameter: 46, showsCaption: false).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
-                    Text(RideActivityPresentation(state: state, language: language, systemStale: context.isStale).alightingSoon ? AppText.text("準備下車", language: language) : RideActivityPresentation(state: state, language: language).phaseTitle)
+                    let value = RideActivityPresentation(state: state, language: language, systemStale: context.isStale)
+                    // The countdown's meaning moves here so the ring beside the camera stays short.
+                    Text((value.alightingSoon ? AppText.text("準備下車", language: language) : value.phaseTitle)
+                         + (value.target != nil ? " · " + value.metricCaption : ""))
                         .font(.caption.weight(.semibold)).foregroundStyle(.secondary).lineLimit(1)
                 }
                 DynamicIslandExpandedRegion(.bottom) {
                     RideActivityDetails(presentation: RideActivityPresentation(state: state, language: language,
-                        systemStale: context.isStale)).padding(.horizontal, 4)
+                        systemStale: context.isStale), compact: true).padding(.horizontal, 4)
                 }
             } compactLeading: {
                 RideIslandLeading(presentation: RideActivityPresentation(state: state, language: language,

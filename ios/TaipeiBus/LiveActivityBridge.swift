@@ -154,9 +154,11 @@ struct RideIslandNoticePolicy {
     /// Only `.ended` and `.dismissed` are final. Any other state, including one a newer iOS
     /// adds, can still occupy an island slot and must be ended rather than skipped.
     nonisolated static func needsEnding(_ state: ActivityState) -> Bool { state != .ended && state != .dismissed }
+    private var listedSessions: [any RideActivitySession] { store.sessions.filter { Self.needsEnding($0.activityState) } }
+    var nativeCount: Int { listedSessions.count }
     /// This app's activities iOS still lists, e.g. "native=1[active] ending=0".
     var nativeSummary: String {
-        let listed = store.sessions.filter { Self.needsEnding($0.activityState) }
+        let listed = listedSessions
         return "native=\(listed.count)[\(listed.map { "\($0.activityState)" }.joined(separator: ","))] ending=\(retirements.count)"
     }
 
@@ -549,11 +551,12 @@ struct IslandPreviewGallery: View {
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         RideActivityBadge(state: state)
-                        Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
+                        Text(value.phaseTitle + (value.target != nil ? " · " + value.metricCaption : ""))
+                            .font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
-                        RideCountdown(state: state, language: language, size: 24, showsCaption: true).frame(maxWidth: 130)
+                        RideCountdownRing(presentation: value, diameter: 46, showsCaption: false)
                     }
-                    RideActivityDetails(presentation: value)
+                    RideActivityDetails(presentation: value, compact: true)
                 }.padding(16).frame(maxWidth: .infinity).background(.black, in: RoundedRectangle(cornerRadius: 32))
                     .environment(\.colorScheme, .dark).foregroundStyle(.white).accessibilityIdentifier("island-expanded")
                 RideActivityLockView(state: state, attributes: .init(destination: state.headline, language: language.rawValue))
