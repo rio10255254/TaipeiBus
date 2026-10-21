@@ -774,5 +774,17 @@
   "確認目前進度": "Check progress",
   "預估時間": "Estimated time",
   "依行程進度": "Based on trip progress",
-  "留意來車，點一下更新": "Watch for arrival · Tap to refresh"
+  "留意來車，點一下更新": "Watch for arrival · Tap to refresh",
+  "距離到站": "Until arrival",
+  "距離下車": "Until alighting",
+  "距離還車": "Until return",
+  "預估抵達": "To destination",
+  "借車後，騎至 %@ 還車": "After pickup, cycle to %@ to return",
+  "還車後，前往 %@": "After return, continue to %@",
+  "還車後，步行前往目的地": "After return, walk to your destination",
+  "接著搭乘 %@": "Next, take %@",
+  "接著搭乘 %@，往 %@": "Next, take %@ toward %@",
+  "下車後轉乘 %@，往 %@": "Then transfer to %@ toward %@",
+  "下車後，前往 %@ 借車": "After alighting, pick up a bike at %@",
+  "下車後步行至 %@": "Then walk to %@"
 }

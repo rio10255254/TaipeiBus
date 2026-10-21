@@ -65,6 +65,7 @@ import ActivityKit
     func testOldActivityPayloadStillDecodes() throws {
         var object = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(state())) as? [String: Any])
         object.removeValue(forKey: "symbol"); object.removeValue(forKey: "freshUntil")
+        for key in ["stepIdentifier", "rideIdentifier", "nextInstruction", "remainingMeters"] { object.removeValue(forKey: key) }
         let old = try JSONDecoder().decode(RideActivityAttributes.ContentState.self, from: JSONSerialization.data(withJSONObject: object))
         XCTAssertNil(old.symbol); XCTAssertNil(old.freshUntil)
         XCTAssertFalse(RideActivityPresentation(state: old, language: .english, now: now).stale)
@@ -80,7 +81,7 @@ import ActivityKit
     }
     func testRepeatedRefreshKeepsOneActivityAndEndRemovesIt() async {
         let store = FakeRideStore()
-        let value = RideActivityController(store: store)
+        let value = RideActivityController(store: store, now: { [now] in now })
         for _ in 0..<20 { value.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true) }
         await value.waitForPendingChanges()
         XCTAssertEqual(store.created.count, 1); XCTAssertTrue(value.isRunning)
@@ -91,7 +92,7 @@ import ActivityKit
     }
     func testDestinationAndLanguageReplaceInsteadOfLeavingTwoIslands() async {
         let store = FakeRideStore()
-        let controller = RideActivityController(store: store)
+        let controller = RideActivityController(store: store, now: { [now] in now })
         controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
         await controller.waitForPendingChanges()
         controller.update(state("walking"), destination: "公館", language: .english, enabled: true)
@@ -102,7 +103,7 @@ import ActivityKit
     }
     func testSlowOldUpdateCannotResurrectAnEndedTripOrOverwriteNextTrip() async {
         let store = FakeRideStore()
-        let controller = RideActivityController(store: store)
+        let controller = RideActivityController(store: store, now: { [now] in now })
         controller.update(state(), destination: "A", language: .traditionalChinese, enabled: true)
         await controller.waitForPendingChanges()
         let old = store.created[0]
@@ -121,7 +122,7 @@ import ActivityKit
     }
     func testImmediateRestartToSameDestinationFinishesPreviousSession() async {
         let store = FakeRideStore()
-        let value = RideActivityController(store: store)
+        let value = RideActivityController(store: store, now: { [now] in now })
         value.update(state(), destination: "A", language: .english, enabled: true)
         await value.waitForPendingChanges()
         value.endAll()
@@ -133,7 +134,7 @@ import ActivityKit
     }
     func testLateDismissalFromEndedActivityCannotDismissNewJourney() async {
         let store = FakeRideStore()
-        let value = RideActivityController(store: store)
+        let value = RideActivityController(store: store, now: { [now] in now })
         value.update(state(), destination: "A", language: .english, enabled: true)
         await value.waitForPendingChanges()
         let previous = store.created[0]
@@ -146,7 +147,7 @@ import ActivityKit
     }
     func testDismissalIsRespectedUntilUserRestarts() async {
         let store = FakeRideStore()
-        let value = RideActivityController(store: store)
+        let value = RideActivityController(store: store, now: { [now] in now })
         value.update(state(), destination: "A", language: .english, enabled: true)
         await value.waitForPendingChanges()
         store.created[0].dismiss()
@@ -162,7 +163,7 @@ import ActivityKit
         let store = FakeRideStore()
         let attributes = RideActivityAttributes(destination: "A", language: AppLanguage.english.rawValue)
         for _ in 0..<2 { _ = try store.start(attributes, content: ActivityContent(state: state(), staleDate: now.addingTimeInterval(120))) }
-        let value = RideActivityController(store: store)
+        let value = RideActivityController(store: store, now: { [now] in now })
         value.update(state("walking"), destination: "A", language: .english, enabled: true)
         await value.waitForPendingChanges()
         XCTAssertEqual(store.sessions.count, 1); XCTAssertEqual(store.created.count, 2)
@@ -170,7 +171,7 @@ import ActivityKit
     }
     func testRevokingAndRestoringPermissionDoesNotRequireAChangedRoute() async {
         let store = FakeRideStore(), snapshot = state()
-        let controller = RideActivityController(store: store)
+        let controller = RideActivityController(store: store, now: { [now] in now })
         store.allowed = false
         controller.update(snapshot, destination: "A", language: .english, enabled: true)
         await controller.waitForPendingChanges()
@@ -193,6 +194,121 @@ import ActivityKit
         await controller.waitForPendingChanges()
         XCTAssertTrue(store.sessions.isEmpty)
     }
+    func testCentralPresentationRetainsBothTimeAndStops() {
+        let value = RideActivityPresentation(state: state(), language: .traditionalChinese, now: now)
+        XCTAssertNotNil(value.target)
+        XCTAssertEqual(value.secondaryMetric, AppText.stops(5, language: .traditionalChinese))
+        XCTAssertEqual(value.metricCaption, "距離下車")
+    }
+    func testStepNoticeWaitsUntilTheAppIsInBackgroundAndOccursOnce() async {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(store.created[0].notices.isEmpty)
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.created[0].notices.count, 1)
+        for seconds in [1.0, 15, 31, 61] {
+            var updated = state("walking"); updated.updatedAt = now.addingTimeInterval(seconds)
+            controller.update(updated, destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+            await controller.waitForPendingChanges()
+        }
+        XCTAssertEqual(store.created[0].notices.count, 1, "Ordinary ETA ticks must not keep reopening the island")
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true)
+        controller.update(state("walking"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.created[0].notices.count, 1, "Reopening the app is not a new journey step")
+    }
+    func testBoardingAndTransferGetDistinctQuietNotices() async {
+        let store = FakeRideStore()
+        var clock = now
+        let value = RideActivityController(store: store, now: { clock })
+        for (i, phase) in ["waiting", "riding", "transfer"].enumerated() {
+            clock = now.addingTimeInterval(Double(i)*20)
+            var current = state(phase); current.updatedAt = clock
+            value.update(current, destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+            await value.waitForPendingChanges()
+        }
+        XCTAssertEqual(store.created[0].notices.count, 3)
+        XCTAssertTrue(store.created[0].notices.allSatisfy { $0.kind == .step })
+    }
+    func testStaleStateNeverOpensAnUrgentIsland() async {
+        let store = FakeRideStore()
+        let value = RideActivityController(store: store, now: { [now] in now })
+        value.update(state("stale"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true, alightingAlerts: true)
+        await value.waitForPendingChanges()
+        XCTAssertTrue(store.created[0].notices.isEmpty)
+    }
+    func testOldSourceTimeCannotCertifyItsOwnFreshness() async {
+        let store = FakeRideStore()
+        let wallClock = now.addingTimeInterval(181)
+        let value = RideActivityController(store: store, now: { wallClock })
+        value.update(state("waiting"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+        await value.waitForPendingChanges()
+        XCTAssertTrue(store.created[0].notices.isEmpty)
+        XCTAssertEqual(store.created[0].content.relevanceScore, 0)
+    }
+    func testAlightingNoticeIsOnceAndHonorsTheReminderPreference() {
+        var policy = RideIslandNoticePolicy(), current = state("riding")
+        current.target = now.addingTimeInterval(100)
+        XCTAssertEqual(policy.candidate(current, language: .english, alighting: false, now: now)?.kind, .step)
+        let notice = policy.candidate(current, language: .english, alighting: true, now: now)!
+        XCTAssertEqual(notice.kind, .alighting)
+        policy.record(notice, state: current, at: now)
+        XCTAssertNil(policy.candidate(current, language: .english, alighting: true, now: now.addingTimeInterval(5)))
+    }
+    func testRapidStepsAreCoalescedButAlightingCanInterruptTheQuietCooldown() {
+        var policy = RideIslandNoticePolicy()
+        let first = state("walking")
+        policy.record(policy.candidate(first, language: .english, alighting: true, now: now)!, state: first, at: now)
+        var riding = state("riding")
+        XCTAssertNil(policy.candidate(riding, language: .english, alighting: true, now: now.addingTimeInterval(5)))
+        XCTAssertNotNil(policy.candidate(riding, language: .english, alighting: true, now: now.addingTimeInterval(13)))
+        riding.target = now.addingTimeInterval(80)
+        XCTAssertEqual(policy.candidate(riding, language: .english, alighting: true, now: now.addingTimeInterval(5))?.kind, .alighting)
+    }
+    func testAlreadyDeliveredLocalReminderDoesNotCauseADuplicateIslandAlert() async {
+        let store = FakeRideStore()
+        let value = RideActivityController(store: store, now: { [now] in now })
+        value.canPresentNotice = { notice, _ in notice.kind != .alighting }
+        var close = state("riding"); close.target = now.addingTimeInterval(80)
+        value.update(close, destination: "A", language: .english, enabled: true, presentImportantUpdates: true, alightingAlerts: true)
+        await value.waitForPendingChanges()
+        XCTAssertTrue(store.created[0].notices.isEmpty)
+        close.updatedAt = now.addingTimeInterval(31)
+        value.update(close, destination: "A", language: .english, enabled: true, presentImportantUpdates: true, alightingAlerts: true)
+        await value.waitForPendingChanges()
+        XCTAssertTrue(store.created[0].notices.isEmpty)
+    }
+    func testEndingAndStartingTheSameDestinationAllowsTheNewTripIntroduction() async {
+        let store = FakeRideStore()
+        let value = RideActivityController(store: store, now: { [now] in now })
+        value.update(state("walking"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+        await value.waitForPendingChanges()
+        value.endAll()
+        value.update(state("walking"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
+        await value.waitForPendingChanges()
+        XCTAssertEqual(store.created.count, 2)
+        XCTAssertEqual(store.created[1].notices.count, 1)
+    }
+    func testQuietStepSoundIsIncludedAndActuallySilent() throws {
+        let file = try XCTUnwrap(Bundle.main.url(forResource: "NavigationQuiet", withExtension: "wav"))
+        let data = try Data(contentsOf: file)
+        XCTAssertEqual(String(data: data.prefix(4), encoding: .ascii), "RIFF")
+        XCTAssertTrue(data.dropFirst(44).allSatisfy { $0 == 0 })
+    }
+    func testLocalReminderOwnershipKeepsSafetyFallbackAndAvoidsDuplicates() {
+        let value = AlightReminder(); value.auditPermission(.allowed)
+        defer { value.reset() }
+        value.update(rideID: "A", stopName: "下車", secondsToAlight: 180, now: now)
+        XCTAssertTrue(value.canPresentInActivity(rideID: "A", now: now))
+        value.presentedInActivity(rideID: "A")
+        XCTAssertFalse(value.canPresentInActivity(rideID: "A", now: now))
+        value.update(rideID: "B", stopName: "下車", secondsToAlight: 80, now: now)
+        XCTAssertFalse(value.canPresentInActivity(rideID: "B", now: now))
+    }
+
 }
 
 @MainActor private final class FakeRideStore: RideActivityStore {
@@ -212,6 +328,7 @@ import ActivityKit
     let attributes: RideActivityAttributes
     var activityState = ActivityState.active
     var content: ActivityContent<RideActivityAttributes.ContentState>
+    var notices: [RideIslandNotice] = []
     var holdUpdate = false
     var updatePending: CheckedContinuation<Void, Never>?
     var didEnd: (() -> Void)?
@@ -219,9 +336,10 @@ import ActivityKit
     init(attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) {
         self.attributes = attributes; self.content = content
     }
-    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>) async {
+    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async {
         if holdUpdate { await withCheckedContinuation { updatePending = $0 } }
         self.content = content
+        if let notice { notices.append(notice) }
     }
     func end() async { activityState = .ended; didEnd?(); observer?(.ended) }
     func dismiss() { activityState = .dismissed; observer?(.dismissed) }

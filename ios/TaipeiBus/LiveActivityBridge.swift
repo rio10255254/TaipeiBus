@@ -1,4 +1,5 @@
 import ActivityKit
+import UIKit
 import SwiftUI
 import WidgetKit
 import TransitCore
@@ -12,12 +13,49 @@ extension RouteSign {
     static let cycling = RouteSign(text: "🚲", color: "#248A3D", darkInk: false)
 }
 
+struct RideIslandNotice: Equatable {
+    enum Kind { case step, alighting }
+    var kind: Kind
+    var key: String
+    var title: String
+    var body: String
+}
+
+/// A step is announced once, when the rider first leaves the app at that step.
+/// ETA ticks do not reopen the island. Alighting remains subject to the reminder preference.
+struct RideIslandNoticePolicy {
+    private(set) var sent = Set<String>()
+    private var lastStepAt = Date.distantPast
+    func candidate(_ state: RideActivityAttributes.ContentState, language: AppLanguage,
+                   alighting: Bool, now: Date) -> RideIslandNotice? {
+        let value = RideActivityPresentation(state: state, language: language, now: now)
+        guard !value.stale else { return nil }
+        if alighting, state.phase == .riding, let target = value.target,
+           target.timeIntervalSince(now) <= 110, !sent.contains(state.stepKey + ":alight") {
+            return RideIslandNotice(kind: .alighting, key: state.stepKey + ":alight",
+                title: AppText.text("準備下車", language: language), body: state.headline)
+        }
+        guard !sent.contains(state.stepKey), now.timeIntervalSince(lastStepAt) >= 12 else { return nil }
+        return RideIslandNotice(kind: .step, key: state.stepKey, title: value.phaseTitle, body: state.headline)
+    }
+    func hasPending(_ state: RideActivityAttributes.ContentState, alighting: Bool, now: Date) -> Bool {
+        let value = RideActivityPresentation(state: state, language: .traditionalChinese, now: now)
+        guard !value.stale else { return false }
+        return !sent.contains(state.stepKey) || (alighting && state.phase == .riding &&
+            value.target.map { $0.timeIntervalSince(now) <= 110 } == true && !sent.contains(state.stepKey + ":alight"))
+    }
+    mutating func record(_ notice: RideIslandNotice, state: RideActivityAttributes.ContentState, at now: Date) {
+        sent.insert(notice.key); sent.insert(state.stepKey)
+        if notice.kind == .step { lastStepAt = now }
+    }
+}
+
 /// The system adapter is also exercised with a delayed store in lifecycle tests.
 @MainActor protocol RideActivitySession: AnyObject {
     var id: String { get }
     var attributes: RideActivityAttributes { get }
     var activityState: ActivityState { get }
-    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>) async
+    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async
     func end() async
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never>
 }
@@ -32,7 +70,13 @@ extension RouteSign {
     var id: String { value.id }
     var attributes: RideActivityAttributes { value.attributes }
     var activityState: ActivityState { value.activityState }
-    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>) async { await value.update(content) }
+    func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async {
+        let alert = notice.map { item in
+            AlertConfiguration(title: LocalizedStringResource("\(item.title)"), body: LocalizedStringResource("\(item.body)"),
+                sound: item.kind == .alighting ? .default : .named("NavigationQuiet.wav"))
+        }
+        await value.update(content, alertConfiguration: alert)
+    }
     func end() async { await value.end(nil, dismissalPolicy: .immediate) }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         Task { for await state in value.activityStateUpdates { guard !Task.isCancelled else { return }; change(state) } }
@@ -53,11 +97,17 @@ extension RouteSign {
     private struct Desired {
         var state: State
         var attributes: RideActivityAttributes
+        var presentImportantUpdates: Bool
+        var alightingAlerts: Bool
     }
     private let store: any RideActivityStore
+    private let now: () -> Date
     private var activity: (any RideActivitySession)?
     private var desired: Desired?
     private var pushed: State?
+    private var noticePolicy = RideIslandNoticePolicy()
+    var canPresentNotice: ((RideIslandNotice, State) -> Bool)?
+    var didPresentNotice: ((RideIslandNotice, State) -> Void)?
     private var revision = 0
     private var worker: Task<Void, Never>?
     private var mayHaveActivities = true
@@ -73,8 +123,9 @@ extension RouteSign {
     }
     var onAvailabilityChange: (() -> Void)?
 
-    init(store: (any RideActivityStore)? = nil) {
+    init(store: (any RideActivityStore)? = nil, now: @escaping () -> Date = Date.init) {
         self.store = store ?? SystemRideStore()
+        self.now = now
         if store == nil {
             authorizationTask = Task { [weak self] in
                 for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
@@ -87,18 +138,22 @@ extension RouteSign {
     deinit { authorizationTask?.cancel(); stateTask?.cancel(); worker?.cancel() }
     func allowRestart() {
         guard !isRunning else { return }
-        stoppedByUser = false; pushed = nil; debugState = "none"
+        stoppedByUser = false; pushed = nil; noticePolicy = RideIslandNoticePolicy(); debugState = "none"
         revision += 1; schedule()
     }
-    func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool) {
+    func update(_ state: State?, destination: String, language: AppLanguage, enabled: Bool,
+                presentImportantUpdates: Bool = false, alightingAlerts: Bool = false) {
         guard enabled, let state else { endAll(); return }
         guard !stoppedByUser else { return }
         let permissionChanged = lastAllowed != store.allowed
         lastAllowed = store.allowed
         let attributes = RideActivityAttributes(destination: destination, language: language.rawValue)
-        if !permissionChanged, let old = desired, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
+        if let old = desired, old.attributes.destination != destination { noticePolicy = RideIslandNoticePolicy() }
+        let pendingNotice = presentImportantUpdates && noticePolicy.hasPending(state, alighting: alightingAlerts, now: now())
+        if !pendingNotice, !permissionChanged, let old = desired, old.presentImportantUpdates == presentImportantUpdates,
+           old.alightingAlerts == alightingAlerts, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
            state.updatedAt.timeIntervalSince(old.state.updatedAt) < 30, isRunning || worker != nil { return }
-        desired = Desired(state: state, attributes: attributes)
+        desired = Desired(state: state, attributes: attributes, presentImportantUpdates: presentImportantUpdates, alightingAlerts: alightingAlerts)
         revision += 1; mayHaveActivities = true; schedule()
     }
     func endAll() {
@@ -108,7 +163,7 @@ extension RouteSign {
         // A terminal callback already queued by the old activity must not dismiss
         // a journey that the user starts immediately after this one.
         stateTask?.cancel(); stateTask = nil; activity = nil
-        desired = nil; stoppedByUser = false; pushed = nil; debugState = "ended"
+        desired = nil; stoppedByUser = false; pushed = nil; noticePolicy = RideIslandNoticePolicy(); debugState = "ended"
         revision += 1; schedule()
     }
     private func schedule() {
@@ -142,15 +197,32 @@ extension RouteSign {
             if activity == nil, let matching { activity = matching; observe(matching) }
             if activity == nil {
                 do {
-                    let created = try store.start(next.attributes, content: Self.content(next.state))
+                    let created = try store.start(next.attributes, content: content(next.state))
                     activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
                 } catch { debugState = "unavailable" }
-            } else if let current = activity,
-                      pushed.map({ Self.changed($0, next.state) || next.state.updatedAt.timeIntervalSince($0.updatedAt) >= 30 }) ?? true {
-                await current.update(Self.content(next.state))
-                guard version == revision else { continue }
-                pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
+            }
+            if let current = activity {
+                // An old source timestamp cannot certify its own freshness, especially
+                // after an earlier native update kept this worker suspended.
+                let presentedAt = now()
+                let language = AppLanguage(rawValue: next.attributes.language) ?? .traditionalChinese
+                var notice = next.presentImportantUpdates ? noticePolicy.candidate(next.state, language: language,
+                    alighting: next.alightingAlerts, now: presentedAt) : nil
+                if let candidate = notice, canPresentNotice?(candidate, next.state) == false {
+                    noticePolicy.record(candidate, state: next.state, at: presentedAt); notice = nil
+                }
+                if notice != nil || (pushed.map { Self.changed($0, next.state) || next.state.updatedAt.timeIntervalSince($0.updatedAt) >= 30 } ?? true) {
+                    await current.update(content(next.state), notice: notice)
+                    if let notice, activity?.id == current.id,
+                       current.activityState == .active || current.activityState == .stale,
+                       desired?.state.stepKey == next.state.stepKey {
+                        noticePolicy.record(notice, state: next.state, at: presentedAt)
+                        didPresentNotice?(notice, next.state)
+                    }
+                    guard version == revision else { continue }
+                    pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
+                }
             }
             if version == revision { return }
         }
@@ -167,15 +239,18 @@ extension RouteSign {
     private static func same(_ a: RideActivityAttributes, _ b: RideActivityAttributes) -> Bool {
         a.destination == b.destination && a.language == b.language
     }
-    private static func content(_ state: State) -> ActivityContent<State> {
-        ActivityContent(state: state, staleDate: state.updateDeadline)
+    private func content(_ state: State) -> ActivityContent<State> {
+        ActivityContent(state: state, staleDate: state.updateDeadline,
+            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: now()).relevance)
     }
     private static func changed(_ old: State, _ new: State) -> Bool {
         if let before = old.freshUntil, let after = new.freshUntil,
            (before <= new.updatedAt) != (after <= new.updatedAt) { return true }
         if old.phase != new.phase || old.sign != new.sign || old.headline != new.headline || old.detail != new.detail ||
-            old.status != new.status || old.stopsLeft != new.stopsLeft || old.totalStops != new.totalStops || old.symbol != new.symbol ||
+            old.status != new.status || old.stopsLeft != new.stopsLeft || old.totalStops != new.totalStops || old.symbol != new.symbol || old.stepIdentifier != new.stepIdentifier ||
+            old.nextInstruction != new.nextInstruction || (old.remainingMeters == nil) != (new.remainingMeters == nil) ||
             (old.target == nil) != (new.target == nil) { return true }
+        if let a = old.remainingMeters, let b = new.remainingMeters, abs(a-b) >= 20 { return true }
         guard let a = old.target, let b = new.target else { return false }
         return abs(a.timeIntervalSince(b)) >= 20
     }
@@ -311,6 +386,9 @@ struct IslandPreviewGallery: View {
             value.headline = english ? "Zhongxiao Fuxing Station · Exit 2" : "捷運忠孝復興站・二號出口"
         default: break
         }
+        value.stepIdentifier = "preview:" + name
+        if value.phase == .riding { value.nextInstruction = english ? "Then walk to your destination" : "下車後步行至目的地" }
+        if value.phase == .walking || value.phase == .cycling { value.remainingMeters = 450 }
         return value
     }
     var body: some View {
@@ -338,7 +416,7 @@ struct IslandPreviewGallery: View {
                         RideActivityBadge(state: state)
                         Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
-                        RideCountdown(state: state, language: language, size: 24).frame(maxWidth: 130)
+                        RideCountdown(state: state, language: language, size: 24, showsCaption: true).frame(maxWidth: 130)
                     }
                     RideActivityDetails(presentation: value)
                 }.padding(16).frame(maxWidth: .infinity).background(.black, in: RoundedRectangle(cornerRadius: 32))
@@ -359,6 +437,16 @@ struct IslandPreviewGallery: View {
                 Button("End test activities") { controller.endAll(); message = "ended" }.accessibilityIdentifier("island-system-end")
                 Text(message).accessibilityIdentifier("island-system-status")
             }.padding(16)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
+            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
+            var current = state; current.updatedAt = Date(); current.freshUntil = Date().addingTimeInterval(120)
+            controller.update(current, destination: "Island verification", language: language, enabled: true,
+                presentImportantUpdates: true, alightingAlerts: true)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
+            controller.update(state, destination: "Island verification", language: language, enabled: true)
         }
     }
 }

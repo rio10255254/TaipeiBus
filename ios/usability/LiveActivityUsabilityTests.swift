@@ -21,6 +21,48 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             }
         }
     }
+    func testNavigationIntroductionAutomaticallyUsesTheExpandedIsland() {
+        launch(["--preview-island", "--island-auto-expand"])
+        let start = button("island-system-start")
+        for _ in 0..<3 { if start.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(start.isHittable); start.tap()
+        let status = app.staticTexts["island-system-status"]
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            status.exists && status.label.hasPrefix("started:")
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
+        XCUIDevice.shared.press(.home)
+        let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        XCTAssertTrue(board.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 25),
+            "Leaving the app should show the trip introduction in the expanded island without a long press")
+        sleep(2); capture("central-island-automatic-introduction")
+
+        // Another app may normally share the island. A fresh navigation step
+        // should still request its full guidance, without a press on either circle.
+        let companion = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus.IslandCompanion")
+        companion.launchArguments = ["--preview-island", "--island-companion", "--test-language", "en"]
+        companion.launch()
+        let secondStart = companion.buttons["island-system-start"]
+        for _ in 0..<3 { if secondStart.isHittable { break }; companion.swipeUp() }
+        XCTAssertTrue(secondStart.isHittable); secondStart.tap()
+        let secondStatus = companion.staticTexts["island-system-status"]
+        let secondReady = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            secondStatus.exists && secondStatus.label == "started:cycling"
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [secondReady], timeout: 15), .completed)
+        app.activate()
+        for _ in 0..<3 { if button("island-next").isHittable { break }; app.swipeDown() }
+        button("island-next").tap()
+        sleep(13) // Deliberately exceed the quiet-step cooldown in this fixture.
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(board.staticTexts["還有 5 站"].firstMatch.waitForExistence(timeout: 25),
+            "Boarding should present full central guidance even while another app has an activity")
+        sleep(2); capture("central-island-automatic-with-other-activity")
+        app.activate()
+        for _ in 0..<3 { if button("island-system-end").isHittable { break }; app.swipeUp() }
+        button("island-system-end").tap()
+        companion.activate(); companion.buttons["island-system-end"].tap()
+    }
     func testSystemCompactAndTwoActivityPresentationsAndEnd() {
         launch(["--preview-island"])
         let start = button("island-system-start")
