@@ -853,8 +853,9 @@ final class TransitAppModel: ObservableObject {
             return self.alightReminder.canPresentInActivity(rideID: id, now: Date())
         }
         rideActivity.didPresentNotice = { [weak self] notice, state in
-            guard notice.kind == .alighting, let id = state.rideIdentifier else { return }
-            self?.alightReminder.presentedInActivity(rideID: id)
+            guard notice.kind == .alighting, let id = state.rideIdentifier,
+                  let self, self.alightReminderActive else { return }
+            self.alightReminder.presentedInActivity(rideID: id)
         }
         rideActivity.onAvailabilityChange = { [weak self] in
             self?.objectWillChange.send(); self?.synchronizeNavigationState()

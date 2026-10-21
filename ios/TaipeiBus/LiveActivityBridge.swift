@@ -101,6 +101,7 @@ struct RideIslandNoticePolicy {
         var alightingAlerts: Bool
     }
     private let store: any RideActivityStore
+    private let now: () -> Date
     private var activity: (any RideActivitySession)?
     private var desired: Desired?
     private var pushed: State?
@@ -122,8 +123,9 @@ struct RideIslandNoticePolicy {
     }
     var onAvailabilityChange: (() -> Void)?
 
-    init(store: (any RideActivityStore)? = nil) {
+    init(store: (any RideActivityStore)? = nil, now: @escaping () -> Date = Date.init) {
         self.store = store ?? SystemRideStore()
+        self.now = now
         if store == nil {
             authorizationTask = Task { [weak self] in
                 for await _ in ActivityAuthorizationInfo().activityEnablementUpdates {
@@ -147,7 +149,7 @@ struct RideIslandNoticePolicy {
         lastAllowed = store.allowed
         let attributes = RideActivityAttributes(destination: destination, language: language.rawValue)
         if let old = desired, old.attributes.destination != destination { noticePolicy = RideIslandNoticePolicy() }
-        let pendingNotice = presentImportantUpdates && noticePolicy.hasPending(state, alighting: alightingAlerts, now: state.updatedAt)
+        let pendingNotice = presentImportantUpdates && noticePolicy.hasPending(state, alighting: alightingAlerts, now: now())
         if !pendingNotice, !permissionChanged, let old = desired, old.presentImportantUpdates == presentImportantUpdates,
            old.alightingAlerts == alightingAlerts, Self.same(old.attributes, attributes), !Self.changed(old.state, state),
            state.updatedAt.timeIntervalSince(old.state.updatedAt) < 30, isRunning || worker != nil { return }
@@ -195,24 +197,27 @@ struct RideIslandNoticePolicy {
             if activity == nil, let matching { activity = matching; observe(matching) }
             if activity == nil {
                 do {
-                    let created = try store.start(next.attributes, content: Self.content(next.state))
+                    let created = try store.start(next.attributes, content: content(next.state))
                     activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
                 } catch { debugState = "unavailable" }
             }
             if let current = activity {
+                // An old source timestamp cannot certify its own freshness, especially
+                // after an earlier native update kept this worker suspended.
+                let presentedAt = now()
                 let language = AppLanguage(rawValue: next.attributes.language) ?? .traditionalChinese
                 var notice = next.presentImportantUpdates ? noticePolicy.candidate(next.state, language: language,
-                    alighting: next.alightingAlerts, now: next.state.updatedAt) : nil
+                    alighting: next.alightingAlerts, now: presentedAt) : nil
                 if let candidate = notice, canPresentNotice?(candidate, next.state) == false {
-                    noticePolicy.record(candidate, state: next.state, at: next.state.updatedAt); notice = nil
+                    noticePolicy.record(candidate, state: next.state, at: presentedAt); notice = nil
                 }
                 if notice != nil || (pushed.map { Self.changed($0, next.state) || next.state.updatedAt.timeIntervalSince($0.updatedAt) >= 30 } ?? true) {
-                    await current.update(Self.content(next.state), notice: notice)
+                    await current.update(content(next.state), notice: notice)
                     if let notice, activity?.id == current.id,
                        current.activityState == .active || current.activityState == .stale,
                        desired?.state.stepKey == next.state.stepKey {
-                        noticePolicy.record(notice, state: next.state, at: next.state.updatedAt)
+                        noticePolicy.record(notice, state: next.state, at: presentedAt)
                         didPresentNotice?(notice, next.state)
                     }
                     guard version == revision else { continue }
@@ -234,9 +239,9 @@ struct RideIslandNoticePolicy {
     private static func same(_ a: RideActivityAttributes, _ b: RideActivityAttributes) -> Bool {
         a.destination == b.destination && a.language == b.language
     }
-    private static func content(_ state: State) -> ActivityContent<State> {
+    private func content(_ state: State) -> ActivityContent<State> {
         ActivityContent(state: state, staleDate: state.updateDeadline,
-            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: state.updatedAt).relevance)
+            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: now()).relevance)
     }
     private static func changed(_ old: State, _ new: State) -> Bool {
         if let before = old.freshUntil, let after = new.freshUntil,
