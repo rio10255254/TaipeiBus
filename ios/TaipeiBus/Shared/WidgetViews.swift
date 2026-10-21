@@ -279,23 +279,23 @@ func rideIslandTint(_ presentation: RideActivityPresentation) -> Color {
 /// look nearly finished; the system animates the ring without app updates.
 let rideRingWindow: TimeInterval = 600
 
-/// A countdown ring with a soft glow in the route colour. Live Activities cannot run their own
-/// animations, so the glow follows the system-driven ring rather than spinning on its own.
+/// A countdown ring on a halo in the route colour. Live Activities cannot run their own
+/// animations, so the motion is the system-driven ring rather than a spinning effect. The halo
+/// is a wide translucent stroke: a shadow on the timed ring delayed the island's first render.
 struct RideGlowRing: View {
     let presentation: RideActivityPresentation
     var lineWidth: CGFloat = 4
     var body: some View {
         let tint = rideIslandTint(presentation)
-        let glow = tint.opacity(0.85)
+        let active = presentation.alightingSoon || presentation.target != nil
         ZStack {
-            Circle().stroke(Color.primary.opacity(0.14), lineWidth: lineWidth)
+            Circle().stroke(active ? tint.opacity(0.22) : Color.primary.opacity(0.14), lineWidth: lineWidth * (active ? 2.6 : 1))
             if presentation.alightingSoon {
-                Circle().stroke(tint, lineWidth: lineWidth).shadow(color: glow, radius: lineWidth * 1.5)
+                Circle().stroke(tint, lineWidth: lineWidth)
             } else if let target = presentation.target {
                 ProgressView(timerInterval: target.addingTimeInterval(-rideRingWindow)...target, countsDown: true,
                              label: { EmptyView() }, currentValueLabel: { EmptyView() })
                     .progressViewStyle(.circular).tint(tint)
-                    .shadow(color: glow, radius: lineWidth * 1.5)
             }
         }
     }
