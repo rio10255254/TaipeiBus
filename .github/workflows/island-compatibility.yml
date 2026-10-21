@@ -15,7 +15,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: island-compatibility-${{ github.ref }}
+  # Keep the failing baseline's screenshots while its corrected successor runs.
+  group: island-compatibility-${{ github.ref }}-${{ github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -181,7 +182,7 @@ jobs:
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$device" \
             -derivedDataPath "$RUNNER_TEMP/Navigation27" -resultBundlePath "$RUNNER_TEMP/navigation27.xcresult" \
-            -only-testing:TaipeiBusUsabilityTests/NavigationReadinessUsabilityTests/testPreviewBackgroundReturnAndEndConfirmation \
+            -only-testing:TaipeiBusUsabilityTests/NavigationReadinessUsabilityTests/testExistingProNavigationRendersOnTheActualSystemIsland \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/navigation27.log"
       - name: Export actual navigation screenshots
