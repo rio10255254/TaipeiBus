@@ -36,6 +36,10 @@ on:
         description: 'For store-verify: put the verified feature screenshots first'
         type: boolean
         default: false
+      diagnostic_logs:
+        description: 'Read redacted crash summaries for the exact existing beta build'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -113,6 +117,15 @@ jobs:
       - name: Read or update exact TestFlight metadata without rebuilding
         if: inputs.operation == 'beta-audit' || inputs.operation == 'beta-metadata'
         run: ruby ios/release/beta_metadata.rb
+      - name: Read redacted diagnostics for the exact existing build
+        if: inputs.operation == 'beta-audit' && inputs.diagnostic_logs
+        run: ruby ios/release/island_diagnostics.rb
+      - uses: actions/upload-artifact@v4
+        if: always() && inputs.operation == 'beta-audit' && inputs.diagnostic_logs
+        with:
+          name: TestFlight-diagnostics-${{ github.run_id }}
+          path: ${{ runner.temp }}/testflight-diagnostics.json
+          retention-days: 14
       - name: Preserve TestFlight metadata readback
         if: always() && (inputs.operation == 'beta-audit' || inputs.operation == 'beta-metadata')
         uses: actions/upload-artifact@v4
