@@ -12,6 +12,10 @@ extension JourneyUsabilityTestBase {
             width: frame.width * scale, height: frame.height * scale).integral
         guard frame.minY < screen.height * 0.3, !frame.isEmpty,
               let crop = full.cropping(to: rect), crop.width > 0, crop.height > 0 else { return nil }
+        guard let counts = islandColors(crop) else { return nil }
+        return (screenshot, counts.light, counts.dark)
+    }
+    private func islandColors(_ crop: CGImage) -> (light: Int, dark: Double)? {
         var pixels = [UInt8](repeating: 0, count: crop.width * crop.height * 4)
         let decoded = pixels.withUnsafeMutableBytes { buffer -> Bool in
             guard let context = CGContext(data: buffer.baseAddress, width: crop.width, height: crop.height,
@@ -27,7 +31,20 @@ extension JourneyUsabilityTestBase {
             if max(r, max(g, b)) < 55 { dark += 1 }
             if min(r, min(g, b)) > 135 { light += 1 }
         }
-        return (screenshot, light, Double(dark) / Double(crop.width * crop.height))
+        return (light, Double(dark) / Double(crop.width * crop.height))
+    }
+    func hasVisibleSystemIsland(_ board: XCUIApplication) -> Bool {
+        let expanded = board.staticTexts["捷運內湖站"].firstMatch
+        if let sample = islandPixelSample(expanded), sample.light > 8 && sample.dark > 0.15 { return true }
+        // Compact accessibility may expose just the route/icon, not a destination.
+        // This central status-bar crop excludes the clock, signal and app icons.
+        let screenshot = XCUIScreen.main.screenshot()
+        guard let full = UIImage(data: screenshot.pngRepresentation)?.cgImage else { return false }
+        let width = CGFloat(full.width), height = CGFloat(full.height)
+        let rect = CGRect(x: width * 0.22, y: height * 0.005,
+            width: width * 0.56, height: height * 0.065).integral
+        guard let crop = full.cropping(to: rect), let counts = islandColors(crop) else { return false }
+        return counts.light > 12 && counts.dark > 0.2
     }
     /// A label is exposed before the expansion animation paints its first frame.
     /// Allow a bounded transition, while still rejecting persistent empty content.

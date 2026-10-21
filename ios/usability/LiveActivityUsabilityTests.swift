@@ -21,9 +21,10 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         }
     }
     private func waitForSystemIsland(_ board: XCUIApplication) {
-        let guidance = board.descendants(matching: .any)
-            .matching(NSPredicate(format: "label CONTAINS %@", "捷運內湖站")).firstMatch
-        XCTAssertTrue(guidance.waitForExistence(timeout: 15),
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            self.hasVisibleSystemIsland(board)
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 15), .completed,
             "The compact system activity must be present before a long press can expand it")
     }
     private func endSystemActivity(_ target: XCUIApplication) {

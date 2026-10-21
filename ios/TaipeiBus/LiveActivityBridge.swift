@@ -65,6 +65,36 @@ struct RideIslandNoticePolicy {
     var sessions: [any RideActivitySession] { get }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession
 }
+@MainActor private final class RideRetirementCompletion {
+    private var waiting: CheckedContinuation<Void, Never>?
+    private var observation: Task<Void, Never>?
+    init(_ waiting: CheckedContinuation<Void, Never>) { self.waiting = waiting }
+    func attach(_ task: Task<Void, Never>) {
+        if waiting == nil { task.cancel() } else { observation = task }
+    }
+    func finish() {
+        guard let waiting else { return }
+        self.waiting = nil; observation?.cancel(); observation = nil
+        waiting.resume()
+    }
+}
+@MainActor private extension RideActivitySession {
+    /// Terminal state is authoritative even when the native end call is still
+    /// awaiting its final acknowledgement. Never end an already terminal item.
+    func retire() async {
+        guard activityState == .active || activityState == .stale else { return }
+        await withCheckedContinuation { continuation in
+            let completion = RideRetirementCompletion(continuation)
+            completion.attach(observe { state in
+                if state == .ended || state == .dismissed { completion.finish() }
+            })
+            Task {
+                await self.end()
+                if self.activityState == .ended || self.activityState == .dismissed { completion.finish() }
+            }
+        }
+    }
+}
 @MainActor private final class SystemRideSession: RideActivitySession {
     let value: Activity<RideActivityAttributes>
     init(_ value: Activity<RideActivityAttributes>) { self.value = value }
@@ -78,7 +108,10 @@ struct RideIslandNoticePolicy {
         }
         await value.update(content, alertConfiguration: alert)
     }
-    func end() async { await value.end(nil, dismissalPolicy: .immediate) }
+    func end() async {
+        guard value.activityState == .active || value.activityState == .stale else { return }
+        await value.end(nil, dismissalPolicy: .immediate)
+    }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         Task { for await state in value.activityStateUpdates { guard !Task.isCancelled else { return }; change(state) } }
     }
@@ -189,7 +222,7 @@ struct RideIslandNoticePolicy {
             }
             // Detach the observer before intentional end events; those are not a user dismissal.
             if activity?.id != matching?.id { stateTask?.cancel(); stateTask = nil; activity = nil; pushed = nil }
-            for session in sessions where session.id != matching?.id { await session.end(); retiredIDs.remove(session.id) }
+            for session in sessions where session.id != matching?.id { await session.retire(); retiredIDs.remove(session.id) }
             guard version == revision else { continue }
             guard let next else {
                 activity = nil; pushed = nil; mayHaveActivities = false

@@ -138,6 +138,38 @@ import ActivityKit
         XCTAssertEqual(session.updateCount, 1)
         XCTAssertEqual(store.created.count, 1)
     }
+    func testAConfirmedTerminalStateAllowsTheNextTripBeforeTheOldEndReplyReturns() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = try XCTUnwrap(store.created.first)
+        old.holdEnd = true
+        controller.endAll()
+        controller.update(state("walking"), destination: "公館", language: .traditionalChinese, enabled: true)
+        for _ in 0..<100 {
+            if store.created.count == 2 { break }
+            await Task.yield()
+        }
+        let beforeReply = store.created.count
+        let reply = old.endPending; old.holdEnd = false; old.endPending = nil; reply?.resume()
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(beforeReply, 2, "The old terminal activity must not block a confirmed new trip")
+        XCTAssertEqual(store.sessions.count, 1); XCTAssertTrue(controller.isRunning)
+        XCTAssertEqual(store.created.last?.attributes.destination, "公館")
+    }
+    func testAnAlreadyTerminalSessionIsNotEndedASecondTime() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let old = try XCTUnwrap(store.created.first)
+        old.activityState = .ended
+        controller.update(state("walking"), destination: "公館", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(old.endCount, 0); XCTAssertEqual(store.created.count, 2)
+        XCTAssertTrue(controller.isRunning)
+    }
     func testDismissalDuringTheFirstNativePublishCannotRestartTheActivity() async throws {
         let store = FakeRideStore()
         store.prepare = { $0.holdUpdate = true }
@@ -401,7 +433,10 @@ import ActivityKit
     var notices: [RideIslandNotice] = []
     var updateCount = 0
     var holdUpdate = false
+    var holdEnd = false
     var updatePending: CheckedContinuation<Void, Never>?
+    var endPending: CheckedContinuation<Void, Never>?
+    var endCount = 0
     var didEnd: (() -> Void)?
     var observer: (@MainActor (ActivityState) -> Void)?
     init(attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) {
@@ -413,7 +448,10 @@ import ActivityKit
         self.content = content
         if let notice { notices.append(notice) }
     }
-    func end() async { activityState = .ended; didEnd?(); observer?(.ended) }
+    func end() async {
+        endCount += 1; activityState = .ended; didEnd?(); observer?(.ended)
+        if holdEnd { await withCheckedContinuation { endPending = $0 } }
+    }
     func dismiss() { activityState = .dismissed; observer?(.dismissed) }
     func observe(_ change: @escaping @MainActor (ActivityState) -> Void) -> Task<Void, Never> {
         observer = change
