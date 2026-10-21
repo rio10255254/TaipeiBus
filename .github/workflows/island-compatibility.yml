@@ -2,6 +2,9 @@ name: iOS 27 island compatibility
 
 on:
   workflow_dispatch:
+  push:
+    branches: ['codex/island-rendering-recovery']
+    paths: ['.github/workflows/island-compatibility.yml']
 
 permissions:
   contents: read
