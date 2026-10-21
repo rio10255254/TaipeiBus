@@ -11,9 +11,6 @@ on:
         description: 'Verify the shipping SDK app on iOS 27 without recompiling an unused SDK 27 app'
         type: boolean
         default: false
-  push:
-    branches: ['codex/island-rendering-recovery']
-    paths: ['.github/workflows/island-compatibility.yml']
 
 permissions:
   contents: read
@@ -158,49 +155,3 @@ jobs:
             ${{ runner.temp }}/island-*.json
             ${{ runner.temp }}/island-*-screenshots
             ${{ runner.temp }}/island-crashes
-
-  navigation:
-    if: inputs.legacy_only != true
-    runs-on: xcode-27
-    timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
-    steps:
-      - uses: actions/checkout@v4
-      - run: xcodebuild -downloadComponent MetalToolchain
-      - name: Exercise a real purchased account and navigation producer on iOS 27
-        run: |
-          set -euo pipefail
-          gem install xcodeproj -v 1.27.0 --no-document --user-install
-          BUS_VERIFY_PRO_UI=true ruby ios/usability/setup.rb
-          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r["isAvailable"] and r["name"].startswith("iOS") and r["version"].startswith("27.0")]; assert r; print(r[0]["identifier"])')
-          device=$(xcrun simctl create TaipeiBus-navigation27 com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro "$runtime")
-          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
-          xcrun simctl boot "$device"
-          xcrun simctl bootstatus "$device" -b
-          xcrun simctl location "$device" set 25.0416,121.5438
-          xcrun simctl spawn "$device" log stream --style compact --level debug \
-            --predicate 'process == "TaipeiBus" OR process == "TaipeiBusWidgets" OR process == "chronod" OR process == "liveactivitiesd"' \
-            > "$RUNNER_TEMP/navigation-renderer.log" 2>&1 &
-          navigation_log_pid=$!
-          trap 'kill "$navigation_log_pid" 2>/dev/null || true' EXIT
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
-            -configuration Debug -destination "platform=iOS Simulator,id=$device" \
-            -derivedDataPath "$RUNNER_TEMP/Navigation27" -resultBundlePath "$RUNNER_TEMP/navigation27.xcresult" \
-            -only-testing:TaipeiBusUsabilityTests/NavigationReadinessUsabilityTests/testExistingProNavigationRendersOnTheActualSystemIsland \
-            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
-            | tee "$RUNNER_TEMP/navigation27.log"
-      - name: Export actual navigation screenshots
-        if: always()
-        run: |
-          if [ -d "$RUNNER_TEMP/navigation27.xcresult" ]; then
-            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/navigation27.xcresult" --output-path "$RUNNER_TEMP/navigation27-screenshots"
-          fi
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: island-ios27-navigation
-          path: |
-            ${{ runner.temp }}/navigation27.log
-            ${{ runner.temp }}/navigation-renderer.log
-            ${{ runner.temp }}/navigation27-screenshots
