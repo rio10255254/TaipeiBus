@@ -153,7 +153,7 @@ import ActivityKit
     func testDismissalDuringANativeUpdateCannotRestartTheActivity() async throws {
         let store = FakeRideStore()
         let controller = RideActivityController(store: store, now: { [now] in now })
-        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        controller.update(state("waiting"), destination: "內湖", language: .traditionalChinese, enabled: true)
         await controller.waitForPendingChanges()
         let session = try XCTUnwrap(store.created.first)
         session.holdUpdate = true
