@@ -107,7 +107,9 @@ struct RideActivityPresentation {
         }
         return nil
     }
-    var relevance: Double { stale ? 0 : alightingSoon ? 100 : state.phase == .riding ? 80 : 60 }
+    // The trip is still useful when its live feed expires: retain the station
+    // and next instruction at low priority instead of suppressing the activity.
+    var relevance: Double { stale ? 10 : alightingSoon ? 100 : state.phase == .riding ? 80 : 60 }
     var status: String {
         if stale {
             if state.phase == .waiting, state.target.map({ $0 <= now }) == true {

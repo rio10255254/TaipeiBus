@@ -280,7 +280,9 @@ import ActivityKit
         value.update(state("waiting"), destination: "A", language: .english, enabled: true, presentImportantUpdates: true)
         await value.waitForPendingChanges()
         XCTAssertTrue(store.created[0].notices.isEmpty)
-        XCTAssertEqual(store.created[0].content.relevanceScore, 0)
+        XCTAssertEqual(store.created[0].content.relevanceScore, 10)
+        XCTAssertLessThan(store.created[0].content.relevanceScore,
+            RideActivityPresentation(state: state("waiting"), language: .english, now: now).relevance)
     }
     func testAlightingNoticeIsOnceAndHonorsTheReminderPreference() {
         var policy = RideIslandNoticePolicy(), current = state("riding")
