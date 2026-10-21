@@ -1,5 +1,6 @@
 import ActivityKit
 import UIKit
+import OSLog
 import SwiftUI
 import WidgetKit
 import TransitCore
@@ -93,6 +94,7 @@ struct RideIslandNoticePolicy {
 /// One serialized lifecycle: finish the previous island before starting its replacement.
 /// Updates received during an await are coalesced to the latest trip, never replayed out of order.
 @MainActor final class RideActivityController {
+    private let logger = Logger(subsystem: "com.rio10255254.TaipeiBus", category: "RideActivity")
     typealias State = RideActivityAttributes.ContentState
     private struct Desired {
         var state: State
@@ -200,7 +202,11 @@ struct RideIslandNoticePolicy {
                     let created = try store.start(next.attributes, content: content(next.state))
                     activity = created; pushed = next.state; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
-                } catch { debugState = "unavailable" }
+                } catch {
+                    let failure = error as NSError
+                    logger.error("Activity request failed: domain=\(failure.domain, privacy: .public) code=\(failure.code, privacy: .public)")
+                    debugState = "unavailable"
+                }
             }
             if let current = activity {
                 // An old source timestamp cannot certify its own freshness, especially
@@ -349,13 +355,18 @@ final class CommuteWidgetBridge {
 }
 
 #if DEBUG || ISLAND_RENDER_AUDIT
+@MainActor private final class IslandPreviewActivity: ObservableObject {
+    let controller = RideActivityController()
+}
+
 /// Deliberately labelled development fixtures, never used as physical-device review evidence.
 struct IslandPreviewGallery: View {
     let language: AppLanguage
     @State private var selected = ProcessInfo.processInfo.arguments.contains("--island-companion") ? 4 :
         ProcessInfo.processInfo.arguments.contains("--island-walking") ? 3 : 0
     @State private var reference = Date()
-    @State private var controller = RideActivityController()
+    @StateObject private var activity = IslandPreviewActivity()
+    private var controller: RideActivityController { activity.controller }
     @State private var message = ""
     private let names = ["waiting", "riding", "alighting", "walking", "cycling", "transfer", "stale", "due", "long"]
     private var state: RideActivityAttributes.ContentState {
@@ -425,6 +436,7 @@ struct IslandPreviewGallery: View {
                 RideActivityLockView(state: state, attributes: .init(destination: state.headline, language: language.rawValue))
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)).accessibilityIdentifier("island-lock")
                 Button("Start system activity") {
+                    reference = Date(); message = "starting"
                     controller.onAvailabilityChange = { message = controller.debugState }
                     controller.update(state, destination: "Island verification", language: language, enabled: true)
                 }.accessibilityIdentifier("island-system-start")

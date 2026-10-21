@@ -53,6 +53,8 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_27.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: Install the Metal compiler component required by the app
+        run: xcodebuild -downloadComponent MetalToolchain
       - uses: actions/download-artifact@v4
         if: matrix.source_sdk == 'legacy'
         with:
@@ -120,6 +122,7 @@ jobs:
               -derivedDataPath "$RUNNER_TEMP/Island27" -resultBundlePath "$RUNNER_TEMP/island-$appearance.xcresult" \
               -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testSystemCompactAndTwoActivityPresentationsAndEnd \
               -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testNavigationIntroductionAutomaticallyUsesTheExpandedIsland \
+              -only-testing:TaipeiBusUsabilityTests/LiveActivityUsabilityTests/testWalkingGuidanceAppearsOnTheActualSystemIsland \
               -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test-without-building \
               | tee "$RUNNER_TEMP/island-$appearance.log"
           done
