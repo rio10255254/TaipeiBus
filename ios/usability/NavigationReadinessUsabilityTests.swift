@@ -103,6 +103,18 @@ final class NavigationReadinessUsabilityTests: JourneyUsabilityTestBase {
         tripLifecycle(english: true)
     }
     func testPreviewBackgroundReturnAndEndConfirmation() { lifecycle(english: false) }
+    func testExistingProNavigationRendersOnTheActualSystemIsland() throws {
+        // The reported account is already subscribed. Seed a real StoreKit test
+        // entitlement, then exercise the production model and navigation UI.
+        // This keeps a separate purchase-sheet availability check from masking
+        // the native renderer regression on a cold iOS 27 simulator.
+        try session.buyProduct(productIdentifier: "com.rio10255254.TaipeiBus.pro.monthly")
+        launch(["--preview-metro-fixture", "--preview-route-only", "--usability-fixture", "--test-navigation-readiness",
+                "-alightReminderOn", "YES", "-rideActivityOn", "YES"])
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 80))
+        waitState("The pre-existing subscription is verified", { $0["started"] as? Bool == false && $0["pro"] as? Bool == true })
+        tripLifecycle(english: false)
+    }
     private func lifecycle(english: Bool) {
         openPro(english); capture(english ? "navigation-readiness-english" : "navigation-readiness-chinese")
         backToJourney(english)

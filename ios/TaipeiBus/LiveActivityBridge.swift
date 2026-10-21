@@ -246,8 +246,13 @@ struct RideIslandNoticePolicy {
         a.destination == b.destination && a.language == b.language
     }
     private func content(_ state: State) -> ActivityContent<State> {
-        ActivityContent(state: state, staleDate: state.updateDeadline,
-            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: now()).relevance)
+        let presentedAt = now(), deadline = state.updateDeadline
+        // An already-expired native deadline can skip the initial system view.
+        // Source freshness remains in the payload and the shared presentation
+        // still shows its stale/due guidance immediately. Only ask ActivityKit
+        // to schedule a future transition when there is one left to perform.
+        return ActivityContent(state: state, staleDate: deadline > presentedAt ? deadline : nil,
+            relevanceScore: RideActivityPresentation(state: state, language: .traditionalChinese, now: presentedAt).relevance)
     }
     private static func changed(_ old: State, _ new: State) -> Bool {
         if let before = old.freshUntil, let after = new.freshUntil,
