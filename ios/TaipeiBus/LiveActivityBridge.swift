@@ -439,13 +439,13 @@ struct IslandPreviewGallery: View {
             }.padding(16)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in
-            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand") else { return }
+            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             var current = state; current.updatedAt = Date(); current.freshUntil = Date().addingTimeInterval(120)
             controller.update(current, destination: "Island verification", language: language, enabled: true,
                 presentImportantUpdates: true, alightingAlerts: true)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
-            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand") else { return }
+            guard ProcessInfo.processInfo.arguments.contains("--island-auto-expand"), controller.isRunning else { return }
             controller.update(state, destination: "Island verification", language: language, enabled: true)
         }
     }
