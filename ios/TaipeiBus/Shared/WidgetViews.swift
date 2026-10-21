@@ -275,25 +275,38 @@ func rideIslandTint(_ presentation: RideActivityPresentation) -> Color {
     return luminance < 70 ? .white : Color(signHex: presentation.state.sign.color)
 }
 
+/// The final ten minutes drain the ring. Further away it stays full, so a fresh trip does not
+/// look nearly finished; the system animates the ring without app updates.
+let rideRingWindow: TimeInterval = 600
+
+/// A countdown ring with a soft glow in the route colour. Live Activities cannot run their own
+/// animations, so the glow follows the system-driven ring rather than spinning on its own.
+struct RideGlowRing: View {
+    let presentation: RideActivityPresentation
+    var lineWidth: CGFloat = 4
+    var body: some View {
+        let tint = rideIslandTint(presentation)
+        ZStack {
+            Circle().stroke(Color.primary.opacity(0.14), lineWidth: lineWidth)
+            if presentation.alightingSoon {
+                Circle().stroke(tint, lineWidth: lineWidth).shadow(color: tint.opacity(0.85), radius: lineWidth * 1.5)
+            } else if let target = presentation.target {
+                ProgressView(timerInterval: target.addingTimeInterval(-rideRingWindow)...target, countsDown: true,
+                             label: { EmptyView() }, currentValueLabel: { EmptyView() })
+                    .progressViewStyle(.circular).tint(tint)
+                    .shadow(color: tint.opacity(0.85), radius: lineWidth * 1.5)
+            }
+        }
+    }
+}
+
 struct RideIslandMinimal: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        // The detached circle has no room for a clock: "14:05" was truncated to "14:…". Show the
-        // current action, ringed by stops travelled on board, or by the final ten minutes before
-        // the bus or the next point is reached. The system animates the ring between updates.
-        let tint = rideIslandTint(presentation)
+        // The detached circle has no room for a clock ("14:05" became "14:…"): the action symbol
+        // inside the same glowing countdown ring as the expanded island.
         ZStack {
-            if presentation.alightingSoon {
-                Circle().stroke(tint, lineWidth: 2.5)
-            } else if presentation.state.phase == .riding, let progress = presentation.progress {
-                Circle().stroke(Color.white.opacity(0.22), lineWidth: 2.5)
-                Circle().trim(from: 0, to: progress).stroke(tint, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                    .rotationEffect(.degrees(-90))
-            } else if let target = presentation.target {
-                ProgressView(timerInterval: target.addingTimeInterval(-600)...target, countsDown: true,
-                             label: { EmptyView() }, currentValueLabel: { EmptyView() })
-                    .progressViewStyle(.circular).tint(tint)
-            }
+            RideGlowRing(presentation: presentation, lineWidth: 2.5)
             Image(systemName: presentation.symbol)
                 .font(.system(size: presentation.alightingSoon ? 12 : 10, weight: .bold))
                 .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
@@ -303,26 +316,32 @@ struct RideIslandMinimal: View {
     }
 }
 
-struct RideCountdown: View {
-    let state: RideActivityAttributes.ContentState
-    let language: AppLanguage
-    var size: CGFloat = 28
-    var stale = false
-    var showsCaption = false
+/// The time inside its ring, with what it counts down to. Without a usable time the ring stays
+/// empty and the status ("留意來車", "點一下更新") takes the time's place.
+struct RideCountdownRing: View {
+    let presentation: RideActivityPresentation
+    var diameter: CGFloat = 64
     var body: some View {
-        let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
-        VStack(alignment: .trailing, spacing: 1) {
-        if let target = value.target {
-            Text(timerInterval: state.updatedAt...target, countsDown: true, showsHours: false)
-                .font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
-                .multilineTextAlignment(.trailing)
-        } else {
-            Text(value.status).font(.system(size: size * 0.55, weight: .semibold, design: .rounded))
-                .lineLimit(2).minimumScaleFactor(0.85).multilineTextAlignment(.trailing)
-        }
-        if showsCaption, value.target != nil {
-            Text(value.metricCaption).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-        }
+        VStack(spacing: 4) {
+            ZStack {
+                RideGlowRing(presentation: presentation, lineWidth: diameter / 14)
+                if let target = presentation.target {
+                    Text(timerInterval: presentation.state.updatedAt...target, countsDown: true, showsHours: false)
+                        .font(.system(size: diameter * 0.25, weight: .bold, design: .rounded)).monospacedDigit()
+                        .multilineTextAlignment(.center).minimumScaleFactor(0.8)
+                        .frame(width: diameter * 0.78)
+                } else {
+                    Image(systemName: presentation.symbol).font(.system(size: diameter * 0.28, weight: .semibold))
+                        .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.primary)
+                }
+            }
+            .frame(width: diameter, height: diameter)
+            // A stale status is already in the details beside the ring.
+            if presentation.target != nil || !presentation.stale {
+                Text(presentation.target != nil ? presentation.metricCaption : presentation.status)
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
+                    .lineLimit(2).multilineTextAlignment(.center).frame(maxWidth: diameter + 36)
+            }
         }
     }
 }
@@ -330,36 +349,27 @@ struct RideCountdown: View {
 struct RideActivityDetails: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(presentation.state.headline).font(.headline).lineLimit(2).minimumScaleFactor(0.85)
-            if let progress = presentation.progress {
-                HStack(spacing: 10) {
-                    Text(AppText.remainingStops(max(0, presentation.state.stopsLeft ?? 0), language: presentation.language))
-                        .font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
-                    // The default bar's track vanishes on the black island and the Lock Screen.
-                    Capsule().fill(Color.primary.opacity(0.18)).frame(height: 5)
-                        .overlay(alignment: .leading) {
-                            GeometryReader { box in
-                                Capsule().fill(rideIslandTint(presentation))
-                                    .frame(width: max(5, box.size.width * progress))
-                            }
-                        }
-                        .accessibilityHidden(true)
-                }
-            } else if let distance = presentation.secondaryMetric {
-                Text(distance).font(.subheadline.weight(.semibold))
-            }
+        let state = presentation.state
+        VStack(alignment: .leading, spacing: 4) {
+            Text(state.headline).font(.headline).lineLimit(2).minimumScaleFactor(0.85)
             if presentation.stale {
                 Text(presentation.status).font(.subheadline).foregroundStyle(.secondary)
             } else {
-                if presentation.state.stopsLeft == nil {
-                    Text(presentation.state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                if let left = state.stopsLeft {
+                    Text(AppText.remainingStops(max(0, left), language: presentation.language))
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.primary)
+                } else if let distance = presentation.secondaryMetric {
+                    Text(distance + " · " + state.detail).font(.subheadline).lineLimit(1)
+                } else {
+                    Text(state.detail).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 }
-                if let next = presentation.state.nextInstruction {
-                    Text(next).font(.caption).lineLimit(2)
+                if let next = state.nextInstruction {
+                    Text(next).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
-                if let source = presentation.state.status, presentation.state.target != nil, source != presentation.state.detail {
-                    Text(source).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                // Say when a time is an estimate, e.g. "班距推估" for a metro headway.
+                if let source = state.status, state.target != nil, source != state.detail {
+                    Text(source).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
                 }
             }
         }
@@ -374,22 +384,18 @@ struct RideActivityLockView: View {
     private var language: AppLanguage { AppLanguage(rawValue: attributes.language) ?? .traditionalChinese }
     var body: some View {
         let value = RideActivityPresentation(state: state, language: language, systemStale: stale)
-        Group {
+        HStack(alignment: .center, spacing: 12) {
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 10) {
-                    if [.walking, .cycling, .transferring].contains(state.phase) {
-                        Image(systemName: value.symbol).font(.title2).frame(width: 36)
-                    } else { RouteSignView(sign: state.sign, size: 15).frame(maxWidth: 108) }
+                HStack(spacing: 8) {
+                    RideActivityBadge(state: state)
                     Text(value.alightingSoon ? AppText.text("準備下車", language: language) : value.phaseTitle)
                         .font(.subheadline.weight(.semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    RideCountdown(state: state, language: language, size: 24, stale: stale, showsCaption: true)
-                        .frame(maxWidth: 130, alignment: .trailing)
                 }
                 RideActivityDetails(presentation: value)
             }
-            .padding(16)
+            RideCountdownRing(presentation: value, diameter: 66)
         }
+        .padding(16)
     }
 }
 #endif

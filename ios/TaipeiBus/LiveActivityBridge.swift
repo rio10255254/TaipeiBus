@@ -553,7 +553,7 @@ struct IslandPreviewGallery: View {
                         RideActivityBadge(state: state)
                         Text(value.phaseTitle).font(.caption).foregroundStyle(.secondary)
                         Spacer(minLength: 4)
-                        RideCountdown(state: state, language: language, size: 24, showsCaption: true).frame(maxWidth: 130)
+                        RideCountdownRing(presentation: value, diameter: 54)
                     }
                     RideActivityDetails(presentation: value)
                 }.padding(16).frame(maxWidth: .infinity).background(.black, in: RoundedRectangle(cornerRadius: 32))

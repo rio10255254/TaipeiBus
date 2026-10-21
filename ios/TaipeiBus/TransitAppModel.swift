@@ -91,17 +91,6 @@ final class TransitAppModel: ObservableObject {
         case .requiresPro: return AppText.text("Pro 功能")
         }
     }
-    /// Advice appears only once this phone needed the classic indicator during a trip; Always is
-    /// then the documented way to keep background updates without it.
-    var islandPlacementStatus: String? {
-        guard purchases.hasPro, rideActivityOn, location.navigationPermission == .allowed,
-              !location.alwaysAuthorized, location.activityBackedFailed else { return nil }
-        return AppText.text("這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。")
-    }
-    var canUpgradeToAlwaysLocation: Bool { islandPlacementStatus != nil }
-    func requestAlwaysLocation() {
-        if !location.requestAlwaysAuthorization() { openAppSettings() }
-    }
     func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)

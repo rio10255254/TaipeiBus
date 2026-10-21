@@ -50,36 +50,18 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if authorized { return .allowed }
         return permissionDenied ? .denied : .notDetermined
     }
-    /// Only with Always may an app hide the indicator during classic background updates
-    /// (`showsBackgroundLocationIndicator`), so it is the one fully documented central-island path.
-    var alwaysAuthorized: Bool {
-#if DEBUG
-        if auditAlwaysAuthorized { return true }
-#endif
-        return manager.authorizationStatus == .authorizedAlways
-    }
     var activityBackedFailed: Bool {
         UserDefaults.standard.integer(forKey: Self.activityBackedFailedKey) == Self.systemMajorVersion
-    }
-    private let alwaysRequestedKey = "alwaysLocationRequested.v1"
-    /// iOS shows the upgrade prompt once; afterwards only Settings can change it.
-    func requestAlwaysAuthorization() -> Bool {
-        guard manager.authorizationStatus == .authorizedWhenInUse,
-              !UserDefaults.standard.bool(forKey: alwaysRequestedKey) else { return false }
-        UserDefaults.standard.set(true, forKey: alwaysRequestedKey)
-        manager.requestAlwaysAuthorization()
-        return true
     }
     private var classicBackground = false
     private var loggedMode = "off"
     func setBackgroundNavigation(_ enabled: Bool, activityVisible: Bool = false) {
         let enabled = enabled && authorized
-        let always = alwaysAuthorized
-        let backed = enabled && activityVisible && !always && !activityBackedFailed
+        let backed = enabled && activityVisible && !activityBackedFailed
         let classic = enabled && !backed
-        let indicator = classic && !(always && activityVisible)
+        let indicator = classic
         let mode = classic ? "classic" : backed ? "activity" : "off"
-        if mode != loggedMode { loggedMode = mode; onDiagnostic?("location mode=\(mode) always=\(always)") }
+        if mode != loggedMode { loggedMode = mode; onDiagnostic?("location mode=\(mode)") }
         if classicBackground != classic {
             classicBackground = classic
             manager.allowsBackgroundLocationUpdates = classic
@@ -176,7 +158,6 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
 #if DEBUG
     private var auditLocationEnabled = false
-    var auditAlwaysAuthorized = false
     func auditLocation(_ value: LocationSample, notify: Bool = false) {
         auditLocationEnabled = true; sample = value
         coordinate = value.coordinate; accuracy = value.accuracy; updatedAt = value.timestamp; revision += 1

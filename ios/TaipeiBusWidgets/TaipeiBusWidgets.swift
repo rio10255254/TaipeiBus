@@ -150,8 +150,8 @@ struct RideLiveActivity: Widget {
                     RideActivityBadge(state: state).padding(.leading, 4)
                 }
                 DynamicIslandExpandedRegion(.trailing) {
-                    RideCountdown(state: state, language: language, size: 24, stale: context.isStale, showsCaption: true)
-                        .frame(maxWidth: 130).padding(.trailing, 4)
+                    RideCountdownRing(presentation: RideActivityPresentation(state: state, language: language,
+                        systemStale: context.isStale), diameter: 54).padding(.trailing, 4)
                 }
                 DynamicIslandExpandedRegion(.center) {
                     Text(RideActivityPresentation(state: state, language: language, systemStale: context.isStale).alightingSoon ? AppText.text("準備下車", language: language) : RideActivityPresentation(state: state, language: language).phaseTitle)

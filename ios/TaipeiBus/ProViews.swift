@@ -189,16 +189,6 @@ struct ProSettingsView: View {
                             Button(AppText.text("重新顯示")) { model.retryLiveActivity() }
                         }
                     }
-                    if let placement = model.islandPlacementStatus {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(placement).font(.caption).foregroundStyle(.secondary)
-                                .accessibilityIdentifier("pro-island-placement")
-                            if model.canUpgradeToAlwaysLocation {
-                                Button(AppText.text("將定位改為「永遠」")) { model.requestAlwaysLocation() }
-                                    .font(.caption.weight(.semibold)).accessibilityIdentifier("pro-always-location")
-                            }
-                        }
-                    }
                     Toggle(AppText.text("下車提醒"), isOn: Binding(get: { model.alightReminderOn },
                         set: { model.setAlightReminderPreference($0) })).accessibilityIdentifier("pro-alight-reminder")
                     HStack {

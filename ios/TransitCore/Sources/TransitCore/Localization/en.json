@@ -786,7 +786,5 @@
   "接著搭乘 %@，往 %@": "Next, take %@ toward %@",
   "下車後轉乘 %@，往 %@": "Then transfer to %@ toward %@",
   "下車後，前往 %@ 借車": "After alighting, pick up a bike at %@",
-  "下車後步行至 %@": "Then walk to %@",
-  "這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。": "This iPhone needs the blue location indicator in the background, so your trip appears in the small circle. Set location to Always to use the central Dynamic Island.",
-  "將定位改為「永遠」": "Set Location to Always"
+  "下車後步行至 %@": "Then walk to %@"
 }

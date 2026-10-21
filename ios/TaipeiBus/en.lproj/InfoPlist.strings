@@ -1,3 +1,2 @@
 "CFBundleDisplayName" = "Taipei Bus";
 "NSLocationWhenInUseUsageDescription" = "Use your location to plan bus trips, find nearby boarding stops and show walking directions. During a trip it also keeps your alighting reminder and Live Activity up to date in the background.";
-"NSLocationAlwaysAndWhenInUseUsageDescription" = "During a trip, keep your alighting reminder and Live Activity up to date in the background without the blue location indicator, so the trip can use the central Dynamic Island. Updates stop when the trip ends.";

@@ -149,23 +149,6 @@ import StoreKitTest
         XCTAssertFalse(value.location.activityBacked)
         XCTAssertTrue(store.sessions.isEmpty)
     }
-    func testAlwaysPermissionHidesTheIndicatorWithClassicBackgroundUpdates() async throws {
-        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
-        let store = FakeRideStore()
-        let controller = RideActivityController(store: store)
-        let value = model(rideActivity: controller)
-        value.location.auditAlwaysAuthorized = true
-        await unlock(value)
-        value.rideActivityOn = true; value.planner.begin()
-        await controller.waitForPendingChanges()
-        let session = try XCTUnwrap(store.created.first)
-        XCTAssertTrue(value.location.backgroundNavigation)
-        XCTAssertFalse(value.location.activityBacked, "Always keeps the documented classic background updates")
-        XCTAssertFalse(value.location.backgroundIndicator, "Always lets the app hide the indicator while the trip is in the island")
-        XCTAssertFalse(value.canUpgradeToAlwaysLocation)
-        session.dismiss()
-        XCTAssertTrue(value.location.backgroundIndicator, "Without a visible trip, background use stays visible")
-    }
     func testWaitingSilentlyKeepsTheActivityPathAndARealFailureIsRememberedPerSystemVersion() async throws {
         UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
         defer { UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey) }
@@ -174,11 +157,9 @@ import StoreKitTest
         // A rider standing at the stop produces no location events; that is not a failure.
         value.location.setActive(false); value.location.setActive(true)
         XCTAssertTrue(value.location.activityBacked)
-        XCTAssertNil(value.islandPlacementStatus, "No permission advice while the activity path works")
         value.location.fallBackFromActivity("insufficiently_in_use")
         XCTAssertFalse(value.location.activityBacked)
         XCTAssertTrue(value.location.backgroundNavigation); XCTAssertTrue(value.location.backgroundIndicator)
-        XCTAssertNotNil(value.islandPlacementStatus); XCTAssertTrue(value.canUpgradeToAlwaysLocation)
         value.finishJourney(); await controller.waitForPendingChanges()
         let (next, _, nextController) = try await startedWithActivity()
         XCTAssertFalse(next.location.activityBacked, "The same iOS version keeps using classic updates")
