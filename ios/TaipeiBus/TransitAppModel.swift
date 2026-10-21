@@ -181,8 +181,8 @@ final class TransitAppModel: ObservableObject {
                                 language: language, enabled: purchases.hasPro && rideActivityOn,
                                 presentImportantUpdates: UIApplication.shared.applicationState == .background,
                                 alightingAlerts: alightReminderActive)
-            // The trip's own Live Activity is the visible sign of background use while it runs.
-            location.setBackgroundNavigation(journeyInBackground, indicator: !rideActivity.isRunning)
+            // The trip's own Live Activity keeps the app in use while it runs, without the indicator.
+            location.setBackgroundNavigation(journeyInBackground, activityVisible: rideActivity.isRunning)
             updateAlightReminder()
         }
         let activityState = navigationReadiness.liveActivity(enabled: rideActivityOn,
@@ -863,6 +863,7 @@ final class TransitAppModel: ObservableObject {
             self.alightReminder.presentedInActivity(rideID: id)
         }
         rideActivity.onDiagnostic = { JourneyDiagnostics.shared.record($0) }
+        location.onDiagnostic = { JourneyDiagnostics.shared.record($0) }
         rideActivity.onAvailabilityChange = { [weak self] in
             self?.objectWillChange.send(); self?.synchronizeNavigationState()
         }
@@ -1859,7 +1860,7 @@ final class TransitAppModel: ObservableObject {
     /// app's activities iOS still lists, and whether background location asked for the indicator.
     private func recordIslandDiagnostics(_ moment: String) {
         JourneyDiagnostics.shared.record("island \(moment) trip=\(planner.started && !planner.arrived) \(rideActivity.nativeSummary)"
-            + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation) indicator=\(location.backgroundIndicator)")
+            + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation) indicator=\(location.backgroundIndicator) activity_backed=\(location.activityBacked)")
     }
     func finishJourney() { defer { recordIslandDiagnostics("end") }; clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
 
