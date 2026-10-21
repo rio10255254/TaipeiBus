@@ -786,5 +786,9 @@
   "接著搭乘 %@，往 %@": "Next, take %@ toward %@",
   "下車後轉乘 %@，往 %@": "Then transfer to %@ toward %@",
   "下車後，前往 %@ 借車": "After alighting, pick up a bike at %@",
-  "下車後步行至 %@": "Then walk to %@"
+  "下車後步行至 %@": "Then walk to %@",
+  "定位為「永遠」：導航時不顯示藍色定位標示，行程可使用中央長條。": "Location is set to Always: no blue location indicator during navigation, so your trip can use the central Dynamic Island.",
+  "這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。": "This iPhone needs the blue location indicator in the background, so your trip appears in the small circle. Set location to Always to use the central Dynamic Island.",
+  "將定位改為「永遠」": "Set Location to Always",
+  "導航時改由動態島維持背景更新，以避免藍色定位標示。若行程仍只在右側小圈顯示，可將定位改為「永遠」。": "During navigation the Live Activity keeps background updates going, to avoid the blue location indicator. If your trip still appears only in the small circle, set location to Always."
 }

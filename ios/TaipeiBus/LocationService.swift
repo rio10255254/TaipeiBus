@@ -49,19 +49,43 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         if authorized { return .allowed }
         return permissionDenied ? .denied : .notDetermined
     }
+    /// Only with Always may an app hide the indicator during classic background updates
+    /// (`showsBackgroundLocationIndicator`), so it is the one fully documented central-island path.
+    var alwaysAuthorized: Bool {
+#if DEBUG
+        if auditAlwaysAuthorized { return true }
+#endif
+        return manager.authorizationStatus == .authorizedAlways
+    }
+    var activityBackedFailed: Bool { UserDefaults.standard.bool(forKey: Self.activityBackedFailedKey) }
+    private let alwaysRequestedKey = "alwaysLocationRequested.v1"
+    /// iOS shows the upgrade prompt once; afterwards only Settings can change it.
+    func requestAlwaysAuthorization() -> Bool {
+        guard manager.authorizationStatus == .authorizedWhenInUse,
+              !UserDefaults.standard.bool(forKey: alwaysRequestedKey) else { return false }
+        UserDefaults.standard.set(true, forKey: alwaysRequestedKey)
+        manager.requestAlwaysAuthorization()
+        return true
+    }
+    private var classicBackground = false
     func setBackgroundNavigation(_ enabled: Bool, activityVisible: Bool = false) {
         let enabled = enabled && authorized
-        let backed = enabled && activityVisible && !UserDefaults.standard.bool(forKey: Self.activityBackedFailedKey)
-        let indicator = enabled && !backed
+        let always = alwaysAuthorized
+        let backed = enabled && activityVisible && !always && !activityBackedFailed
+        let classic = enabled && !backed
+        let indicator = classic && !(always && activityVisible)
+        if classicBackground != classic {
+            classicBackground = classic
+            manager.allowsBackgroundLocationUpdates = classic
+            onDiagnostic?("location mode=\(classic ? "classic" : enabled ? "activity" : "off") always=\(always)")
+        }
         if backgroundIndicator != indicator {
             backgroundIndicator = indicator
-            manager.allowsBackgroundLocationUpdates = indicator
             manager.showsBackgroundLocationIndicator = indicator
         }
         if activityBacked != backed {
             activityBacked = backed
             if backed { startActivityBackedUpdates() } else { liveTask?.cancel(); liveTask = nil }
-            onDiagnostic?("location mode=\(backed ? "activity" : enabled ? "indicator" : "off")")
         }
         if backgroundNavigation != enabled {
             backgroundNavigation = enabled
@@ -70,7 +94,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         }
         // Behind a visible activity the app does not run the classic manager in the background:
         // a While Using app's classic background use is what shows the indicator.
-        if enabled, indicator || active, !updating { manager.startUpdatingLocation(); updating = true }
+        if enabled, classic || active, !updating { manager.startUpdatingLocation(); updating = true }
     }
     private func startActivityBackedUpdates() {
         liveTask?.cancel()
@@ -86,7 +110,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
                     guard let self, !Task.isCancelled, self.activityBacked else { return }
                     if !self.active { self.backgroundEvents += 1 }
                     if #available(iOS 18.0, *), update.insufficientlyInUse, !self.active {
-                        self.activityBackedFailed("insufficiently_in_use"); return
+                        self.fallBackFromActivity("insufficiently_in_use"); return
                     }
                     if let location = update.location { self.accept(Self.sample(location)) }
                 }
@@ -97,7 +121,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     /// Return to the indicator for this and later trips. Core Location may refuse to resume
     /// from the background, but the next foreground visit restores updates either way.
-    private func activityBackedFailed(_ reason: String) {
+    private func fallBackFromActivity(_ reason: String) {
         UserDefaults.standard.set(true, forKey: Self.activityBackedFailedKey)
         onDiagnostic?("location activity_backed_failed reason=\(reason)")
         setBackgroundNavigation(backgroundNavigation)
@@ -109,7 +133,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         guard activityBacked, let since = backgroundSince else { return }
         let seconds = Int(now.timeIntervalSince(since))
         onDiagnostic?("location background seconds=\(seconds) events=\(backgroundEvents)")
-        if seconds >= 150, backgroundEvents == 0 { activityBackedFailed("no_background_events") }
+        if seconds >= 150, backgroundEvents == 0 { fallBackFromActivity("no_background_events") }
     }
     /// Walking and riding both want continuous, navigation-grade fixes; otherwise save power.
     private var precise: Bool { walkingNavigation || ridingNavigation }
@@ -149,6 +173,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
 #if DEBUG
     private var auditLocationEnabled = false
+    var auditAlwaysAuthorized = false
     func auditLocation(_ value: LocationSample, notify: Bool = false) {
         auditLocationEnabled = true; sample = value
         coordinate = value.coordinate; accuracy = value.accuracy; updatedAt = value.timestamp; revision += 1

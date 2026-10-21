@@ -91,6 +91,19 @@ final class TransitAppModel: ObservableObject {
         case .requiresPro: return AppText.text("Pro 功能")
         }
     }
+    /// Where iOS can place the trip in the Dynamic Island, as far as location permission decides.
+    var islandPlacementStatus: String? {
+        guard purchases.hasPro, rideActivityOn, location.navigationPermission == .allowed else { return nil }
+        if location.alwaysAuthorized { return AppText.text("定位為「永遠」：導航時不顯示藍色定位標示，行程可使用中央長條。") }
+        if location.activityBackedFailed {
+            return AppText.text("這支手機在背景需要藍色定位標示，行程會顯示在右側小圈。將定位改為「永遠」即可使用中央長條。")
+        }
+        return AppText.text("導航時改由動態島維持背景更新，以避免藍色定位標示。若行程仍只在右側小圈顯示，可將定位改為「永遠」。")
+    }
+    var canUpgradeToAlwaysLocation: Bool { islandPlacementStatus != nil && !location.alwaysAuthorized }
+    func requestAlwaysLocation() {
+        if !location.requestAlwaysAuthorization() { openAppSettings() }
+    }
     func openAppSettings() {
         guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
         UIApplication.shared.open(url)
@@ -851,7 +864,7 @@ final class TransitAppModel: ObservableObject {
         purchases.onAccessChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onPermissionChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onOpenJourney = { [weak self] in self?.resumeCurrentJourney() }
-        location.onAuthorizationChange = { [weak self] in self?.synchronizeNavigationState() }
+        location.onAuthorizationChange = { [weak self] in self?.objectWillChange.send(); self?.synchronizeNavigationState() }
         rideActivity.canPresentNotice = { [weak self] notice, state in
             guard notice.kind == .alighting else { return true }
             guard let self, let id = state.rideIdentifier, self.alightReminderActive else { return false }

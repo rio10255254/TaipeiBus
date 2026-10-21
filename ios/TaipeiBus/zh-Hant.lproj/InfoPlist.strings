@@ -1,2 +1,3 @@
 "CFBundleDisplayName" = "台北公車";
 "NSLocationWhenInUseUsageDescription" = "從目前位置規劃公車行程，尋找附近上車站牌與步行路線；導航進行中也會在背景更新下車提醒與即時動態。";
+"NSLocationAlwaysAndWhenInUseUsageDescription" = "導航進行中於背景更新下車提醒與即時動態，且不顯示藍色定位標示，讓行程使用動態島中央長條。導航結束即停止。";
