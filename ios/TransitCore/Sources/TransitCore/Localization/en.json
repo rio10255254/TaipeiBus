@@ -786,5 +786,6 @@
   "接著搭乘 %@，往 %@": "Next, take %@ toward %@",
   "下車後轉乘 %@，往 %@": "Then transfer to %@ toward %@",
   "下車後，前往 %@ 借車": "After alighting, pick up a bike at %@",
-  "下車後步行至 %@": "Then walk to %@"
+  "下車後步行至 %@": "Then walk to %@",
+  "站": "stops"
 }

@@ -149,6 +149,20 @@ import StoreKitTest
         XCTAssertFalse(value.location.activityBacked)
         XCTAssertTrue(store.sessions.isEmpty)
     }
+    func testReturningActivityStopsClassicUpdatesStartedInTheBackground() async throws {
+        UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
+        let (value, store, controller) = try await startedWithActivity()
+        value.location.setActive(false)
+        XCTAssertTrue(value.location.activityBacked); XCTAssertFalse(value.location.updating)
+        // Dismissed while away: the alighting reminder keeps classic updates, behind the arrow.
+        try XCTUnwrap(store.created.first).dismiss()
+        XCTAssertFalse(value.location.activityBacked); XCTAssertTrue(value.location.updating)
+        controller.allowRestart(); value.synchronizeNavigationState()
+        await controller.waitForPendingChanges()
+        XCTAssertTrue(value.liveActivityRunning)
+        XCTAssertTrue(value.location.activityBacked)
+        XCTAssertFalse(value.location.updating, "The blue arrow must not outlive the classic updates it belonged to")
+    }
     func testWaitingSilentlyKeepsTheActivityPathAndARealFailureIsRememberedPerSystemVersion() async throws {
         UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey)
         defer { UserDefaults.standard.removeObject(forKey: LocationService.activityBackedFailedKey) }

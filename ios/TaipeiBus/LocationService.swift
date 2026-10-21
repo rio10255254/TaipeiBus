@@ -19,7 +19,8 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private let manager = CLLocationManager()
     private var sample: LocationSample?
     private var active = false
-    private var updating = false
+    /// Whether the classic manager is delivering updates.
+    private(set) var updating = false
     private var permissionRequested = false
     private var timeoutTask: Task<Void, Never>?
     private let cacheKey = "recentDeviceLocation.v1"
@@ -80,8 +81,18 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
             if !enabled, !active { manager.stopUpdatingLocation(); updating = false }
         }
         // Behind a visible activity the app does not run the classic manager in the background:
-        // a While Using app's classic background use is what shows the indicator.
-        if enabled, classic || active, !updating { manager.startUpdatingLocation(); updating = true }
+        // a While Using app's classic background use is what shows the indicator. When the
+        // activity returns while the app is already in the background (it was dismissed or
+        // replaced for a moment), stop the classic updates started meanwhile, or the blue
+        // arrow stays in the island until the next visit.
+        if backed, !active, updating {
+            manager.stopUpdatingLocation(); updating = false
+            onDiagnostic?("location classic_stopped_in_background")
+        }
+        if enabled, classic || active, !updating {
+            manager.startUpdatingLocation(); updating = true
+            if !active { onDiagnostic?("location classic_started_in_background") }
+        }
     }
     private func startActivityBackedUpdates() {
         liveTask?.cancel()

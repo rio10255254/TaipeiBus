@@ -175,7 +175,10 @@ struct RideLiveActivity: Widget {
                     systemStale: context.isStale))
             }
             .widgetURL(URL(string: "taipeibus://journey"))
-            .keylineTint(Color(signHex: state.sign.color))
+            // The only colour iOS lets an activity put around the island: a thin keyline,
+            // in the route colour, orange when it is time to alight.
+            .keylineTint(rideIslandTint(RideActivityPresentation(state: state, language: language,
+                systemStale: context.isStale)))
         }
     }
 }

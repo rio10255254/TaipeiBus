@@ -313,13 +313,23 @@ struct RideGlowRing: View {
 struct RideIslandMinimal: View {
     let presentation: RideActivityPresentation
     var body: some View {
-        // The detached circle has no room for a clock ("14:05" became "14:…"): the action symbol
-        // inside the same countdown ring as the expanded island.
+        // The detached circle has no room for a clock ("14:05" became "14:…"), but it still
+        // carries the key figure: stops left on board, metres while walking, otherwise minutes.
         ZStack {
             RideGlowRing(presentation: presentation, lineWidth: 2.5, halo: false)
-            Image(systemName: presentation.symbol)
-                .font(.system(size: presentation.alightingSoon ? 12 : 10, weight: .bold))
-                .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
+            if presentation.alightingSoon || presentation.stale {
+                Image(systemName: presentation.symbol).font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(presentation.alightingSoon ? Color.orange : Color.white)
+            } else if let figure = presentation.minimalFigure {
+                VStack(spacing: -1) {
+                    Text(figure.value).font(.system(size: figure.value.count > 2 ? 9 : 11, weight: .bold, design: .rounded))
+                        .monospacedDigit()
+                    Text(figure.unit).font(.system(size: 6.5, weight: .semibold))
+                }
+                .lineLimit(1).minimumScaleFactor(0.7).foregroundStyle(.white)
+            } else {
+                Image(systemName: presentation.symbol).font(.system(size: 10, weight: .bold)).foregroundStyle(.white)
+            }
         }
         .frame(width: 24, height: 24)
         .accessibilityElement(children: .ignore).accessibilityLabel(presentation.accessibilityLabel)
