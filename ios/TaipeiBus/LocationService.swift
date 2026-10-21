@@ -28,18 +28,28 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     private var walkingNavigation = false
     var permissionDenied: Bool { manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted }
     private var ridingNavigation = false
-    /// A trip in progress keeps receiving fixes behind the Lock Screen (blue status indicator).
+    /// A trip in progress keeps receiving fixes behind the Lock Screen.
     private(set) var backgroundNavigation = false
+    /// Whether the app asks iOS for the blue background-location indicator. On Dynamic Island
+    /// phones that indicator is a second island item, so iOS moves the trip's Live Activity
+    /// to the detached minimal circle. A visible Live Activity already keeps the app in use
+    /// (WWDC23 "Discover streamlined location updates"). With While Using permission iOS may
+    /// still show the indicator; that placement is the system's choice.
+    private(set) var backgroundIndicator = false
     var navigationPermission: NavigationPermission {
         if authorized { return .allowed }
         return permissionDenied ? .denied : .notDetermined
     }
-    func setBackgroundNavigation(_ enabled: Bool) {
+    func setBackgroundNavigation(_ enabled: Bool, indicator: Bool = true) {
         let enabled = enabled && authorized
+        let indicator = enabled && indicator
+        if backgroundIndicator != indicator {
+            backgroundIndicator = indicator
+            manager.showsBackgroundLocationIndicator = indicator
+        }
         guard backgroundNavigation != enabled else { return }
         backgroundNavigation = enabled
         manager.allowsBackgroundLocationUpdates = enabled
-        manager.showsBackgroundLocationIndicator = enabled
         manager.pausesLocationUpdatesAutomatically = !(enabled || precise)
         if enabled, authorized, !updating { manager.startUpdatingLocation(); updating = true }
         if !enabled, !active { manager.stopUpdatingLocation(); updating = false }

@@ -121,6 +121,26 @@ import StoreKitTest
         XCTAssertTrue(store.sessions.isEmpty)
         XCTAssertEqual(store.created.count, 1, "A late permission refresh or old island link must not begin another trip")
     }
+    func testVisibleLiveActivityDoesNotAlsoRequestTheBackgroundLocationIndicator() async throws {
+        let store = FakeRideStore()
+        let controller = RideActivityController(store: store)
+        let value = model(rideActivity: controller)
+        await unlock(value)
+        value.rideActivityOn = true; value.planner.begin()
+        await controller.waitForPendingChanges()
+        let session = try XCTUnwrap(store.created.first)
+        XCTAssertTrue(value.liveActivityRunning)
+        XCTAssertTrue(value.location.backgroundNavigation, "Background updates still keep the island current")
+        XCTAssertFalse(value.location.backgroundIndicator,
+            "A second island item would move the trip from the central compact island to the detached circle")
+        session.dismiss()
+        XCTAssertTrue(value.location.backgroundNavigation, "The alighting reminder still needs background location")
+        XCTAssertTrue(value.location.backgroundIndicator, "Without a visible activity, iOS's location indicator is the visible sign")
+        value.finishJourney()
+        await controller.waitForPendingChanges()
+        XCTAssertFalse(value.location.backgroundNavigation); XCTAssertFalse(value.location.backgroundIndicator)
+        XCTAssertTrue(store.sessions.isEmpty)
+    }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()
         let selected = value.planner.selectedID
