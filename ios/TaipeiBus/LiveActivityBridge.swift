@@ -197,10 +197,14 @@ struct RideIslandNoticePolicy {
                 return
             }
             if activity == nil, let matching { activity = matching; observe(matching) }
+            var startedNow = false
             if activity == nil {
                 do {
                     let created = try store.start(next.attributes, content: content(next.state))
-                    activity = created; pushed = next.state; observe(created)
+                    // Confirm the initial payload through the native update path
+                    // before identical-data suppression begins. A successful
+                    // request alone does not confirm the first rendered frame.
+                    activity = created; pushed = nil; startedNow = true; observe(created)
                     debugState = "started:" + next.state.phase.rawValue
                 } catch {
                     let failure = error as NSError
@@ -227,7 +231,11 @@ struct RideIslandNoticePolicy {
                         didPresentNotice?(notice, next.state)
                     }
                     guard version == revision else { continue }
-                    pushed = next.state; debugState = "updated:" + next.state.phase.rawValue
+                    guard current.activityState == .active || current.activityState == .stale else {
+                        stoppedByUser = true; debugState = "dismissed"; return
+                    }
+                    pushed = next.state
+                    debugState = (startedNow ? "started:" : "updated:") + next.state.phase.rawValue
                 }
             }
             if version == revision { return }

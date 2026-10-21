@@ -123,6 +123,39 @@ import ActivityKit
         await value.waitForPendingChanges()
         XCTAssertTrue(store.sessions.isEmpty)
     }
+    func testInitialNativePayloadIsPublishedOnceBeforeIdenticalUpdatesAreSuppressed() async throws {
+        let store = FakeRideStore(), sample = state("waiting")
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        let session = try XCTUnwrap(store.created.first)
+        XCTAssertEqual(session.updateCount, 1)
+        XCTAssertTrue(session.notices.isEmpty, "An initial snapshot is not an alert")
+        for _ in 0..<20 {
+            controller.update(sample, destination: "內湖", language: .traditionalChinese, enabled: true)
+        }
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(session.updateCount, 1)
+        XCTAssertEqual(store.created.count, 1)
+    }
+    func testDismissalDuringTheFirstNativePublishCannotRestartTheActivity() async throws {
+        let store = FakeRideStore()
+        store.prepare = { $0.holdUpdate = true }
+        let controller = RideActivityController(store: store, now: { [now] in now })
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        for _ in 0..<100 {
+            if store.created.first?.updatePending != nil { break }
+            await Task.yield()
+        }
+        let session = try XCTUnwrap(store.created.first)
+        let pending = try XCTUnwrap(session.updatePending)
+        session.dismiss(); session.holdUpdate = false; session.updatePending = nil; pending.resume()
+        await controller.waitForPendingChanges()
+        XCTAssertFalse(controller.isRunning); XCTAssertEqual(controller.debugState, "dismissed")
+        controller.update(state(), destination: "內湖", language: .traditionalChinese, enabled: true)
+        await controller.waitForPendingChanges()
+        XCTAssertEqual(store.created.count, 1)
+    }
     func testDestinationAndLanguageReplaceInsteadOfLeavingTwoIslands() async {
         let store = FakeRideStore()
         let controller = RideActivityController(store: store, now: { [now] in now })
@@ -348,11 +381,13 @@ import ActivityKit
 
 @MainActor private final class FakeRideStore: RideActivityStore {
     var allowed = true
+    var prepare: ((FakeRideSession) -> Void)?
     var created: [FakeRideSession] = []
     var events: [String] = []
     var sessions: [any RideActivitySession] { created.filter { $0.activityState == .active || $0.activityState == .stale } }
     func start(_ attributes: RideActivityAttributes, content: ActivityContent<RideActivityAttributes.ContentState>) throws -> any RideActivitySession {
         let value = FakeRideSession(attributes: attributes, content: content)
+        prepare?(value)
         value.didEnd = { [weak self] in self?.events.append("end:" + attributes.destination) }
         created.append(value); events.append("start:" + attributes.destination)
         return value
@@ -364,6 +399,7 @@ import ActivityKit
     var activityState = ActivityState.active
     var content: ActivityContent<RideActivityAttributes.ContentState>
     var notices: [RideIslandNotice] = []
+    var updateCount = 0
     var holdUpdate = false
     var updatePending: CheckedContinuation<Void, Never>?
     var didEnd: (() -> Void)?
@@ -372,6 +408,7 @@ import ActivityKit
         self.attributes = attributes; self.content = content
     }
     func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async {
+        updateCount += 1
         if holdUpdate { await withCheckedContinuation { updatePending = $0 } }
         self.content = content
         if let notice { notices.append(notice) }

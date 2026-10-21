@@ -2,6 +2,12 @@ import XCTest
 import UIKit
 
 final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
+    private func waitForSystemIsland(_ board: XCUIApplication) {
+        let guidance = board.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", "捷運內湖站")).firstMatch
+        XCTAssertTrue(guidance.waitForExistence(timeout: 15),
+            "The compact system activity must be present before a long press can expand it")
+    }
     private func endSystemActivity(_ target: XCUIApplication) {
         target.buttons["island-system-end"].tap()
         let status = target.staticTexts["island-system-status"]
@@ -24,6 +30,7 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
             XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 15), .completed)
             XCUIDevice.shared.press(.home); sleep(4)
             let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+            waitForSystemIsland(board)
             board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
             let headline = board.staticTexts["捷運內湖站"].firstMatch
             XCTAssertTrue(headline.waitForExistence(timeout: 20), "A past deadline must not leave a black shell")
@@ -48,7 +55,8 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         XCUIDevice.shared.press(.home); sleep(3)
         capture("walking-real-system-compact")
         let board = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        waitForSystemIsland(board)
+            board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
         XCTAssertTrue(board.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20))
         XCTAssertTrue(board.staticTexts["450 m"].firstMatch.exists,
             "The walking route must render its real guidance, not only create an activity shell")
@@ -134,7 +142,8 @@ final class LiveActivityUsabilityTests: JourneyUsabilityTestBase {
         capture("island-real-system-compact")
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         // Use the physical screen coordinates, since SpringBoard is not the app's test window.
-        springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
+        springwaitForSystemIsland(board)
+            board.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.035)).press(forDuration: 1.2)
         XCTAssertTrue(springboard.staticTexts["捷運內湖站"].firstMatch.waitForExistence(timeout: 20),
                       "An expanded black shell without trip content is not a successful expansion")
         assertIslandPixels(springboard.staticTexts["捷運內湖站"].firstMatch)
