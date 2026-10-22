@@ -427,7 +427,7 @@ private struct JourneyBoardingContent: View {
     private var guide: BoardingGuide { BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date) }
     var body: some View {
         if ride.route.mode != .bus {
-            MetroBoardingRows(model: model, ride: ride, date: date)
+            MetroBoardingRows(model: model, ride: ride, date: date, showsSource: false)
         } else {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
@@ -804,6 +804,13 @@ private struct JourneyWaitingActions: View {
     private var layout: AnyLayout {
         dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))
     }
+    /// Still well short of the stop: walking is the next thing to do, so it carries the
+    /// prominent style; "已上車" takes it back once the rider is there or progress is unknown.
+    private var stillWalking: Bool {
+        guard planner.walkingLegIndex == index, let progress = planner.walkingProgress,
+              progress.hasConfirmedProgress else { return false }
+        return progress.remainingDistance > 80
+    }
     var body: some View {
         VStack(spacing: 6) {
             layout {
@@ -813,7 +820,7 @@ private struct JourneyWaitingActions: View {
                     Label(cycling ? live.text("騎到站牌") : planner.activeRide?.route.mode == .bus ? live.text("走到站牌") : live.text("走到車站"),
                           systemImage: cycling ? "bicycle" : "figure.walk")
                         .liveFont(.body, weight: .semibold).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 50)
-                }.buttonStyle(MapActionStyle())
+                }.buttonStyle(MapActionStyle(prominent: stillWalking))
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                     .accessibilityIdentifier("journey-walk-to-stop")
@@ -821,7 +828,7 @@ private struct JourneyWaitingActions: View {
                 Button(action: board) {
                     Text(live.text("已上車")).liveFont(.body, weight: .bold).fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, minHeight: 50)
-                }.buttonStyle(MapActionStyle(prominent: true))
+                }.buttonStyle(MapActionStyle(prominent: !stillWalking))
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityIdentifier("journey-board")
             }
@@ -1015,8 +1022,12 @@ struct JourneyOptionsView: View {
                     // Return to the first recommendation without replacing the inspected map automatically.
                     if planner.comparisonChanged, !planner.checkingWalks {
                         Button { planner.refreshRecommendations() } label: {
-                            Image(systemName: "arrow.clockwise").frame(width: 36, height: 44)
-                        }.accessibilityLabel(AppText.text("查看推薦")).accessibilityIdentifier("journey-refresh-options")
+                            Label(AppText.text("查看推薦"), systemImage: "arrow.uturn.backward")
+                                .liveFont(.caption, weight: .semibold).padding(.horizontal, 10).frame(minHeight: 32)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                                .frame(minHeight: 44)
+                        }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .accessibilityIdentifier("journey-refresh-options")
                             .transition(.opacity)
                     }
                     Spacer(minLength: 4)
@@ -1770,8 +1781,9 @@ private struct WaitingBannerContent: View {
             .padding(.horizontal, 16).padding(.vertical, 13)
             BannerStrip {
                 Image(systemName: "arrow.down").font(.caption.weight(.bold))
-                Text(access == nil ? AppText.text("在「%@」下車", ride.alighting.localizedName)
-                    : AppText.text("接著搭 %@ · 往 %@", ride.route.localizedName, ride.route.localizedDestination(direction:ride.direction))).lineLimit(1)
+                // The header already names the line and direction; repeating them here was
+                // truncated ("接著搭 文湖線 · 往…"). Where to get off is the useful next fact.
+                Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).lineLimit(1).minimumScaleFactor(0.85)
                 Spacer(minLength: 4)
                 Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(model.plannedRideTime(ride, at: date).seconds / 60)))))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
@@ -1884,6 +1896,8 @@ struct MetroBoardingRows: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
     let date: Date
+    /// During navigation the banner already states where the time comes from.
+    var showsSource = true
     private var arrivals: [MetroArrival] {
         (model.metroRealtime?.arrivals ?? []).filter { $0.stationID == ride.boarding.stationID && $0.remaining(at: date) != nil && model.metadata.metro.canServe(ride, patternID: $0.patternID, direction: $0.direction, destinationStationID: $0.destinationStationID) }
             .sorted { ($0.remaining(at: date) ?? .max) < ($1.remaining(at: date) ?? .max) }
@@ -1905,7 +1919,7 @@ struct MetroBoardingRows: View {
                             .accessibilityHint(model.selectedTrainID == tracked.train.id ? AppText.text("停止追蹤") : "")
                     }
                 }
-                Text(model.metroWaitSource(ride, at: date)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
+                if showsSource { Text(model.metroWaitSource(ride, at: date)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText) }
             } else {
                 ForEach(Array(arrivals.prefix(3).enumerated()), id: \.offset) { index, arrival in
                     HStack {
@@ -1921,7 +1935,7 @@ struct MetroBoardingRows: View {
                         }
                     }
                 }
-                Text(AppText.text("官方到站時間")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
+                if showsSource { Text(AppText.text("官方到站時間")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText) }
             }
         }.padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("metro-boarding-arrivals")
     }
