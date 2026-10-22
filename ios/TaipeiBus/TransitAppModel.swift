@@ -1618,6 +1618,15 @@ final class TransitAppModel: ObservableObject {
     func metroArrival(_ ride: TransitRide, at date: Date) -> Int? {
         metroRealtime?.nextArrival(ride: ride, network: metadata.metro, at: date)?.remaining(at: date)
     }
+    /// The boarding card's track button: a second tap on the tracked train stops tracking it.
+    /// Once on board the selected train times the ride, so it stays selected there.
+    func toggleTrainTracking(_ id: String) {
+        if selectedTrainID == id, boardedAt == nil {
+            selectedTrainID = nil; followingTrain = false
+        } else {
+            selectedTrainID = id; metroRevisionForSelection()
+        }
+    }
     /// Follow the selected train. A free user who taps it starts a trial look at live trains;
     /// boarding never spends a trial on its own.
     func metroRevisionForSelection(userInitiated: Bool = true) {

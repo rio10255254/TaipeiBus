@@ -46,18 +46,27 @@ import XCTest
         XCTAssertEqual(p.selectedID,green.id)
         XCTAssertFalse(p.started)
     }
-    func testVisibleFirstChoiceKeepsItsActionWhileLaterRoutesAreCompared() async {
-        let bus = choice("18", rideSeconds: 2200), green = choice("G", rideSeconds: 900, metro: true)
+    func testVisibleFirstChoiceKeepsItsActionWhenALaterRouteIsOnlySlightlyBetter() async {
+        let bus = choice("18", rideSeconds: 2200), other = choice("20", rideSeconds: 2050)
         let p = planner([bus]); p.retainVisiblePreview()
         let revision = p.mapRevision
-        p.auditVerifyAdditionalChoices([green])
+        p.auditVerifyAdditionalChoices([other])
         await waitForChoices(p)
-        XCTAssertEqual(p.options.first?.id, green.id)
-        XCTAssertEqual(p.selectedID, bus.id)
+        XCTAssertEqual(p.options.first?.id, other.id)
+        XCTAssertEqual(p.selectedID, bus.id, "A few minutes do not move the Go button under the reader's finger")
         XCTAssertEqual(p.mapRevision, revision)
         XCTAssertTrue(p.comparisonChanged); XCTAssertFalse(p.started)
-        p.select(green); p.begin()
-        XCTAssertEqual(p.selectedID, green.id); XCTAssertTrue(p.started)
+        p.select(other); p.begin()
+        XCTAssertEqual(p.selectedID, other.id); XCTAssertTrue(p.started)
+    }
+    func testRetainedFirstChoiceGivesWayToAClearlyBetterRoute() async {
+        let bus = choice("18", rideSeconds: 2200), green = choice("G", rideSeconds: 900, metro: true)
+        let p = planner([bus]); p.retainVisiblePreview()
+        p.auditVerifyAdditionalChoices([green])
+        await waitForChoices(p)
+        XCTAssertEqual(p.selectedID, green.id, "The large card shows the best route, not merely the first one found")
+        XCTAssertEqual(p.options.first?.id, green.id)
+        XCTAssertFalse(p.comparisonChanged); XCTAssertFalse(p.started)
     }
     func testStationAccessAndTransferAppearInTheBreakdownWithoutAddingTime() throws {
         var option = choice("G", rideSeconds: 900, metro: true)

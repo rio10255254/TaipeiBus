@@ -1898,10 +1898,11 @@ struct MetroBoardingRows: View {
                     Text(model.metroWaitLabel(ride, at: date)).liveFont(.subheadline, weight: .bold).monospacedDigit()
                     if let tracked = model.nextTrackedTrain(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
                                                             alightingStationID: ride.alighting.stationID, at: date) {
-                        Button { model.selectedTrainID = tracked.train.id; model.metroRevisionForSelection() } label: {
+                        Button { model.toggleTrainTracking(tracked.train.id) } label: {
                             Label(model.selectedTrainID == tracked.train.id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
                                 .liveFont(.caption, weight: .semibold).padding(8)
                         }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-estimated")
+                            .accessibilityHint(model.selectedTrainID == tracked.train.id ? AppText.text("停止追蹤") : "")
                     }
                 }
                 Text(model.metroWaitSource(ride, at: date)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
@@ -1912,9 +1913,11 @@ struct MetroBoardingRows: View {
                         Spacer()
                         Text(MetroCountdown.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
                         if let id = arrival.trainID, model.metroTrain(id) != nil {
-                            Button { model.selectedTrainID = id; model.metroRevisionForSelection(); } label: {
-                                Label(AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold).padding(8)
+                            Button { model.toggleTrainTracking(id) } label: {
+                                Label(model.selectedTrainID == id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
+                                    .liveFont(.caption, weight: .semibold).padding(8)
                             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-arrival-" + id)
+                                .accessibilityHint(model.selectedTrainID == id ? AppText.text("停止追蹤") : "")
                         }
                     }
                 }

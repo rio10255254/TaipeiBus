@@ -187,6 +187,9 @@ final class JourneyPlannerModel: ObservableObject {
     private var preferences = LiveSettings.Planning()
     private var lastMetadata: TransitMetadata?
     private var selectionConfirmed = false
+    /// The rider tapped this route. A card only retained because it appeared first may still
+    /// give way to a clearly better route found later.
+    private var selectionChosen = false
     private var forecast = VehicleArrivalForecast()
     private struct CachedDuration {
         let bucket: Int
@@ -579,6 +582,13 @@ final class JourneyPlannerModel: ObservableObject {
     private func publishRecommendations() {
         let date = JourneyDuration.previewDate(Date())
         let ranked = recommendations(at: date)
+        // The first usable card is kept steady under the reader's finger, but not at any cost:
+        // an 88-minute bus must not stay on top of a 39-minute route found seconds later.
+        if selectionConfirmed, !selectionChosen, let current = selected, let best = ranked.first, best.id != current.id,
+           let shown = duration(current, at: date), let better = duration(best, at: date),
+           JourneyRevisionPolicy.shouldOffer(current: shown.totalSeconds, alternative: better.totalSeconds, currentUsable: true) {
+            selectionConfirmed = false
+        }
         // Previewing a result must not cancel discovery of later alternatives. Keep
         // the inspected route available even if it falls outside the new top three.
         var result = ranked
@@ -608,7 +618,7 @@ final class JourneyPlannerModel: ObservableObject {
     func refreshRecommendations() {
         guard !started else { return }
         if !checkingWalks, !verifiedPool.isEmpty {
-            selectionConfirmed = false; publishRecommendations()
+            selectionConfirmed = false; selectionChosen = false; publishRecommendations()
         } else if let metadata = lastMetadata { plan(metadata: metadata) }
     }
     private func startAlternativeTransit(from: Coordinate, to: Coordinate, token: UUID) {
@@ -1130,7 +1140,7 @@ final class JourneyPlannerModel: ObservableObject {
     func plan(metadata: TransitMetadata) {
         defer { onNavigationChange?() }
         durationCache.removeAll(keepingCapacity: true)
-        lastMetadata = metadata; selectionConfirmed = false
+        lastMetadata = metadata; selectionConfirmed = false; selectionChosen = false
         cancelRequests()
         hadTemporaryStreetFailure = false
         JourneyDiagnostics.shared.record("plan_start")
@@ -1265,7 +1275,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard let current = verifiedPool.first(where: { $0.id == option.id }) ?? options.first(where: { $0.id == option.id }),
               current.verified, current.walkIssue == nil, unavailableBoarding(current) == nil else { return }
         if !options.contains(where: { $0.id == current.id }) { options.append(current) }
-        selectionConfirmed = true
+        selectionConfirmed = true; selectionChosen = true
         comparisonChanged = current.id != options.first?.id
         guard selectedID != current.id else { return }
         endWalkingGuidance()
