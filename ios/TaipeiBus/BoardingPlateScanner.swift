@@ -73,7 +73,7 @@ struct BoardingPlateScanner: View {
             }.padding(.top)
                 .navigationTitle(AppText.text("掃描車牌")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("取消")) { dismiss() } } }
-        }.task {
+        }.presentationDetents([.large]).task {
             guard DataScannerViewController.isSupported else {
                 message = AppText.text("此裝置不支援即時文字辨識，請手動選擇車牌。"); return
             }

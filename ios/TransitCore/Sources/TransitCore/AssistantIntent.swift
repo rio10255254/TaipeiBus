@@ -42,6 +42,10 @@ public struct AssistantIntentDraft: Equatable, Sendable {
         guard origin.isEmpty || literal(origin) else { throw ValidationError.origin }
         guard preference == .balanced || literal(preferenceEvidence) else { throw ValidationError.preference }
         var arriveBy: Date?
+        // Common explicit time cues cannot silently become "leave now" when a
+        // model drops its time fields. Ambiguous requests need another review.
+        let hasTimeCue = input.range(of: #"(?i)明天|後天|今天|今晚|明早|tomorrow|today|tonight|\b\d{1,2}\s*(?:am|pm)\b|\d{1,2}:\d{2}|[0-9一二三四五六七八九十]+\s*[點時]"#,
+                                     options: .regularExpression) != nil
         if !timeEvidence.isEmpty || !arrivalDay.isEmpty || arrivalHour != -1 || arrivalMinute != -1 {
             guard literal(timeEvidence), (0...23).contains(arrivalHour), (0...59).contains(arrivalMinute),
                   arrivalDay.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { throw ValidationError.time }
@@ -55,7 +59,16 @@ public struct AssistantIntentDraft: Equatable, Sendable {
                   calendar.component(.minute, from: date) == arrivalMinute,
                   date > now, date.timeIntervalSince(now) <= 90 * 86_400 else { throw ValidationError.time }
             arriveBy = date
+            let relative: [(String, Int)] = [("明天", 1), ("明早", 1), ("後天", 2), ("今天", 0), ("今晚", 0),
+                                            ("tomorrow", 1), ("today", 0), ("tonight", 0)]
+            let days = Set(relative.filter { input.range(of: $0.0, options: .caseInsensitive) != nil }.map(\.1))
+            guard days.count <= 1 else { throw ValidationError.clarification }
+            if let offset = days.first {
+                guard let expected = calendar.date(byAdding: .day, value: offset, to: now),
+                      calendar.isDate(date, inSameDayAs: expected) else { throw ValidationError.time }
+            }
         }
+        guard !hasTimeCue || arriveBy != nil else { throw ValidationError.clarification }
         return AssistantJourneyRequest(destination: destination, origin: origin, preference: preference, arriveBy: arriveBy)
     }
 }

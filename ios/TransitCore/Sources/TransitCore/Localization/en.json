@@ -837,5 +837,19 @@
   "通勤提示": "Commute suggestions",
   "通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。": "Commute suggestions are off by default. When enabled, saved trip IDs and start times stay on your phone for up to 42 days. Clear them in settings or disable suggestions to remove them.",
   "開啟後只在手機記錄已儲存行程的開始時間，最多保留 42 天。相近時段至少使用三天才提示；關閉即清除紀錄，不影響已儲存的行程。": "When enabled, start times of saved trips stay on your phone for up to 42 days. Suggestions require use at similar times on at least three days. Disabling clears history while keeping saved trips.",
-  "預排行程參考": "Future trip estimates"
+  "預排行程參考": "Future trip estimates",
+  "來源：臺北市公共運輸處新聞稿。發布日期不等於管制日期；請核對原文及附件。公告可能包含已結束的措施，未列出也不代表沒有異動。": "Source: Taipei Public Transportation Office news releases. Publication dates are not restriction dates. Check the original and attachments. Notices may describe past measures; missing notices do not mean normal service.",
+  "取得時間：%@": "Retrieved: %@",
+  "無法更新公告；下列內容可能不是最新資料，請查看官網。": "Could not refresh notices. Content below may be outdated; check the official website.",
+  "公運處公告原文": "Official transportation notices",
+  "交通公告": "Service notices",
+  "完整公告與附件": "Full notice and attachments",
+  "擷取原文重點": "Extract key paragraphs",
+  "暫時無法擷取重點，請閱讀下方原文。": "Could not extract key paragraphs. Read the original below.",
+  "原文重點摘錄": "Selected source paragraphs",
+  "裝置端模型僅選取原文段落，可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。": "The on-device model only selects original paragraphs and may omit important conditions. Check the full text, restriction dates, direction and attachments. Excerpts do not change routing or arrival times.",
+  "公告全文": "Original notice",
+  "重點摘錄目前無法使用，仍可閱讀下方全文。": "Excerpts are unavailable. You can read the full original below.",
+  "路線或公告關鍵字": "Route or notice keywords",
+  "開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。": "Opening service notices downloads public transportation news without sending your location or trips. Excerpts are selected on your phone; the full text and official links remain available."
 }

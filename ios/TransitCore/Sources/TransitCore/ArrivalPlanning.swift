@@ -17,10 +17,10 @@ public enum ArrivalPlanning {
         guard arriveBy > now, arriveBy.timeIntervalSince(now) <= 90 * 86_400, !trip.rides.isEmpty,
               trip.bikeConnections.isEmpty,
               walking.count == trip.rides.count + 1,
+              trip.rideSeconds.count == trip.rides.count,
+              trip.rideSeconds.allSatisfy({ $0.isFinite && $0 >= 0 }),
               walking.allSatisfy({ $0.isFinite && $0 >= 0 }) else { return nil }
-        var departure = arriveBy.addingTimeInterval(-3600)
-        var result: TripAssessment?
-        for _ in 0..<8 {
+        func timing(at departure: Date) -> TripAssessment? {
             // Do not carry today's rail headway into a future service period.
             var rides = trip.rides, cursor = 0.0
             for index in rides.indices {
@@ -41,12 +41,38 @@ public enum ArrivalPlanning {
             guard !assessment.unavailable, assessment.unknownWaits == 0,
                   assessment.latestSeconds.isFinite, assessment.latestSeconds > 0,
                   assessment.latestSeconds < 12 * 3600 else { return nil }
-            let next = arriveBy.addingTimeInterval(-assessment.latestSeconds - 600)
-            if abs(next.timeIntervalSince(departure)) < 1 { result = assessment; break }
-            departure = next
+            // Live planning deliberately keeps late buses visible. A future query
+            // has no observed bus, so headways alone must not imply overnight service.
+            var upper = 0.0
+            for index in rides.indices {
+                upper += walking[index] + assessment.waits[index].upperSeconds
+                let ride = rides[index]
+                let service = ride.railService ?? ride.route.servicePlans[ride.direction]?.service(at: departure)
+                if assessment.waits[index].evidence != .timetable {
+                    guard let window = service?.window else { return nil }
+                    var first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
+                    let boarding = BusServiceWindow.secondsOfDay(at: departure) + upper - ride.boardingOffsetSeconds
+                    if first > last {
+                        if boarding <= last { first -= 86_400 } else { last += 86_400 }
+                    }
+                    guard boarding >= first, boarding <= last else { return nil }
+                }
+                upper += trip.rideSeconds[index]
+            }
+            return assessment
         }
-        guard let result, departure > now,
-              departure.addingTimeInterval(result.latestSeconds + 599) <= arriveBy else { return nil }
-        return ArrivalPlan(departure: departure, assessment: result)
+        // Search backwards at minute resolution. Fixed timetable departures make
+        // waiting time discontinuous, so a fixed-point ETA subtraction can diverge.
+        let latest = arriveBy.addingTimeInterval(-walking.reduce(0, +) - trip.rideSeconds.reduce(0, +) - 600)
+        let rounded = Date(timeIntervalSince1970: floor(latest.timeIntervalSince1970 / 60) * 60)
+        for minute in 0..<360 {
+            guard !Task.isCancelled else { return nil }
+            let departure = rounded.addingTimeInterval(Double(-minute) * 60)
+            guard departure > now, AssistantJourneyRequest.calendar.isDate(departure, inSameDayAs: arriveBy) else { break }
+            if let result = timing(at: departure), departure.addingTimeInterval(result.latestSeconds + 600) <= arriveBy {
+                return ArrivalPlan(departure: departure, assessment: result)
+            }
+        }
+        return nil
     }
 }

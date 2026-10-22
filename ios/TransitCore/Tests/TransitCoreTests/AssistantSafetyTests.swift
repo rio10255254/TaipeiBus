@@ -24,6 +24,13 @@ final class AssistantSafetyTests: XCTestCase {
         }
         XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", needsClarification: true).validated(source: "早點去醫院", now: now))
     }
+    func testExplicitTimeCannotBeSilentlyDroppedOrMovedToAnotherDay() {
+        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院").validated(source: "明天 9 點前到台大醫院", now: now))
+        XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "明天 9 點", arrivalDay: "2026-10-24",
+            arrivalHour: 9, arrivalMinute: 0).validated(source: "明天 9 點到醫院", now: now))
+        XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "明天", arrivalDay: "2026-10-23",
+            arrivalHour: 9, arrivalMinute: 0).validated(source: "明天或後天去醫院", now: now))
+    }
     func testPlateMatchesOnlyNearbyFreshCandidatesWithoutGuessing() {
         let candidates = [
             PlateCandidate(id: "near", plate: "ABC-1234", observedAt: now, distance: 25),
