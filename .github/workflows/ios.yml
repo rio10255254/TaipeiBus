@@ -239,6 +239,13 @@ jobs:
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
             CODE_SIGNING_ALLOWED=NO build | tee "$RUNNER_TEMP/ios-release-build.log"
+          # iOS 17–25 have no FoundationModels; a strong link would stop the app from launching there.
+          binary="$RUNNER_TEMP/BusBuild/Build/Products/Release-iphoneos/TaipeiBus.app/TaipeiBus"
+          if otool -L "$binary" | grep -q FoundationModels; then
+            otool -l "$binary" | grep -B1 -A3 LC_LOAD_WEAK_DYLIB | grep -q FoundationModels.framework \
+              || { echo "FoundationModels must be weak-linked (iOS 17 is still supported)."; exit 1; }
+            echo "FoundationModels is weak-linked."
+          fi
       - name: Verify real StoreKit transactions and commute persistence
         env:
           BUS_LIVE_CYCLING_TEST: "1"

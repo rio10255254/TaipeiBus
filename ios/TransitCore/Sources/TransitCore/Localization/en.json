@@ -787,5 +787,10 @@
   "下車後轉乘 %@，往 %@": "Then transfer to %@ toward %@",
   "下車後，前往 %@ 借車": "After alighting, pick up a bike at %@",
   "下車後步行至 %@": "Then walk to %@",
-  "站": "stops"
+  "站": "stops",
+  "理解整句": "Read the whole sentence",
+  "在手機上理解出發地、目的地與路線偏好，再由你選擇地點": "Reads the start, destination and route preference on this iPhone; you still choose each place",
+  "「%@」路線偏好需要 Pro": "The “%@” route preference needs Pro",
+  "目前只規劃現在出發，未套用「%@」": "Routes are planned for leaving now; “%@” was not applied",
+  "沒能理解這句話，可直接搜尋地點。": "Couldn't understand that sentence. Search for the place instead."
 }
