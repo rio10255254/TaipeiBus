@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
 
 simctl = subprocess.check_output(["xcrun", "--find", "simctl"], text=True).strip()
 
@@ -13,13 +14,20 @@ def run(*args, timeout=60, capture=False):
                           stdout=subprocess.PIPE if capture else None).stdout
 
 
-runtimes = json.loads(run("list", "runtimes", "-j", capture=True))["runtimes"]
-runtimes = [r for r in runtimes if r.get("isAvailable") and "iOS 26" in r["name"]]
-assert runtimes, "iOS 26 simulator unavailable"
-runtime = max(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))))["identifier"]
-device = run("create", "TaipeiBus-AI", "com.apple.CoreSimulator.SimDeviceType.iPhone-17", runtime, capture=True).strip()
-with open(os.environ["GITHUB_ENV"], "a") as env_file:
-    env_file.write(f"AI_SIMULATOR={device}\n")
+phase = sys.argv[1] if len(sys.argv) > 1 else "all"
+assert phase in ("prepare", "launch", "all"), "Expected prepare or launch"
+if phase != "launch":
+    runtimes = json.loads(run("list", "runtimes", "-j", capture=True))["runtimes"]
+    runtimes = [r for r in runtimes if r.get("isAvailable") and "iOS 26" in r["name"]]
+    assert runtimes, "iOS 26 simulator unavailable"
+    runtime = max(runtimes, key=lambda r: tuple(map(int, r["version"].split("."))))["identifier"]
+    device = run("create", "TaipeiBus-AI", "com.apple.CoreSimulator.SimDeviceType.iPhone-17", runtime, capture=True).strip()
+    with open(os.environ["GITHUB_ENV"], "a") as env_file:
+        env_file.write(f"AI_SIMULATOR={device}\n")
+    if phase == "prepare":
+        sys.exit(0)
+else:
+    device = os.environ["AI_SIMULATOR"]
 temporary = Path(os.environ["RUNNER_TEMP"])
 app = str(temporary / "ai-build/Build/Products/Debug-iphonesimulator/TaipeiBus.app")
 run("boot", device)

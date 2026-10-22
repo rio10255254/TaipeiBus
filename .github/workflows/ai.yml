@@ -36,20 +36,31 @@ jobs:
         with:
           path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
           key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
-      - name: Compile native simulator app
+      - name: Prepare simulator and native test targets
+        run: |
+          set -euo pipefail
+          python3 ios/ai/simulator.py prepare
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
+          export GEM_PATH="$GEM_HOME:$(ruby -e 'print Gem.path.join(":")')"
+          ruby ios/ai/setup.rb
+      - name: Compile native app and test bundles before boot
         id: simulator_build
         run: |
           set -euo pipefail
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
-            -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/ai-build" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
-            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-build.log"
+          for scheme in TaipeiBusAITests TaipeiBusAIUITests; do
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
+              -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$AI_SIMULATOR" \
+              -derivedDataPath "$RUNNER_TEMP/ai-build" \
+              -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
+              -jobs 2 ONLY_ACTIVE_ARCH=YES ENABLE_ONLY_ACTIVE_RESOURCES=NO CODE_SIGNING_ALLOWED=NO \
+              build-for-testing 2>&1 | tee -a "$RUNNER_TEMP/ai-build.log"
+          done
       - name: Boot and launch on iPhone simulator
         timeout-minutes: 18
         run: |
           set -euo pipefail
-          python3 ios/ai/simulator.py 2>&1 | tee "$RUNNER_TEMP/ai-simulator.log"
+          python3 ios/ai/simulator.py launch 2>&1 | tee "$RUNNER_TEMP/ai-simulator.log"
       - name: Exercise native AI integration and fallback UI
         # Xcode manages simulator readiness itself; retain this independent check
         # if a raw simctl smoke command fails after creating the test device.
@@ -57,10 +68,6 @@ jobs:
         timeout-minutes: 15
         run: |
           set -euo pipefail
-          gem install xcodeproj -v 1.27.0 --no-document --user-install
-          export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
-          export GEM_PATH="$GEM_HOME:$(ruby -e 'print Gem.path.join(":")')"
-          ruby ios/ai/setup.rb
           failed=0
           for scheme in TaipeiBusAITests TaipeiBusAIUITests; do
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
@@ -68,11 +75,13 @@ jobs:
               -derivedDataPath "$RUNNER_TEMP/ai-build" \
               -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
               -resultBundlePath "$RUNNER_TEMP/$scheme.xcresult" \
-              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$RUNNER_TEMP/$scheme.log" || failed=1
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES ENABLE_ONLY_ACTIVE_RESOURCES=NO \
+              CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee "$RUNNER_TEMP/$scheme.log" || failed=1
           done
           exit "$failed"
       - name: Export XCTest screenshots
         if: always()
+        timeout-minutes: 2
         run: |
           for suite in TaipeiBusAITests TaipeiBusAIUITests; do
             if [ -d "$RUNNER_TEMP/$suite.xcresult" ]; then
