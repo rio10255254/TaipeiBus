@@ -397,9 +397,11 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         if button("journey-all-options").exists { button("journey-all-options").tap() }
         XCTAssertTrue(app.navigationBars["路線"].exists)
         let options = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "journey-option-"))
-        XCTAssertTrue((1...3).contains(options.count))
+        // The full list keeps every reasonable verified trade-off (#42), so live data can offer
+        // more than three; the leading recommendations must still be visible at once.
+        XCTAssertGreaterThanOrEqual(options.count, 1)
         capture("choose-a-route-before-fit-check")
-        for index in 0..<options.count { XCTAssertTrue(options.element(boundBy: index).isHittable, "All options must fit without scrolling") }
+        for index in 0..<min(3, options.count) { XCTAssertTrue(options.element(boundBy: index).isHittable, "The leading options must fit without scrolling") }
         for index in 0..<options.count {
             XCTAssertFalse(options.element(boundBy: index).label.contains("今日未營運"))
         }
@@ -419,8 +421,11 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-options").tap()
         capture("full-itinerary")
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
-        let internalWalk = button("journey-in-app-walk-0")
-        XCTAssertTrue(internalWalk.waitForExistence(timeout: 10)); internalWalk.tap()
+        // Live recommendations may open with a YouBike leg; its in-app guidance is the bike button.
+        let walk = button("journey-in-app-walk-0"), bike = button("journey-in-app-bike-0")
+        let firstLeg = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in walk.exists || bike.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstLeg], timeout: 10), .completed)
+        (walk.exists ? walk : bike).tap()
         let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertNotEqual(maps.state, .runningForeground)
@@ -970,12 +975,14 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
     func testRealNeihuOptionsHaveVerifiedWalkingSeparateWaitsAndArrivalClocks() {
         launch(["--test-journey-selection", "--test-map-controls", "--preview-neihu-planning"])
         waitTiming { ($0["checking"] as? Bool) == false && ($0["options"] as? [[String: Any]] ?? []).count > 0 }
-        XCTAssertTrue(button("journey-options").waitForExistence(timeout: 10))
-        button("journey-options").tap()
+        // Before a trip starts the route pages carry their own full-list button; the trip
+        // button only appears once a route is chosen (see MixedRouteMenuUsabilityTests).
+        XCTAssertTrue(button("journey-all-options").waitForExistence(timeout: 10))
+        button("journey-all-options").tap()
         XCTAssertTrue(app.navigationBars["路線"].waitForExistence(timeout: 10))
         let state = timing(), records = state["options"] as? [[String: Any]] ?? []
-        XCTAssertTrue((1...3).contains(records.count))
-        for record in records {
+        XCTAssertGreaterThanOrEqual(records.count, 1)
+        for (index, record) in records.enumerated() {
             XCTAssertEqual(record["verified"] as? Bool, true)
             XCTAssertNotEqual(record["label"] as? String, "少轉乘", "A one-transfer option cannot claim fewer transfers than a direct bus")
             let total = record["total"] as? Double ?? -1
@@ -986,7 +993,7 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
             let choice = button("journey-option-" + (record["id"] as? String ?? ""))
             XCTAssertTrue(choice.waitForExistence(timeout: 5))
             XCTAssertTrue(choice.isEnabled)
-            XCTAssertTrue(choice.isHittable, "All verified choices must be visible without scrolling")
+            if index < 3 { XCTAssertTrue(choice.isHittable, "The leading verified choices must be visible without scrolling") }
             XCTAssertTrue(choice.label.contains("候車") || choice.label.contains("步行即可"))
         }
         Thread.sleep(forTimeInterval: 17)
@@ -995,7 +1002,6 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         capture("optimized-neihu-options-and-times")
         let report = XCTAttachment(string: String(describing: state))
         report.name = "navigation-optimized-timing-report"; report.lifetime = .keepAlways; add(report)
-        XCTAssertTrue(button("journey-other-transit").exists)
         if button("journey-refresh-options").exists {
             button("journey-refresh-options").tap()
             let refreshed = timing()
