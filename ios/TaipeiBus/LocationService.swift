@@ -1,5 +1,6 @@
 import CoreLocation
 import Combine
+import UIKit
 import TransitCore
 
 @MainActor
@@ -14,6 +15,9 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     var onNavigationUpdate: (() -> Void)?
     var onAuthorizationChange: (() -> Void)?
     private(set) var heading: Double?
+    /// Direction of travel from GPS, a real reading: in a moving bus, or when the compass is
+    /// disturbed by steel and wiring around stations, it is the better arrow.
+    private var course: (degrees: Double, time: Date)?
     private(set) var headingAccuracy: Double?
     private var headingTime = Date.distantPast
     private let manager = CLLocationManager()
@@ -63,15 +67,28 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         ridingNavigation = enabled
         applyPrecision()
     }
+    private var fullAccuracyRequested = false
     private func applyPrecision() {
         manager.desiredAccuracy = precise ? kCLLocationAccuracyBestForNavigation : kCLLocationAccuracyNearestTenMeters
-        manager.distanceFilter = walkingNavigation ? 3 : ridingNavigation ? 5 : 20
+        // Every fix (about once a second) while walking or riding, so the dot, the remaining
+        // distance and the stop count move with the rider rather than in 3–5 m steps.
+        manager.distanceFilter = precise ? kCLDistanceFilterNone : 20
         manager.activityType = walkingNavigation ? .fitness : ridingNavigation ? .automotiveNavigation : .otherNavigation
         manager.pausesLocationUpdatesAutomatically = !(precise || backgroundNavigation)
         if precise, active, authorized { manager.startUpdatingLocation(); updating = true }
+        requestFullAccuracyIfNeeded()
+    }
+    /// With Precise Location off, fixes are kilometres wide and walking guidance can never
+    /// match the path. Ask once per launch, and only on screen, where iOS can show the prompt.
+    private func requestFullAccuracyIfNeeded() {
+        guard precise, !fullAccuracyRequested, authorized, manager.accuracyAuthorization == .reducedAccuracy,
+              UIApplication.shared.applicationState == .active else { return }
+        fullAccuracyRequested = true
+        onDiagnostic?("location reduced accuracy, asking for precise")
+        manager.requestTemporaryFullAccuracyAuthorization(withPurposeKey: "Navigation")
     }
 #if DEBUG
-    var walkingAccuracyConfigured: Bool { manager.desiredAccuracy == kCLLocationAccuracyBestForNavigation && manager.distanceFilter == 3 }
+    var walkingAccuracyConfigured: Bool { manager.desiredAccuracy == kCLLocationAccuracyBestForNavigation && manager.distanceFilter == kCLDistanceFilterNone }
     private(set) var requestStartedAt: Date?
     private(set) var firstUsableMilliseconds: Double?
 #endif
@@ -105,7 +122,12 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
 #if DEBUG
         if active, authorized, ProcessInfo.processInfo.arguments.contains("--test-device-heading") { return 90 }
 #endif
-        return active && authorized && Date().timeIntervalSince(headingTime) <= 60 ? heading : nil
+        guard active, authorized else { return nil }
+        // A compass inside a vehicle reads the phone, not the bus; a bus held at a stop still
+        // faces the way it last drove, while a walker may have turned.
+        let travel = course.flatMap { Date().timeIntervalSince($0.time) <= (ridingNavigation ? 60 : 5) ? $0.degrees : nil }
+        if ridingNavigation, let travel { return travel }
+        return Date().timeIntervalSince(headingTime) <= 60 ? heading : travel
     }
     private func updateHeadingActivity() {
         manager.headingOrientation = .portrait
@@ -135,7 +157,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     func setActive(_ active: Bool) {
         self.active = active
-        if active { requestIfAuthorized(); updateHeadingActivity() }
+        if active { requestIfAuthorized(); updateHeadingActivity(); requestFullAccuracyIfNeeded() }
         else if backgroundNavigation {
             timeoutTask?.cancel(); timeoutTask = nil; requesting = false
             manager.stopUpdatingHeading()
@@ -194,12 +216,20 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
     }
     func requestIfAuthorized() { if authorized { request() } }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        requestFullAccuracyIfNeeded()
         if authorized, active || permissionRequested { request() }
         else if manager.authorizationStatus == .denied || manager.authorizationStatus == .restricted { request() }
         onAuthorizationChange?()
     }
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) { accept(Self.sample(location)) }
+        for location in locations.sorted(by: { $0.timestamp < $1.timestamp }) {
+            // Course is only meaningful while actually moving; standing still it wanders.
+            if location.course >= 0, location.speed >= (ridingNavigation ? 3 : 0.8),
+               location.courseAccuracy >= 0, location.courseAccuracy <= 25, location.horizontalAccuracy <= 35 {
+                course = (location.course, location.timestamp)
+            }
+            accept(Self.sample(location))
+        }
         if displayCoordinate != nil {
             requesting = false; timeoutTask?.cancel(); timeoutTask = nil
             // Refinement happens after publishing the first useful position.
