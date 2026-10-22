@@ -68,6 +68,14 @@ import XCTest
         XCTAssertEqual(p.options.first?.id, green.id)
         XCTAssertFalse(p.comparisonChanged); XCTAssertFalse(p.started)
     }
+    func testStartedNavigationNeverSwitchesToALaterRoute() async {
+        let bus = choice("18", rideSeconds: 2200), green = choice("G", rideSeconds: 900, metro: true)
+        let p = planner([bus]); p.retainVisiblePreview(); p.begin()
+        XCTAssertTrue(p.started)
+        p.auditLoadAdditionalChoicesWhileNavigating([green])
+        XCTAssertEqual(p.selectedID, bus.id, "A better route found later must not replace the active trip")
+        XCTAssertTrue(p.started)
+    }
     func testStationAccessAndTransferAppearInTheBreakdownWithoutAddingTime() throws {
         var option = choice("G", rideSeconds: 900, metro: true)
         option.walks[0].duration = 420; option.walks[0].streetDuration = 240; option.walks[0].stationSeconds = 180

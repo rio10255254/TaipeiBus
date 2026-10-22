@@ -584,7 +584,8 @@ final class JourneyPlannerModel: ObservableObject {
         let ranked = recommendations(at: date)
         // The first usable card is kept steady under the reader's finger, but not at any cost:
         // an 88-minute bus must not stay on top of a 39-minute route found seconds later.
-        if selectionConfirmed, !selectionChosen, let current = selected, let best = ranked.first, best.id != current.id,
+        // Never while navigating: the active route is the rider's commitment.
+        if !started, selectionConfirmed, !selectionChosen, let current = selected, let best = ranked.first, best.id != current.id,
            let shown = duration(current, at: date), let better = duration(best, at: date),
            JourneyRevisionPolicy.shouldOffer(current: shown.totalSeconds, alternative: better.totalSeconds, currentUsable: true) {
             selectionConfirmed = false
@@ -1721,6 +1722,10 @@ final class JourneyPlannerModel: ObservableObject {
         origin = TravelPlace(name:"出發",address:"",coordinate:from)
         destination = TravelPlace(name:"目的地",address:"",coordinate:to)
         return bikeGatewayProbes(at: Date())
+    }
+    /// A late verification result arriving after Go, without the generation guard of a search.
+    func auditLoadAdditionalChoicesWhileNavigating(_ choices: [JourneyOption]) {
+        verifiedPool.append(contentsOf: choices); publishRecommendations()
     }
     func auditVerifyAdditionalChoices(_ choices: [JourneyOption], delay: Double = 0.15) {
         checkingWalks = true
