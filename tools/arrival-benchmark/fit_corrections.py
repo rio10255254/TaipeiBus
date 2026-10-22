@@ -24,6 +24,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[2]
 SWIFT = ROOT / 'ios/TransitCore/Sources/TransitCore/ForecastTuning.swift'
 CALENDAR = ROOT / 'ios/TransitCore/Sources/TransitCore/TransitServiceCalendar.swift'
+SCHEMA = ROOT / 'runtime/tuning.schema.json'
 COLUMNS = ['made_at', 'evidence', 'predicted_s', 'uncertainty_s', 'shown', 'actual_arrive_s']
 # Bounds must stay inside ForecastTuning.tables / fields; tighter here so one odd fortnight cannot swing the App far.
 FACTOR_RANGE = (0.9, 1.3)
@@ -110,7 +111,8 @@ def evaluate(name, df, predicted, uncertainty, early, late, rounding):
           f'in range {inside:.0%} (width {(upper - lower).mean():.1f} min)')
 
 
-def write_swift(tables):
+def write_swift(tables, early, late):
+    """Store the fit as the App's built-in values; the schema defaults must match them (ForecastTuningTests)."""
     text = SWIFT.read_text(encoding='utf-8')
     def literal(values):
         return '[' + ', '.join(f'{v:g}' for v in values) + ']'
@@ -119,7 +121,13 @@ def write_swift(tables):
              f'    static let measuredHolidayFactors: [Double] = {literal(tables["holidayPaceFactors"])}\n'
              '    // MEASURED-FACTORS-END')
     text = re.sub(r'    // MEASURED-FACTORS-BEGIN.*?// MEASURED-FACTORS-END', block, text, flags=re.S)
+    text = re.sub(r'public var rangeEarlyScale = [0-9.]+', f'public var rangeEarlyScale = {early:g}', text)
+    text = re.sub(r'public var rangeLateScale = [0-9.]+', f'public var rangeLateScale = {late:g}', text)
     SWIFT.write_text(text, encoding='utf-8')
+    schema = json.loads(SCHEMA.read_text(encoding='utf-8'))
+    schema['properties']['rangeEarlyScale']['default'] = early
+    schema['properties']['rangeLateScale']['default'] = late
+    SCHEMA.write_text(json.dumps(schema, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 
 
 def main():
@@ -151,7 +159,7 @@ def main():
     if args.json:
         Path(args.json).write_text(json.dumps(fitted, indent=2) + '\n')
     if args.write_swift:
-        write_swift(tables)
+        write_swift(tables, early, late)
     if args.write_tuning:
         path = Path(args.write_tuning)
         document = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'schemaVersion': 1}
