@@ -79,4 +79,22 @@ final class AIUITests: XCTestCase {
         reveal(plan); XCTAssertFalse(plan.isEnabled)
     }
 
+    func testTesterBenchmarkPageOpensFromSettingsWithoutRunningOnSimulator() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--usability-fixture", "--test-ai-ui", "--test-ai-unavailable"]
+        app.launch()
+        let settings = app.buttons["map"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 60)); settings.tap()
+        XCTAssertTrue(app.buttons["settings-pro"].waitForExistence(timeout: 15))
+        let entry = app.buttons["settings-ai-benchmark"]
+        for _ in 0..<10 where !(entry.exists && entry.isHittable) { app.swipeUp() }
+        XCTAssertTrue(entry.isHittable); entry.tap()
+        let start = app.buttons["ai-benchmark-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10))
+        // The corpus is bundled (the button only appears once it loads), but there is no model to run.
+        XCTAssertFalse(start.isEnabled)
+    }
+
 }

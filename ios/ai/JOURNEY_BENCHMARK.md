@@ -4,7 +4,17 @@
 
 `journey-corpus.json` 收錄 72 句人工整理的日常說法，不是擷取使用者私人對話。包含「快一點」、臺／台、北車、回家、去公司、從公司到其他地點、明天 9 點前、跨午夜、過去時間、指定出發時間、多目的地、沒有儲存地點與重複的家／公司。正常情境使用固定的虛構常用行程；「家」位於古亭、「公司」位於市政府，只是測試資料。地點搜尋仍呼叫真正的 `PlaceSearch`／Apple 地圖，未以假資料替代模型或搜尋結果。
 
-## 在 iPhone 執行
+## 在 iPhone 上直接執行（不需要 Mac）
+
+測試版（Debug、Xcode 安裝或 TestFlight）的「資訊與設定」最下方有「AI 測試」。App Store 版不會顯示：入口只在 `AppTransaction` 為 sandbox／xcode 環境時出現。
+
+1. 在已開啟 Apple Intelligence 的 iPhone 安裝 TestFlight 版，打開「資訊與設定 → AI 測試 → 開始測試」。
+2. 72 句會逐句在手機上的模型執行，期間保持 App 在前景（測試中不會自動鎖定螢幕）。使用的是固定的虛構常用行程，不讀取或修改自己的常用行程；地點搜尋仍連 Apple 地圖。
+3. 完成（或按「停止」）後用「分享測試報告」把 JSON 存到檔案或傳到電腦，再執行下方的 `journey-report.py`。中途停止的報告會標示為不完整。
+
+測試頁與下方的 XCTest 共用 `ios/TaipeiBus/JourneyBenchmark.swift`，產生相同格式的報告；App 內的報告以版本號與 build 號、語料 SHA-256 標示來源。
+
+## 在 iPhone 執行（Mac + Xcode）
 
 1. 使用 Xcode 26.3 或更新版本，連接已啟用 Apple Intelligence 且繁體中文模型可用的 iPhone。開啟 Developer Mode，確認開發簽署、App 與測試 bundle 的簽署權限；本流程不發布或上傳 TestFlight。
 2. 安裝 `xcodeproj` Ruby gem，執行 `ruby ios/ai/setup.rb`。會生成獨立的 `TaipeiBusAIBenchmarkTests` scheme、加入語料資源，並寫出忽略版本控制的 `journey-build.json`（commit、dirty 狀態、來源與語料 SHA-256）。修改來源後須重新執行 setup。
@@ -39,6 +49,6 @@ python3 ios/ai/journey-report.py /tmp/journey-device-attachments/REPORT.json \
 ## 其他回歸驗證
 
 - `AssistantSafetyTests`：欄位保留、無效日期、選項範圍與輸入限制。
-- `JourneyAssistantToolTests`：只回傳工具取得的候選、已存起終點與偏好、搜尋失敗／取消及次數上限。
+- `JourneyAssistantToolTests`：只回傳工具取得的候選、已存起終點與偏好、搜尋失敗／取消及次數上限。裝置端模型的上下文約 4,096 tokens，工具輸出因此受限：`listSavedJourneys` 依關鍵字只回傳最相關的 3 筆，且不含地址（50 筆常用行程時「回家」仍取得正確的一筆，輸出在 600 bytes 內）；`searchPlaces` 每次對話最多 3 次、每次 3 筆，地址截為 20 字。超過上下文時以新的 session 重試一次，再失敗就回到手動填寫。
 - `AIUITests`：不可用時入口隱藏；以明確的 Debug fixture 檢查點選後不需重打、選地點後仍需明確確認、更換地點取消確認。這不是模型準確率測試。
 - CI 裝置 Release 建置後以 Mach-O load commands 確認 FoundationModels 使用 `LC_LOAD_WEAK_DYLIB`。

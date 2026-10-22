@@ -56,20 +56,85 @@ import TransitCore
         }
         XCTAssertNil(context.place(id: "invented-place"))
     }
+    func testPlaceToolShortensLongAddresses() async throws {
+        let long = TravelPlace(name: "臺北車站", address: "臺北市中正區北平西路三號一樓至地下三樓（台鐵、高鐵、捷運共構）",
+                               coordinate: Coordinate(latitude: 25.047, longitude: 121.517))
+        let context = JourneyAssistantContext(journeys: []) { _ in [long] }
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try await context.search("北車").utf8)) as? [[String: String]])
+        XCTAssertEqual(rows.first?["address"], String(long.address.prefix(20)))
+        // The full place, not the shortened text, is what the review screen receives.
+        XCTAssertEqual(context.place(id: try XCTUnwrap(rows.first?["id"]))?.address, long.address)
+    }
     func testSavedJourneyToolPreservesDistinctEndpointsAndPreferences() throws {
         let home = TravelPlace(name: "家", address: "測試地址", coordinate: Coordinate(latitude: 25.03, longitude: 121.53))
         let work = TravelPlace(name: "公司", address: "測試地址", coordinate: Coordinate(latitude: 25.04, longitude: 121.54))
         let saved = SavedJourney(id: UUID(), title: "上班", symbol: "briefcase.fill", origin: home,
                                  destination: work, preference: .faster, updatedAt: Date())
         let context = JourneyAssistantContext(journeys: [saved]) { _ in [] }
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try context.savedJourneys().utf8)) as? [[String: Any]])
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try context.savedJourneys(matching: "上班").utf8)) as? [[String: Any]])
         let row = try XCTUnwrap(rows.first)
         let from = try XCTUnwrap(row["origin"] as? [String: String])
         let to = try XCTUnwrap(row["destination"] as? [String: String])
         XCTAssertEqual(context.place(id: try XCTUnwrap(from["id"]))?.id, home.id)
         XCTAssertEqual(context.place(id: try XCTUnwrap(to["id"]))?.id, work.id)
+        XCTAssertEqual(Set(from.keys), ["id", "name"], "Saved endpoints carry no address")
         XCTAssertEqual(row["preference"] as? String, "faster")
-        XCTAssertEqual(context.toolCalls, ["listSavedJourneys"])
+        XCTAssertEqual(context.toolCalls, ["listSavedJourneys: 上班"])
+    }
+    func testGoingHomeFindsTheHomeJourneyAmongFiftyWithinAFewHundredCharacters() throws {
+        func place(_ index: Int) -> TravelPlace {
+            TravelPlace(name: "地點\(index)", address: "臺北市信義區市府路\(index)號很長很長的地址說明文字",
+                        coordinate: Coordinate(latitude: 25.03 + Double(index) / 10_000, longitude: 121.53))
+        }
+        var library = (0..<50).map { index in
+            SavedJourney(id: UUID(), title: "行程\(index)", symbol: "mappin", origin: place(index),
+                         destination: place(index + 100), preference: .balanced, updatedAt: Date())
+        }
+        let home = TravelPlace(name: "古亭站", address: "臺北市中正區", coordinate: Coordinate(latitude: 25.026, longitude: 121.522))
+        library[37] = SavedJourney(id: UUID(), title: "回家", symbol: "house.fill", origin: nil,
+                                   destination: home, preference: .lessWalking, updatedAt: Date())
+        let context = JourneyAssistantContext(journeys: library) { _ in [] }
+        for query in ["回家", "家", "home"] {
+            let text = try context.savedJourneys(matching: query)
+            XCTAssertLessThan(text.utf8.count, 600, "\(query): \(text)")
+            let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
+            XCTAssertLessThanOrEqual(rows.count, 3)
+            let first = try XCTUnwrap(rows.first)
+            XCTAssertEqual(first["title"] as? String, "回家")
+            XCTAssertEqual(first["preference"] as? String, "lessWalking")
+            let to = try XCTUnwrap(first["destination"] as? [String: String])
+            XCTAssertEqual(context.place(id: try XCTUnwrap(to["id"]))?.id, home.id)
+            XCTAssertFalse(text.contains("市府路"), "Addresses never enter the model context")
+        }
+        XCTAssertEqual(try context.savedJourneys(matching: "動物園"), "[]")
+        let unfiltered = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try context.savedJourneys(matching: "").utf8)) as? [Any])
+        XCTAssertEqual(unfiltered.count, 3)
+    }
+    func testContextOverflowRetriesOnceWithAFreshSessionThenFallsBack() async throws {
+        struct Overflow: Error {}
+        var attempts: [Bool] = [], restarts = 0
+        let value = try await ContextWindowRetry.run(isOverflow: { $0 is Overflow }, fresh: { restarts += 1 }) { retried in
+            attempts.append(retried)
+            if !retried { throw Overflow() }
+            return "ok"
+        }
+        XCTAssertEqual(value, "ok"); XCTAssertEqual(attempts, [false, true]); XCTAssertEqual(restarts, 1)
+        attempts = []
+        do {
+            _ = try await ContextWindowRetry.run(isOverflow: { $0 is Overflow }, fresh: { restarts += 1 }) { retried -> String in
+                attempts.append(retried); throw Overflow()
+            }
+            XCTFail("A second overflow must reach the manual fallback")
+        } catch is Overflow {}
+        XCTAssertEqual(attempts, [false, true]); XCTAssertEqual(restarts, 2)
+        attempts = []
+        do {
+            _ = try await ContextWindowRetry.run(isOverflow: { $0 is Overflow }, fresh: { restarts += 1 }) { retried -> String in
+                attempts.append(retried); throw URLError(.timedOut)
+            }
+            XCTFail("Other failures are not retried")
+        } catch is URLError {}
+        XCTAssertEqual(attempts, [false]); XCTAssertEqual(restarts, 2)
     }
     func testSearchFailureAndBudgetLeaveManualReviewAvailable() async throws {
         var calls = 0
@@ -78,7 +143,8 @@ import TransitCore
             throw URLError(.notConnectedToInternet)
         }
         for _ in 0..<10 { _ = try await context.search("台北車站") }
-        XCTAssertEqual(calls, 8)
+        XCTAssertEqual(calls, JourneyAssistantContext.searchLimit)
+        XCTAssertEqual(calls, 3)
         XCTAssertNil(context.place(id: "place-1"))
     }
     func testCancellationDoesNotRegisterStaleToolEvidence() async throws {

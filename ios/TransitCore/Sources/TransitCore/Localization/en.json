@@ -859,5 +859,14 @@
   "確定": "Understood",
   "需確認": "Needs confirmation",
   "暫時無法理解，請直接填寫下方行程條件，或再試一次。": "Could not understand the request right now. Fill in the conditions below or try again.",
-  "暫時無法繼續理解，已保留條件，請直接修改確認。": "Could not continue right now. Your conditions are preserved for editing and confirmation."
+  "暫時無法繼續理解，已保留條件，請直接修改確認。": "Could not continue right now. Your conditions are preserved for editing and confirmation.",
+  "AI 測試": "AI test",
+  "只在測試版顯示。": "Shown only in test builds.",
+  "在這支 iPhone 的裝置端模型上逐句測試內建的行程語句，使用虛構的常用行程，不讀取或修改你的資料。地點搜尋仍使用 Apple 地圖。": "Tests the built-in journey sentences one by one on this iPhone's on-device model, using fictional saved journeys. Your data is not read or changed. Place search still uses Apple Maps.",
+  "四欄全對：%@": "All four fields correct: %@",
+  "開始測試": "Start test",
+  "重新測試": "Run again",
+  "停止": "Stop",
+  "分享測試報告": "Share test report",
+  "測試期間請保持 App 在前景。報告為 JSON 檔，可傳回電腦用 journey-report.py 整理。": "Keep the app in the foreground during the test. The report is a JSON file that journey-report.py can summarize on a computer."
 }

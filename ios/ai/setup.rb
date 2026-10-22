@@ -31,7 +31,8 @@ group = project.main_group.groups.find { |item| item.path == 'ai' } || project.m
     raise 'Cannot identify benchmark source' unless status.success?
     dirty, = Open3.capture2('git', '-C', root, 'status', '--porcelain')
     sources = %w[ios/TaipeiBus/OnDeviceJourneyAssistant.swift ios/TransitCore/Sources/TransitCore/AssistantIntent.swift
-                 ios/TaipeiBus/PlaceSearch.swift ios/ai/journey-corpus.json ios/ai/JourneyDeviceBenchmarkTests.swift]
+                 ios/TaipeiBus/PlaceSearch.swift ios/TaipeiBus/JourneyBenchmark.swift ios/ai/journey-corpus.json
+                 ios/ai/JourneyDeviceBenchmarkTests.swift]
     fingerprint = Digest::SHA256.new
     sources.each { |source| fingerprint.update(source).update(File.binread(File.join(root, source))) }
     File.write(File.join(__dir__, 'journey-build.json'), JSON.pretty_generate({

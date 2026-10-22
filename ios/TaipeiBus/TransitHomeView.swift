@@ -1542,6 +1542,7 @@ private struct AppInformationView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var diagnostics = JourneyDiagnostics.shared
     @Environment(\.dismiss) private var dismiss
+    @State private var testerBuild = false
 
     var body: some View {
         NavigationStack {
@@ -1605,7 +1606,14 @@ private struct AppInformationView: View {
                         Label(AppText.text("分享路線規劃紀錄"),systemImage:"square.and.arrow.up")
                     }.accessibilityIdentifier("share-journey-diagnostics")
                 }
+                if testerBuild {
+                    Section {
+                        NavigationLink(AppText.text("AI 測試")) { JourneyBenchmarkView() }
+                            .accessibilityIdentifier("settings-ai-benchmark")
+                    } footer: { Text(AppText.text("只在測試版顯示。")) }
+                }
             }
+            .task { testerBuild = await JourneyBenchmark.testerBuild() }
             .smoothChanges(model.language)
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }

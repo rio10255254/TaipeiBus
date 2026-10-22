@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Validate the corpus, or turn a real device XCTest JSON attachment into CSV."""
+"""Validate the corpus, or turn a real device report (XCTest attachment or the app's AI 測試 page) into CSV."""
 import argparse
 import csv
+import hashlib
 import json
 from datetime import datetime
 from pathlib import Path
@@ -38,10 +39,17 @@ def validate_corpus():
 def summarize(report_path, csv_path):
     report = json.loads(report_path.read_text())
     assert report['device'].startswith('iPhone'), 'Expected a physical iPhone report'
-    assert report['source']['sourceSHA256'] and report['promptVersion']
+    source = report['source']
+    # XCTest runs carry a source fingerprint; the in-app page identifies its build instead.
+    assert report['promptVersion'] and (source.get('sourceSHA256') or (source.get('appVersion') and source.get('build')))
     cases = report['cases']
     corpus = validate_corpus()
-    assert {row['id'] for row in cases} == {row['id'] for row in corpus['cases']}, 'Incomplete or different corpus'
+    expected_ids = {row['id'] for row in corpus['cases']}
+    assert {row['id'] for row in cases} <= expected_ids, 'Different corpus'
+    if source.get('corpusSHA256') and source['corpusSHA256'] != hashlib.sha256((ROOT / 'journey-corpus.json').read_bytes()).hexdigest():
+        print('Warning: the report was made with a different version of journey-corpus.json')
+    if len(cases) < len(expected_ids):
+        print(f'Incomplete run: {len(cases)}/{len(expected_ids)} utterances; rates below cover only those.')
     with csv_path.open('w', newline='', encoding='utf-8-sig') as output:
         writer = csv.DictWriter(output, fieldnames=['id', 'text', *FIELDS, 'fieldAccuracy', 'questionCorrect',
             'savedToolCorrect', 'elapsedSeconds', 'error', 'observed', 'selectedOption', 'followUpObserved', 'followUpCorrect', 'toolCalls'])
