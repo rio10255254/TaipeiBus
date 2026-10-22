@@ -1080,7 +1080,7 @@ final class JourneyPlannerModel: ObservableObject {
         if let data = try? JSONEncoder().encode(recentPlaces) { UserDefaults.standard.set(data, forKey: "journeyRecentPlaces") }
         plan(metadata: metadata)
     }
-    private func option(_ trip: TransitTrip, metadata: TransitMetadata, origin: TravelPlace, destination: TravelPlace) -> JourneyOption {
+    func option(_ trip: TransitTrip, metadata: TransitMetadata, origin: TravelPlace, destination: TravelPlace) -> JourneyOption {
         func entrance(_ stop: BusStop, toward point: Coordinate) -> Coordinate {
             metadata.metro.nearestExit(stationID: stop.stationID, to: point)?.coordinate ?? stop.coordinate
         }
@@ -1329,7 +1329,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
         return result
     }
-    private func checkedWalk(_ leg: WalkingLeg) async throws -> WalkingLeg {
+    func checkedWalk(_ leg: WalkingLeg) async throws -> WalkingLeg {
         func finish(_ path: WalkingLeg, requested: WalkingLeg) -> WalkingLeg {
             var result = path
             result.stationSeconds = requested.stationSeconds; result.stationInstruction = requested.stationInstruction

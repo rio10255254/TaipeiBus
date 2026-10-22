@@ -1555,6 +1555,7 @@ private struct AppInformationView: View {
                     Toggle("English", isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) }))
                         .accessibilityIdentifier("app-language-toggle")
                 }
+                CommuteHabitSettings(habits: model.commuteHabits)
                 Section(AppText.text("即時資料")) {
                     Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
                     Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
@@ -1612,6 +1613,11 @@ private struct PrivacyExplanationView: View {
     @Environment(\.liveSettings) private var live
     var body: some View {
         List {
+            Section(AppText.text("智慧輔助與相機")) {
+                Text(AppText.text("行程需求只在手機上的模型處理，不上傳完整提示文字。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
+                Text(AppText.text("掃描車牌才會請求相機權限；影像在手機辨識，不儲存或上傳。拒絕權限仍可手動選車。"))
+                Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
+            }
             Section(AppText.text("你的位置")) {
                 Text(AppText.text("定位為選用，只在使用 App 時尋找附近站牌、規劃行程與定位地圖。也能拒絕定位，手動選擇出發地、站牌或路線。App 不會將定位座標加入公車資料查詢。"))
                 Text(AppText.text("地點搜尋與步行路線由 Apple 地圖提供；搜尋文字及路線起終點由 Apple 處理。"))

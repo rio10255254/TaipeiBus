@@ -53,6 +53,8 @@ private actor StationLookup {
 final class TransitAppModel: ObservableObject {
     let purchases = ProPurchases()
     let commutes = CommuteLibrary()
+    let commuteHabits = CommuteHabitStore()
+    private var recordedCommuteStart = false
 
     // MARK: Pro features and free daily trials
     /// Free uses of Pro features today (three per Taipei day; the same bus again costs nothing).
@@ -166,6 +168,15 @@ final class TransitAppModel: ObservableObject {
         guard !synchronizingNavigation else { return }
         synchronizingNavigation = true
         defer { synchronizingNavigation = false }
+        if !planner.started { recordedCommuteStart = false }
+        if planner.started, !recordedCommuteStart {
+            recordedCommuteStart = true
+            if let id = activeSavedJourneyID, let saved = commutes.journeys.first(where: { $0.id == id }),
+               planner.destination?.coordinate == saved.destination.coordinate,
+               saved.origin == nil || planner.origin?.coordinate == saved.origin?.coordinate {
+                commuteHabits.record(id, available: Set(commutes.journeys.map(\.id)))
+            }
+        }
         let readiness = NavigationReadiness(hasPro: purchases.hasPro, checkingPro: purchases.checkingAccess,
             notifications: alightReminder.permission, location: location.navigationPermission,
             liveActivitiesAllowed: rideActivity.isAllowed)
@@ -562,6 +573,14 @@ final class TransitAppModel: ObservableObject {
     func setTripPreference(_ value: RoutePreference) {
         guard purchases.hasPro else { return }
         tripPreference = value; applyPersonalPreferences()
+    }
+    func previewAssistantJourney(origin: TravelPlace, destination: TravelPlace, preference: RoutePreference) {
+        guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea,
+              preference == .balanced || purchases.hasPro else { return }
+        planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
+        tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
+        planner.setOrigin(origin, metadata: metadata)
+        planner.setDestination(destination, metadata: metadata, currentLocation: nil)
     }
     /// Opening a saved trip stays free after Pro ends; its saved route preference only applies with Pro.
     func previewSavedJourney(_ saved: SavedJourney) {

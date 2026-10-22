@@ -30,6 +30,7 @@ struct JourneyPlanningView: View {
     @State private var showingPro = false
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
+    @State private var showingAssistant = false
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
@@ -176,6 +177,11 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
+        .sheet(isPresented: $showingAssistant) {
+            AIJourneyAssistantView(model: model) {
+                focused = false; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
+            }
+        }
         .bikeStationDetails(model: model)
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
@@ -268,6 +274,11 @@ struct JourneyPlanningView: View {
     }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if !editingOrigin, !planner.started {
+                Button { focused = false; showingAssistant = true } label: {
+                    Label(AppText.text("用一句話規劃"), systemImage: "sparkles").frame(minHeight: 44)
+                }.accessibilityIdentifier("journey-ai-assistant")
+            }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(MapChrome.secondaryText)
                 TextField(editingOrigin ? AppText.text("出發地、地址或站名") : AppText.text("地點、地址或站名"), text: $query)
@@ -286,6 +297,10 @@ struct JourneyPlanningView: View {
             }
             if query.isEmpty {
                 if !editingOrigin, !planner.started {
+                    CommuteHabitSuggestions(habits: model.commuteHabits, library: model.commutes) { saved in
+                        model.previewSavedJourney(saved)
+                        focused = false; editingDestination = false; showingItinerary = false; collapse()
+                    }
                     JourneySavedShortcuts(model: model) { saved in
                         model.previewSavedJourney(saved)
                         focused = false; editingDestination = false; showingItinerary = false; collapse()
@@ -672,9 +687,15 @@ private struct BoardedVehiclePicker: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
+    @State private var showingScanner = false
     var body: some View {
         NavigationStack {
             List {
+                Section {
+                    Button { showingScanner = true } label: {
+                        Label(AppText.text("掃描車牌"), systemImage: "camera")
+                    }.accessibilityIdentifier("boarding-scan-plate")
+                }
                 Section {
                     let vehicles = BoardingGuide.vehicles(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: Date(), approachingOnly: false)
                     if vehicles.isEmpty { Text(AppText.text("暫無車輛位置，稍後再選擇")).foregroundStyle(MapChrome.secondaryText) }
@@ -693,6 +714,12 @@ private struct BoardedVehiclePicker: View {
             }.navigationTitle(AppText.text("搭乘車牌")).navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("取消")) { dismiss() } } }
         }.presentationDetents([.medium, .large])
+            .sheet(isPresented: $showingScanner) {
+                BoardingPlateScanner(model: model, ride: ride) { bus in
+                    model.confirmBoardedVehicle(bus, ride: ride)
+                    showingScanner = false; dismiss()
+                }
+            }
     }
 }
 
