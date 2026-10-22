@@ -34,13 +34,14 @@ jobs:
           path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
           key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
       - name: Compile native simulator app
+        id: simulator_build
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/ai-build" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
-            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-build.log"
+            ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-build.log"
       - name: Boot and launch on iPhone simulator
         timeout-minutes: 12
         run: |
@@ -53,15 +54,18 @@ jobs:
           export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
           export GEM_PATH="$GEM_HOME:$(ruby -e 'print Gem.path.join(":")')"
           ruby ios/ai/setup.rb
+          failed=0
           for scheme in TaipeiBusAITests TaipeiBusAIUITests; do
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
               -configuration Debug -destination "platform=iOS Simulator,id=$AI_SIMULATOR" \
               -derivedDataPath "$RUNNER_TEMP/ai-build" \
               -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
               -resultBundlePath "$RUNNER_TEMP/$scheme.xcresult" \
-              -parallel-testing-enabled NO CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$RUNNER_TEMP/$scheme.log"
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$RUNNER_TEMP/$scheme.log" || failed=1
           done
+          exit "$failed"
       - name: Compile unsigned device release
+        if: ${{ !cancelled() && steps.simulator_build.outcome == 'success' }}
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -69,6 +73,15 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/ai-device-build" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-device-build.log"
+      - name: Export XCTest screenshots
+        if: always()
+        run: |
+          for suite in TaipeiBusAITests TaipeiBusAIUITests; do
+            if [ -d "$RUNNER_TEMP/$suite.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$suite.xcresult" \
+                --output-path "$RUNNER_TEMP/$suite-screenshots"
+            fi
+          done
       - name: Preserve native validation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -83,5 +96,6 @@ jobs:
             ${{ runner.temp }}/TaipeiBusAITests.log
             ${{ runner.temp }}/TaipeiBusAIUITests.log
             ${{ runner.temp }}/*.xcresult
+            ${{ runner.temp }}/*-screenshots/
           if-no-files-found: warn
           retention-days: 14

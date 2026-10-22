@@ -25,6 +25,7 @@ final class AssistantSafetyTests: XCTestCase {
         XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", needsClarification: true).validated(source: "早點去醫院", now: now))
     }
     func testExplicitTimeCannotBeSilentlyDroppedOrMovedToAnotherDay() {
+        XCTAssertNoThrow(try AssistantIntentDraft(destination: "NTU Hospital").validated(source: "I am going to NTU Hospital", now: now))
         XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院").validated(source: "明天 9 點前到台大醫院", now: now))
         XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "明天 9 點", arrivalDay: "2026-10-24",
             arrivalHour: 9, arrivalMinute: 0).validated(source: "明天 9 點到醫院", now: now))

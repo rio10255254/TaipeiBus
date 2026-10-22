@@ -205,6 +205,7 @@ final class TransitAppModel: ObservableObject {
     }
     func updateLiveSurfaces() {
         synchronizeNavigationState()
+        commuteHabits.prune(available: Set(commutes.journeys.map(\.id)))
         // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
         guard !purchases.checkingAccess else { return }
         let now = Date()

@@ -37,4 +37,4 @@ for attempt in range(2):
         run("shutdown", device)
         run("boot", device)
 run("launch", device, "com.example.TaipeiBus", timeout=180)
-run("io", device, "screenshot", str(temporary / "ai-simulator.png"))
+run("io", device, "screenshot", str(temporary / "ai-simulator.png"), timeout=180)
