@@ -60,7 +60,8 @@ import TransitCore
         let long = TravelPlace(name: "臺北車站", address: "臺北市中正區北平西路三號一樓至地下三樓（台鐵、高鐵、捷運共構）",
                                coordinate: Coordinate(latitude: 25.047, longitude: 121.517))
         let context = JourneyAssistantContext(journeys: []) { _ in [long] }
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try await context.search("北車").utf8)) as? [[String: String]])
+        let text = try await context.search("北車")
+        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: String]])
         XCTAssertEqual(rows.first?["address"], String(long.address.prefix(20)))
         // The full place, not the shortened text, is what the review screen receives.
         XCTAssertEqual(context.place(id: try XCTUnwrap(rows.first?["id"]))?.address, long.address)
