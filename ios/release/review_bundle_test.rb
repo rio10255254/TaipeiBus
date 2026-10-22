@@ -61,6 +61,7 @@ class ReviewBundleTest < Minitest::Test
       @app_state = 'READY_FOR_REVIEW' if relationships['appStoreVersion']
       {'data'=>@items.last || {}}
     end
+    def detach_subscription_versions = @items.reject! { |item| item['relationships'].key?('subscriptionVersion') }
     def row(id, **attributes) = {'id'=>id,'attributes'=>attributes.transform_keys(&:to_s)}
     def localizations = %w[zh-Hant en-US].map { |locale| row(locale,locale:locale,name:'Pro',description:'Trips and reminders') }
   end
@@ -123,6 +124,29 @@ class ReviewBundleTest < Minitest::Test
     bundle.prepare('app-version'); @client.writes.clear
     @client.submitted_date = '2026-10-13T08:00:00Z'
     assert_raises(TaipeiBusRelease::Error) { bundle.reopen_app_for_assets('app-version') }
+    assert_empty @client.writes
+  end
+  def test_rejected_bundle_is_resumed_instead_of_opening_a_second_submission
+    bundle.prepare('app-version'); @client.writes.clear
+    @client.state = 'UNRESOLVED_ISSUES'; @client.submitted_date = '2026-10-18T18:49:04Z'
+    result = bundle.prepare('app-version')
+    assert_equal 'draft', result[:submission_id]
+    assert result[:items_verified]
+    assert_empty @client.writes
+  end
+  def test_rejected_bundle_regains_an_item_apple_detached
+    bundle.prepare('app-version')
+    @client.state = 'UNRESOLVED_ISSUES'; @client.submitted_date = '2026-10-18T18:49:04Z'
+    @client.detach_subscription_versions; @client.writes.clear
+    assert_equal 'draft', bundle.prepare('app-version')[:submission_id]
+    assert_equal 2, @client.writes.length
+    refute @client.writes.any? { |_,path,_| path == '/v1/reviewSubmissions' }
+  end
+  def test_sent_bundle_still_refuses_new_items
+    bundle.prepare('app-version')
+    @client.state = 'WAITING_FOR_REVIEW'; @client.submitted_date = '2026-10-18T18:49:04Z'
+    @client.detach_subscription_versions; @client.writes.clear
+    assert_raises(TaipeiBusRelease::Error) { bundle.prepare('app-version') }
     assert_empty @client.writes
   end
   def test_interrupted_screenshot_edit_rejoins_the_existing_subscription_bundle

@@ -5,6 +5,8 @@ module TaipeiBusRelease
   # A draft contains the exact app build, group version and both subscription versions.
   # Adding items asks Apple to validate metadata; only store-submit sends the draft.
   class ReviewBundle
+    RESUBMITTABLE_STATES = %w[UNRESOLVED_ISSUES].freeze
+
     def initialize(client, config)
       @client, @config = client, config
       raise Error, 'Production billing was not authorized.' unless config['production_submission_authorized'] == true
@@ -52,8 +54,10 @@ module TaipeiBusRelease
       targets.unshift({relationship: :appStoreVersion, type: 'appStoreVersions', id: app_version_id})
       submissions = @client.all("/v1/apps/#{@config.fetch('app_id')}/reviewSubmissions")
       items_by_id = {}
+      # After App Review rejects a bundle, Apple keeps it as UNRESOLVED_ISSUES and
+      # expects that same submission to be corrected and sent again.
       submission = submissions.find do |row|
-        next false unless %w[READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW].include?(row.dig('attributes','state'))
+        next false unless (%w[READY_FOR_REVIEW WAITING_FOR_REVIEW IN_REVIEW] + RESUBMITTABLE_STATES).include?(row.dig('attributes','state'))
         items_by_id[row.fetch('id')] = review_items(row.fetch('id'))
         items_by_id[row.fetch('id')].any? { |item| item.dig('relationships','appStoreVersion','data','id') == app_version_id }
       end
@@ -69,7 +73,7 @@ module TaipeiBusRelease
       items = items_by_id[submission.fetch('id')] || []
       targets.each do |target|
         next if items.any? { |item| item.dig('relationships',target.fetch(:relationship).to_s,'data','id') == target.fetch(:id) }
-        raise Error, 'Cannot add missing items after a submission was sent.' unless submission.dig('attributes','state') == 'READY_FOR_REVIEW'
+        raise Error, 'Cannot add missing items after a submission was sent.' unless (%w[READY_FOR_REVIEW] + RESUBMITTABLE_STATES).include?(submission.dig('attributes','state'))
         begin
           @client.request(:post,'/v1/reviewSubmissionItems',{},data:{type:'reviewSubmissionItems',relationships:{
             reviewSubmission:{data:{type:'reviewSubmissions',id:submission.fetch('id')}},
