@@ -25,8 +25,8 @@ public struct ForecastTuning: Equatable, Sendable {
     public var limitedUncertainty = 0.3
     /// The shown reference range spans this many uncertainties before and after the estimate.
     /// Buses run late more often than early, so the late side is wider.
-    public var rangeEarlyScale = 1.2
-    public var rangeLateScale = 1.8
+    public var rangeEarlyScale = 1.39
+    public var rangeLateScale = 1.74
     /// Measured ratio of actual to estimated time, by Taipei hour (index 0 = 00:00–00:59), for
     /// segments timed from the official hour profile or from a bus's own recent pace. Segments
     /// timed from other buses' recent crossings already reflect current traffic and are not scaled.
@@ -37,8 +37,8 @@ public struct ForecastTuning: Equatable, Sendable {
     public init() {}
 
     // MEASURED-FACTORS-BEGIN
-    static let measuredWorkdayFactors: [Double] = Array(repeating: 1, count: 24)
-    static let measuredHolidayFactors: [Double] = Array(repeating: 1, count: 24)
+    static let measuredWorkdayFactors: [Double] = [0.996, 0.999, 1, 1, 1.002, 1.025, 1.044, 1.089, 1.033, 1.015, 1.022, 1.03, 1.04, 1.029, 1.024, 1.037, 1.052, 1.075, 1.042, 0.997, 1.013, 1.018, 0.99, 0.978]
+    static let measuredHolidayFactors: [Double] = [0.998, 1.003, 1.001, 1, 1.002, 1.013, 1.021, 1.028, 1.032, 1.033, 1.029, 1.023, 1.028, 1.026, 1.019, 1.019, 1.027, 1.028, 1.005, 1.018, 1.018, 1.013, 0.991, 0.985]
     // MEASURED-FACTORS-END
 
     /// The pace factor for travel at this moment.

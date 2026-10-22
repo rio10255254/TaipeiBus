@@ -94,14 +94,14 @@
       "type": "number",
       "minimum": 0.5,
       "maximum": 3,
-      "default": 1.2,
+      "default": 1.39,
       "description": "參考範圍往「提早」那側延伸幾倍的不確定度"
     },
     "rangeLateScale": {
       "type": "number",
       "minimum": 0.5,
       "maximum": 4,
-      "default": 1.8,
+      "default": 1.74,
       "description": "參考範圍往「延後」那側延伸幾倍的不確定度"
     },
     "workdayPaceFactors": {
