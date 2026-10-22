@@ -358,7 +358,12 @@ func format(_ value: Double?, _ digits: Int = 0) -> String {
 }
 
 let predictionWriter = GzipWriter(options.out + "/predictions.csv.gz", header:
-    "made_at,vehicle,route,parent,direction,stop,stops_ahead,distance_m,speed_kmh,age_s,evidence,predicted_s,uncertainty_s,usable,near_stop,shown,official_s,actual_arrive_s,arrive_bracket_s,actual_pass_s,pass_bracket_s")
+    "made_at,vehicle,route,parent,direction,stop,stops_ahead,distance_m,speed_kmh,age_s,evidence,predicted_s,uncertainty_s,usable,near_stop,shown,official_s,actual_arrive_s,arrive_bracket_s,actual_pass_s,pass_bracket_s,label_min,range_low_min,range_high_min")
+/// The whole minutes in one of the App's own labels ("約 3 分", "參考範圍 8–14 分"), so the score uses
+/// exactly what a rider reads, whatever rounding the App version applies.
+func minutes(_ label: String) -> [Int] {
+    label.split(whereSeparator: { !$0.isNumber }).compactMap { Int($0) }
+}
 var matched = 0
 for row in predictions {
     let crossing = crossings["\(row.vehicle)|\(row.trip)|\(row.stop)"]
@@ -366,14 +371,18 @@ for row in predictions {
     let pass = crossing?.pass.flatMap { $0 >= row.madeAt - 30 ? $0 - row.madeAt : nil }
     if arrive != nil || pass != nil { matched += 1 }
     let prediction = row.prediction
-    predictionWriter.write([
+    let label = row.shown ? minutes(prediction?.label ?? "") : []
+    let range = row.shown ? minutes(prediction?.rangeLabel ?? "") : []
+    let shownColumns: [String] = [label.first, range.first, range.last].map { $0.map(String.init) ?? "" }
+    let columns: [String] = [
         format(row.madeAt), row.vehicle, row.route, row.parent, row.direction, row.stop, String(row.stopsAhead),
         format(row.distance), format(row.speed >= 0 ? row.speed : nil), format(row.age),
         prediction?.evidence.rawValue ?? "", format(prediction?.seconds), format(prediction?.uncertaintySeconds),
         prediction.map { $0.hasUsableTime ? "1" : "0" } ?? "", prediction.map { $0.nearStop ? "1" : "0" } ?? "",
         row.shown ? "1" : "0", row.official.map(String.init) ?? "",
         format(arrive), format(arrive == nil ? nil : crossing?.arriveBracket), format(pass), format(pass == nil ? nil : crossing?.passBracket)
-    ].joined(separator: ","))
+    ]
+    predictionWriter.write((columns + shownColumns).joined(separator: ","))
 }
 predictionWriter.close()
 

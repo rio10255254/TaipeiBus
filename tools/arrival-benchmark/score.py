@@ -48,11 +48,11 @@ class Stats:
         self.in_range = 0
         self.with_range = 0
 
-    def add(self, predicted, actual, uncertainty=None):
+    def add(self, predicted, actual, in_range=None):
         self.errors.append(actual - predicted)
-        if uncertainty is not None:
+        if in_range is not None:
             self.with_range += 1
-            self.in_range += abs(actual - predicted) <= uncertainty
+            self.in_range += in_range
 
     def summary(self):
         if not self.errors:
@@ -80,6 +80,15 @@ def number(text):
     return float(text) if text not in ('', None) else None
 
 
+def shown_minutes(row, predicted, uncertainty):
+    """The minute label and reference range the App showed: recorded by newer replays, otherwise
+    rebuilt with the formulas of App versions up to 1.8.18 (both rounded up)."""
+    if row.get('label_min'):
+        return int(row['label_min']), int(row['range_low_min']), int(row['range_high_min'])
+    low = max(1, math.ceil((predicted - uncertainty) / 60))
+    return max(1, math.ceil(predicted / 60)), low, max(low, math.ceil((predicted + uncertainty) / 60))
+
+
 def score_predictions(folders):
     overall, displayed, by_bucket, by_evidence, by_hour = Stats(), Stats(), {}, {}, {}
     brackets = []
@@ -102,13 +111,16 @@ def score_predictions(folders):
                     continue
                 entry[1] += 1
                 predicted, uncertainty = float(row['predicted_s']), float(row['uncertainty_s'])
-                overall.add(predicted, actual, uncertainty)
-                # What the rider reads: "約 N 分" with N = ceil(seconds / 60) (VehicleArrivalPrediction.label).
-                displayed.add(max(1, math.ceil(predicted / 60)) * 60, actual)
+                minute, low, high = shown_minutes(row, predicted, uncertainty)
+                # The range a rider reads in whole minutes contains the arrival when it rounds into it.
+                in_range = low * 60 - 30 <= actual < high * 60 + 30
+                overall.add(predicted, actual, in_range)
+                # What the rider reads: "約 N 分" (VehicleArrivalPrediction.label).
+                displayed.add(minute * 60, actual)
                 brackets.append(float(row['arrive_bracket_s']))
-                by_bucket.setdefault(label, Stats()).add(predicted, actual, uncertainty)
-                by_evidence.setdefault(row['evidence'], Stats()).add(predicted, actual, uncertainty)
-                by_hour.setdefault(hour_band(float(row['made_at'])), Stats()).add(predicted, actual, uncertainty)
+                by_bucket.setdefault(label, Stats()).add(predicted, actual, in_range)
+                by_evidence.setdefault(row['evidence'], Stats()).add(predicted, actual, in_range)
+                by_hour.setdefault(hour_band(float(row['made_at'])), Stats()).add(predicted, actual, in_range)
     return {
         'rows': rows, 'rows_with_actual_within_30min': matched,
         'shown': overall.summary(),
