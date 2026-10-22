@@ -21,7 +21,7 @@ jobs:
     # The standard Intel pool also supplies Xcode 26.3 / iOS 26 and avoids
     # the arm64 capacity queue. ONLY_ACTIVE_ARCH keeps every test dependency aligned.
     runs-on: macos-15-intel
-    timeout-minutes: 45
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - name: Verify toolchain and offline core behavior
@@ -46,11 +46,15 @@ jobs:
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
             ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-build.log"
       - name: Boot and launch on iPhone simulator
-        timeout-minutes: 12
+        timeout-minutes: 18
         run: |
           set -euo pipefail
           python3 ios/ai/simulator.py 2>&1 | tee "$RUNNER_TEMP/ai-simulator.log"
       - name: Exercise native AI integration and fallback UI
+        # Xcode manages simulator readiness itself; retain this independent check
+        # if a raw simctl smoke command fails after creating the test device.
+        if: ${{ !cancelled() && steps.simulator_build.outcome == 'success' && env.AI_SIMULATOR != '' }}
+        timeout-minutes: 15
         run: |
           set -euo pipefail
           gem install xcodeproj -v 1.27.0 --no-document --user-install
@@ -67,15 +71,6 @@ jobs:
               -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test 2>&1 | tee "$RUNNER_TEMP/$scheme.log" || failed=1
           done
           exit "$failed"
-      - name: Compile unsigned device release
-        if: ${{ !cancelled() && steps.simulator_build.outcome == 'success' }}
-        run: |
-          set -euo pipefail
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
-            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/ai-device-build" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
-            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-device-build.log"
       - name: Export XCTest screenshots
         if: always()
         run: |
@@ -95,10 +90,37 @@ jobs:
             ${{ runner.temp }}/ai-build.log
             ${{ runner.temp }}/ai-simulator.png
             ${{ runner.temp }}/ai-simulator.log
-            ${{ runner.temp }}/ai-device-build.log
             ${{ runner.temp }}/TaipeiBusAITests.log
             ${{ runner.temp }}/TaipeiBusAIUITests.log
             ${{ runner.temp }}/*.xcresult
             ${{ runner.temp }}/*-screenshots/
+          if-no-files-found: warn
+          retention-days: 14
+
+  device:
+    # Keep optimized device compilation independent of simulator lifecycle and
+    # expose each job's logs as soon as its own validation completes.
+    runs-on: macos-15-intel
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
+          key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      - name: Compile unsigned device release
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath "$RUNNER_TEMP/ai-device-build" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-device-build.log"
+      - name: Preserve device validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-device-${{ github.sha }}
+          path: ${{ runner.temp }}/ai-device-build.log
           if-no-files-found: warn
           retention-days: 14

@@ -23,9 +23,11 @@ with open(os.environ["GITHUB_ENV"], "a") as env_file:
 temporary = Path(os.environ["RUNNER_TEMP"])
 app = str(temporary / "ai-build/Build/Products/Debug-iphonesimulator/TaipeiBus.app")
 run("boot", device)
+# A fresh iOS 26 runtime on the standard Intel runner migrates its system data
+# for several minutes. Restarting during that migration only delays readiness.
+run("bootstatus", device, "-b", timeout=600)
 for attempt in range(2):
     try:
-        run("bootstatus", device, "-b", timeout=180)
         run("install", device, app, timeout=180)
         break
     except subprocess.TimeoutExpired:
@@ -33,8 +35,9 @@ for attempt in range(2):
             raise
         # The repository's existing preview workflow uses the same recovery for
         # a hosted CoreSimulator installation RPC that stalls after a fresh boot.
-        print("Restarting this disposable simulator after a boot/install RPC timeout.", flush=True)
-        run("shutdown", device)
+        print("Restarting this disposable simulator after an installation RPC timeout.", flush=True)
+        run("shutdown", device, timeout=120)
         run("boot", device)
+        run("bootstatus", device, "-b", timeout=180)
 run("launch", device, "com.example.TaipeiBus", timeout=180)
 run("io", device, "screenshot", str(temporary / "ai-simulator.png"), timeout=180)
