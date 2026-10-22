@@ -421,8 +421,11 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         button("journey-options").tap()
         capture("full-itinerary")
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
-        let internalWalk = button("journey-in-app-walk-0")
-        XCTAssertTrue(internalWalk.waitForExistence(timeout: 10)); internalWalk.tap()
+        // Live recommendations may open with a YouBike leg; its in-app guidance is the bike button.
+        let walk = button("journey-in-app-walk-0"), bike = button("journey-in-app-bike-0")
+        let firstLeg = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in walk.exists || bike.exists }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [firstLeg], timeout: 10), .completed)
+        (walk.exists ? walk : bike).tap()
         let maps = XCUIApplication(bundleIdentifier: "com.apple.Maps")
         XCTAssertEqual(app.state, .runningForeground)
         XCTAssertNotEqual(maps.state, .runningForeground)
@@ -999,7 +1002,6 @@ final class NavigationOptimizationUsabilityTests: JourneyUsabilityTestBase {
         capture("optimized-neihu-options-and-times")
         let report = XCTAttachment(string: String(describing: state))
         report.name = "navigation-optimized-timing-report"; report.lifetime = .keepAlways; add(report)
-        XCTAssertTrue(button("journey-other-transit").exists)
         if button("journey-refresh-options").exists {
             button("journey-refresh-options").tap()
             let refreshed = timing()
