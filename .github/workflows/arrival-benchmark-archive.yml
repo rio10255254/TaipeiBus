@@ -1,0 +1,49 @@
+name: Arrival benchmark archive
+# Workflow artifacts from arrival-benchmark.yml expire 90 days after each recording.
+# This copies every recording into the arrival-benchmark-data release, which does not
+# expire, so the replay (tools/arrival-benchmark/replay) and later model training can
+# reuse the full two weeks. Already archived recordings are skipped. Public data only.
+on:
+  schedule:
+    # Daily 11:37 Taipei; cheap when nothing is new.
+    - cron: '37 3 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: arrival-benchmark-archive
+  cancel-in-progress: false
+env:
+  TAG: arrival-benchmark-data
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Create the release if needed
+        run: |
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --prerelease --latest=false --title 'Arrival benchmark recordings' \
+              --notes 'Recordings of Taipei public bus feeds (positions and official EstimateTime) from .github/workflows/arrival-benchmark.yml, kept beyond the 90-day artifact limit for tools/arrival-benchmark/replay. Public data only; see tools/arrival-benchmark/README.md.'
+          fi
+      - name: Copy recordings that are not archived yet
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" --json assets --jq '.assets[].name' | sort > archived.txt
+          gh api --paginate "repos/$GH_REPO/actions/artifacts?per_page=100" \
+            --jq '.artifacts[] | select(.expired == false and (.name | startswith("arrival-benchmark-"))) | "\(.id) \(.name)"' > available.txt
+          copied=0
+          while read -r id name; do
+            if grep -qx "$name.zip" archived.txt; then continue; fi
+            gh api "repos/$GH_REPO/actions/artifacts/$id/zip" > "$name.zip"
+            # A recording without its two feeds is not worth keeping.
+            unzip -l "$name.zip" | grep -q 'gps.csv.gz' || { echo "Skipping $name: no gps.csv.gz"; rm "$name.zip"; continue; }
+            gh release upload "$TAG" "$name.zip"
+            rm "$name.zip"
+            copied=$((copied + 1))
+          done < available.txt
+          echo "Archived $copied new recordings; $(wc -l < available.txt) available, $(wc -l < archived.txt) were already archived."

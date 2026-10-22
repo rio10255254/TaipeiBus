@@ -52,13 +52,36 @@ final class RidingTrafficTests: XCTestCase {
         let span = journey.anchors[1].match.along - journey.anchors[0].match.along
         let prediction = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
         XCTAssertEqual(prediction.evidence, .officialProfile)
-        XCTAssertEqual(prediction.seconds, 400 + 200 * (span - 700) / span, accuracy: 5)
+        XCTAssertEqual(prediction.seconds, (400 + 200 * (span - 700) / span) * ForecastTuning.current.paceFactor(at: now), accuracy: 5)
         XCTAssertTrue(prediction.hasUsableTime)
         // Without a profile, fresh GPS can still offer a short approximate time,
         // clearly distinguished from the official hour profile.
         let plain = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: source().0, at: now))
         XCTAssertEqual(plain.evidence, .routeProgress)
         XCTAssertTrue(plain.hasUsableTime)
+    }
+    func testMeasuredPaceFactorScalesTheOfficialProfile() throws {
+        defer { ForecastTuning.current = ForecastTuning() }
+        let m = try withOfficialProfile(source().0, seconds: 200)
+        let forecast = replay(starts: [250], rates: [5], metadata: m), bus = lastReport(start: 250, rate: 5, metadata: m)
+        var neutral = ForecastTuning(); neutral.workdayPaceFactors = Array(repeating: 1, count: 24)
+        ForecastTuning.current = neutral
+        let base = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now)).seconds
+        // `now` is a Friday 16:00 in Taipei: only that hour's workday factor applies.
+        var busy = neutral; busy.workdayPaceFactors[16] = 1.25; busy.holidayPaceFactors[16] = 0.8
+        ForecastTuning.current = busy
+        let scaled = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
+        XCTAssertEqual(scaled.seconds, base * 1.25, accuracy: 2)
+        XCTAssertEqual(scaled.evidence, .officialProfile)
+    }
+    func testLabelsUseTheNearestMinuteAndAWiderLateSide() {
+        defer { ForecastTuning.current = ForecastTuning() }
+        var tuning = ForecastTuning(); tuning.rangeEarlyScale = 1; tuning.rangeLateScale = 2
+        ForecastTuning.current = tuning
+        XCTAssertEqual(VehicleArrivalPrediction(seconds: 140, uncertaintySeconds: 30, evidence: .officialProfile, nearStop: false).label, "約 2 分")
+        XCTAssertEqual(VehicleArrivalPrediction(seconds: 160, uncertaintySeconds: 30, evidence: .officialProfile, nearStop: false).label, "約 3 分")
+        // 600 s ± 120 s: 480 s → 8 minutes before, 600 + 240 s → 14 minutes after.
+        XCTAssertEqual(VehicleArrivalPrediction(seconds: 600, uncertaintySeconds: 120, evidence: .officialProfile, nearStop: false).rangeLabel, "參考範圍 8–14 分")
     }
     func testOfficialProfileIsNotAppliedToABusWaitingAtItsFirstStop() throws {
         let m = try withOfficialProfile(source().0, seconds: 200)
