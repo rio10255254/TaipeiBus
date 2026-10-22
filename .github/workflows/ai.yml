@@ -1,0 +1,65 @@
+name: AI branch native validation
+
+on:
+  push:
+    branches: [ai]
+    paths: ['ios/**', '.github/workflows/ai.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-native-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  native:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify toolchain and offline core behavior
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          swift test --package-path ios/TransitCore -j 3 2>&1 | tee "$RUNNER_TEMP/ai-core.log"
+          python3 ios/release-check.py
+          python3 ios/localization-check.py
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
+          key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      - name: Compile native simulator app
+        run: |
+          set -euo pipefail
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
+            -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/ai-build" \
+            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
+            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-build.log"
+      - name: Boot and launch on iPhone simulator
+        run: |
+          set -euo pipefail
+          runtime=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[r for r in json.load(sys.stdin)["runtimes"] if r.get("isAvailable") and "iOS 26" in r["name"]]; assert r, "iOS 26 simulator unavailable"; print(r[-1]["identifier"])')
+          device=$(xcrun simctl create TaipeiBus-AI com.apple.CoreSimulator.SimDeviceType.iPhone-17 "$runtime")
+          echo "AI_SIMULATOR=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl install "$device" "$RUNNER_TEMP/ai-build/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
+          xcrun simctl launch "$device" com.example.TaipeiBus
+          xcrun simctl io "$device" screenshot "$RUNNER_TEMP/ai-simulator.png"
+      - name: Preserve native validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ai-core.log
+            ${{ runner.temp }}/ai-build.log
+            ${{ runner.temp }}/ai-simulator.png
+          if-no-files-found: warn
+          retention-days: 14
