@@ -25,8 +25,9 @@ struct AIJourneyAssistantView: View {
     private var unavailable: String? { OnDeviceJourneyAssistant.unavailableReason() }
     private var requiresPro: Bool { preference != .balanced && !model.purchases.hasPro }
     private var start: TravelPlace? {
-        origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model.location.usableCoordinate.map {
-            TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: $0)
+        origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? model.location.usableCoordinate.flatMap { point in
+            guard point.isInServiceArea else { return nil }
+            return TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: point)
         } : selectedOrigin
     }
     var body: some View {
