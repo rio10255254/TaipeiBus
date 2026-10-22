@@ -89,6 +89,42 @@
       "maximum": 0.8,
       "default": 0.3,
       "description": "資料不足時到站範圍至少佔剩餘時間的比例"
+    },
+    "rangeEarlyScale": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 3,
+      "default": 1.2,
+      "description": "參考範圍往「提早」那側延伸幾倍的不確定度"
+    },
+    "rangeLateScale": {
+      "type": "number",
+      "minimum": 0.5,
+      "maximum": 4,
+      "default": 1.8,
+      "description": "參考範圍往「延後」那側延伸幾倍的不確定度"
+    },
+    "workdayPaceFactors": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": {
+        "type": "number",
+        "minimum": 0.8,
+        "maximum": 1.4
+      },
+      "description": "平日各小時（0–23 時）官方車程與單車車速估算的修正倍數"
+    },
+    "holidayPaceFactors": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": {
+        "type": "number",
+        "minimum": 0.8,
+        "maximum": 1.4
+      },
+      "description": "週末與國定假日各小時的修正倍數"
     }
   }
 }

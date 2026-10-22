@@ -27,6 +27,21 @@ python3 tools/arrival-benchmark/replay_all.py recordings --official official-tim
 
 在 GitHub 上可手動執行 `Arrival replay` workflow，它會從 release 下載錄製檔、回放、評分，並把報告放在執行摘要。
 
+## 修正係數
+
+`fit_corrections.py` 從回放結果算出 App 的到站修正（`ForecastTuning`）：
+
+- **每小時倍數**（平日與假日各 24 個）：官方分時段車程與單車車速估算的時間，在尖峰時段明顯偏短。依其他車輛剛通過紀錄估算的時間幾乎沒有偏差，所以不修正。
+- **參考範圍倍數**：讓畫面上的「參考範圍」約有 80% 的機會涵蓋實際到站時間。
+
+```sh
+python3 tools/arrival-benchmark/fit_corrections.py results/replay/* --test-days 10-21 10-22   # 留兩天驗證
+python3 tools/arrival-benchmark/fit_corrections.py results/replay/* --write-swift               # 寫成 App 內建值
+python3 tools/arrival-benchmark/fit_corrections.py results/replay/* --base runtime/tuning.json --write-tuning runtime/tuning.json
+```
+
+回放時已在使用的倍數要用 `--base` 指定，新的倍數會乘在上面，重複「回放 → 計算」只會逐步收斂，不會重複修正。
+
 ## 解讀注意
 
 - 誤差 = 實際 − 預估。負值代表公車比顯示的早到，乘客可能錯過，是最需要避免的情況。
