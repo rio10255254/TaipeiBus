@@ -47,12 +47,21 @@ public struct ForecastTuning: Equatable, Sendable {
         var value = ForecastTuning()
         let known = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0) })
         for (key, raw) in root where key != "schemaVersion" && key != "note" {
-            guard let field = known[key], let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+            guard let field = known[key], let number = raw as? NSNumber, !isBoolean(number),
                   field.range.contains(number.doubleValue) else { throw SettingsError.invalid("tuning.\(key)") }
             value[keyPath: field.path] = number.doubleValue
         }
         if let note = root["note"], !((note as? String).map { $0.count <= 300 } ?? false) { throw SettingsError.invalid("tuning.note") }
         return value
+    }
+
+    private static func isBoolean(_ number: NSNumber) -> Bool {
+        #if canImport(Darwin)
+        return CFGetTypeID(number) == CFBooleanGetTypeID()
+        #else
+        // swift-corelibs-foundation decodes JSON true/false as a char-typed NSNumber; JSON numbers never are.
+        return String(cString: number.objCType) == "c"
+        #endif
     }
 
     private static let lock = NSLock()

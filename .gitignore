@@ -12,3 +12,6 @@ ios/**/xcuserdata/
 ios/**/.build/
 ios/**/.swiftpm/
 __pycache__/
+tools/**/.build/
+tools/**/.swiftpm/
+tools/**/Package.resolved
