@@ -30,11 +30,6 @@ struct JourneyPlanningView: View {
     @State private var showingPro = false
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
-    @State private var sentenceReaderAvailable = false
-    @State private var readingSentence = false
-    @State private var sentenceNote: String?
-    /// The destination of a read sentence, searched once the rider has picked its start.
-    @State private var pendingDestination: String?
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
@@ -134,8 +129,7 @@ struct JourneyPlanningView: View {
                             model.focusMap(.journey(planner.mapCoordinates))
                         } else if searchingPlaces, planner.destination != nil {
                             focused = false; resolveTask?.cancel(); search.cancel()
-                            resolving = false; readingSentence = false; pendingDestination = nil; sentenceNote = nil
-                            editingOrigin = false; editingDestination = false
+                            resolving = false; editingOrigin = false; editingDestination = false
                             showingItinerary = searchReturnToItinerary; searchReturnToItinerary = false
                             if !planner.started { if showingItinerary { expand() } else { collapse() } }
                         } else { dismiss() }
@@ -186,7 +180,6 @@ struct JourneyPlanningView: View {
         .onAppear {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(searchContext)
-            sentenceReaderAvailable = TripSentenceReader.isAvailable
             editingDestination = planner.destination == nil
             if planner.origin == nil && planner.usingLocation {
                 planner.useLocation(location.usableCoordinate, metadata: model.metadata)
@@ -206,8 +199,6 @@ struct JourneyPlanningView: View {
             if resolving && value != resolvingQuery {
                 resolveTask?.cancel(); resolveToken = UUID(); resolving = false; search.cancel()
             }
-            // Editing the sentence while it is being read means the rider wants something else.
-            if readingSentence { resolveTask?.cancel(); resolveToken = UUID(); readingSentence = false }
             searchError = nil; search.update(value)
         }
         .onChange(of: planner.options.count) { _, count in
@@ -271,7 +262,6 @@ struct JourneyPlanningView: View {
             Button {
                 planner.useLocation(location.usableCoordinate, metadata: model.metadata); location.request()
                 editingOrigin = false; editingDestination = planner.destination == nil; query = ""
-                continuePendingDestination()
             } label: { Image(systemName: "location.circle").liveFont(.title2).frame(width: 44, height: 44) }
                 .accessibilityLabel(live.text("使用目前位置出發"))
         }.padding(.vertical, 4)
@@ -284,18 +274,11 @@ struct JourneyPlanningView: View {
                     .accessibilityIdentifier("journey-search-field")
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
                     .onSubmit { resolve(text: query) }
-                if resolving || search.searching || readingSentence { ProgressView() }
+                if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
-            if let sentenceNote { Label(sentenceNote, systemImage: "sparkles").liveFont(.caption).foregroundStyle(MapChrome.secondaryText) }
-            if sentenceReaderAvailable, !editingOrigin, !planner.started, TripIntent.isSentence(query) {
-                Button { readSentence() } label: {
-                    Label(AppText.text("理解整句"), systemImage: "sparkles").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
-                }.secondaryAction().disabled(readingSentence || resolving).accessibilityIdentifier("journey-read-sentence")
-                    .accessibilityHint(AppText.text("在手機上理解出發地、目的地與路線偏好，再由你選擇地點"))
-            }
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button { resolve(text: query) } label: {
                     Label(AppText.text("搜尋「%@」", query), systemImage: "arrow.up.right").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
@@ -389,8 +372,7 @@ struct JourneyPlanningView: View {
     private func edit(origin: Bool) {
         searchReturnToItinerary = showingItinerary || planner.started
         expand()
-        resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false; readingSentence = false
-        pendingDestination = nil; sentenceNote = nil
+        resolveTask?.cancel(); resolveToken = UUID(); search.cancel(); resolving = false
         editingOrigin = origin; editingDestination = !origin; showingItinerary = false; query = ""; searchError = nil; focused = true
         search.setContext(searchContext)
     }
@@ -419,54 +401,8 @@ struct JourneyPlanningView: View {
         else { planner.setDestination(place, metadata: model.metadata, currentLocation: location.usableCoordinate) }
         editingOrigin = false; editingDestination = planner.destination == nil; query = ""
         search.cancel()
-        if continuePendingDestination() { return }
         if planner.destination != nil, planner.origin == nil { edit(origin: true) }
         else if planner.destination != nil { collapse() }
-    }
-    /// After the start of a read sentence is settled, search its destination for the rider to pick.
-    @discardableResult
-    private func continuePendingDestination() -> Bool {
-        guard let destination = pendingDestination else { return false }
-        pendingDestination = nil
-        editingOrigin = false; editingDestination = true
-        query = destination; resolve(text: destination)
-        return true
-    }
-    private func readSentence() {
-        let sentence = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !sentence.isEmpty else { return }
-        resolveTask?.cancel(); resolveToken = UUID(); let token = resolveToken
-        readingSentence = true; searchError = nil; sentenceNote = nil; focused = false
-        let titles = model.commutes.journeys.map(\.title)
-        resolveTask = Task {
-            let intent = await TripSentenceReader.read(sentence, savedTitles: titles)
-            guard !Task.isCancelled, token == resolveToken else { return }
-            readingSentence = false
-            guard let intent else { searchError = "沒能理解這句話，可直接搜尋地點。"; return }
-            apply(intent)
-        }
-    }
-    private func apply(_ intent: TripIntent) {
-        if let title = intent.savedJourneyTitle, intent.origin == nil,
-           let saved = model.commutes.journeys.first(where: { $0.title == title }) {
-            model.previewSavedJourney(saved)
-            focused = false; editingDestination = false; showingItinerary = false; query = ""; collapse()
-            return
-        }
-        var notes: [String] = []
-        if intent.preference != .balanced, let preference = RoutePreference(rawValue: intent.preference.rawValue) {
-            if model.purchases.hasPro { model.setTripPreference(preference) }
-            else { notes.append(AppText.text("「%@」路線偏好需要 Pro", preference.title)) }
-        }
-        if let time = intent.timeText { notes.append(AppText.text("目前只規劃現在出發，未套用「%@」", time)) }
-        sentenceNote = notes.isEmpty ? nil : notes.joined(separator: "\n")
-        if let origin = intent.origin {
-            pendingDestination = intent.destination
-            editingOrigin = true; editingDestination = false
-            query = origin; resolve(text: origin)
-        } else {
-            query = intent.destination; resolve(text: intent.destination)
-        }
     }
 }
 
