@@ -994,6 +994,15 @@ final class TransitAppModel: ObservableObject {
                 openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
+#if DEBUG
+                // AI interface checks use the real bundled route catalog and the
+                // existing explicitly labelled fixtures, without waiting for a live poll.
+                if ProcessInfo.processInfo.arguments.contains("--test-ai-ui") {
+                    previewNotice = "介面驗證用資料 · 非即時車輛"
+                    applyPreviewSelection()
+                    return
+                }
+#endif
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
@@ -2357,6 +2366,8 @@ final class TransitAppModel: ObservableObject {
             planningMetadata.rebuildRouteCatalog()
         }
         let source = planningMetadata
+        let planningDate = ProcessInfo.processInfo.arguments.contains("--test-ai-ui")
+            ? ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! : Date()
         let chosen = await Task.detached(priority: .userInitiated) {
             let metadata = source
         let network = TripPlanner(metadata: metadata)
@@ -2365,7 +2376,7 @@ final class TransitAppModel: ObservableObject {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
                 Coordinate(latitude: 25.0478, longitude: 121.5172), Coordinate(latitude: 25.1362, longitude: 121.4598)]
             for destination in destinations {
-                chosen = network.plan(from: .taipei, to: destination, maximumWalk: 800, limit: 80).first { trip in
+                chosen = network.plan(from: .taipei, to: destination, maximumWalk: 800, limit: 80, at: planningDate).first { trip in
                     guard trip.rides.count == 2, let ride = trip.rides.first,
                           let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
                           let boarding = pattern.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
@@ -2378,7 +2389,7 @@ final class TransitAppModel: ObservableObject {
             guard let journey = metadata.journey(routeID: route.id, direction: cooperated ? "1" : "0"), journey.anchors.count > 10 else { continue }
             let middle = journey.anchors.count / 2
             let trips = network.plan(from: journey.anchors[middle].stop.coordinate,
-                to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20)
+                to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20, at: planningDate)
             chosen = trips.first { trip in
                 guard trip.rides.count == 1, let ride = trip.rides.first,
                       let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),

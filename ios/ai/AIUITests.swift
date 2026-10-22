@@ -4,7 +4,8 @@ final class AIUITests: XCTestCase {
     func testSimulatorCameraFallbackReturnsToManualPlateSelection() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
-        app.launchArguments = ["--test-language", "zh-Hant", "--preview-boarding-fixture", "--usability-fixture"]
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui"]
         app.launch()
         XCTAssertTrue(app.buttons["journey-board"].waitForExistence(timeout: 90))
         app.buttons["journey-board"].tap()
@@ -24,8 +25,10 @@ final class AIUITests: XCTestCase {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
-            "--preview-journey-search", "--usability-fixture", "--test-ai-unavailable"]
+            "--usability-fixture", "--test-ai-ui", "--test-ai-unavailable"]
         app.launch()
+        XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
+        app.buttons["home-destination-search"].tap()
         let assistant = app.buttons["journey-ai-assistant"]
         XCTAssertTrue(assistant.waitForExistence(timeout: 60))
         assistant.tap()

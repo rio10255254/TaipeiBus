@@ -52,7 +52,7 @@ for attempt in range(2):
 container = Path(run("get_app_container", device, "com.example.TaipeiBus", "data", timeout=180, capture=True).strip())
 token = uuid.uuid4().hex
 run("launch", device, "com.example.TaipeiBus", "-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW",
-    "--test-language", "zh-Hant", "--usability-fixture", "--preview-journey-search", "--preview-capture", token,
+    "--test-language", "zh-Hant", "--usability-fixture", "--test-ai-ui", "--preview-capture", token,
     timeout=180)
 marker = container / "Documents/transit-preview-ready"
 deadline = time.monotonic() + 90
@@ -60,7 +60,7 @@ while not marker.exists() or marker.read_text() != token:
     if time.monotonic() >= deadline:
         raise RuntimeError("The app did not reach its requested preview state.")
     time.sleep(1)
-print("App confirmed the requested journey-search preview is ready.", flush=True)
+print("App confirmed the requested preview is ready.", flush=True)
 # Let the already initialized SwiftUI hierarchy present its first frame.
 time.sleep(2)
 run("io", device, "screenshot", str(temporary / "ai-simulator.png"), timeout=180)
