@@ -5,12 +5,18 @@ on:
     branches: [ai]
     paths: ['ios/**', '.github/workflows/ai.yml']
   workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard runner for simulator validation
+        type: choice
+        options: [macos-15, macos-15-intel]
+        default: macos-15
 
 permissions:
   contents: read
 
 concurrency:
-  group: ai-native-${{ github.ref }}
+  group: ai-native-${{ github.ref }}-${{ inputs.runner || 'macos-15' }}
   cancel-in-progress: true
 
 env:
@@ -18,9 +24,9 @@ env:
 
 jobs:
   native:
-    # The standard Intel pool also supplies Xcode 26.3 / iOS 26 and avoids
-    # the arm64 capacity queue. ONLY_ACTIVE_ARCH keeps every test dependency aligned.
-    runs-on: macos-15-intel
+    # Prefer Apple Silicon for iOS execution; keep the standard Intel pool
+    # available for explicit comparisons. Both supply Xcode 26.3 / iOS 26.
+    runs-on: ${{ inputs.runner || 'macos-15' }}
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
