@@ -139,6 +139,14 @@ import StoreKitTest
         XCTAssertFalse(value.location.backgroundNavigation)
         XCTAssertTrue(store.sessions.isEmpty)
     }
+    func testSecondTapStopsTrackingATrainBeforeBoarding() async {
+        let value = model(); await unlock(value)
+        value.toggleTrainTracking("BR-1")
+        XCTAssertEqual(value.selectedTrainID, "BR-1")
+        value.toggleTrainTracking("BR-1")
+        XCTAssertNil(value.selectedTrainID, "The track button must also release the train")
+        XCTAssertFalse(value.followingTrain)
+    }
     func testRevokedProStopsPaidBackgroundWorkAndKeepsFreeNavigation() async throws {
         let value = model(); await unlock(value); value.planner.begin()
         let selected = value.planner.selectedID
