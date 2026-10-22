@@ -851,5 +851,13 @@
   "公告全文": "Original notice",
   "重點摘錄目前無法使用，仍可閱讀下方全文。": "Excerpts are unavailable. You can read the full original below.",
   "路線或公告關鍵字": "Route or notice keywords",
-  "開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。": "Opening service notices downloads public transportation news without sending your location or trips. Excerpts are selected on your phone; the full text and official links remain available."
+  "開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。": "Opening service notices downloads public transportation news without sending your location or trips. Excerpts are selected on your phone; the full text and official links remain available.",
+  "確認你的意思": "Confirm what you mean",
+  "直接修改行程條件": "Edit journey conditions directly",
+  "需確認的欄位可直接修改；請核對每個條件與實際地點後再規劃。": "Edit any fields that need confirmation. Check every condition and actual place before planning.",
+  "我已確認所有行程條件與實際地點": "I have confirmed all conditions and actual places",
+  "確定": "Understood",
+  "需確認": "Needs confirmation",
+  "暫時無法理解，請直接填寫下方行程條件，或再試一次。": "Could not understand the request right now. Fill in the conditions below or try again.",
+  "暫時無法繼續理解，已保留條件，請直接修改確認。": "Could not continue right now. Your conditions are preserved for editing and confirmation."
 }

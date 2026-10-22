@@ -31,6 +31,8 @@ struct JourneyPlanningView: View {
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
     @State private var showingAssistant = false
+    @State private var assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
+    @Environment(\.scenePhase) private var scenePhase
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
@@ -183,7 +185,14 @@ struct JourneyPlanningView: View {
             }
         }
         .bikeStationDetails(model: model)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil }
+        }
+        .onChange(of: AppLanguage.current) { _, _ in
+            assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
+        }
         .onAppear {
+            assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(searchContext)
             editingDestination = planner.destination == nil
@@ -274,7 +283,7 @@ struct JourneyPlanningView: View {
     }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !editingOrigin, !planner.started {
+            if !editingOrigin, !planner.started, assistantAvailable {
                 Button { focused = false; showingAssistant = true } label: {
                     Label(AppText.text("用一句話規劃"), systemImage: "sparkles").frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-ai-assistant")

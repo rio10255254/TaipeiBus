@@ -11,26 +11,57 @@ final class AssistantSafetyTests: XCTestCase {
         XCTAssertEqual(value.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
         XCTAssertEqual(value.destination, "台大醫院")
     }
-    func testInventedPlacesPreferencesAndTimesAreRejected() throws {
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台北車站").validated(source: "去台大醫院", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院", origin: "西門").validated(source: "去台大醫院", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院", preference: .faster).validated(source: "去台大醫院", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院", arrivalDay: "2026-10-23", arrivalHour: 9, arrivalMinute: 0).validated(source: "去台大醫院", now: now))
-        XCTAssertNil(try AssistantIntentDraft(destination: "台大醫院").validated(source: "去台大醫院", now: now).arriveBy)
+    func testNormalizedPlacesAndColloquialPreferenceReachReview() throws {
+        let certain = AssistantFieldReview(destination: .certain, origin: .certain, preference: .certain, time: .certain)
+        let value = try AssistantIntentDraft(destination: "臺北車站", origin: "公司已存地點", preference: .faster,
+            review: certain).validated(source: "從公司到北車，快一點", now: now)
+        XCTAssertEqual(value.destination, "臺北車站")
+        XCTAssertEqual(value.origin, "公司已存地點")
+        XCTAssertEqual(value.preference, .faster)
+        XCTAssertEqual(value.review, certain)
     }
-    func testInvalidRolledOverPastAndAmbiguousDatesAreRejected() {
-        for (day, hour, minute) in [("2026-02-30", 9, 0), ("2026-10-23", 24, 0), ("2026-10-23", 9, 60), ("2026-10-21", 9, 0), ("2028-10-23", 9, 0)] {
-            XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "早上", arrivalDay: day, arrivalHour: hour, arrivalMinute: minute).validated(source: "早上去醫院", now: now))
+    func testAmbiguityPreservesEveryUsableFieldInsteadOfRejectingSentence() throws {
+        let review = AssistantFieldReview(destination: .needsConfirmation, origin: .certain, preference: .certain, time: .certain)
+        let value = try AssistantIntentDraft(destination: "台大", origin: "西門站", preference: .lessWalking,
+            needsClarification: true, review: review).validated(source: "從西門到台大，少走路", now: now)
+        XCTAssertEqual(value.destination, "台大")
+        XCTAssertEqual(value.origin, "西門站")
+        XCTAssertEqual(value.preference, .lessWalking)
+        XCTAssertEqual(value.review, review)
+    }
+    func testInvalidDatesRemainEditableAndCannotEnterPlannerAsDates() throws {
+        for (day, hour, minute) in [("2026-02-30", 9, 0), ("2026-10-23", 24, 0), ("2026-10-23", 9, 60),
+                                  ("2026-10-21", 9, 0), ("2028-10-23", 9, 0), ("not-a-date", 9, 0), ("2026-x-10-23", 9, 0)] {
+            let value = try AssistantIntentDraft(destination: "醫院", timeEvidence: "早上", arrivalDay: day,
+                arrivalHour: hour, arrivalMinute: minute,
+                review: .init(time: .certain)).validated(source: "早上去醫院", now: now)
+            XCTAssertNil(value.arriveBy)
+            XCTAssertEqual(value.review.time, .needsConfirmation)
+            XCTAssertEqual(value.timeDescription, "早上")
+            XCTAssertEqual(value.destination, "醫院")
         }
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", needsClarification: true).validated(source: "早點去醫院", now: now))
     }
-    func testExplicitTimeCannotBeSilentlyDroppedOrMovedToAnotherDay() {
-        XCTAssertNoThrow(try AssistantIntentDraft(destination: "NTU Hospital").validated(source: "I am going to NTU Hospital", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "台大醫院").validated(source: "明天 9 點前到台大醫院", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "明天 9 點", arrivalDay: "2026-10-24",
-            arrivalHour: 9, arrivalMinute: 0).validated(source: "明天 9 點到醫院", now: now))
-        XCTAssertThrowsError(try AssistantIntentDraft(destination: "醫院", timeEvidence: "明天", arrivalDay: "2026-10-23",
-            arrivalHour: 9, arrivalMinute: 0).validated(source: "明天或後天去醫院", now: now))
+    func testMissingTimeAndDestinationAreReviewedWithoutKeywordRejection() throws {
+        let value = try AssistantIntentDraft(destination: "", timeEvidence: "明天 9 點前", needsClarification: true)
+            .validated(source: "明天 9 點前要到那邊", now: now)
+        XCTAssertEqual(value.review.destination, .needsConfirmation)
+        XCTAssertEqual(value.review.time, .needsConfirmation)
+        XCTAssertNil(value.arriveBy)
+        // A time-like substring is not a parser or a reason to reject a place.
+        XCTAssertNoThrow(try AssistantIntentDraft(destination: "今天書屋").validated(source: "去今天書屋", now: now))
+    }
+    func testInputLimitsAndFinalDeadlineGuard() {
+        XCTAssertThrowsError(try AssistantIntentDraft(destination: "").validated(source: "  ", now: now))
+        XCTAssertThrowsError(try AssistantIntentDraft(destination: "").validated(source: String(repeating: "字", count: 601), now: now))
+        XCTAssertFalse(AssistantJourneyRequest.canPlan(arriveBy: now, now: now))
+        XCTAssertTrue(AssistantJourneyRequest.canPlan(arriveBy: now.addingTimeInterval(90 * 86_400), now: now))
+        XCTAssertFalse(AssistantJourneyRequest.canPlan(arriveBy: now.addingTimeInterval(90 * 86_400 + 1), now: now))
+    }
+    func testChoiceQuestionHasTwoOrThreeDistinctOptions() {
+        XCTAssertNil(AssistantClarification(question: "", options: ["甲", "乙"]))
+        XCTAssertNil(AssistantClarification(question: "去哪裡？", options: ["甲", " 甲 ", ""]))
+        let question = AssistantClarification(question: "去哪裡？", options: ["甲", "乙", "丙", "丁"])
+        XCTAssertEqual(question?.options, ["甲", "乙", "丙"])
     }
     func testPlateMatchesOnlyNearbyFreshCandidatesWithoutGuessing() {
         let candidates = [

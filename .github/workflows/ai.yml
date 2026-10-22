@@ -54,7 +54,7 @@ jobs:
         id: simulator_build
         run: |
           set -euo pipefail
-          for scheme in TaipeiBusAITests TaipeiBusAIUITests; do
+          for scheme in TaipeiBusAITests TaipeiBusAIUITests TaipeiBusAIBenchmarkTests; do
             xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
               -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$AI_SIMULATOR" \
               -derivedDataPath "$RUNNER_TEMP/ai-build" \
@@ -131,6 +131,7 @@ jobs:
             -derivedDataPath "$RUNNER_TEMP/ai-device-build" \
             -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
             CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-device-build.log"
+          python3 ios/ai/check-weak-link.py "$RUNNER_TEMP/ai-device-build/Build/Products/Release-iphoneos/TaipeiBus.app/TaipeiBus" | tee -a "$RUNNER_TEMP/ai-device-build.log"
       - name: Preserve device validation evidence
         if: always()
         uses: actions/upload-artifact@v4

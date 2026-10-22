@@ -12,3 +12,7 @@ ios/**/xcuserdata/
 ios/**/.build/
 ios/**/.swiftpm/
 __pycache__/
+
+# Generated device-benchmark provenance and local results
+ios/ai/journey-build.json
+ios/ai/results/

@@ -29,14 +29,51 @@ final class AIUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
         app.buttons["home-destination-search"].tap()
-        let assistant = app.buttons["journey-ai-assistant"]
-        XCTAssertTrue(assistant.waitForExistence(timeout: 60))
-        assistant.tap()
-        XCTAssertTrue(app.staticTexts["ai-unavailable"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["ai-extract"].exists)
+        XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 60))
+        XCTAssertFalse(app.buttons["journey-ai-assistant"].exists)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "AI unavailable fallback"; shot.lifetime = .keepAlways; add(shot)
-        app.buttons["ai-manual-search"].tap()
-        XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 10))
+        shot.name = "Unavailable model hides assistant entry"; shot.lifetime = .keepAlways; add(shot)
     }
+    func testChoiceContinuesWithoutRetypingAndPlanningRequiresExplicitConfirmation() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--usability-fixture", "--test-ai-ui", "--test-ai-review"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
+        app.buttons["home-destination-search"].tap()
+        XCTAssertTrue(app.buttons["journey-ai-assistant"].waitForExistence(timeout: 60))
+        app.buttons["journey-ai-assistant"].tap()
+        let input = app.textFields["ai-request"].exists ? app.textFields["ai-request"] : app.textViews["ai-request"]
+        XCTAssertTrue(input.waitForExistence(timeout: 10))
+        input.tap(); input.typeText("從公司到北車")
+        app.buttons["ai-extract"].tap()
+        XCTAssertTrue(app.buttons["ai-choice-0"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["ai-choice-2"].exists)
+        XCTAssertFalse(app.buttons["ai-choice-3"].exists)
+        app.buttons["ai-choice-0"].tap()
+        let answered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["ai-choice-0"])
+        XCTAssertEqual(XCTWaiter.wait(for: [answered], timeout: 10), .completed)
+        XCTAssertTrue(app.textFields["ai-destination"].waitForExistence(timeout: 10))
+        XCTAssertEqual(input.value as? String, "從公司到北車")
+        XCTAssertFalse(app.buttons["ai-choice-0"].exists)
+        func reveal(_ element: XCUIElement) {
+            for _ in 0..<8 {
+                if element.isHittable { return }
+                app.swipeUp()
+            }
+        }
+        let origin = app.buttons["ai-place-測試出發地"]
+        reveal(origin); origin.tap()
+        let destination = app.buttons["ai-place-台北車站"]
+        reveal(destination); destination.tap()
+        let plan = app.buttons["ai-plan"]
+        reveal(plan); XCTAssertFalse(plan.isEnabled)
+        let confirmation = app.switches["ai-confirm-places"]
+        confirmation.tap(); XCTAssertTrue(plan.isEnabled)
+        // Changing a confirmed place invalidates the final acknowledgement.
+        reveal(destination); destination.tap()
+        reveal(plan); XCTAssertFalse(plan.isEnabled)
+    }
+
 }
