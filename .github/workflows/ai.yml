@@ -18,13 +18,16 @@ env:
 
 jobs:
   native:
-    runs-on: macos-15
+    # The standard Intel pool also supplies Xcode 26.3 / iOS 26 and avoids
+    # the arm64 capacity queue. ONLY_ACTIVE_ARCH keeps every test dependency aligned.
+    runs-on: macos-15-intel
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Verify toolchain and offline core behavior
         run: |
           set -euo pipefail
+          uname -m
           xcodebuild -version
           swift test --package-path ios/TransitCore -j 3 2>&1 | tee "$RUNNER_TEMP/ai-core.log"
           python3 ios/release-check.py
