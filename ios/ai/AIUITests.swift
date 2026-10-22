@@ -70,7 +70,10 @@ final class AIUITests: XCTestCase {
         let plan = app.buttons["ai-plan"]
         reveal(plan); XCTAssertFalse(plan.isEnabled)
         let confirmation = app.switches["ai-confirm-places"]
-        confirmation.tap(); XCTAssertTrue(plan.isEnabled)
+        reveal(confirmation); confirmation.tap()
+        // A Toggle row in a List flips only when its switch is hit on some iOS versions.
+        if !plan.isEnabled { confirmation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() }
+        XCTAssertTrue(plan.isEnabled)
         // Changing a confirmed place invalidates the final acknowledgement.
         reveal(destination); destination.tap()
         reveal(plan); XCTAssertFalse(plan.isEnabled)

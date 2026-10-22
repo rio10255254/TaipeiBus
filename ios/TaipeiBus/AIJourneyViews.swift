@@ -66,7 +66,7 @@ struct AIJourneyAssistantView: View {
                         }
                         Button(AppText.text("直接修改行程條件")) { abandonClarification() }
                             .disabled(busy).accessibilityIdentifier("ai-edit-conditions")
-                    }.accessibilityIdentifier("ai-clarification")
+                    }
                 }
                 if reviewed {
                     Section {

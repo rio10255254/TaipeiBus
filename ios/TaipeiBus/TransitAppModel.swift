@@ -2466,6 +2466,9 @@ final class TransitAppModel: ObservableObject {
         let estimates = EstimateFeed(seconds: Dictionary(uniqueKeysWithValues: trip.rides.map {
             ("\($0.route.parentID):\($0.boarding.id)", integrity ? 750 : 120)
         }), updatedAt: date)
+        // The fixture itself must land even when --test-ai-ui already marked the session as a fixture,
+        // which otherwise makes applySnapshot ignore every snapshot.
+        previewNotice = nil
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"
