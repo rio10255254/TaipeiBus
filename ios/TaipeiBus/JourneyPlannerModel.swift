@@ -191,10 +191,37 @@ final class JourneyPlannerModel: ObservableObject {
     @Published private(set) var scheduledDeparture: Date?
     /// The time every timing in this plan is measured from.
     func clock(_ date: Date) -> Date { scheduledDeparture ?? date }
-    func schedule(_ departure: Date?) {
+    /// 「三點前到台大」: the departure is moved until the recommended route arrives a few minutes early.
+    @Published private(set) var arrivalDeadline: Date?
+    func schedule(_ departure: Date?, arriveBy deadline: Date? = nil) {
         // Within a few minutes it is simply now, with live buses.
-        scheduledDeparture = departure.flatMap { $0.timeIntervalSinceNow > 5 * 60 ? $0 : nil }
+        arrivalDeadline = deadline.flatMap { $0.timeIntervalSinceNow > 10 * 60 ? $0 : nil }
+        if let arrivalDeadline {
+            // A first guess; alignToDeadline() corrects it from the routes found.
+            let guess = arrivalDeadline.addingTimeInterval(-45 * 60)
+            scheduledDeparture = max(Date().addingTimeInterval(6 * 60), Date(timeIntervalSince1970: floor(guess.timeIntervalSince1970 / 60) * 60))
+        } else {
+            scheduledDeparture = departure.flatMap { $0.timeIntervalSinceNow > 5 * 60 ? $0 : nil }
+        }
         durationCache.removeAll(keepingCapacity: true)
+    }
+    /// Timetable waits jump at each departure, so a few corrections, each to the whole minute.
+    private func alignToDeadline() {
+        guard let deadline = arrivalDeadline, var departure = scheduledDeparture else { return }
+        let earliest = Date().addingTimeInterval(6 * 60)
+        for _ in 0..<5 {
+            guard let best = recommendations(at: departure).first, let timing = duration(best, at: departure) else { return }
+            let shift = deadline.addingTimeInterval(-5 * 60).timeIntervalSince(departure.addingTimeInterval(timing.totalSeconds))
+            if abs(shift) < 90 { return }
+            let next = max(earliest, Date(timeIntervalSince1970: floor((departure.timeIntervalSince1970 + shift) / 60) * 60))
+            if next == departure { return }
+            departure = next; scheduledDeparture = next; durationCache.removeAll(keepingCapacity: true)
+        }
+    }
+    /// When the shown route is expected to arrive, from the planned departure.
+    var expectedArrival: Date? {
+        guard let option = selected ?? options.first, let timing = duration(option, at: Date()) else { return nil }
+        return timing.referenceDate.addingTimeInterval(timing.totalSeconds)
     }
     private var preferences = LiveSettings.Planning()
     private var lastMetadata: TransitMetadata?
@@ -639,6 +666,7 @@ final class JourneyPlannerModel: ObservableObject {
         return labels
     }
     private func publishRecommendations() {
+        alignToDeadline()
         let date = JourneyDuration.previewDate(Date())
         let ranked = recommendations(at: date)
         // The first usable card is kept steady under the reader's finger, but not at any cost:
@@ -1696,7 +1724,7 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         defer { onNavigationChange?() }
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
-        preferredMode = .any; scheduledDeparture = nil
+        preferredMode = .any; scheduledDeparture = nil; arrivalDeadline = nil
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]
     }

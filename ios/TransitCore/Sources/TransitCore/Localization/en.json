@@ -930,8 +930,13 @@
   "%@ 出發": "Leave %@",
   "30 分鐘後": "In 30 minutes",
   "1 小時後": "In 1 hour",
-  "選擇時間…": "Choose a time…",
   "依當天班表與班距估算，不含即時車況；時間到了再開始導航。": "Estimated from that day's timetables and headways, without live traffic. Start navigation when it's time.",
   "規劃": "Plan",
-  "出發時間": "Departure time"
+  "出發時間": "Departure time",
+  "%@ 前抵達": "Arrive by %@",
+  "指定出發時間…": "Leave at…",
+  "指定抵達時間…": "Arrive by…",
+  "建議 %@ 出發": "Leave %@",
+  "最快約 %@ 抵達，會晚於指定時間。": "The earliest arrival is about %@, after the time you chose.",
+  "抵達時間": "Arrival time"
 }

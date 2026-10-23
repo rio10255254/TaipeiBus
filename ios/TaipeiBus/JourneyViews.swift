@@ -2090,6 +2090,7 @@ struct JourneyDepartureControl: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     @State private var choosing = false
+    @State private var arriving = false
     @State private var chosen = Date()
     static func label(_ date: Date, now: Date = Date()) -> String {
         let calendar = AssistantJourneyRequest.calendar
@@ -2104,6 +2105,10 @@ struct JourneyDepartureControl: View {
             .month(.defaultDigits).day().weekday(.abbreviated))
         return day + " " + clock
     }
+    private var title: String {
+        if let deadline = planner.arrivalDeadline { return AppText.text("%@ 前抵達", Self.label(deadline)) }
+        return planner.scheduledDeparture.map { AppText.text("%@ 出發", Self.label($0)) } ?? AppText.text("現在出發")
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
@@ -2112,17 +2117,23 @@ struct JourneyDepartureControl: View {
                     Button(AppText.text("現在出發")) { model.setJourneyDeparture(nil) }
                     Button(AppText.text("30 分鐘後")) { model.setJourneyDeparture(Date().addingTimeInterval(30 * 60)) }
                     Button(AppText.text("1 小時後")) { model.setJourneyDeparture(Date().addingTimeInterval(3600)) }
-                    Button(AppText.text("選擇時間…"), systemImage: "calendar") {
-                        chosen = planner.scheduledDeparture ?? Date().addingTimeInterval(3600); choosing = true
-                    }
+                    Button(AppText.text("指定出發時間…"), systemImage: "calendar") { choose(arriving: false) }
+                    Button(AppText.text("指定抵達時間…"), systemImage: "flag.checkered") { choose(arriving: true) }
                 } label: {
                     HStack(spacing: 4) {
-                        Text(planner.scheduledDeparture.map { AppText.text("%@ 出發", Self.label($0)) } ?? AppText.text("現在出發"))
-                            .font(.subheadline.weight(.semibold))
+                        Text(title).font(.subheadline.weight(.semibold))
                         Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
                     }.frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-departure-time")
                 Spacer(minLength: 0)
+            }
+            if planner.arrivalDeadline != nil, let leave = planner.scheduledDeparture {
+                Text(AppText.text("建議 %@ 出發", Self.label(leave))).font(.subheadline)
+                    .accessibilityIdentifier("journey-suggested-departure")
+                if let deadline = planner.arrivalDeadline, let arrival = planner.expectedArrival, arrival > deadline {
+                    Text(AppText.text("最快約 %@ 抵達，會晚於指定時間。", Self.label(arrival)))
+                        .font(.caption).foregroundStyle(.orange).accessibilityIdentifier("journey-arrival-late")
+                }
             }
             if planner.scheduledDeparture != nil {
                 Text(AppText.text("依當天班表與班距估算，不含即時車況；時間到了再開始導航。"))
@@ -2132,18 +2143,25 @@ struct JourneyDepartureControl: View {
         }
         .sheet(isPresented: $choosing) {
             NavigationStack {
-                DatePicker(AppText.text("出發時間"), selection: $chosen,
+                DatePicker(arriving ? AppText.text("抵達時間") : AppText.text("出發時間"), selection: $chosen,
                            in: Date()...Date().addingTimeInterval(30 * 86_400))
                     .datePickerStyle(.graphical).padding()
-                    .navigationTitle(AppText.text("出發時間")).navigationBarTitleDisplayMode(.inline)
+                    .navigationTitle(arriving ? AppText.text("抵達時間") : AppText.text("出發時間")).navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .cancellationAction) { Button(AppText.text("取消")) { choosing = false } }
                         ToolbarItem(placement: .confirmationAction) {
-                            Button(AppText.text("規劃")) { choosing = false; model.setJourneyDeparture(chosen) }
-                                .accessibilityIdentifier("journey-departure-confirm")
+                            Button(AppText.text("規劃")) {
+                                choosing = false
+                                if arriving { model.setJourneyDeparture(nil, arriveBy: chosen) } else { model.setJourneyDeparture(chosen) }
+                            }.accessibilityIdentifier("journey-departure-confirm")
                         }
                     }
             }.presentationDetents([.large])
         }
+    }
+    private func choose(arriving: Bool) {
+        self.arriving = arriving
+        chosen = (arriving ? planner.arrivalDeadline : planner.scheduledDeparture) ?? Date().addingTimeInterval(3600)
+        choosing = true
     }
 }

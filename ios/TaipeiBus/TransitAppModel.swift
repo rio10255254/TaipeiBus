@@ -587,6 +587,8 @@ final class TransitAppModel: ObservableObject {
         var preference: RoutePreference
         /// nil means leaving now.
         var departure: Date? = nil
+        /// An arrival time, worked back to a departure by the planner.
+        var arriveBy: Date? = nil
         /// Set when a requested preference could not be applied, e.g. without Pro.
         var note: String?
     }
@@ -602,16 +604,17 @@ final class TransitAppModel: ObservableObject {
     /// Plans what 用一句話規劃 understood. No origin means the current location. Without Pro a requested
     /// preference falls back to the recommendation, and the note says so.
     func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
-                                 preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil) {
+                                 preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil, arriveBy: Date? = nil) {
         guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
-        planner.preferredMode = mode; planner.schedule(departure)
+        planner.preferredMode = mode; planner.schedule(departure, arriveBy: arriveBy)
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
         let note = preference != .balanced && !purchases.hasPro
             ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
         assistantTrip = AssistantTrip(request: request, destination: destination,
             alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
-            preference: preference, departure: planner.scheduledDeparture, note: note)
+            preference: preference, departure: planner.scheduledDeparture,
+            arriveBy: planner.arrivalDeadline, note: note)
         if let origin { planner.setOrigin(origin, metadata: metadata) }
         else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
@@ -621,13 +624,16 @@ final class TransitAppModel: ObservableObject {
         guard let trip = assistantTrip else { return }
         previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
             alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode,
-            departure: trip.departure)
+            departure: trip.departure, arriveBy: trip.arriveBy)
     }
     /// 「幾點出發」: nil plans for now with live buses; a later time plans on that day's timetables and headways.
-    func setJourneyDeparture(_ departure: Date?) {
+    /// An arrival time (「三點前到」) is worked back to the latest sensible departure.
+    func setJourneyDeparture(_ departure: Date?, arriveBy: Date? = nil) {
         guard !planner.started else { return }
-        planner.schedule(departure)
-        if assistantTrip != nil { assistantTrip?.departure = planner.scheduledDeparture }
+        planner.schedule(departure, arriveBy: arriveBy)
+        if assistantTrip != nil {
+            assistantTrip?.departure = planner.scheduledDeparture; assistantTrip?.arriveBy = planner.arrivalDeadline
+        }
         planner.plan(metadata: metadata)
     }
     func setAssistantMode(_ mode: AssistantTravelMode) {

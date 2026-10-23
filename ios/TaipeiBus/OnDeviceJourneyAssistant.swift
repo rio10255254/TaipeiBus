@@ -5,7 +5,7 @@ import FoundationModels
 #endif
 
 enum OnDeviceJourneyAssistant {
-    static let promptVersion = "journey-reading-v3"
+    static let promptVersion = "journey-reading-v4"
     enum Failure: Error { case unavailable, unsupportedLanguage, invalidResponse }
     static func unavailableReason(language: AppLanguage = .current) -> String? {
 #if DEBUG
@@ -316,13 +316,11 @@ final class JourneyAssistantContext {
             value.arrivalDay = ""; value.arrivalHour = -1; value.arrivalMinute = -1
             value.departureTime = false; value.timeEvidence = ""
         } else if value.arrivalHour >= 0 {
-            // 「明天下午三點去台大」 came back as a deadline on a phone. The words decide:
-            // …前 / 抵達 is when to be there, …點去 / 出發 is when to leave.
+            // A time said with a trip (「明天下午三點去台大」) is when to be there; it is
+            // when to leave only when the sentence says so (出發, 離開, …點走).
             let plain = ["前往", "目前", "前面"].reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
-            if ["前", "抵達", "到達", "趕到", "趕上", "準時到", "要到", "by "].contains(where: plain.contains) { value.departureTime = false }
-            else if ["出發", "點去", "點走", "點離開", "點從", "分去", "分走", "半去", "半走", "點騎", "點搭", "leave", "depart"].contains(where: plain.contains) {
-                value.departureTime = true
-            }
+            value.departureTime = !["前", "抵達", "到達", "趕到", "趕上", "準時", "要到", "by "].contains(where: plain.contains) &&
+                ["出發", "離開", "動身", "點走", "分走", "半走", "leave", "depart"].contains(where: plain.contains)
         }
         return value
     }
@@ -432,14 +430,15 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         Preference: faster for 快一點/最快/趕時間, lessWalking for 少走路/不想走路, fewerTransfers for 少轉乘/不要換車,
         conflicting when the user asks for incompatible things, otherwise balanced.
         Time: a clock time fills arrivalDay/arrivalHour/arrivalMinute using the given date (下午/晚上 add 12 hours;
-        下三點 is a typo for 下午三點). departureTime is true when it is when to leave (…點去, …點出發, …點走) and
-        false when it is a deadline (…前到, …以前要到). 現在/馬上/等一下 mean leave now: leave every time field empty.
+        下三點 is a typo for 下午三點). departureTime is true only when the user says it is when to leave (…點出發, …點離開, …點走)
+        and false otherwise: a time with a trip (…點去, …點到, …前到) is when to be there. 現在/馬上/等一下 mean leave now: leave every time field empty.
         Never invent places or times.
         Examples:
         回家，快一點 → destination 家 (home), preference faster.
         明天九點前從公司到北車 → destination 台北車站 (place), origin 公司 (work), arrival tomorrow 9:00.
         騎單車去台大 → destination 國立臺灣大學 (place), travelMode cycling, preference balanced, no time.
-        明天下午三點去台大 → destination 國立臺灣大學 (place), departureTime true, time tomorrow 15:00.
+        明天下午三點去台大 → destination 國立臺灣大學 (place), arrival tomorrow 15:00.
+        明天下午三點出發去台大 → destination 國立臺灣大學 (place), departureTime true, time tomorrow 15:00.
         """)
     }
     func prewarm() { session.prewarm() }

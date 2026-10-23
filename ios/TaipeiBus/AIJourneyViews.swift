@@ -37,8 +37,6 @@ struct AIJourneyAssistantView: View {
     @State private var activity = AppText.text("正在理解你的需求…")
     @State private var startedAt = Date()
     @State private var activeContext: JourneyAssistantContext?
-    @State private var arrival: (origin: TravelPlace, destination: TravelPlace, target: FutureTripTime)?
-    @State private var showingArrival = false
     /// The on-device model can be slow, but the screen must never wait indefinitely.
     private static let timeLimit: Double = 45
 
@@ -86,12 +84,6 @@ struct AIJourneyAssistantView: View {
             }
             .navigationTitle(AppText.text("用一句話規劃")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("關閉")) { dismiss() } } }
-            .navigationDestination(isPresented: $showingArrival) {
-                if let arrival {
-                    ArrivalJourneyView(metadata: model.metadata, origin: arrival.origin, destination: arrival.destination,
-                        target: arrival.target, preferences: preference.applying(to: model.liveSettings.planning))
-                }
-            }
         }
         .onChange(of: input) { _, _ in
             guard !busy else { return }
@@ -343,16 +335,14 @@ struct AIJourneyAssistantView: View {
             from = nil
         }
         AssistantRecents.shared.remember(trimmed)
-        if let arrive = request.arriveBy, AssistantJourneyRequest.canPlan(arriveBy: arrive), let start = from ?? currentPlace {
-            JourneyDiagnostics.shared.record("ai-plan started deadline")
-            arrival = (start, target, .arriveBy(arrive)); showingArrival = true
-            return
-        }
-        // A later departure is planned in the ordinary route view, on that day's timetables and headways.
-        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)\(turn.departAt == nil ? "" : " departure")")
+        // A stated time is planned in the ordinary route view, on that day's timetables and headways:
+        // an arrival time works back to when to leave.
+        let arriveBy = request.arriveBy.flatMap { AssistantJourneyRequest.canPlan(arriveBy: $0) ? $0 : nil }
+        let timing = arriveBy != nil ? " deadline" : turn.departAt != nil ? " departure" : ""
+        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)\(timing)")
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: trimmed, origin: from, destination: target, alternatives: alternatives,
-                                      preference: preference, mode: turn.mode, departure: turn.departAt)
+                                      preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy)
         planned(); dismiss()
     }
     private func stop(_ reason: Problem) {
@@ -388,108 +378,6 @@ struct AIJourneyAssistantView: View {
     }
 }
 
-/// A trip planned for later: by an arrival deadline, or for leaving at a chosen time.
-enum FutureTripTime {
-    case arriveBy(Date), departAt(Date)
-}
-
-private actor ArrivalCandidateSearch {
-    func options(metadata: TransitMetadata, origin: Coordinate, destination: Coordinate, at date: Date,
-                 preferences: LiveSettings.Planning) -> [TransitTrip] {
-        guard !Task.isCancelled else { return [] }
-        return MultimodalPlanner(metadata: metadata).plan(from: origin, to: destination,
-            maximumWalk: preferences.expandedWalkMeters, limit: 12, preferences: preferences, at: date)
-    }
-}
-
-private struct ArrivalJourneyView: View {
-    let metadata: TransitMetadata
-    let origin: TravelPlace
-    let destination: TravelPlace
-    let target: FutureTripTime
-    let preferences: LiveSettings.Planning
-    @State private var results: [Result] = []
-    @State private var busy = true
-    private struct Result: Identifiable { let option: JourneyOption; let timing: ArrivalPlan; var id: String { option.id } }
-    private func clock(_ date: Date) -> String {
-        let formatter = DateFormatter(); formatter.locale = AppLanguage.current.locale
-        formatter.timeZone = AssistantJourneyRequest.calendar.timeZone; formatter.dateStyle = .medium; formatter.timeStyle = .short
-        return formatter.string(from: date)
-    }
-    var body: some View {
-        List {
-            Section {
-                Text(destination.localizedName).font(.headline)
-                switch target {
-                case .arriveBy(let deadline): Text(AppText.text("抵達期限：%@", clock(deadline)))
-                case .departAt(let leave): Text(AppText.text("出發時間：%@", clock(leave)))
-                }
-                Text(AppText.text("依官方班表、班距與車程資料推估，含 10 分鐘預留；不是保證抵達時間。未使用目前車輛位置或未來車位數量。出發當天請重新搜尋並確認公告。"))
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-            if busy { ProgressView(AppText.text("確認步行與班距資料")) }
-            ForEach(results) { result in
-                Section {
-                    if case .arriveBy = target {
-                        Text(AppText.text("建議預留出發時間：%@", clock(result.timing.departure))).font(.headline)
-                    } else {
-                        Text(AppText.text("預計抵達：%@", clock(result.timing.latestArrival))).font(.headline)
-                    }
-                    Text(AppText.text("推估抵達：%@ 至 %@", clock(result.timing.earliestArrival), clock(result.timing.latestArrival)))
-                    Text(result.option.walkingTimeLabel)
-                    ForEach(result.option.rides) { ride in
-                        VStack(alignment: .leading) {
-                            Text(ride.route.localizedName).bold()
-                            Text(ride.boarding.localizedName + " → " + ride.alighting.localizedName)
-                        }
-                    }
-                }
-            }
-            if !busy, results.isEmpty {
-                Text(AppText.text("目前資料不足以確認這個時間的行程。請改選時間、查看官方班表，並於出發當天重新規劃。"))
-                    .accessibilityIdentifier("ai-arrival-unavailable")
-            }
-        }.navigationTitle(AppText.text("預排行程參考"))
-            .task {
-                let planner = JourneyPlannerModel()
-                let searchTime: Date
-                switch target {
-                case .arriveBy(let deadline): searchTime = deadline.addingTimeInterval(-3600)
-                case .departAt(let leave): searchTime = leave
-                }
-                let candidates = await ArrivalCandidateSearch().options(metadata: metadata, origin: origin.coordinate,
-                    destination: destination.coordinate, at: searchTime, preferences: preferences)
-                var checked: [Result] = []
-                for trip in candidates.prefix(6) {
-                    guard !Task.isCancelled else { return }
-                    var option = planner.option(trip, metadata: metadata, origin: origin, destination: destination)
-                    do {
-                        for index in option.walks.indices where !option.walks[index].internalTransfer {
-                            option.walks[index] = try await planner.checkedWalk(option.walks[index])
-                        }
-                        try Task.checkCancellation()
-                        let walking = option.walks.compactMap(\.duration)
-                        let timing: ArrivalPlan?
-                        switch target {
-                        case .arriveBy(let deadline):
-                            timing = ArrivalPlanning.assess(trip, metadata: metadata, arriveBy: deadline, walking: walking, preferences: preferences)
-                        case .departAt(let leave):
-                            timing = ArrivalPlanning.depart(trip, metadata: metadata, at: leave, walking: walking, preferences: preferences)
-                        }
-                        if option.verified, let timing { checked.append(Result(option: option, timing: timing)) }
-                    } catch { if Task.isCancelled { return } }
-                }
-                if case .departAt = target {
-                    results = Array(checked.sorted { $0.timing.latestArrival < $1.timing.latestArrival }.prefix(3))
-                } else {
-                    results = Array(checked.sorted { $0.timing.assessment.score < $1.timing.assessment.score }.prefix(3))
-                }
-                busy = false
-            }
-    }
-}
-
-/// What 用一句話規劃 understood, above the routes it started, with the quick changes a rider may want.
 struct AssistantTripBanner: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
@@ -509,7 +397,8 @@ struct AssistantTripBanner: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("「" + trip.request + "」").font(.subheadline.weight(.semibold)).lineLimit(2)
                         Text([trip.destination.localizedName, title(trip.mode),
-                             trip.departure.map { AppText.text("%@ 出發", JourneyDepartureControl.label($0)) } ?? AppText.text("現在出發")].joined(separator: " · "))
+                             trip.arriveBy.map { AppText.text("%@ 前抵達", JourneyDepartureControl.label($0)) }
+                                ?? trip.departure.map { AppText.text("%@ 出發", JourneyDepartureControl.label($0)) } ?? AppText.text("現在出發")].joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer(minLength: 0)

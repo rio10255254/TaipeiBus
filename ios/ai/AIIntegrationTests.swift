@@ -157,29 +157,32 @@ import TransitCore
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
         var value = reading("國立臺灣大學"); value.departureTime = true; value.timeEvidence = "明天下午三點"
         value.arrivalDay = "2026-10-23"; value.arrivalHour = 15
-        let turn = try await context.resolve(value, source: "明天下三點去台大", now: now)
+        let turn = try await context.resolve(value, source: "明天下三點出發去台大", now: now)
         XCTAssertEqual(turn.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
         XCTAssertNil(turn.request.arriveBy, "A departure time is never turned into a deadline")
         XCTAssertEqual(turn.request.review.time, .certain)
         XCTAssertNil(turn.clarification)
         var earlier = reading("國立臺灣大學"); earlier.departureTime = true; earlier.arrivalHour = 9
-        let tomorrow = try await context.resolve(earlier, source: "九點去台大", now: now)
+        let tomorrow = try await context.resolve(earlier, source: "九點出發去台大", now: now)
         XCTAssertEqual(tomorrow.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "Nine o'clock has passed today")
     }
     func testWordsDecideDepartureOrDeadline() async throws {
-        // 「明天下午三點去台大」 came back from a phone as a 15:00 deadline.
+        // A time said with a trip is when to be there; leaving needs 出發/離開/…點走.
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
-        var value = reading("國立臺灣大學"); value.departureTime = false; value.timeEvidence = "明天下午三點"
+        let three = ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z")
+        var value = reading("國立臺灣大學"); value.departureTime = true; value.timeEvidence = "明天下午三點"
         value.arrivalDay = "2026-10-23"; value.arrivalHour = 15
-        let leave = try await context.resolve(value, source: "明天下午三點去台大", now: now)
-        XCTAssertEqual(leave.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
+        let going = try await context.resolve(value, source: "明天下午三點去台大", now: now)
+        XCTAssertNil(going.departAt)
+        XCTAssertEqual(going.request.arriveBy, three)
+        value.departureTime = false
+        let leave = try await context.resolve(value, source: "明天下午三點出發去台大", now: now)
+        XCTAssertEqual(leave.departAt, three)
         XCTAssertNil(leave.request.arriveBy)
-        value.departureTime = true
-        let deadline = try await context.resolve(value, source: "明天下午三點前到台大", now: now)
-        XCTAssertNil(deadline.departAt)
-        XCTAssertEqual(deadline.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
         let onTheWay = try await context.resolve(value, source: "明天下午三點前往台大", now: now)
-        XCTAssertEqual(onTheWay.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"), "前往 is going, not a deadline")
+        XCTAssertEqual(onTheWay.request.arriveBy, three, "前往 is going, not 「…前」")
+        let before = try await context.resolve(value, source: "明天下午三點前出發去台大", now: now)
+        XCTAssertEqual(before.request.arriveBy, three, "…前 is a deadline even with 出發")
     }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
