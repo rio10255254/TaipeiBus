@@ -3,3 +3,5 @@
 "Navigation" = "Navigation needs your precise location to follow the walking route, count the remaining distance and remind you before your stop.";
 
 "NSCameraUsageDescription" = "Scan bus plates on your phone to help select a nearby vehicle. Images are not saved or uploaded. You can also select a plate manually.";
+"NSMicrophoneUsageDescription" = "Used when you tap the microphone to say where you want to go. Audio is only turned into text and is not saved or uploaded.";
+"NSSpeechRecognitionUsageDescription" = "Turns what you say into a trip request. Recognition runs on your phone when supported; recordings are not saved.";

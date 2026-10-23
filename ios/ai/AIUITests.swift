@@ -75,4 +75,22 @@ final class AIUITests: XCTestCase {
         XCTAssertFalse(start.isEnabled)
     }
 
+    func testSentenceInTheOrdinarySearchBoxIsUnderstood() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--usability-fixture", "--test-ai-ui", "--test-ai-review"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
+        app.buttons["home-destination-search"].tap()
+        let field = app.textFields["journey-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 30))
+        XCTAssertTrue(app.buttons["journey-voice"].exists, "One tap to speak from the search box")
+        field.tap(); field.typeText("回家")
+        XCTAssertTrue(app.buttons["journey-understand-sentence"].waitForExistence(timeout: 5))
+        field.typeText("\n")
+        // Return on a sentence opens the assistant, which starts understanding without another tap.
+        XCTAssertTrue(app.buttons["ai-choice-0"].waitForExistence(timeout: 15))
+    }
+
 }

@@ -195,6 +195,28 @@ final class JourneyPlannerModel: ObservableObject {
     var preferredMode = AssistantTravelMode.any
     /// A rider who asked to cycle gets a whole-trip YouBike route up to 20 km; otherwise rides stay
     /// within the usual limit (5 km), beyond which public transport is normally the better offer.
+    /// Why no whole-trip YouBike route can be offered for a rider who asked to cycle, or nil when
+    /// one is listed or may still appear (its streets are still being checked).
+    func wholeTripBikeIssue(at date: Date = Date()) -> String? {
+        guard preferredMode == .cycling, let origin, let destination, !options.contains(where: \.bikeOnly) else { return nil }
+        guard let availability = bikeAvailability else { return AppText.text("YouBike 即時車位尚未載入。") }
+        let limits = wholeTripBikePreferences
+        let distance = origin.coordinate.distance(to: destination.coordinate)
+        if distance > limits.bikeMaximumRideMeters {
+            return AppText.text("距離超過 %@ 公里，不適合全程騎 YouBike。", "\(Int(limits.bikeMaximumRideMeters / 1000))")
+        }
+        if distance < limits.bikeMinimumRideMeters { return AppText.text("距離很近，走路就能到。") }
+        func usable(_ point: Coordinate, renting: Bool) -> Bool {
+            bikeNetwork.stations(near: point, radius: limits.bikeAccessMeters, limit: 40).contains { station in
+                guard let dock = availability.dock(station.id, at: date), dock.active else { return false }
+                return Double(renting ? dock.rentable : dock.returnable) >= (renting ? limits.bikeMinimumBikes : limits.bikeMinimumDocks)
+            }
+        }
+        let meters = "\(Int(limits.bikeAccessMeters))"
+        if !usable(origin.coordinate, renting: true) { return AppText.text("出發地 %@ 公尺內沒有可借的 YouBike。", meters) }
+        if !usable(destination.coordinate, renting: false) { return AppText.text("目的地 %@ 公尺內沒有可還車的 YouBike 站。", meters) }
+        return nil
+    }
     private var wholeTripBikePreferences: LiveSettings.Planning {
         guard preferredMode == .cycling else { return preferences }
         var value = preferences

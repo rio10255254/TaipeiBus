@@ -1,28 +1,34 @@
 import SwiftUI
 import TransitCore
 
+/// 用一句話規劃: type or say one sentence and the route search starts. The sheet stays open only
+/// for the few cases it cannot settle by itself: several saved journeys, a place that was not found,
+/// or no current location.
 struct AIJourneyAssistantView: View {
     @ObservedObject var model: TransitAppModel
+    /// A sentence already typed in the search box or said to Siri; it is understood at once.
+    var seed: String? = nil
+    /// Opened from the microphone button: start listening at once.
+    var listen = false
     let planned: () -> Void
     @Environment(\.dismiss) private var dismiss
     @StateObject private var search = PlaceSearch()
+    @StateObject private var speech = SpeechInput()
+    @ObservedObject private var recents = AssistantRecents.shared
     @FocusState private var inputFocused: Bool
+    @FocusState private var fixFocused: Bool
     @State private var input = ""
-    @State private var reviewed = false
-    @State private var review = AssistantFieldReview()
-    @State private var timeDescription = ""
     @State private var clarification: AssistantClarification?
     @State private var conversation: (any JourneyAssistantConversation)?
-    @State private var confirmed = false
-    @State private var destination = ""
-    @State private var origin = ""
-    @State private var preference = RoutePreference.balanced
-    @State private var hasDeadline = false
-    @State private var deadline = Date().addingTimeInterval(3600)
-    @State private var destinations: [TravelPlace] = []
-    @State private var origins: [TravelPlace] = []
-    @State private var selectedDestination: TravelPlace?
-    @State private var selectedOrigin: TravelPlace?
+    @State private var turn: AssistantJourneyTurn?
+    @State private var problem: Problem?
+    @State private var fixQuery = ""
+    @State private var fixResults: [TravelPlace] = []
+    @State private var fixSearching = false
+    @State private var saveFix = true
+    /// Places the rider picked after a problem, kept while another one is fixed.
+    @State private var chosenDestination: TravelPlace?
+    @State private var chosenOrigin: TravelPlace?
     @State private var busy = false
     @State private var message: String?
     @State private var operation: Task<Void, Never>?
@@ -31,19 +37,36 @@ struct AIJourneyAssistantView: View {
     @State private var activity = AppText.text("正在理解你的需求…")
     @State private var startedAt = Date()
     @State private var activeContext: JourneyAssistantContext?
+    @State private var arrival: (origin: TravelPlace, destination: TravelPlace, deadline: Date)?
+    @State private var showingArrival = false
     /// The on-device model can be slow, but the screen must never wait indefinitely.
     private static let timeLimit: Double = 45
-    @State private var showingArrival = false
+
+    /// What stopped planning, and what the rider can do about it.
+    private enum Problem: Equatable {
+        case destination(String), origin(String), unsavedDestination(String), unsavedOrigin(String), location
+        var keyword: String {
+            switch self {
+            case .destination(let text), .origin(let text), .unsavedDestination(let text), .unsavedOrigin(let text): text
+            case .location: ""
+            }
+        }
+        var isOrigin: Bool {
+            switch self { case .origin, .unsavedOrigin, .location: true; default: false }
+        }
+        var unsaved: Bool {
+            switch self { case .unsavedDestination, .unsavedOrigin: true; default: false }
+        }
+    }
 
     private var unavailable: String? { OnDeviceJourneyAssistant.unavailableReason() }
-    private var requiresPro: Bool { preference != .balanced && !model.purchases.hasPro }
-    private var usesCurrentOrigin: Bool { origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-    private var start: TravelPlace? {
-        usesCurrentOrigin ? model.location.usableCoordinate.flatMap { point in
-            guard point.isInServiceArea else { return nil }
-            return TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: point)
-        } : selectedOrigin
+    private var currentPlace: TravelPlace? {
+        model.location.usableCoordinate.flatMap { point in
+            point.isInServiceArea ? TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: point) : nil
+        }
     }
+    private var trimmed: String { input.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -53,205 +76,162 @@ struct AIJourneyAssistantView: View {
                         Button(AppText.text("返回手動搜尋")) { dismiss() }.accessibilityIdentifier("ai-manual-search")
                     }
                 } else {
-                    Section {
-                        TextField(AppText.text("例如：明天 9 點前到台大醫院，不想走太多路"), text: $input, axis: .vertical)
-                            .lineLimit(3...6).focused($inputFocused).accessibilityIdentifier("ai-request")
-                        Button(AppText.text("理解行程需求")) { extract() }
-                            .disabled(busy || input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || input.count > 600)
-                            .accessibilityIdentifier("ai-extract")
-                        if input.count > 600 { Text(AppText.text("請將需求縮短至 600 字以內。")) }
-                    } footer: {
-                        Text(AppText.text("文字只交給手機上的模型理解。請確認下方條件；地點搜尋與步行路線仍由 Apple 地圖處理。"))
-                    }
+                    requestSection
+                    if trimmed.isEmpty, !busy, !speech.listening, problem == nil { examplesSection }
+                    if busy { progressSection }
+                    if let clarification { clarificationSection(clarification) }
+                    if let problem { problemSection(problem) }
+                    if let message { Section { Text(message).accessibilityIdentifier("ai-error") } }
                 }
-                if let clarification {
-                    Section(AppText.text("確認你的意思")) {
-                        Text(clarification.question).font(.headline)
-                        ForEach(clarification.options.indices, id: \.self) { index in
-                            Button(clarification.options[index]) { answer(index) }
-                                .disabled(busy).accessibilityIdentifier("ai-choice-\(index)")
-                        }
-                        Button(AppText.text("直接修改行程條件")) { abandonClarification() }
-                            .disabled(busy).accessibilityIdentifier("ai-edit-conditions")
-                    }
-                }
-                if reviewed {
-                    Section {
-                        fieldStatus(AppText.text("目的地"), review.destination)
-                        TextField(AppText.text("目的地"), text: Binding(get: { destination }, set: {
-                            destination = $0; review.destination = .needsConfirmation; editPlace(isOrigin: false)
-                        })).accessibilityIdentifier("ai-destination")
-                        fieldStatus(AppText.text("出發地"), review.origin)
-                        TextField(AppText.text("出發地（留空使用目前位置）"), text: Binding(get: { origin }, set: {
-                            origin = $0; review.origin = .needsConfirmation; editPlace(isOrigin: true)
-                        })).accessibilityIdentifier("ai-origin")
-                        fieldStatus(AppText.text("個人路線偏好"), review.preference)
-                        Picker(AppText.text("個人路線偏好"), selection: Binding(get: { preference }, set: {
-                            preference = $0; review.preference = .certain; abandonClarification()
-                        })) {
-                            ForEach(RoutePreference.allCases) { Text($0.title).tag($0) }
-                        }
-                        if requiresPro { Text(AppText.text("此路線偏好需要 Pro；可改選「推薦」繼續規劃。")) }
-                        fieldStatus(AppText.text("抵達期限（台北時間）"), review.time)
-                        if !timeDescription.isEmpty { Text(timeDescription).font(.callout) }
-                        Toggle(AppText.text("指定抵達期限"), isOn: Binding(get: { hasDeadline }, set: {
-                            hasDeadline = $0; review.time = .certain; timeDescription = ""; abandonClarification()
-                        })).accessibilityIdentifier("ai-deadline-toggle")
-                        if hasDeadline {
-                            DatePicker(AppText.text("抵達期限（台北時間）"), selection: Binding(get: { deadline }, set: {
-                                deadline = $0; review.time = .certain; timeDescription = ""; abandonClarification()
-                            }),
-                                in: Date()...Date().addingTimeInterval(90 * 86_400), displayedComponents: [.date, .hourAndMinute])
-                                .environment(\.timeZone, AssistantJourneyRequest.calendar.timeZone)
-                        } else { Text(AppText.text("現在出發")) }
-                        Button(AppText.text("搜尋並選擇實際地點")) { findPlaces() }
-                            .disabled(busy || destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    } header: {
-                        Text(AppText.text("確認行程條件"))
-                    } footer: {
-                        Text(AppText.text("需確認的欄位可直接修改；請核對每個條件與實際地點後再規劃。"))
-                    }.disabled(busy)
-                    if !usesCurrentOrigin { places(origins, selected: $selectedOrigin, status: $review.origin, title: AppText.text("出發地")) }
-                    places(destinations, selected: $selectedDestination, status: $review.destination, title: AppText.text("目的地"))
-                    if selectedDestination != nil {
-                        Section {
-                            if start == nil { Text(AppText.text("請選擇出發地，或開啟定位後再規劃。")) }
-                            if let start, let selectedDestination {
-                                Text(start.localizedName + " → " + selectedDestination.localizedName)
-                                Toggle(AppText.text("我已確認所有行程條件與實際地點"), isOn: $confirmed)
-                                    .accessibilityIdentifier("ai-confirm-places")
-                            }
-                            Button(AppText.text("依確認條件規劃")) { apply() }
-                                .disabled(busy || !confirmed || clarification != nil || requiresPro || start == nil ||
-                                    (hasDeadline && !AssistantJourneyRequest.canPlan(arriveBy: deadline)))
-                                .accessibilityIdentifier("ai-plan")
-                        }
-                    }
-                }
-                if busy {
-                    Section {
-                        HStack(spacing: 12) {
-                            ProgressView()
-                            Text(activity)
-                            Spacer()
-                            TimelineView(.periodic(from: startedAt, by: 1)) { timeline in
-                                Text(AppText.text("%@ 秒", "\(max(0, Int(timeline.date.timeIntervalSince(startedAt))))"))
-                                    .monospacedDigit().foregroundStyle(.secondary)
-                            }
-                        }.accessibilityIdentifier("ai-progress")
-                    }
-                }
-                if let message { Section { Text(message).accessibilityIdentifier("ai-error") } }
             }
-            .navigationTitle(AppText.text("用一句話規劃"))
+            .navigationTitle(AppText.text("用一句話規劃")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("關閉")) { dismiss() } } }
             .navigationDestination(isPresented: $showingArrival) {
-                if let start, let selectedDestination {
-                    ArrivalJourneyView(metadata: model.metadata, origin: start, destination: selectedDestination,
-                        deadline: deadline, preferences: preference.applying(to: model.liveSettings.planning))
+                if let arrival {
+                    ArrivalJourneyView(metadata: model.metadata, origin: arrival.origin, destination: arrival.destination,
+                        deadline: arrival.deadline, preferences: preference.applying(to: model.liveSettings.planning))
                 }
             }
         }
         .onChange(of: input) { _, _ in
-            resetPlaces(); reviewed = false; message = nil; clarification = nil; conversation = nil
+            guard !busy else { return }
+            clarification = nil; conversation = nil; problem = nil; message = nil
         }
-        .onChange(of: preference) { _, _ in confirmed = false }
-        .onChange(of: hasDeadline) { _, _ in confirmed = false }
-        .onChange(of: deadline) { _, _ in confirmed = false }
-        .onAppear { prepare() }
-        .onDisappear { operation?.cancel(); deadlineTask?.cancel(); search.cancel(); conversation = nil; prepared = nil }
+        .onAppear {
+            prepare()
+            if let seed, !seed.isEmpty { input = seed; extract() }
+            else if listen { startListening() }
+            else { inputFocused = true }
+        }
+        .onDisappear { operation?.cancel(); deadlineTask?.cancel(); search.cancel(); speech.stop(); conversation = nil; prepared = nil }
     }
-    private func fieldStatus(_ title: String, _ status: AssistantFieldStatus) -> some View {
-        Label(title + " · " + (status == .certain ? AppText.text("確定") : AppText.text("需確認")),
-              systemImage: status == .certain ? "checkmark.circle" : "exclamationmark.triangle.fill")
-            .font(.subheadline.bold())
-            .foregroundStyle(status == .certain ? Color.secondary : Color.orange)
-            .padding(.vertical, 4)
-            .accessibilityIdentifier("ai-status-\(title)")
+
+    // MARK: Sections
+
+    private var requestSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                TextField(AppText.text("例如：騎單車去台大、明天 9 點前到公司"), text: $input)
+                    .focused($inputFocused).submitLabel(.go).onSubmit { extract() }
+                    .disabled(busy || speech.listening)
+                    .accessibilityIdentifier("ai-request")
+                Button { speech.listening ? speech.finish() : startListening() } label: {
+                    Image(systemName: speech.listening ? "stop.circle.fill" : "mic.fill")
+                        .font(.title3).frame(width: 44, height: 44)
+                }.buttonStyle(.borderless).disabled(busy)
+                    .accessibilityLabel(speech.listening ? AppText.text("停止聆聽") : AppText.text("用說的"))
+                    .accessibilityIdentifier("ai-voice")
+            }
+            if speech.listening {
+                Label(speech.transcript.isEmpty ? AppText.text("請說出要去哪裡…") : speech.transcript, systemImage: "waveform")
+                    .foregroundStyle(.secondary).accessibilityIdentifier("ai-listening")
+            }
+            if let issue = speech.problem { Text(issue).font(.footnote).foregroundStyle(.secondary) }
+            Button(AppText.text("理解並規劃")) { extract() }
+                .disabled(busy || trimmed.isEmpty || trimmed.count > 600)
+                .accessibilityIdentifier("ai-extract")
+        } footer: {
+            Text(AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。文字只在手機上理解，地點與路線由 Apple 地圖處理。"))
+        }
     }
-    private func places(_ values: [TravelPlace], selected: Binding<TravelPlace?>, status: Binding<AssistantFieldStatus>, title: String) -> some View {
-        Section(title) {
-            ForEach(values) { place in
-                Button { selected.wrappedValue = place; status.wrappedValue = .certain; confirmed = false } label: {
-                    HStack {
-                        VStack(alignment: .leading) { Text(place.localizedName); Text(place.address).font(.caption).foregroundStyle(.secondary) }
-                        Spacer()
-                        if selected.wrappedValue?.id == place.id { Image(systemName: "checkmark.circle.fill") }
+
+    private var examplesSection: some View {
+        Section(recents.items.isEmpty ? AppText.text("試試看") : AppText.text("最近說過")) {
+            let examples = recents.items.isEmpty ? [AppText.text("回家"), AppText.text("騎單車去台大"), AppText.text("明天 9 點前到台北車站")] : recents.items
+            ForEach(examples, id: \.self) { text in
+                Button { input = text; extract() } label: { Label(text, systemImage: recents.items.isEmpty ? "sparkles" : "clock") }
+                    .accessibilityIdentifier("ai-example-" + text)
+                    .contextMenu {
+                        if !recents.items.isEmpty { Button(AppText.text("從最近說過移除"), role: .destructive) { recents.remove(text) } }
                     }
-                }.disabled(busy).accessibilityIdentifier("ai-place-\(place.name)")
             }
         }
     }
-    private func abandonClarification() {
-        clarification = nil; conversation = nil; confirmed = false
-    }
-    private func editPlace(isOrigin: Bool) {
-        operation?.cancel(); search.cancel(); busy = false; confirmed = false
-        clarification = nil; conversation = nil
-        if isOrigin { origins = []; selectedOrigin = nil }
-        else { destinations = []; selectedDestination = nil }
-    }
-    private func resetPlaces() {
-        operation?.cancel(); search.cancel(); busy = false
-        destinations = []; origins = []; selectedDestination = nil; selectedOrigin = nil; confirmed = false
-    }
-    private func receive(_ turn: AssistantJourneyTurn) {
-        let result = turn.request
-        destination = result.destination; origin = result.origin
-        preference = RoutePreference(rawValue: result.preference.rawValue) ?? .balanced
-        hasDeadline = result.arriveBy != nil; deadline = result.arriveBy ?? Date().addingTimeInterval(3600)
-        review = result.review; timeDescription = result.timeDescription
-        destinations = turn.destinationCandidates; origins = turn.originCandidates
-        selectedDestination = nil; selectedOrigin = nil; confirmed = false
-        clarification = turn.clarification; reviewed = true; busy = false
-        if turn.clarification == nil { planRightAway(turn) }
-    }
-    /// After understanding, plan at once: unstated parts mean current location and leaving now, and
-    /// the route screen is where the rider adjusts the rest. The review below appears only when a
-    /// place could not be found or the start is unknown.
-    private func planRightAway(_ turn: AssistantJourneyTurn) {
-        guard let target = turn.destinationCandidates.first else {
-            JourneyDiagnostics.shared.record("ai-plan stopped=destination")
-            let word = turn.request.destination
-            message = JourneyAssistantContext.category(of: word) != nil
-                ? AppText.text("還沒有儲存「%@」的常用行程。請在下方填寫地址，或先規劃一次並儲存為常用行程。", word)
-                : AppText.text("找不到這個目的地，請修改下方的目的地。")
-            return
+
+    private var progressSection: some View {
+        Section {
+            HStack(spacing: 12) {
+                ProgressView()
+                Text(activity)
+                Spacer()
+                TimelineView(.periodic(from: startedAt, by: 1)) { timeline in
+                    Text(AppText.text("%@ 秒", "\(max(0, Int(timeline.date.timeIntervalSince(startedAt))))"))
+                        .monospacedDigit().foregroundStyle(.secondary)
+                }
+            }.accessibilityIdentifier("ai-progress")
         }
-        selectedDestination = target; selectedOrigin = turn.originCandidates.first
-        guard let start, start.coordinate.isInServiceArea, target.coordinate.isInServiceArea else {
-            JourneyDiagnostics.shared.record("ai-plan stopped=" + (usesCurrentOrigin ? "location" : "origin"))
-            message = usesCurrentOrigin ? AppText.text("需要目前位置才能直接規劃，請開啟定位或填寫出發地。")
-                : AppText.text("找不到這個出發地，請修改下方的出發地。")
-            return
+    }
+
+    private func clarificationSection(_ question: AssistantClarification) -> some View {
+        Section(AppText.text("確認你的意思")) {
+            Text(question.question).font(.headline)
+            ForEach(question.options.indices, id: \.self) { index in
+                Button(question.options[index]) { answer(index) }
+                    .disabled(busy).accessibilityIdentifier("ai-choice-\(index)")
+            }
         }
-        if let arrive = turn.request.arriveBy, AssistantJourneyRequest.canPlan(arriveBy: arrive) {
-            JourneyDiagnostics.shared.record("ai-plan started deadline")
-            deadline = arrive; hasDeadline = true; showingArrival = true
-            return
+    }
+
+    private func problemSection(_ problem: Problem) -> some View {
+        Section {
+            switch problem {
+            case .location:
+                Text(AppText.text("需要目前位置才能從這裡出發。")).font(.headline)
+                Button(AppText.text("開啟定位")) { model.location.request() }
+                Button(AppText.text("已開啟，繼續規劃")) { self.problem = nil; planRightAway() }
+                    .disabled(currentPlace == nil)
+                Text(AppText.text("或輸入出發地：")).font(.footnote).foregroundStyle(.secondary)
+            case .unsavedDestination(let word), .unsavedOrigin(let word):
+                Text(AppText.text("還沒有儲存「%@」，輸入它的地址或附近地點：", word)).font(.headline)
+            case .destination(let word), .origin(let word):
+                Text(AppText.text("找不到「%@」，換個說法或選一個地點：", word)).font(.headline)
+            }
+            HStack {
+                TextField(problem.isOrigin ? AppText.text("出發地、地址或站名") : AppText.text("地點、地址或站名"), text: $fixQuery)
+                    .focused($fixFocused).submitLabel(.search).onSubmit { findFix() }
+                    .accessibilityIdentifier("ai-fix-query")
+                if fixSearching { ProgressView() }
+            }
+            ForEach(fixResults) { place in
+                Button { chooseFix(place) } label: {
+                    VStack(alignment: .leading) {
+                        Text(place.localizedName)
+                        if !place.address.isEmpty { Text(place.address).font(.caption).foregroundStyle(.secondary) }
+                    }
+                }.accessibilityIdentifier("ai-fix-\(place.name)")
+            }
+            if problem.unsaved, model.purchases.hasPro {
+                Toggle(AppText.text("同時儲存為「%@」", problem.keyword), isOn: $saveFix)
+            }
         }
-        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)")
-        model.previewAssistantJourney(origin: start, destination: target, preference: preference, mode: turn.mode)
-        planned(); dismiss()
+    }
+
+    // MARK: Model
+
+    private var preference: RoutePreference {
+        turn.flatMap { RoutePreference(rawValue: $0.request.preference.rawValue) } ?? .balanced
     }
     private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
         return JourneyAssistantContext(journeys: model.commutes.journeys) { query in
-            // A separate search per call avoids cancellation when the model calls tools concurrently.
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
             return try await toolSearch.find(text: query, queryLimit: 2, timeout: 4)
         }
     }
-    /// Starts loading the model while the user types.
+    /// Starts loading the model while the user types or speaks.
     private func prepare() {
         guard unavailable == nil, prepared == nil else { return }
         let context = makeContext()
         guard let session = try? OnDeviceJourneyAssistant.conversation(context: context) else { return }
         session.prewarm()
         prepared = (context, session)
+    }
+    private func startListening() {
+        inputFocused = false
+        Task { await speech.start { text in input = text; extract() } }
     }
     private func track(_ context: JourneyAssistantContext) {
         context.onActivity = { value in
@@ -261,43 +241,35 @@ struct AIJourneyAssistantView: View {
             }
         }
     }
-    /// Starts the limit for one model step; when it passes, the review stays editable by hand.
-    private func startDeadline(_ step: String, context: JourneyAssistantContext, onTimeout: @escaping @MainActor () -> Void) {
+    private func startDeadline(_ step: String, context: JourneyAssistantContext) {
         deadlineTask?.cancel()
         deadlineTask = Task { @MainActor in
             do { try await Task.sleep(for: .seconds(Self.timeLimit)) } catch { return }
             guard busy else { return }
             operation?.cancel()
             record(step, outcome: "timeout", context: context)
-            onTimeout()
+            busy = false; conversation = nil
+            message = AppText.text("手機上的模型這次回應太久，請再試一次，或關閉後直接搜尋。")
         }
     }
-    /// Timing only: no request text, places or answers enter the troubleshooting history.
+    /// Timing and kinds only: no request text, places or answers enter the troubleshooting history.
     private func record(_ step: String, outcome: String, context: JourneyAssistantContext) {
         let searches = context.toolCalls.filter { $0.hasPrefix("searchPlaces") }.count
         let saved = context.toolCalls.filter { $0.hasPrefix("listSavedJourneys") }.count
         JourneyDiagnostics.shared.record(String(format: "ai-%@ %@ %.1fs searches=%d search=%.1fs saved=%d %@",
             step, outcome, Date().timeIntervalSince(startedAt), searches, context.searchSeconds, saved, context.trace))
     }
-    private func manualReview(_ text: String) {
-        busy = false
-        // Model failures still allow the user to fill in the same review screen.
-        reviewed = true; review = .init(); destination = ""; origin = ""
-        preference = .balanced; hasDeadline = false; timeDescription = ""
-        message = text
-    }
     private func extract() {
-        inputFocused = false
-        resetPlaces(); busy = true; message = nil; reviewed = false; clarification = nil; conversation = nil
-        let source = input
+        guard !busy, !trimmed.isEmpty, trimmed.count <= 600 else { return }
+        inputFocused = false; speech.stop()
+        operation?.cancel(); busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
+        chosenDestination = nil; chosenOrigin = nil
+        let source = trimmed
         let ready = prepared; prepared = nil
         let context = ready?.context ?? makeContext()
         track(context); activeContext = context
         activity = AppText.text("正在理解你的需求…"); startedAt = Date()
-        startDeadline("understand", context: context) {
-            conversation = nil
-            manualReview(AppText.text("手機上的模型這次回應太久，請直接填寫下方行程條件，或再試一次。"))
-        }
+        startDeadline("understand", context: context)
         operation = Task { @MainActor in
             do {
                 let session = try ready?.conversation ?? OnDeviceJourneyAssistant.conversation(context: context)
@@ -312,19 +284,17 @@ struct AIJourneyAssistantView: View {
                 deadlineTask?.cancel()
                 let kind = OnDeviceJourneyAssistant.failureKind(error)
                 record("understand", outcome: "error:" + kind, context: context)
-                manualReview(AppText.text("暫時無法理解，請直接填寫下方行程條件，或再試一次。") + "\n(" + kind + ")")
+                busy = false
+                message = AppText.text("這句話暫時無法理解，請換個說法再試，或關閉後直接搜尋。") + "\n(" + kind + ")"
             }
         }
     }
     private func answer(_ index: Int) {
         guard let conversation, !busy else { return }
-        operation?.cancel(); busy = true; confirmed = false; message = nil
+        operation?.cancel(); busy = true; message = nil
         activity = AppText.text("正在理解你的選擇…"); startedAt = Date()
         let context = activeContext ?? makeContext()
-        startDeadline("answer", context: context) {
-            busy = false; clarification = nil
-            message = AppText.text("手機上的模型這次回應太久，已保留條件，請直接修改確認。")
-        }
+        startDeadline("answer", context: context)
         operation = Task { @MainActor in
             do {
                 let result = try await conversation.answer(option: index)
@@ -337,48 +307,83 @@ struct AIJourneyAssistantView: View {
                 deadlineTask?.cancel()
                 record("answer", outcome: "error:" + OnDeviceJourneyAssistant.failureKind(error), context: context)
                 busy = false; clarification = nil
-                message = AppText.text("暫時無法繼續理解，已保留條件，請直接修改確認。")
+                message = AppText.text("這個選擇暫時無法處理，請再試一次。")
             }
         }
     }
-    private func findPlaces() {
-        operation?.cancel(); search.cancel(); busy = true; message = nil; confirmed = false
-        selectedDestination = nil; selectedOrigin = nil
+    private func receive(_ result: AssistantJourneyTurn) {
+        turn = result; busy = false
+        clarification = result.clarification
+        if result.clarification == nil { planRightAway() }
+    }
+
+    // MARK: Planning
+
+    /// After understanding, plan at once: unstated parts mean current location and leaving now, and
+    /// the route screen is where the rider adjusts the rest.
+    private func planRightAway() {
+        guard let turn else { return }
+        let request = turn.request
+        guard let target = chosenDestination ?? turn.destinationCandidates.first else {
+            stop(JourneyAssistantContext.category(of: request.destination) != nil
+                 ? .unsavedDestination(request.destination) : .destination(request.destination))
+            return
+        }
+        let statedOrigin = !request.origin.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let from: TravelPlace?
+        if let chosenOrigin { from = chosenOrigin }
+        else if statedOrigin {
+            guard let found = turn.originCandidates.first else {
+                stop(JourneyAssistantContext.category(of: request.origin) != nil ? .unsavedOrigin(request.origin) : .origin(request.origin))
+                return
+            }
+            from = found
+        } else {
+            guard currentPlace != nil else { stop(.location); return }
+            from = nil
+        }
+        AssistantRecents.shared.remember(trimmed)
+        if let arrive = request.arriveBy, AssistantJourneyRequest.canPlan(arriveBy: arrive), let start = from ?? currentPlace {
+            JourneyDiagnostics.shared.record("ai-plan started deadline")
+            arrival = (start, target, arrive); showingArrival = true
+            return
+        }
+        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)")
+        let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
+        model.previewAssistantJourney(request: trimmed, origin: from, destination: target, alternatives: alternatives,
+                                      preference: preference, mode: turn.mode)
+        planned(); dismiss()
+    }
+    private func stop(_ reason: Problem) {
+        JourneyDiagnostics.shared.record("ai-plan stopped=\(reason.isOrigin ? "origin" : "destination")\(reason.unsaved ? "-unsaved" : "")")
+        problem = reason; fixResults = []
+        fixQuery = reason.unsaved || reason == .location ? "" : reason.keyword
+        if !fixQuery.isEmpty { findFix() } else { fixFocused = true }
+    }
+    private func findFix() {
+        let text = fixQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
         search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
         search.setContext(model.location.usableCoordinate)
-        operation = Task { @MainActor in
-            do {
-                // Keep tool/library evidence when editing or resolving the other endpoint.
-                if destinations.isEmpty {
-                    let found = try await search.find(text: destination)
-                    try Task.checkCancellation()
-                    destinations = found.filter { $0.coordinate.isInServiceArea }
-                }
-                if !usesCurrentOrigin, origins.isEmpty {
-                    let from = try await search.find(text: origin)
-                    try Task.checkCancellation()
-                    origins = from.filter { $0.coordinate.isInServiceArea }
-                }
-                if destinations.isEmpty || (!usesCurrentOrigin && origins.isEmpty) {
-                    message = AppText.text("找不到服務範圍內的地點，請修改關鍵字。")
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                message = AppText.text("地點搜尋暫時無法連線，請稍後再試。")
-            }
-            busy = false
+        fixSearching = true
+        Task { @MainActor in
+            let found = (try? await search.find(text: text)) ?? []
+            fixResults = Array(found.filter { $0.coordinate.isInServiceArea }.prefix(6))
+            fixSearching = false
+            if fixResults.isEmpty { message = AppText.text("找不到服務範圍內的地點，請換個關鍵字。") } else { message = nil }
         }
     }
-    private func apply() {
-        guard !busy, confirmed, clarification == nil, !requiresPro, let start, let selectedDestination,
-              start.coordinate.isInServiceArea, selectedDestination.coordinate.isInServiceArea else { return }
-        if hasDeadline {
-            guard AssistantJourneyRequest.canPlan(arriveBy: deadline) else { return }
-            showingArrival = true
-        } else {
-            model.previewAssistantJourney(origin: start, destination: selectedDestination, preference: preference)
-            planned(); dismiss()
+    private func chooseFix(_ place: TravelPlace) {
+        guard let problem else { return }
+        if problem.unsaved, saveFix, model.purchases.hasPro {
+            let word = problem.keyword
+            let symbol = JourneyAssistantContext.category(of: word) == .work ? "briefcase.fill"
+                : JourneyAssistantContext.category(of: word) == .school ? "book.fill" : "house.fill"
+            model.commutes.store(title: word, symbol: symbol, origin: nil, destination: place, preference: .balanced)
         }
+        self.problem = nil; message = nil
+        if problem.isOrigin { chosenOrigin = place } else { chosenDestination = place }
+        planRightAway()
     }
 }
 
@@ -455,5 +460,61 @@ private struct ArrivalJourneyView: View {
                 results = Array(checked.sorted { $0.timing.assessment.score < $1.timing.assessment.score }.prefix(3))
                 busy = false
             }
+    }
+}
+
+/// What 用一句話規劃 understood, above the routes it started, with the quick changes a rider may want.
+struct AssistantTripBanner: View {
+    @ObservedObject var model: TransitAppModel
+    @ObservedObject var planner: JourneyPlannerModel
+    let reopen: () -> Void
+    private func title(_ mode: AssistantTravelMode) -> String {
+        switch mode {
+        case .any: AppText.text("推薦路線")
+        case .cycling: AppText.text("騎 YouBike 優先")
+        case .walking: AppText.text("步行優先")
+        }
+    }
+    var body: some View {
+        if let trip = model.currentAssistantTrip {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: "sparkles").foregroundStyle(.tint)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("「" + trip.request + "」").font(.subheadline.weight(.semibold)).lineLimit(2)
+                        Text([trip.destination.localizedName, title(trip.mode), AppText.text("現在出發")].joined(separator: " · "))
+                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    }
+                    Spacer(minLength: 0)
+                    Menu {
+                        if !trip.alternatives.isEmpty {
+                            Section(AppText.text("不是這裡？")) {
+                                ForEach(trip.alternatives) { place in
+                                    Button(place.localizedName) { model.switchAssistantDestination(place) }
+                                }
+                            }
+                        }
+                        Section(AppText.text("交通方式")) {
+                            ForEach([AssistantTravelMode.any, .cycling, .walking], id: \.self) { mode in
+                                Button { model.setAssistantMode(mode) } label: {
+                                    if trip.mode == mode { Label(title(mode), systemImage: "checkmark") } else { Text(title(mode)) }
+                                }
+                            }
+                        }
+                        Button(AppText.text("重新說一次"), systemImage: "mic") { reopen() }
+                    } label: {
+                        Text(AppText.text("調整")).font(.subheadline.weight(.semibold)).frame(minWidth: 44, minHeight: 44)
+                    }.accessibilityIdentifier("assistant-trip-adjust")
+                }
+                if let note = trip.note { Text(note).font(.caption).foregroundStyle(.orange) }
+                if let issue = planner.wholeTripBikeIssue() {
+                    Text(AppText.text("沒有全程 YouBike 路線：%@", issue)).font(.caption).foregroundStyle(.orange)
+                        .accessibilityIdentifier("assistant-trip-bike-issue")
+                }
+            }
+            .padding(12)
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityIdentifier("assistant-trip")
+        }
     }
 }

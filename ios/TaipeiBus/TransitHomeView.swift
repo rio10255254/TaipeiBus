@@ -399,6 +399,9 @@ struct TransitHomeView: View {
         }
         .bikeStationDetails(model: model, active: hasSelection && !showJourney && !showDetails && !showSearch && !showInformation)
         .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
+        // A sentence said to Siri opens the route panel, which understands and plans it.
+        .onReceive(NotificationCenter.default.publisher(for: AssistantLaunch.notification)) { _ in takeAssistantLaunch() }
+        .onAppear { takeAssistantLaunch() }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
             guard requested else { return }
             model.showSavedJourneyRequested = false
@@ -528,6 +531,12 @@ struct TransitHomeView: View {
 #endif
     }
 
+    private func takeAssistantLaunch() {
+        guard let text = AssistantLaunch.take() else { return }
+        model.pendingAssistantRequest = text
+        showInformation = false; showDetails = false; showSearch = false
+        showJourneyItinerary = false; journeyDetent = .large; showJourney = true
+    }
     private func restoreJourneyMap() {
         guard !stationWalk.isActive, planner.selected != nil else { return }
         if model.hasConfirmedOnboardFollow, model.selectedVehicle == nil { return }
@@ -1628,6 +1637,7 @@ private struct PrivacyExplanationView: View {
             Section(AppText.text("智慧輔助與相機")) {
                 Text(AppText.text("開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。"))
                 Text(AppText.text("行程需求只在手機上的模型處理，不上傳完整提示文字。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
+                Text(AppText.text("按麥克風或對 Siri 說出行程時，聲音只用來轉成文字（支援時在手機上辨識），不儲存錄音。最近說過的句子只存在這支手機，可長按移除。"))
                 Text(AppText.text("掃描車牌才會請求相機權限；影像在手機辨識，不儲存或上傳。拒絕權限仍可手動選車。"))
                 Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
             }

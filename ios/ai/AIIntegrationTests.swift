@@ -241,3 +241,29 @@ import TransitCore
         XCTAssertEqual(attempts, [false]); XCTAssertEqual(restarts, 2)
     }
 }
+
+@MainActor final class AssistantInputTests: XCTestCase {
+    func testOnlySentencesLeaveTheOrdinarySearch() {
+        for text in ["騎單車去台大", "回家", "明天九點前到北車", "從公司到西門", "帶我去101", "我要去台大醫院"] {
+            XCTAssertTrue(AssistantSentence.looksLikeRequest(text), text)
+        }
+        for text in ["台大", "西門站", "回龍", "市政府", "台北101", "a", ""] {
+            XCTAssertFalse(AssistantSentence.looksLikeRequest(text), text)
+        }
+    }
+    func testRecentRequestsStayFewDistinctAndRemovable() throws {
+        let suite = "ai-recents-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let recents = AssistantRecents(defaults: defaults)
+        for index in 0..<8 { recents.remember("去地點\(index)") }
+        recents.remember("去地點3")
+        XCTAssertEqual(recents.items.first, "去地點3")
+        XCTAssertEqual(recents.items.count, 6)
+        XCTAssertEqual(Set(recents.items).count, 6)
+        recents.remove("去地點3")
+        XCTAssertFalse(AssistantRecents(defaults: defaults).items.contains("去地點3"), "Removal persists")
+        recents.clear()
+        XCTAssertTrue(AssistantRecents(defaults: defaults).items.isEmpty)
+    }
+}

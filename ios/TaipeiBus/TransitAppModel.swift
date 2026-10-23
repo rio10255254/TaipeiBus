@@ -575,15 +575,56 @@ final class TransitAppModel: ObservableObject {
         guard purchases.hasPro else { return }
         tripPreference = value; applyPersonalPreferences()
     }
-    /// Without Pro a requested preference falls back to the recommendation instead of blocking the trip.
-    func previewAssistantJourney(origin: TravelPlace, destination: TravelPlace, preference: RoutePreference,
-                                 mode: AssistantTravelMode = .any) {
-        guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea else { return }
+    /// What 用一句話規劃 understood, shown above the routes it started so the rider can see and change it.
+    struct AssistantTrip {
+        var request: String
+        var destination: TravelPlace
+        /// Other search results for the same words, offered as 「不是這裡？」.
+        var alternatives: [TravelPlace]
+        /// nil means the current location.
+        var origin: TravelPlace?
+        var mode: AssistantTravelMode
+        var preference: RoutePreference
+        /// Set when a requested preference could not be applied, e.g. without Pro.
+        var note: String?
+    }
+    @Published private(set) var assistantTrip: AssistantTrip?
+    /// A sentence from Siri waiting for the route panel to open.
+    @Published var pendingAssistantRequest: String?
+    /// The understanding only describes the trip it started; another destination hides it.
+    var currentAssistantTrip: AssistantTrip? {
+        guard let trip = assistantTrip, let destination = planner.destination, destination.id == trip.destination.id else { return nil }
+        return trip
+    }
+
+    /// Plans what 用一句話規劃 understood. No origin means the current location. Without Pro a requested
+    /// preference falls back to the recommendation, and the note says so.
+    func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
+                                 preference: RoutePreference, mode: AssistantTravelMode = .any) {
+        guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
         planner.preferredMode = mode
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
-        planner.setOrigin(origin, metadata: metadata)
-        planner.setDestination(destination, metadata: metadata, currentLocation: nil)
+        let note = preference != .balanced && !purchases.hasPro
+            ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
+        assistantTrip = AssistantTrip(request: request, destination: destination,
+            alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
+            preference: preference, note: note)
+        if let origin { planner.setOrigin(origin, metadata: metadata) }
+        else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
+    }
+    /// 「不是這裡？」: plan the same request to another of its search results.
+    func switchAssistantDestination(_ place: TravelPlace) {
+        guard let trip = assistantTrip else { return }
+        previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
+            alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode)
+    }
+    func setAssistantMode(_ mode: AssistantTravelMode) {
+        guard assistantTrip != nil, !planner.started else { return }
+        assistantTrip?.mode = mode
+        planner.preferredMode = mode
+        planner.plan(metadata: metadata)
     }
     /// Opening a saved trip stays free after Pro ends; its saved route preference only applies with Pro.
     func previewSavedJourney(_ saved: SavedJourney) {

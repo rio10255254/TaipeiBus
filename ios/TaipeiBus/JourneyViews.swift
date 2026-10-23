@@ -31,6 +31,9 @@ struct JourneyPlanningView: View {
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
     @State private var showingAssistant = false
+    @State private var assistantSeed: String?
+    @State private var assistantListen = false
+    @ObservedObject private var assistantRecents = AssistantRecents.shared
     @State private var assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
     @Environment(\.scenePhase) private var scenePhase
 
@@ -63,6 +66,7 @@ struct JourneyPlanningView: View {
                                 else { showingItinerary = false; collapse() }
                             })
                         } else {
+                            AssistantTripBanner(model: model, planner: planner) { openAssistant(nil) }
                             JourneyOptionsView(model: model, planner: planner, collapse: {
                                 showingItinerary = false; collapse()
                             }, compact: compact, expand: expand, showSteps: {
@@ -180,11 +184,16 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
         .sheet(isPresented: $showingAssistant) {
-            AIJourneyAssistantView(model: model) {
+            AIJourneyAssistantView(model: model, seed: assistantSeed, listen: assistantListen) {
                 focused = false; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
             }
         }
         .bikeStationDetails(model: model)
+        .onChange(of: model.pendingAssistantRequest, initial: true) { _, text in
+            guard let text, assistantAvailable else { return }
+            model.pendingAssistantRequest = nil
+            openAssistant(text)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil }
         }
@@ -281,6 +290,15 @@ struct JourneyPlanningView: View {
                 .accessibilityLabel(live.text("使用目前位置出發"))
         }.padding(.vertical, 4)
     }
+    /// A sentence such as 「騎單車去台大」 typed in the ordinary search box is understood, not searched.
+    private var understandsSentence: Bool {
+        assistantAvailable && !editingOrigin && !planner.started && AssistantSentence.looksLikeRequest(query)
+    }
+    private func openAssistant(_ text: String?) {
+        focused = false
+        assistantSeed = text?.trimmingCharacters(in: .whitespacesAndNewlines); assistantListen = false
+        showingAssistant = true
+    }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !editingOrigin, !planner.started, assistantAvailable {
@@ -293,18 +311,39 @@ struct JourneyPlanningView: View {
                 TextField(editingOrigin ? AppText.text("出發地、地址或站名") : AppText.text("地點、地址或站名"), text: $query)
                     .accessibilityIdentifier("journey-search-field")
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
-                    .onSubmit { resolve(text: query) }
+                    .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
+                if query.isEmpty, assistantAvailable, !editingOrigin, !planner.started {
+                    // One tap, then just say where to go.
+                    Button { focused = false; assistantSeed = nil; assistantListen = true; showingAssistant = true } label: {
+                        Image(systemName: "mic.fill").frame(width: 36, height: 36)
+                    }.accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
+                }
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
+            if understandsSentence {
+                Button { openAssistant(query) } label: {
+                    Label(AppText.text("理解並規劃「%@」", query), systemImage: "sparkles").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
+                }.accessibilityIdentifier("journey-understand-sentence")
+            }
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button { resolve(text: query) } label: {
                     Label(AppText.text("搜尋「%@」", query), systemImage: "arrow.up.right").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
+                if !editingOrigin, !planner.started, assistantAvailable, !assistantRecents.items.isEmpty {
+                    // Zero typing: what was said before, one tap to plan it again.
+                    Text(AppText.text("最近說過")).liveFont(.subheadline, weight: .semibold)
+                    ForEach(assistantRecents.items.prefix(3), id: \.self) { text in
+                        Button { openAssistant(text) } label: {
+                            Label(text, systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                        }.accessibilityIdentifier("journey-recent-request")
+                            .contextMenu { Button(AppText.text("從最近說過移除"), role: .destructive) { assistantRecents.remove(text) } }
+                    }
+                }
                 if !editingOrigin, !planner.started {
                     CommuteHabitSuggestions(habits: model.commuteHabits, library: model.commutes) { saved in
                         model.previewSavedJourney(saved)
