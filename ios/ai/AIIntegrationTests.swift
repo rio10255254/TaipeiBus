@@ -40,96 +40,155 @@ import TransitCore
 }
 
 @MainActor final class JourneyAssistantToolTests: XCTestCase {
-    func testPlaceToolReturnsOnlyThreeRealNamesAddressesAndOpaqueIDs() async throws {
-        let values = (0..<5).map { index in
-            TravelPlace(name: "地點\(index)", address: "地址\(index)", coordinate: Coordinate(latitude: 25.03, longitude: 121.53))
-        }
-        let context = JourneyAssistantContext(journeys: []) { _ in values }
-        let data = Data(try await context.search("北車").utf8)
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [[String: String]])
-        XCTAssertEqual(rows.count, 3)
-        for row in rows {
-            XCTAssertEqual(Set(row.keys), ["id", "name", "address"])
-            let place = try XCTUnwrap(context.place(id: try XCTUnwrap(row["id"])))
-            XCTAssertEqual(place.name, row["name"])
-            XCTAssertEqual(place.address, row["address"])
-        }
-        XCTAssertNil(context.place(id: "invented-place"))
+    private let now = ISO8601DateFormatter().date(from: "2026-10-22T04:00:00Z")!  // 12:00 Taipei
+    private func place(_ name: String, _ latitude: Double = 25.04) -> TravelPlace {
+        TravelPlace(name: name, address: "臺北市中正區", coordinate: Coordinate(latitude: latitude, longitude: 121.52))
     }
-    func testPlaceToolShortensLongAddresses() async throws {
-        let long = TravelPlace(name: "臺北車站", address: "臺北市中正區北平西路三號一樓至地下三樓（台鐵、高鐵、捷運共構）",
-                               coordinate: Coordinate(latitude: 25.047, longitude: 121.517))
-        let context = JourneyAssistantContext(journeys: []) { _ in [long] }
-        let text = try await context.search("北車")
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: String]])
-        XCTAssertEqual(rows.first?["address"], String(long.address.prefix(20)))
-        // The full place, not the shortened text, is what the review screen receives.
-        XCTAssertEqual(context.place(id: try XCTUnwrap(rows.first?["id"]))?.address, long.address)
+    private func saved(_ title: String, _ symbol: String, _ destination: TravelPlace, _ preference: RoutePreference = .balanced) -> SavedJourney {
+        SavedJourney(id: UUID(), title: title, symbol: symbol, origin: nil, destination: destination, preference: preference, updatedAt: Date())
     }
-    func testSavedJourneyToolPreservesDistinctEndpointsAndPreferences() throws {
-        let home = TravelPlace(name: "家", address: "測試地址", coordinate: Coordinate(latitude: 25.03, longitude: 121.53))
-        let work = TravelPlace(name: "公司", address: "測試地址", coordinate: Coordinate(latitude: 25.04, longitude: 121.54))
-        let saved = SavedJourney(id: UUID(), title: "上班", symbol: "briefcase.fill", origin: home,
-                                 destination: work, preference: .faster, updatedAt: Date())
-        let context = JourneyAssistantContext(journeys: [saved]) { _ in [] }
-        let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try context.savedJourneys(matching: "上班").utf8)) as? [[String: Any]])
-        let row = try XCTUnwrap(rows.first)
-        let from = try XCTUnwrap(row["origin"] as? [String: String])
-        let to = try XCTUnwrap(row["destination"] as? [String: String])
-        XCTAssertEqual(context.place(id: try XCTUnwrap(from["id"]))?.id, home.id)
-        XCTAssertEqual(context.place(id: try XCTUnwrap(to["id"]))?.id, work.id)
-        XCTAssertEqual(Set(from.keys), ["id", "name"], "Saved endpoints carry no address")
-        XCTAssertEqual(row["preference"] as? String, "faster")
-        XCTAssertEqual(context.toolCalls, ["listSavedJourneys: 上班"])
+    private func reading(_ destination: String, _ kind: JourneyReading.Kind = .place, origin: String = "",
+                         originKind: JourneyReading.Kind = .none) -> JourneyReading {
+        JourneyReading(destination: destination, destinationKind: kind, origin: origin, originKind: originKind)
     }
-    func testGoingHomeFindsTheHomeJourneyAmongFiftyWithinAFewHundredCharacters() throws {
-        func place(_ index: Int) -> TravelPlace {
-            TravelPlace(name: "地點\(index)", address: "臺北市信義區市府路\(index)號很長很長的地址說明文字",
-                        coordinate: Coordinate(latitude: 25.03 + Double(index) / 10_000, longitude: 121.53))
+
+    func testOrdinaryPlaceUsesCurrentLocationAndAsksNothing() async throws {
+        // 現在去台北車站: on a phone the old design asked whether to start from 公司 or 家.
+        var searched: [String] = []
+        let context = JourneyAssistantContext(journeys: []) { query in
+            searched.append(query); return [self.place("臺北車站"), self.place("台北車站 M8 出口", 25.05)]
         }
-        var library = (0..<50).map { index in
-            SavedJourney(id: UUID(), title: "行程\(index)", symbol: "mappin", origin: place(index),
-                         destination: place(index + 100), preference: .balanced, updatedAt: Date())
-        }
-        let home = TravelPlace(name: "古亭站", address: "臺北市中正區", coordinate: Coordinate(latitude: 25.026, longitude: 121.522))
-        library[37] = SavedJourney(id: UUID(), title: "回家", symbol: "house.fill", origin: nil,
-                                   destination: home, preference: .lessWalking, updatedAt: Date())
-        for query in ["回家", "家", "home"] {
-            let context = JourneyAssistantContext(journeys: library) { _ in [] }
-            let text = try context.savedJourneys(matching: query)
-            XCTAssertLessThan(text.utf8.count, 600, "\(query): \(text)")
-            let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
-            XCTAssertLessThanOrEqual(rows.count, 3)
-            let first = try XCTUnwrap(rows.first)
-            XCTAssertEqual(first["title"] as? String, "回家")
-            XCTAssertEqual(first["preference"] as? String, "lessWalking")
-            let to = try XCTUnwrap(first["destination"] as? [String: String])
-            XCTAssertEqual(context.place(id: try XCTUnwrap(to["id"]))?.id, home.id)
-            XCTAssertFalse(text.contains("市府路"), "Addresses never enter the model context")
-        }
-        let unfiltered = JourneyAssistantContext(journeys: library) { _ in [] }
-        let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try unfiltered.savedJourneys(matching: "").utf8)) as? [Any])
-        XCTAssertEqual(all.count, 3)
+        let turn = try await context.resolve(reading("台北車站"), source: "現在去台北車站", now: now)
+        XCTAssertNil(turn.clarification)
+        XCTAssertEqual(searched, ["台北車站"])
+        XCTAssertEqual(turn.request.destination, "台北車站")
+        XCTAssertEqual(turn.request.review, AssistantFieldReview(destination: .certain, origin: .certain, preference: .certain, time: .certain))
+        XCTAssertEqual(turn.request.origin, "")
+        XCTAssertEqual(turn.destinationCandidates.first?.name, "臺北車站", "The exact match is offered first")
+        XCTAssertNil(turn.request.arriveBy)
+        XCTAssertEqual(turn.request.timeDescription, "")
     }
-    func testSavedJourneyToolStopsTheModelFromAskingAgain() throws {
-        // On a phone, an empty "[]" reply made the model call listSavedJourneys 30-40 times until the
-        // request timed out. A miss now says so plainly, and the tool answers at most twice.
-        let context = JourneyAssistantContext(journeys: []) { _ in [] }
-        let miss = try context.savedJourneys(matching: "台大")
-        XCTAssertTrue(miss.contains("no saved journey") && miss.contains("searchPlaces"), miss)
-        _ = try context.savedJourneys(matching: "台灣大學")
-        for _ in 0..<5 { XCTAssertEqual(try context.savedJourneys(matching: "臺大"), JourneyAssistantContext.savedExhausted) }
-        XCTAssertEqual(context.toolCalls.count, JourneyAssistantContext.savedLimit)
-        context.resetSearchBudget()
-        XCTAssertNotEqual(try context.savedJourneys(matching: "台大"), JourneyAssistantContext.savedExhausted)
+    func testWorkWithoutASavedJourneyIsNeverSearchedOnTheMap() async throws {
+        // Choosing 公司 once searched the map for 公司 and picked an unrelated company in 三重.
+        var searched: [String] = []
+        let context = JourneyAssistantContext(journeys: []) { query in searched.append(query); return [self.place("堅詠股份有限公司")] }
+        for kind in [JourneyReading.Kind.work, .place, .saved] {
+            let turn = try await context.resolve(reading("台北車站", origin: "公司", originKind: kind), source: "從公司到台北車站", now: now)
+            XCTAssertEqual(turn.request.origin, "公司")
+            XCTAssertEqual(turn.request.review.origin, .needsConfirmation)
+            XCTAssertTrue(turn.originCandidates.isEmpty)
+        }
+        XCTAssertFalse(searched.contains("公司"))
     }
-    func testEmptyPlaceSearchSaysSoInsteadOfAnEmptyList() async throws {
-        let context = JourneyAssistantContext(journeys: []) { _ in [] }
-        let reply = try await context.search("不存在的地方")
-        XCTAssertTrue(reply.hasPrefix("No Taipei place matches"), reply)
-        for _ in 0..<3 { _ = try await context.search("台大") }
-        let exhausted = try await context.search("台大")
-        XCTAssertEqual(exhausted, JourneyAssistantContext.searchExhausted)
+    func testHomeUsesTheSavedJourneyAndItsPreferenceUnlessTheUserAsksForAnother() async throws {
+        let home = place("古亭站")
+        let context = JourneyAssistantContext(journeys: [saved("家", "house.fill", home, .lessWalking)]) { _ in
+            XCTFail("A saved journey is not searched"); return []
+        }
+        let turn = try await context.resolve(reading("家", .home), source: "回家", now: now)
+        XCTAssertEqual(turn.request.destination, "古亭站")
+        XCTAssertEqual(turn.request.preference, .lessWalking)
+        XCTAssertEqual(turn.destinationCandidates.map(\.id), [home.id])
+        XCTAssertEqual(turn.request.review.destination, .certain)
+        var faster = reading("家", .home); faster.preference = .faster
+        let asked = try await context.resolve(faster, source: "回家，快一點", now: now)
+        XCTAssertEqual(asked.request.preference, .faster)
+        XCTAssertTrue(context.toolCalls.allSatisfy { $0.hasPrefix("listSavedJourneys") })
+    }
+    func testGoingHomeFindsTheHomeJourneyAmongFifty() async throws {
+        var library = (0..<50).map { saved("行程\($0)", "mappin", place("地點\($0)")) }
+        let home = place("古亭站")
+        library[37] = saved("回家", "house.fill", home, .lessWalking)
+        let context = JourneyAssistantContext(journeys: library) { _ in [] }
+        for text in ["回家", "家", "家裡"] {
+            let turn = try await context.resolve(reading(text, .home), source: text, now: now)
+            XCTAssertEqual(turn.destinationCandidates.map(\.id), [home.id], text)
+            XCTAssertNil(turn.clarification)
+        }
+    }
+    func testTwoHomesAskWhichOneAndTheAnswerNeedsNoModel() async throws {
+        let first = place("測試住家（古亭）"), second = place("測試住家（板橋）", 25.01)
+        let context = JourneyAssistantContext(journeys: [saved("家", "house.fill", first), saved("另一個家", "house.fill", second)]) { _ in [] }
+        let turn = try await context.resolve(reading("家", .home), source: "回家", now: now)
+        let question = try XCTUnwrap(turn.clarification)
+        XCTAssertTrue(question.options[0].contains("古亭"))
+        XCTAssertEqual(question.options.count, 2)
+        XCTAssertEqual(turn.request.review.destination, .needsConfirmation)
+        let next = try await context.answer(option: 1)
+        XCTAssertNil(next.clarification)
+        XCTAssertEqual(next.request.destination, "測試住家（板橋）")
+        XCTAssertEqual(next.request.review.destination, .certain)
+    }
+    func testAmbiguousPlaceAsksAmongRealSearchResults() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("中山站"), self.place("中山國中", 25.06), self.place("中山站", 25.07)] }
+        let turn = try await context.resolve(reading("中山"), source: "到中山", now: now)
+        let question = try XCTUnwrap(turn.clarification)
+        XCTAssertEqual(question.options, ["中山站", "中山國中"], "Duplicate names are offered once")
+        let next = try await context.answer(option: 1)
+        XCTAssertEqual(next.request.destination, "中山國中")
+        XCTAssertEqual(next.destinationCandidates.map(\.name), ["中山國中"])
+        XCTAssertNil(next.clarification)
+    }
+    func testDepartureTimeAsksAndLeavingNowClearsTheTime() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
+        var value = reading("台北車站"); value.departureTime = true; value.timeEvidence = "明天九點"
+        value.arrivalDay = "2026-10-23"; value.arrivalHour = 9
+        let turn = try await context.resolve(value, source: "明天九點出發去台北車站", now: now)
+        XCTAssertNil(turn.request.arriveBy, "A departure time is never turned into a deadline")
+        XCTAssertEqual(turn.request.review.time, .needsConfirmation)
+        XCTAssertEqual(turn.clarification?.options.first, "現在出發")
+        let next = try await context.answer(option: 0)
+        XCTAssertEqual(next.request.review.time, .certain)
+        XCTAssertEqual(next.request.timeDescription, "")
+        XCTAssertNil(next.clarification)
+    }
+    func testPassedDeadlineOffersTomorrowMorning() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
+        var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9
+        let turn = try await context.resolve(value, source: "到北車，九點以前", now: now)
+        XCTAssertEqual(turn.request.review.time, .needsConfirmation)
+        let question = try XCTUnwrap(turn.clarification)
+        XCTAssertTrue(question.options[0].contains("明天早上"), question.options[0])
+        let next = try await context.answer(option: 0)
+        XCTAssertEqual(next.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
+        XCTAssertEqual(next.request.review.time, .certain)
+    }
+    func testArrivalDeadlineAndConflictingPreference() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺大醫院")] }
+        var value = reading("台大醫院"); value.timeEvidence = "明天九點前"; value.arrivalDay = "2026-10-23"; value.arrivalHour = 9
+        value.preference = nil
+        let turn = try await context.resolve(value, source: "明天九點前到臺大醫院，快一點但完全不要走路", now: now)
+        XCTAssertEqual(turn.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
+        XCTAssertEqual(turn.request.review.time, .certain)
+        XCTAssertEqual(turn.request.review.preference, .needsConfirmation)
+        XCTAssertEqual(turn.request.review.destination, .certain)
+    }
+    func testTwoDestinationsAskWhichFirst() async throws {
+        let context = JourneyAssistantContext(journeys: []) { query in [self.place(query == "台北101" ? "臺北101" : "臺北車站")] }
+        var value = reading("台北車站"); value.otherDestination = "台北101"
+        let turn = try await context.resolve(value, source: "先去北車再去台北101", now: now)
+        XCTAssertEqual(turn.clarification?.options, ["台北車站", "台北101"])
+        let next = try await context.answer(option: 1)
+        XCTAssertEqual(next.request.destination, "台北101")
+        XCTAssertNil(next.clarification)
+    }
+    func testSearchFailureLeavesTheKeywordEditable() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in throw URLError(.notConnectedToInternet) }
+        let turn = try await context.resolve(reading("台大"), source: "去台大", now: now)
+        XCTAssertEqual(turn.request.destination, "台大")
+        XCTAssertEqual(turn.request.review.destination, .needsConfirmation)
+        XCTAssertTrue(turn.destinationCandidates.isEmpty)
+        do { _ = try await context.answer(option: 0); XCTFail("Nothing was asked") } catch {}
+    }
+    func testCancellationStopsResolution() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in
+            try await Task.sleep(for: .seconds(5))
+            return []
+        }
+        let task = Task { try await context.resolve(self.reading("北車"), source: "去北車", now: self.now) }
+        task.cancel()
+        do { _ = try await task.value; XCTFail("Expected cancellation") }
+        catch is CancellationError { }
     }
     func testContextOverflowRetriesOnceWithAFreshSessionThenFallsBack() async throws {
         struct Overflow: Error {}
@@ -156,26 +215,5 @@ import TransitCore
             XCTFail("Other failures are not retried")
         } catch is URLError {}
         XCTAssertEqual(attempts, [false]); XCTAssertEqual(restarts, 2)
-    }
-    func testSearchFailureAndBudgetLeaveManualReviewAvailable() async throws {
-        var calls = 0
-        let context = JourneyAssistantContext(journeys: []) { _ in
-            calls += 1
-            throw URLError(.notConnectedToInternet)
-        }
-        for _ in 0..<10 { _ = try await context.search("台北車站") }
-        XCTAssertEqual(calls, JourneyAssistantContext.searchLimit)
-        XCTAssertEqual(calls, 3)
-        XCTAssertNil(context.place(id: "place-1"))
-    }
-    func testCancellationDoesNotRegisterStaleToolEvidence() async throws {
-        let context = JourneyAssistantContext(journeys: []) { _ in
-            try await Task.sleep(for: .seconds(5))
-            return []
-        }
-        let task = Task { try await context.search("北車") }
-        task.cancel()
-        do { _ = try await task.value; XCTFail("Expected cancellation") }
-        catch is CancellationError { }
     }
 }

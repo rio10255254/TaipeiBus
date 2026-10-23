@@ -49,6 +49,6 @@ python3 ios/ai/journey-report.py /tmp/journey-device-attachments/REPORT.json \
 ## 其他回歸驗證
 
 - `AssistantSafetyTests`：欄位保留、無效日期、選項範圍與輸入限制。
-- `JourneyAssistantToolTests`：只回傳工具取得的候選、已存起終點與偏好、搜尋失敗／取消及次數上限。裝置端模型的上下文約 4,096 tokens，工具輸出因此受限：`listSavedJourneys` 依關鍵字只回傳最相關的 3 筆，且不含地址（50 筆常用行程時「回家」仍取得正確的一筆，輸出在 600 bytes 內）；`searchPlaces` 每次對話最多 3 次、每次 3 筆，地址截為 20 字。超過上下文時以新的 session 重試一次，再失敗就回到手動填寫。
+- `JourneyAssistantToolTests`：裝置端模型只讀出一份欄位（`JourneyReading`：地點文字與種類、偏好、時間），不呼叫工具；之後由 App 比對常用行程、用 Apple 地圖搜尋，只有真的有兩個以上可選時才追問。測試涵蓋：沒說出發地就用目前位置且不追問、沒有存「公司」時絕不拿「公司」去地圖搜尋、「回家」沿用常用行程的偏好、兩個「家」時詢問、地名有多個結果時列出真實結果、指定出發時間與已過時間的追問、搜尋失敗與取消。（先前讓模型自己呼叫工具時，真機上一句話要 15–45 秒，且會重複查詢 30 次以上。）
 - `AIUITests`：不可用時入口隱藏；以明確的 Debug fixture 檢查點選後不需重打、選地點後仍需明確確認、更換地點取消確認。這不是模型準確率測試。
 - CI 裝置 Release 建置後以 Mach-O load commands 確認 FoundationModels 使用 `LC_LOAD_WEAK_DYLIB`。

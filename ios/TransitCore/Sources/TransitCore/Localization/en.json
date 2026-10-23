@@ -875,5 +875,17 @@
   "正在準備確認問題…": "Preparing a question…",
   "正在理解你的選擇…": "Understanding your choice…",
   "手機上的模型這次回應太久，請直接填寫下方行程條件，或再試一次。": "The on-device model took too long this time. Fill in the journey details below, or try again.",
-  "手機上的模型這次回應太久，已保留條件，請直接修改確認。": "The on-device model took too long this time. Your details are kept; edit and confirm them below."
+  "手機上的模型這次回應太久，已保留條件，請直接修改確認。": "The on-device model took too long this time. Your details are kept; edit and confirm them below.",
+  "要先去哪裡？": "Where do you want to go first?",
+  "要用哪一個常用行程？": "Which saved journey?",
+  "目的地是哪一個？": "Which destination?",
+  "出發地用哪一個常用行程？": "Start from which saved journey?",
+  "出發地是哪一個？": "Which starting point?",
+  "目前只能依抵達時間規劃，要怎麼做？": "Trips can be planned by arrival time only. What would you like to do?",
+  "改成指定抵達時間": "Set an arrival time instead",
+  "早上": "morning",
+  "下午": "afternoon",
+  "晚上": "evening",
+  "這個時間已經過了，要改成？": "That time has passed. Change it to?",
+  "明天%@ %@ 前抵達": "Arrive by %@ tomorrow %@"
 }

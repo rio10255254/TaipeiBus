@@ -229,7 +229,6 @@ struct AIJourneyAssistantView: View {
             switch value {
             case .search: activity = AppText.text("正在搜尋地點…")
             case .saved: activity = AppText.text("正在查看常用行程…")
-            case .clarify: activity = AppText.text("正在準備確認問題…")
             }
         }
     }
