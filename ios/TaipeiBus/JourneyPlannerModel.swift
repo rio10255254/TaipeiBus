@@ -790,18 +790,26 @@ final class JourneyPlannerModel: ObservableObject {
     /// Pull freshly possible bike choices between verification batches. A feed arriving
     /// mid-search must not wait for every ordinary boarding platform to finish first.
     private func takeBikeConnections(limit: Int) -> [JourneyOption] {
-        guard preferences.bikeRouting, attemptedBikeConnections.count < limit else { return [] }
+        guard preferences.bikeRouting else { return [] }
+        // A rider who asked to cycle always gets the whole-trip ride checked, even after transit
+        // feeder rides have used the comparison budget; it used to never be tried on long trips.
+        var priority: [JourneyOption] = []
+        if preferredMode == .cycling, let whole = wholeTripBikeChoice(),
+           attemptedBikeConnections.insert(bikeChoiceKey(whole)).inserted { priority = [whole] }
+        guard attemptedBikeConnections.count < limit else { return priority }
         var choices = integratedSearchHasSupply ? [] : bikeConnections(for: Array(connectionBases.values), at: Date())
-        if let origin, let destination,
-           let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
-               network: bikeNetwork, availability: bikeAvailability, preferences: wholeTripBikePreferences) {
-            var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate); leg.bike = BikeLeg(whole)
-            let choice = JourneyOption(id: "youbike", trip: nil, walks: [leg])
-            if !attemptedBikeConnections.contains(bikeChoiceKey(choice)) { choices.append(choice) }
-        }
+        if let whole = wholeTripBikeChoice(), !attemptedBikeConnections.contains(bikeChoiceKey(whole)) { choices.append(whole) }
         let reserved = Array(choices.prefix(limit - attemptedBikeConnections.count))
         attemptedBikeConnections.formUnion(reserved.map(bikeChoiceKey))
-        return reserved
+        return priority + reserved
+    }
+    /// Riding YouBike all the way, when stations with bikes and docks are near both ends.
+    private func wholeTripBikeChoice() -> JourneyOption? {
+        guard preferences.bikeRouting, let origin, let destination,
+              let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
+                  network: bikeNetwork, availability: bikeAvailability, preferences: wholeTripBikePreferences) else { return nil }
+        var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate); leg.bike = BikeLeg(whole)
+        return JourneyOption(id: "youbike", trip: nil, walks: [leg])
     }
     /// One ordinary route and one cycling alternative share each batch. Later walking
     /// platforms cannot monopolize the queue; at most two routes are verified at once.
@@ -1254,6 +1262,10 @@ final class JourneyPlannerModel: ObservableObject {
             if complete, !verifiedPool.contains(where: { $0.walkingOnly }), origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 2_000) {
                 pending.insert(JourneyOption(id: "walking", trip: nil,
                     walks: [WalkingLeg(from: origin.coordinate, to: destination.coordinate)]), at: 0)
+            }
+            if complete, preferredMode == .cycling, !verifiedPool.contains(where: \.bikeOnly),
+               let whole = wholeTripBikeChoice(), attemptedBikeConnections.insert(bikeChoiceKey(whole)).inserted {
+                pending.insert(whole, at: 0)
             }
             if options.isEmpty { options = Array(pending.prefix(3)); selectedID = nil }
             planning = false; checkingWalks = true
