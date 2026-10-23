@@ -80,7 +80,10 @@ struct AssistantJourneyTurn {
 protocol JourneyAssistantConversation: AnyObject {
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn
     func answer(option: Int) async throws -> AssistantJourneyTurn
+    /// Loads the model before the first request, so the first answer does not wait for it.
+    func prewarm()
 }
+extension JourneyAssistantConversation { func prewarm() {} }
 
 /// Each conversation owns its evidence and tools; neither tool can invoke a planner.
 /// Tool output is kept small: the on-device model has a context window of about 4,096 tokens
@@ -93,6 +96,12 @@ final class JourneyAssistantContext {
     private var evidence: [String: TravelPlace] = [:]
     private var searchCount = 0
     private(set) var toolCalls: [String] = []
+    /// Seconds spent waiting for place search, for the troubleshooting history.
+    private(set) var searchSeconds: Double = 0
+    /// What the assistant is doing now, for the progress line: search, saved, clarify.
+    var onActivity: (@MainActor (Activity) -> Void)?
+    enum Activity { case search, saved, clarify }
+    func report(_ activity: Activity) { onActivity?(activity) }
 
     init(journeys: [SavedJourney], searchPlaces: @escaping @MainActor (String) async throws -> [TravelPlace]) {
         self.journeys = journeys.filter(\.valid); self.searchPlaces = searchPlaces
@@ -115,7 +124,9 @@ final class JourneyAssistantContext {
         guard searchCount < Self.searchLimit, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, query.count <= 120 else {
             return "Search unavailable for this query. Keep the field editable and mark it as needing confirmation."
         }
-        searchCount += 1; toolCalls.append("searchPlaces: \(query)")
+        searchCount += 1; toolCalls.append("searchPlaces: \(query)"); report(.search)
+        let started = Date()
+        defer { searchSeconds += Date().timeIntervalSince(started) }
         do {
             let places = try await searchPlaces(query)
             try Task.checkCancellation()
@@ -130,7 +141,7 @@ final class JourneyAssistantContext {
     /// At most three saved journeys relevant to the query, without addresses.
     func savedJourneys(matching query: String) throws -> String {
         try Task.checkCancellation()
-        toolCalls.append("listSavedJourneys: \(query)")
+        toolCalls.append("listSavedJourneys: \(query)"); report(.saved)
         return try json(Self.relevant(journeys, to: query).prefix(Self.resultLimit).map { item in
             Journey(title: item.title, symbol: item.symbol,
                     origin: item.origin.map { Endpoint(id: register($0), name: $0.name) },
@@ -256,6 +267,7 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         session = Self.session(context: context, language: language)
         context.resetSearchBudget()
     }
+    func prewarm() { session.prewarm() }
     private func overflowed(_ error: Error) -> Bool {
         guard let failure = error as? LanguageModelSession.GenerationError,
               case .exceededContextWindowSize = failure else { return false }
@@ -303,6 +315,7 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
             .validated(source: source, now: referenceDate)
         var clarification: AssistantClarification?
         if value.needsClarification {
+            context.report(.clarify)
             do {
                 let question = try await session.respond(to: "Ask one choice question to resolve the most important remaining ambiguity in this journey. Offer at most three options.",
                     generating: GeneratedJourneyClarification.self, options: GenerationOptions(temperature: 0))

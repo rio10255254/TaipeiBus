@@ -134,7 +134,9 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
     func resolve(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> TravelPlace? {
         try await find(text: text, completion: completion).first
     }
-    func find(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> [TravelPlace] {
+    /// `queryLimit` and `timeout` bound one lookup; the journey assistant uses a smaller budget
+    /// because the on-device model waits for every search it makes.
+    func find(text: String, completion: MKLocalSearchCompletion? = nil, queryLimit: Int = 3, timeout: Double = 6) async throws -> [TravelPlace] {
         debounceTask?.cancel(); completer?.cancel(); completer = nil
         search?.cancel()
         query = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -152,7 +154,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         let category: MKPointOfInterestCategory? = ["咖啡": .cafe, "咖啡店": .cafe, "餐廳": .restaurant,
             "醫院": .hospital, "公園": .park, "捷運站": .publicTransport, "加油站": .gasStation][StationSearch.normalize(clean)]
         let transitQuery = StationSearch.isTransitQuery(clean)
-        let searchQueries = completion == nil ? queries(for: text) : [text]
+        let searchQueries = completion == nil ? Array(queries(for: text).prefix(max(1, queryLimit))) : [text]
         let matchers = ([text] + searchQueries).map { PlaceMatcher(query: $0, vocabulary: vocabulary) }
         for (index, query) in searchQueries.enumerated() {
             try Task.checkCancellation()
@@ -165,7 +167,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
             else if transitQuery && index == 0 { request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.publicTransport]) }
             let operation = MKLocalSearch(request: request); search = operation
             let deadline = Task { @MainActor in
-                do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
                 operation.cancel()
             }
             do {

@@ -868,5 +868,12 @@
   "重新測試": "Run again",
   "停止": "Stop",
   "分享測試報告": "Share test report",
-  "測試期間請保持 App 在前景。報告為 JSON 檔，可傳回電腦用 journey-report.py 整理。": "Keep the app in the foreground during the test. The report is a JSON file that journey-report.py can summarize on a computer."
+  "測試期間請保持 App 在前景。報告為 JSON 檔，可傳回電腦用 journey-report.py 整理。": "Keep the app in the foreground during the test. The report is a JSON file that journey-report.py can summarize on a computer.",
+  "正在理解你的需求…": "Understanding your request…",
+  "正在搜尋地點…": "Searching places…",
+  "正在查看常用行程…": "Checking saved journeys…",
+  "正在準備確認問題…": "Preparing a question…",
+  "正在理解你的選擇…": "Understanding your choice…",
+  "手機上的模型這次回應太久，請直接填寫下方行程條件，或再試一次。": "The on-device model took too long this time. Fill in the journey details below, or try again.",
+  "手機上的模型這次回應太久，已保留條件，請直接修改確認。": "The on-device model took too long this time. Your details are kept; edit and confirm them below."
 }

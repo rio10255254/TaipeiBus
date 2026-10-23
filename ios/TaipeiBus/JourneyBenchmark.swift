@@ -152,7 +152,7 @@ enum JourneyBenchmark {
         row.fieldCorrect = Dictionary(uniqueKeysWithValues: fields.map { ($0, false) })
         let context = JourneyAssistantContext(journeys: fixtures(sample.scenario)) { query in
             let search = PlaceSearch(); search.setContext(.taipei)
-            return try await search.find(text: query)
+            return try await search.find(text: query, queryLimit: 2, timeout: 4)
         }
         do {
             guard let now = ISO8601DateFormatter().date(from: sample.now) else { throw CocoaError(.coderInvalidValue) }

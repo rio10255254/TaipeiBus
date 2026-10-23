@@ -26,6 +26,13 @@ struct AIJourneyAssistantView: View {
     @State private var busy = false
     @State private var message: String?
     @State private var operation: Task<Void, Never>?
+    @State private var deadlineTask: Task<Void, Never>?
+    @State private var prepared: (context: JourneyAssistantContext, conversation: any JourneyAssistantConversation)?
+    @State private var activity = AppText.text("正在理解你的需求…")
+    @State private var startedAt = Date()
+    @State private var activeContext: JourneyAssistantContext?
+    /// The on-device model can be slow, but the screen must never wait indefinitely.
+    private static let timeLimit: Double = 45
     @State private var showingArrival = false
 
     private var unavailable: String? { OnDeviceJourneyAssistant.unavailableReason() }
@@ -121,7 +128,19 @@ struct AIJourneyAssistantView: View {
                         }
                     }
                 }
-                if busy { ProgressView().accessibilityIdentifier("ai-progress") }
+                if busy {
+                    Section {
+                        HStack(spacing: 12) {
+                            ProgressView()
+                            Text(activity)
+                            Spacer()
+                            TimelineView(.periodic(from: startedAt, by: 1)) { timeline in
+                                Text(AppText.text("%@ 秒", "\(max(0, Int(timeline.date.timeIntervalSince(startedAt))))"))
+                                    .monospacedDigit().foregroundStyle(.secondary)
+                            }
+                        }.accessibilityIdentifier("ai-progress")
+                    }
+                }
                 if let message { Section { Text(message).accessibilityIdentifier("ai-error") } }
             }
             .navigationTitle(AppText.text("用一句話規劃"))
@@ -139,7 +158,8 @@ struct AIJourneyAssistantView: View {
         .onChange(of: preference) { _, _ in confirmed = false }
         .onChange(of: hasDeadline) { _, _ in confirmed = false }
         .onChange(of: deadline) { _, _ in confirmed = false }
-        .onDisappear { operation?.cancel(); search.cancel(); conversation = nil }
+        .onAppear { prepare() }
+        .onDisappear { operation?.cancel(); deadlineTask?.cancel(); search.cancel(); conversation = nil; prepared = nil }
     }
     private func fieldStatus(_ title: String, _ status: AssistantFieldStatus) -> some View {
         Label(title + " · " + (status == .certain ? AppText.text("確定") : AppText.text("需確認")),
@@ -185,46 +205,108 @@ struct AIJourneyAssistantView: View {
         selectedDestination = nil; selectedOrigin = nil; confirmed = false
         clarification = turn.clarification; reviewed = true; busy = false
     }
-    private func extract() {
-        inputFocused = false
-        resetPlaces(); busy = true; message = nil; reviewed = false; clarification = nil; conversation = nil
-        let source = input
+    private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
-        let context = JourneyAssistantContext(journeys: model.commutes.journeys) { query in
+        return JourneyAssistantContext(journeys: model.commutes.journeys) { query in
             // A separate search per call avoids cancellation when the model calls tools concurrently.
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
-            return try await toolSearch.find(text: query)
+            return try await toolSearch.find(text: query, queryLimit: 2, timeout: 4)
+        }
+    }
+    /// Starts loading the model while the user types.
+    private func prepare() {
+        guard unavailable == nil, prepared == nil else { return }
+        let context = makeContext()
+        guard let session = try? OnDeviceJourneyAssistant.conversation(context: context) else { return }
+        session.prewarm()
+        prepared = (context, session)
+    }
+    private func track(_ context: JourneyAssistantContext) {
+        context.onActivity = { value in
+            switch value {
+            case .search: activity = AppText.text("正在搜尋地點…")
+            case .saved: activity = AppText.text("正在查看常用行程…")
+            case .clarify: activity = AppText.text("正在準備確認問題…")
+            }
+        }
+    }
+    /// Starts the limit for one model step; when it passes, the review stays editable by hand.
+    private func startDeadline(_ step: String, context: JourneyAssistantContext, onTimeout: @escaping @MainActor () -> Void) {
+        deadlineTask?.cancel()
+        deadlineTask = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(Self.timeLimit)) } catch { return }
+            guard busy else { return }
+            operation?.cancel()
+            record(step, outcome: "timeout", context: context)
+            onTimeout()
+        }
+    }
+    /// Timing only: no request text, places or answers enter the troubleshooting history.
+    private func record(_ step: String, outcome: String, context: JourneyAssistantContext) {
+        let searches = context.toolCalls.filter { $0.hasPrefix("searchPlaces") }.count
+        let saved = context.toolCalls.filter { $0.hasPrefix("listSavedJourneys") }.count
+        JourneyDiagnostics.shared.record(String(format: "ai-%@ %@ %.1fs searches=%d search=%.1fs saved=%d",
+            step, outcome, Date().timeIntervalSince(startedAt), searches, context.searchSeconds, saved))
+    }
+    private func manualReview(_ text: String) {
+        busy = false
+        // Model failures still allow the user to fill in the same review screen.
+        reviewed = true; review = .init(); destination = ""; origin = ""
+        preference = .balanced; hasDeadline = false; timeDescription = ""
+        message = text
+    }
+    private func extract() {
+        inputFocused = false
+        resetPlaces(); busy = true; message = nil; reviewed = false; clarification = nil; conversation = nil
+        let source = input
+        let ready = prepared; prepared = nil
+        let context = ready?.context ?? makeContext()
+        track(context); activeContext = context
+        activity = AppText.text("正在理解你的需求…"); startedAt = Date()
+        startDeadline("understand", context: context) {
+            conversation = nil
+            manualReview(AppText.text("手機上的模型這次回應太久，請直接填寫下方行程條件，或再試一次。"))
         }
         operation = Task { @MainActor in
             do {
-                let session = try OnDeviceJourneyAssistant.conversation(context: context)
+                let session = try ready?.conversation ?? OnDeviceJourneyAssistant.conversation(context: context)
                 conversation = session
                 let result = try await session.begin(source, at: Date())
                 try Task.checkCancellation()
+                deadlineTask?.cancel()
+                record("understand", outcome: "ok", context: context)
                 receive(result)
             } catch {
                 guard !Task.isCancelled else { return }
-                busy = false
-                // Model failures still allow the user to fill in the same review screen.
-                reviewed = true; review = .init(); destination = ""; origin = ""
-                preference = .balanced; hasDeadline = false; timeDescription = ""
-                message = AppText.text("暫時無法理解，請直接填寫下方行程條件，或再試一次。")
+                deadlineTask?.cancel()
+                record("understand", outcome: "error", context: context)
+                manualReview(AppText.text("暫時無法理解，請直接填寫下方行程條件，或再試一次。"))
             }
         }
     }
     private func answer(_ index: Int) {
         guard let conversation, !busy else { return }
         operation?.cancel(); busy = true; confirmed = false; message = nil
+        activity = AppText.text("正在理解你的選擇…"); startedAt = Date()
+        let context = activeContext ?? makeContext()
+        startDeadline("answer", context: context) {
+            busy = false; clarification = nil
+            message = AppText.text("手機上的模型這次回應太久，已保留條件，請直接修改確認。")
+        }
         operation = Task { @MainActor in
             do {
                 let result = try await conversation.answer(option: index)
                 try Task.checkCancellation()
+                deadlineTask?.cancel()
+                record("answer", outcome: "ok", context: context)
                 receive(result)
             } catch {
                 guard !Task.isCancelled else { return }
+                deadlineTask?.cancel()
+                record("answer", outcome: "error", context: context)
                 busy = false; clarification = nil
                 message = AppText.text("暫時無法繼續理解，已保留條件，請直接修改確認。")
             }
