@@ -107,11 +107,16 @@ extension JourneyAssistantConversation { func prewarm() {} }
 /// shared by the instructions, the request, every tool result and the generated answer.
 @MainActor
 final class JourneyAssistantContext {
-    static let searchLimit = 3, resultLimit = 3, addressLength = 20
+    static let searchLimit = 3, savedLimit = 2, resultLimit = 3, addressLength = 20
+    /// Tool replies the model cannot misread as "try again": an empty JSON array made the
+    /// on-device model repeat listSavedJourneys 30-40 times until the request timed out.
+    static let searchExhausted = "No more place searches are available. Do not call searchPlaces again. Answer now and mark unresolved places as needing confirmation."
+    static let savedExhausted = "Saved journeys were already checked. Do not call listSavedJourneys again. Answer now."
     private let searchPlaces: @MainActor (String) async throws -> [TravelPlace]
     private let journeys: [SavedJourney]
     private var evidence: [String: TravelPlace] = [:]
     private var searchCount = 0
+    private var savedCount = 0
     private(set) var toolCalls: [String] = []
     /// Seconds spent waiting for place search, for the troubleshooting history.
     private(set) var searchSeconds: Double = 0
@@ -138,7 +143,8 @@ final class JourneyAssistantContext {
     }
     func search(_ query: String) async throws -> String {
         try Task.checkCancellation()
-        guard searchCount < Self.searchLimit, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, query.count <= 120 else {
+        guard searchCount < Self.searchLimit else { return Self.searchExhausted }
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, query.count <= 120 else {
             return "Search unavailable for this query. Keep the field editable and mark it as needing confirmation."
         }
         searchCount += 1; toolCalls.append("searchPlaces: \(query)"); report(.search)
@@ -147,7 +153,11 @@ final class JourneyAssistantContext {
         do {
             let places = try await searchPlaces(query)
             try Task.checkCancellation()
-            return try json(places.filter { $0.coordinate.isInServiceArea }.prefix(Self.resultLimit).map {
+            let found = places.filter { $0.coordinate.isInServiceArea }.prefix(Self.resultLimit)
+            guard !found.isEmpty else {
+                return "No Taipei place matches \"\(query)\". Keep the keyword as typed and mark the place as needing confirmation."
+            }
+            return try json(found.map {
                 Place(id: register($0), name: $0.name, address: String($0.address.prefix(Self.addressLength)))
             })
         } catch {
@@ -158,8 +168,14 @@ final class JourneyAssistantContext {
     /// At most three saved journeys relevant to the query, without addresses.
     func savedJourneys(matching query: String) throws -> String {
         try Task.checkCancellation()
+        guard savedCount < Self.savedLimit else { return Self.savedExhausted }
+        savedCount += 1
         toolCalls.append("listSavedJourneys: \(query)"); report(.saved)
-        return try json(Self.relevant(journeys, to: query).prefix(Self.resultLimit).map { item in
+        let matches = Self.relevant(journeys, to: query).prefix(Self.resultLimit)
+        guard !matches.isEmpty else {
+            return "The user has no saved journey matching \"\(query)\". It is an ordinary place name: use searchPlaces for it instead. Do not call listSavedJourneys again."
+        }
+        return try json(matches.map { item in
             Journey(title: item.title, symbol: item.symbol,
                     origin: item.origin.map { Endpoint(id: register($0), name: $0.name) },
                     destination: Endpoint(id: register(item.destination), name: item.destination.name),
@@ -168,7 +184,7 @@ final class JourneyAssistantContext {
     }
     func place(id: String) -> TravelPlace? { evidence[id] }
     /// A fresh model session after a context overflow gets a fresh search budget; evidence IDs stay valid.
-    func resetSearchBudget() { searchCount = 0 }
+    func resetSearchBudget() { searchCount = 0; savedCount = 0 }
 
     private static let categories: [(symbol: String, words: [String])] = [
         ("house.fill", ["家", "住處", "home", "house"]),
@@ -262,8 +278,9 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         Only an explicitly requested arrival deadline belongs in the time fields. No requested time means leave now.
         Interpret relative dates using the supplied Asia/Taipei date. A departure-time request is unsupported:
         mark time uncertain and ask whether to use an arrival deadline or leave now; never silently convert it.
-        Use searchPlaces to resolve place names/abbreviations. Use listSavedJourneys with a keyword such as 家,
-        公司, 學校 or a saved journey name for home/work/school or a named saved journey. For 從公司 use the work
+        Use searchPlaces to resolve place names/abbreviations. Use listSavedJourneys ONLY when the user says
+        home, work, school (家, 公司, 學校…) or names a saved journey; ordinary places such as 台大 or 北車 are not
+        saved journeys. Call each tool at most twice, then answer. For 從公司 use the work
         journey's destination as origin. For 回家/去公司 use the matching saved journey and its preference unless
         the user overrides it. Empty saved origin means current location. Never invent a home/work address.
         If multiple saved journeys match, ask a choice.

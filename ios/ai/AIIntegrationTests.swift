@@ -94,8 +94,8 @@ import TransitCore
         let home = TravelPlace(name: "古亭站", address: "臺北市中正區", coordinate: Coordinate(latitude: 25.026, longitude: 121.522))
         library[37] = SavedJourney(id: UUID(), title: "回家", symbol: "house.fill", origin: nil,
                                    destination: home, preference: .lessWalking, updatedAt: Date())
-        let context = JourneyAssistantContext(journeys: library) { _ in [] }
         for query in ["回家", "家", "home"] {
+            let context = JourneyAssistantContext(journeys: library) { _ in [] }
             let text = try context.savedJourneys(matching: query)
             XCTAssertLessThan(text.utf8.count, 600, "\(query): \(text)")
             let rows = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(text.utf8)) as? [[String: Any]])
@@ -107,9 +107,29 @@ import TransitCore
             XCTAssertEqual(context.place(id: try XCTUnwrap(to["id"]))?.id, home.id)
             XCTAssertFalse(text.contains("市府路"), "Addresses never enter the model context")
         }
-        XCTAssertEqual(try context.savedJourneys(matching: "動物園"), "[]")
-        let unfiltered = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try context.savedJourneys(matching: "").utf8)) as? [Any])
-        XCTAssertEqual(unfiltered.count, 3)
+        let unfiltered = JourneyAssistantContext(journeys: library) { _ in [] }
+        let all = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(try unfiltered.savedJourneys(matching: "").utf8)) as? [Any])
+        XCTAssertEqual(all.count, 3)
+    }
+    func testSavedJourneyToolStopsTheModelFromAskingAgain() throws {
+        // On a phone, an empty "[]" reply made the model call listSavedJourneys 30-40 times until the
+        // request timed out. A miss now says so plainly, and the tool answers at most twice.
+        let context = JourneyAssistantContext(journeys: []) { _ in [] }
+        let miss = try context.savedJourneys(matching: "台大")
+        XCTAssertTrue(miss.contains("no saved journey") && miss.contains("searchPlaces"), miss)
+        _ = try context.savedJourneys(matching: "台灣大學")
+        for _ in 0..<5 { XCTAssertEqual(try context.savedJourneys(matching: "臺大"), JourneyAssistantContext.savedExhausted) }
+        XCTAssertEqual(context.toolCalls.count, JourneyAssistantContext.savedLimit)
+        context.resetSearchBudget()
+        XCTAssertNotEqual(try context.savedJourneys(matching: "台大"), JourneyAssistantContext.savedExhausted)
+    }
+    func testEmptyPlaceSearchSaysSoInsteadOfAnEmptyList() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [] }
+        let reply = try await context.search("不存在的地方")
+        XCTAssertTrue(reply.hasPrefix("No Taipei place matches"), reply)
+        for _ in 0..<3 { _ = try await context.search("台大") }
+        let exhausted = try await context.search("台大")
+        XCTAssertEqual(exhausted, JourneyAssistantContext.searchExhausted)
     }
     func testContextOverflowRetriesOnceWithAFreshSessionThenFallsBack() async throws {
         struct Overflow: Error {}
