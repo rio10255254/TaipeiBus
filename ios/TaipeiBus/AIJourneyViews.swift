@@ -282,8 +282,9 @@ struct AIJourneyAssistantView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 deadlineTask?.cancel()
-                record("understand", outcome: "error", context: context)
-                manualReview(AppText.text("暫時無法理解，請直接填寫下方行程條件，或再試一次。"))
+                let kind = OnDeviceJourneyAssistant.failureKind(error)
+                record("understand", outcome: "error:" + kind, context: context)
+                manualReview(AppText.text("暫時無法理解，請直接填寫下方行程條件，或再試一次。") + "\n(" + kind + ")")
             }
         }
     }
@@ -306,7 +307,7 @@ struct AIJourneyAssistantView: View {
             } catch {
                 guard !Task.isCancelled else { return }
                 deadlineTask?.cancel()
-                record("answer", outcome: "error", context: context)
+                record("answer", outcome: "error:" + OnDeviceJourneyAssistant.failureKind(error), context: context)
                 busy = false; clarification = nil
                 message = AppText.text("暫時無法繼續理解，已保留條件，請直接修改確認。")
             }

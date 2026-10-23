@@ -172,7 +172,7 @@ enum JourneyBenchmark {
                     row.followUpCorrect = Dictionary(uniqueKeysWithValues: fields.map { ($0, false) })
                 }
             }
-        } catch { row.error = String(describing: error) }
+        } catch { row.error = OnDeviceJourneyAssistant.failureKind(error) + ": " + String(describing: error) }
         row.toolCalls = context.toolCalls
         row.savedToolCorrect = !sample.requiresSavedTool || context.toolCalls.contains { $0.hasPrefix("listSavedJourneys") }
         row.elapsedSeconds = Date().timeIntervalSince(start)

@@ -45,6 +45,23 @@ enum OnDeviceJourneyAssistant {
         throw Failure.unavailable
     }
 
+    /// A short failure category for troubleshooting, e.g. generation.guardrailViolation.
+    /// Only type and case names: never the request text, prompts or tool output.
+    static func failureKind(_ error: Error) -> String {
+#if canImport(FoundationModels)
+        if #available(iOS 26.0, *) {
+            if let failure = error as? LanguageModelSession.GenerationError {
+                return "generation." + (Mirror(reflecting: failure).children.first?.label ?? String(String(describing: failure).prefix(40)))
+            }
+            if let failure = error as? LanguageModelSession.ToolCallError {
+                return "tool.\(failure.tool.name).\(type(of: failure.underlyingError))"
+            }
+        }
+#endif
+        if let failure = error as? Failure { return "assistant.\(failure)" }
+        return String(describing: type(of: error))
+    }
+
     /// The result is verbatim excerpts, always displayed alongside the full notice.
     static func excerpt(_ document: NoticeExcerpt, language: AppLanguage = .current) async throws -> [String] {
         guard document.canSummarize, unavailableReason(language: language) == nil else { throw Failure.unavailable }
