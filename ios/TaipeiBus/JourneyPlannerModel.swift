@@ -1817,8 +1817,7 @@ final class JourneyPlannerModel: ObservableObject {
         lastMetadata = metadata
         return try await enrich(option)
     }
-    func auditBikeConnections(_ choices: [JourneyOption], at suppliedDate: Date = Date()) -> [JourneyOption] {
-        let date = clock(suppliedDate)
+    func auditBikeConnections(_ choices: [JourneyOption], at date: Date = Date()) -> [JourneyOption] {
         bikeConnections(for: choices, at: date)
     }
     func auditBikeGatewayProbes(metadata: TransitMetadata, from: Coordinate, to: Coordinate) -> [(Coordinate, Coordinate)] {
