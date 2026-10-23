@@ -190,6 +190,9 @@ final class JourneyPlannerModel: ObservableObject {
     /// The rider tapped this route. A card only retained because it appeared first may still
     /// give way to a clearly better route found later.
     private var selectionChosen = false
+    /// A way of travelling the rider asked for in 用一句話規劃 (e.g. 騎單車): routes made only of
+    /// it are listed first. Cleared when the trip is finished.
+    var preferredMode = AssistantTravelMode.any
     private var forecast = VehicleArrivalForecast()
     private struct CachedDuration {
         let bucket: Int
@@ -541,7 +544,16 @@ final class JourneyPlannerModel: ObservableObject {
                 transitLed: isTransitLed(option,timing:timing,hasTransit:hasTransit)))
         }
         let byID = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0) })
-        return JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
+        let ranked = JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
+        let wanted: [JourneyOption]
+        switch preferredMode {
+        case .any: return ranked
+        case .cycling: wanted = valid.filter(\.bikeOnly)
+        case .walking: wanted = valid.filter(\.walkingOnly)
+        }
+        let fastest = wanted.sorted { (duration($0, at: date)?.totalSeconds ?? .infinity) < (duration($1, at: date)?.totalSeconds ?? .infinity) }
+        let ids = Set(fastest.map(\.id))
+        return fastest + ranked.filter { !ids.contains($0.id) }
     }
     private func isTransitLed(_ option: JourneyOption, timing: JourneyDuration, hasTransit: Bool = true) -> Bool {
         let bikes = option.walks.compactMap(\.bike)
@@ -1623,6 +1635,7 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         defer { onNavigationChange?() }
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
+        preferredMode = .any
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]
     }

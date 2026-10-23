@@ -85,9 +85,13 @@ enum OnDeviceJourneyAssistant {
     }
 }
 
+/// A way of travelling named in the sentence, such as 騎單車 or 走路過去.
+enum AssistantTravelMode: String, Codable, Sendable { case any, cycling, walking }
+
 struct AssistantJourneyTurn {
     var request: AssistantJourneyRequest
     var clarification: AssistantClarification?
+    var mode = AssistantTravelMode.any
     // Only actual search/library objects can enter the confirmation screen.
     var destinationCandidates: [TravelPlace]
     var originCandidates: [TravelPlace]
@@ -111,8 +115,6 @@ struct JourneyReading: Equatable, Sendable {
     var destinationKind = Kind.none
     var origin = ""
     var originKind = Kind.none
-    /// A second place the user wants to go to in the same sentence.
-    var otherDestination = ""
     /// nil when the user asked for conflicting preferences.
     var preference: AssistantIntentDraft.Preference? = .balanced
     var timeEvidence = ""
@@ -120,6 +122,7 @@ struct JourneyReading: Equatable, Sendable {
     var arrivalHour = -1
     var arrivalMinute = -1
     var departureTime = false
+    var travelMode = AssistantTravelMode.any
 }
 
 /// Resolves a reading against the user's saved journeys and Apple Maps search, and asks a
@@ -152,25 +155,16 @@ final class JourneyAssistantContext {
         case places(String, [TravelPlace])
         case chosen(TravelPlace)
     }
-    private enum Pending {
-        case order, savedDestination([SavedJourney]), placeDestination([TravelPlace])
-        case savedOrigin([SavedJourney]), placeOrigin([TravelPlace]), departure, deadline(String)
-    }
+    private enum Pending { case savedDestination([SavedJourney]), savedOrigin([SavedJourney]) }
     private var reading = JourneyReading()
     private var source = ""
     private var now = Date()
     private var destination = Endpoint.unresolved("")
     private var origin = Endpoint.current
-    private var orderSettled = true
-    private var departureSettled = true
-    private var deadlineSettled = false
     private var pending: Pending?
 
     func resolve(_ reading: JourneyReading, source: String, now: Date) async throws -> AssistantJourneyTurn {
         self.reading = reading; self.source = source; self.now = now
-        orderSettled = Self.trimmed(reading.otherDestination).isEmpty
-        departureSettled = !reading.departureTime
-        deadlineSettled = false
         destination = try await endpoint(reading.destination, kind: reading.destinationKind, isOrigin: false)
         origin = try await endpoint(reading.origin, kind: reading.originKind, isOrigin: true)
         return try turn()
@@ -183,26 +177,8 @@ final class JourneyAssistantContext {
             return values[option]
         }
         switch question {
-        case .order:
-            guard (0...1).contains(option) else { throw OnDeviceJourneyAssistant.Failure.invalidResponse }
-            if option == 1 { destination = try await endpoint(reading.otherDestination, kind: .place, isOrigin: false) }
-            orderSettled = true
         case .savedDestination(let values): destination = .saved(try pick(values))
-        case .placeDestination(let values): destination = .chosen(try pick(values))
         case .savedOrigin(let values): origin = .saved(try pick(values))
-        case .placeOrigin(let values): origin = .chosen(try pick(values))
-        case .departure:
-            guard (0...1).contains(option) else { throw OnDeviceJourneyAssistant.Failure.invalidResponse }
-            if option == 0 {
-                reading.departureTime = false; reading.timeEvidence = ""
-                reading.arrivalDay = ""; reading.arrivalHour = -1; reading.arrivalMinute = -1
-            }
-            departureSettled = true
-        case .deadline(let tomorrow):
-            guard (0...1).contains(option) else { throw OnDeviceJourneyAssistant.Failure.invalidResponse }
-            if option == 0 { reading.arrivalDay = tomorrow }
-            else { reading.arrivalDay = ""; reading.arrivalHour = -1; reading.arrivalMinute = -1; reading.timeEvidence = "" }
-            deadlineSettled = true
         }
         pending = nil
         return try turn()
@@ -255,7 +231,9 @@ final class JourneyAssistantContext {
         case .saved(let journey): return (journey.destination.name, .certain, [journey.destination])
         case .savedChoice(let text, let values): return (text, .needsConfirmation, values.map(\.destination))
         case .places(let text, let values):
-            return (text, Self.exact(text, values) ? .certain : .needsConfirmation, values)
+            // The best result is used right away; the planner lets the rider change it.
+            guard let best = values.first else { return (text, .needsConfirmation, []) }
+            return (best.name, .certain, values)
         case .chosen(let place): return (place.name, .certain, [place])
         }
     }
@@ -273,67 +251,41 @@ final class JourneyAssistantContext {
             }
             if case .savedChoice = destination { review.preference = .needsConfirmation }
         }
+        // Leave now unless there is a clock deadline. A departure time cannot be planned, a day without
+        // a clock time is not a deadline, and a time already past today means tomorrow.
         var day = reading.arrivalDay, hour = reading.arrivalHour, minute = reading.arrivalMinute
-        if reading.departureTime { day = ""; hour = -1; minute = -1 }
-        if hour >= 0 && minute < 0 { minute = 0 }
-        if hour >= 0 && day.isEmpty { day = Self.dayString(now) }
-        let hasTime = reading.departureTime || !day.isEmpty || hour >= 0
+        if reading.departureTime || !(0...23).contains(hour) { day = ""; hour = -1; minute = -1 }
+        else {
+            if !(0...59).contains(minute) { minute = 0 }
+            if day.isEmpty { day = Self.dayString(now) }
+            if let date = Self.date(day: day, hour: hour, minute: minute), date <= now,
+               let tomorrow = AssistantJourneyRequest.calendar.date(byAdding: .day, value: 1, to: date), tomorrow > now {
+                day = Self.dayString(tomorrow)
+            }
+        }
         let request = try AssistantIntentDraft(destination: target.name, origin: start.name, preference: preference,
-            timeEvidence: hasTime ? reading.timeEvidence : "", arrivalDay: day, arrivalHour: hour, arrivalMinute: minute,
+            timeEvidence: hour >= 0 ? reading.timeEvidence : "", arrivalDay: day, arrivalHour: hour, arrivalMinute: minute,
             review: review).validated(source: source, now: now)
-        let question = clarification(day: day, hour: hour, minute: minute, request: request)
+        let question = clarification()
         pending = question?.pending
-        return AssistantJourneyTurn(request: request, clarification: question?.value,
+        return AssistantJourneyTurn(request: request, clarification: question?.value, mode: reading.travelMode,
             destinationCandidates: target.candidates, originCandidates: start.candidates)
     }
 
-    private func clarification(day: String, hour: Int, minute: Int, request: AssistantJourneyRequest)
-        -> (value: AssistantClarification, pending: Pending)? {
-        func ask(_ question: String, _ options: [String], _ pending: Pending) -> (AssistantClarification, Pending)? {
-            AssistantClarification(question: question, options: options).map { ($0, pending) }
-        }
-        if !orderSettled {
-            return ask(AppText.text("要先去哪裡？"), [Self.trimmed(reading.destination), Self.trimmed(reading.otherDestination)], .order)
-        }
-        if case .savedChoice(_, let values) = destination {
+    /// Only a choice the app cannot make for the rider: which of several saved journeys.
+    private func clarification() -> (value: AssistantClarification, pending: Pending)? {
+        func ask(_ question: String, _ values: [SavedJourney], _ pending: ([SavedJourney]) -> Pending) -> (AssistantClarification, Pending)? {
             let (labels, kept) = Self.labels(values.map { $0.title + "・" + $0.destination.name }, values)
-            return ask(AppText.text("要用哪一個常用行程？"), labels, .savedDestination(kept))
+            return AssistantClarification(question: question, options: labels).map { ($0, pending(kept)) }
         }
-        if case .places(let text, let values) = destination, values.count > 1, !Self.exact(text, values) {
-            let (labels, kept) = Self.labels(values.map(\.name), values)
-            return ask(AppText.text("目的地是哪一個？"), labels, .placeDestination(kept))
-        }
-        if case .savedChoice(_, let values) = origin {
-            let (labels, kept) = Self.labels(values.map { $0.title + "・" + $0.destination.name }, values)
-            return ask(AppText.text("出發地用哪一個常用行程？"), labels, .savedOrigin(kept))
-        }
-        if case .places(let text, let values) = origin, values.count > 1, !Self.exact(text, values) {
-            let (labels, kept) = Self.labels(values.map(\.name), values)
-            return ask(AppText.text("出發地是哪一個？"), labels, .placeOrigin(kept))
-        }
-        if reading.departureTime && !departureSettled {
-            return ask(AppText.text("目前只能依抵達時間規劃，要怎麼做？"),
-                       [AppText.text("現在出發"), AppText.text("改成指定抵達時間")], .departure)
-        }
-        if !deadlineSettled, request.arriveBy == nil, hour >= 0, (0...59).contains(minute),
-           let date = Self.date(day: day, hour: hour, minute: minute), date <= now,
-           let tomorrow = AssistantJourneyRequest.calendar.date(byAdding: .day, value: 1, to: date), tomorrow > now,
-           AssistantJourneyRequest.canPlan(arriveBy: tomorrow, now: now) {
-            let period = hour < 12 ? AppText.text("早上") : hour < 18 ? AppText.text("下午") : AppText.text("晚上")
-            let clock = String(format: "%d:%02d", hour > 12 ? hour - 12 : hour, minute)
-            return ask(AppText.text("這個時間已經過了，要改成？"),
-                       [AppText.text("明天%@ %@ 前抵達", period, clock), AppText.text("現在出發")], .deadline(Self.dayString(tomorrow)))
-        }
+        if case .savedChoice(_, let values) = destination { return ask(AppText.text("要用哪一個常用行程？"), values, Pending.savedDestination) }
+        if case .savedChoice(_, let values) = origin { return ask(AppText.text("出發地用哪一個常用行程？"), values, Pending.savedOrigin) }
         return nil
     }
 
     // MARK: Helpers
 
     private static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private static func exact(_ text: String, _ places: [TravelPlace]) -> Bool {
-        let key = normalized(text)
-        return !key.isEmpty && places.contains { normalized($0.name) == key }
-    }
     /// Distinct option labels, with the values they stand for kept in the same order.
     private static func labels<T>(_ names: [String], _ values: [T]) -> ([String], [T]) {
         var seen = Set<String>(), labels: [String] = [], kept: [T] = []
@@ -422,7 +374,8 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         Kind: home for 家/回家, work for 公司/上班, school for 學校/上學, saved when the user names one of the listed
         saved journeys (copy that name), place for any other place, absent when not said.
         Origin stays empty with kind absent unless the user says where they start (從…, …出發的地方).
-        Ways of travelling such as 騎腳踏車, 坐捷運, 搭公車 are neither places nor preferences.
+        travelMode: cycling for 騎單車/騎腳踏車/騎 YouBike, walking for 走路/步行, otherwise any. Ways of travelling are
+        never places or preferences.
         Preference: faster for 快一點/最快/趕時間, lessWalking for 少走路/不想走路, fewerTransfers for 少轉乘/不要換車,
         conflicting when the user asks for incompatible things, otherwise balanced.
         Time: only an arrival deadline (…前到, …以前要到) fills arrivalDay/arrivalHour/arrivalMinute, using the given date.
@@ -431,9 +384,8 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         Examples:
         回家，快一點 → destination 家 (home), preference faster.
         明天九點前從公司到北車 → destination 台北車站 (place), origin 公司 (work), arrival tomorrow 9:00.
-        騎腳踏車去台大 → destination 國立臺灣大學 (place), preference balanced, no time.
+        騎單車去台大 → destination 國立臺灣大學 (place), travelMode cycling, preference balanced, no time.
         明天下午三點出發去101 → destination 台北101 (place), departureTime true, timeEvidence 明天下午三點.
-        先去北車再去西門 → destination 台北車站, otherDestination 西門.
         """)
     }
     func prewarm() { session.prewarm() }
@@ -464,9 +416,10 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
             options: GenerationOptions(temperature: 0)).content
         try Task.checkCancellation()
         return JourneyReading(destination: value.destination, destinationKind: value.destinationKind.kind,
-            origin: value.origin, originKind: value.originKind.kind, otherDestination: value.otherDestination,
+            origin: value.origin, originKind: value.originKind.kind,
             preference: value.preference.preference, timeEvidence: value.timeEvidence, arrivalDay: value.arrivalDay,
-            arrivalHour: value.arrivalHour, arrivalMinute: value.arrivalMinute, departureTime: value.departureTime)
+            arrivalHour: value.arrivalHour, arrivalMinute: value.arrivalMinute, departureTime: value.departureTime,
+            travelMode: value.travelMode.mode)
     }
 }
 
@@ -476,6 +429,15 @@ private enum GeneratedPlaceKind {
     case absent, place, home, work, school, saved
     var kind: JourneyReading.Kind {
         switch self { case .absent: .none; case .place: .place; case .home: .home; case .work: .work; case .school: .school; case .saved: .saved }
+    }
+}
+
+@available(iOS 26.0, *)
+@Generable
+private enum GeneratedTravelMode {
+    case any, cycling, walking
+    var mode: AssistantTravelMode {
+        switch self { case .any: .any; case .cycling: .cycling; case .walking: .walking }
     }
 }
 
@@ -498,7 +460,7 @@ private struct GeneratedJourneyReading {
     var destinationKind: GeneratedPlaceKind
     @Guide(description: "Where the user starts, only if they say so; otherwise empty.") var origin: String
     var originKind: GeneratedPlaceKind
-    @Guide(description: "A second place to go to in the same request; otherwise empty.") var otherDestination: String
+    var travelMode: GeneratedTravelMode
     var preference: GeneratedPreference
     @Guide(description: "The user's words for an arrival deadline or departure time; empty for now or no time.") var timeEvidence: String
     @Guide(description: "Arrival deadline day as yyyy-MM-dd; empty if there is no arrival deadline.") var arrivalDay: String

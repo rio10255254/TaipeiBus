@@ -575,10 +575,12 @@ final class TransitAppModel: ObservableObject {
         guard purchases.hasPro else { return }
         tripPreference = value; applyPersonalPreferences()
     }
-    func previewAssistantJourney(origin: TravelPlace, destination: TravelPlace, preference: RoutePreference) {
-        guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea,
-              preference == .balanced || purchases.hasPro else { return }
+    /// Without Pro a requested preference falls back to the recommendation instead of blocking the trip.
+    func previewAssistantJourney(origin: TravelPlace, destination: TravelPlace, preference: RoutePreference,
+                                 mode: AssistantTravelMode = .any) {
+        guard origin.coordinate.isInServiceArea, destination.coordinate.isInServiceArea else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
+        planner.preferredMode = mode
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
         planner.setOrigin(origin, metadata: metadata)
         planner.setDestination(destination, metadata: metadata, currentLocation: nil)

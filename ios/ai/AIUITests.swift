@@ -34,7 +34,7 @@ final class AIUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Unavailable model hides assistant entry"; shot.lifetime = .keepAlways; add(shot)
     }
-    func testChoiceContinuesWithoutRetypingAndPlanningRequiresExplicitConfirmation() {
+    func testChoiceThenPlansRightAway() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
@@ -46,37 +46,15 @@ final class AIUITests: XCTestCase {
         app.buttons["journey-ai-assistant"].tap()
         let input = app.textFields["ai-request"].exists ? app.textFields["ai-request"] : app.textViews["ai-request"]
         XCTAssertTrue(input.waitForExistence(timeout: 10))
-        input.tap(); input.typeText("從公司到北車")
+        input.tap(); input.typeText("回家")
         app.buttons["ai-extract"].tap()
         XCTAssertTrue(app.buttons["ai-choice-0"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["ai-choice-2"].exists)
         XCTAssertFalse(app.buttons["ai-choice-3"].exists)
         app.buttons["ai-choice-0"].tap()
-        let answered = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: app.buttons["ai-choice-0"])
-        XCTAssertEqual(XCTWaiter.wait(for: [answered], timeout: 10), .completed)
-        XCTAssertTrue(app.textFields["ai-destination"].waitForExistence(timeout: 10))
-        XCTAssertEqual(input.value as? String, "從公司到北車")
-        XCTAssertFalse(app.buttons["ai-choice-0"].exists)
-        func reveal(_ element: XCUIElement) {
-            for _ in 0..<8 {
-                if element.isHittable { return }
-                app.swipeUp()
-            }
-        }
-        let origin = app.buttons["ai-place-測試出發地"]
-        reveal(origin); origin.tap()
-        let destination = app.buttons["ai-place-台北車站"]
-        reveal(destination); destination.tap()
-        let plan = app.buttons["ai-plan"]
-        reveal(plan); XCTAssertFalse(plan.isEnabled)
-        let confirmation = app.switches["ai-confirm-places"]
-        reveal(confirmation); confirmation.tap()
-        // A Toggle row in a List flips only when its switch is hit on some iOS versions.
-        if !plan.isEnabled { confirmation.coordinate(withNormalizedOffset: CGVector(dx: 0.92, dy: 0.5)).tap() }
-        XCTAssertTrue(plan.isEnabled)
-        // Changing a confirmed place invalidates the final acknowledgement.
-        reveal(destination); destination.tap()
-        reveal(plan); XCTAssertFalse(plan.isEnabled)
+        // Once the choice resolves the trip, planning starts without another confirmation screen.
+        let closed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: input)
+        XCTAssertEqual(XCTWaiter.wait(for: [closed], timeout: 15), .completed)
     }
 
     func testTesterBenchmarkPageOpensFromSettingsWithoutRunningOnSimulator() {

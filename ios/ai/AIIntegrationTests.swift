@@ -61,7 +61,7 @@ import TransitCore
         let turn = try await context.resolve(reading("台北車站"), source: "現在去台北車站", now: now)
         XCTAssertNil(turn.clarification)
         XCTAssertEqual(searched, ["台北車站"])
-        XCTAssertEqual(turn.request.destination, "台北車站")
+        XCTAssertEqual(turn.request.destination, "臺北車站", "The best search result is used right away")
         XCTAssertEqual(turn.request.review, AssistantFieldReview(destination: .certain, origin: .certain, preference: .certain, time: .certain))
         XCTAssertEqual(turn.request.origin, "")
         XCTAssertEqual(turn.destinationCandidates.first?.name, "臺北車站", "The exact match is offered first")
@@ -119,39 +119,40 @@ import TransitCore
         XCTAssertEqual(next.request.destination, "測試住家（板橋）")
         XCTAssertEqual(next.request.review.destination, .certain)
     }
-    func testAmbiguousPlaceAsksAmongRealSearchResults() async throws {
-        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("中山站"), self.place("中山國中", 25.06), self.place("中山站", 25.07)] }
+    func testSeveralResultsPlanWithTheBestOneWithoutAsking() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("中山站"), self.place("中山國中", 25.06)] }
         let turn = try await context.resolve(reading("中山"), source: "到中山", now: now)
-        let question = try XCTUnwrap(turn.clarification)
-        XCTAssertEqual(question.options, ["中山站", "中山國中"], "Duplicate names are offered once")
-        let next = try await context.answer(option: 1)
-        XCTAssertEqual(next.request.destination, "中山國中")
-        XCTAssertEqual(next.destinationCandidates.map(\.name), ["中山國中"])
-        XCTAssertNil(next.clarification)
+        XCTAssertNil(turn.clarification)
+        XCTAssertEqual(turn.request.destination, "中山站")
+        XCTAssertEqual(turn.destinationCandidates.map(\.name), ["中山站", "中山國中"])
     }
-    func testDepartureTimeAsksAndLeavingNowClearsTheTime() async throws {
-        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
-        var value = reading("台北車站"); value.departureTime = true; value.timeEvidence = "明天九點"
-        value.arrivalDay = "2026-10-23"; value.arrivalHour = 9
-        let turn = try await context.resolve(value, source: "明天九點出發去台北車站", now: now)
-        XCTAssertNil(turn.request.arriveBy, "A departure time is never turned into a deadline")
-        XCTAssertEqual(turn.request.review.time, .needsConfirmation)
-        XCTAssertEqual(turn.clarification?.options.first, "現在出發")
-        let next = try await context.answer(option: 0)
-        XCTAssertEqual(next.request.review.time, .certain)
-        XCTAssertEqual(next.request.timeDescription, "")
-        XCTAssertNil(next.clarification)
+    func testUnstatedOrUnplannableTimesMeanLeavingNow() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        // 騎單車去台大 once showed "2026-10-23 -1:-1" as a deadline needing confirmation.
+        var dayOnly = reading("國立臺灣大學"); dayOnly.arrivalDay = "2026-10-23"
+        var departure = reading("國立臺灣大學"); departure.departureTime = true; departure.timeEvidence = "明天九點"
+        departure.arrivalDay = "2026-10-23"; departure.arrivalHour = 9
+        for value in [dayOnly, departure] {
+            let turn = try await context.resolve(value, source: "騎單車去台大", now: now)
+            XCTAssertNil(turn.request.arriveBy)
+            XCTAssertEqual(turn.request.timeDescription, "")
+            XCTAssertEqual(turn.request.review.time, .certain)
+            XCTAssertNil(turn.clarification)
+        }
     }
-    func testPassedDeadlineOffersTomorrowMorning() async throws {
+    func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9
         let turn = try await context.resolve(value, source: "到北車，九點以前", now: now)
-        XCTAssertEqual(turn.request.review.time, .needsConfirmation)
-        let question = try XCTUnwrap(turn.clarification)
-        XCTAssertTrue(question.options[0].contains("明天早上"), question.options[0])
-        let next = try await context.answer(option: 0)
-        XCTAssertEqual(next.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
-        XCTAssertEqual(next.request.review.time, .certain)
+        XCTAssertNil(turn.clarification)
+        XCTAssertEqual(turn.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
+    }
+    func testCyclingRequestReachesThePlanner() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        var value = reading("國立臺灣大學"); value.travelMode = .cycling
+        let turn = try await context.resolve(value, source: "騎單車去台大", now: now)
+        XCTAssertEqual(turn.mode, .cycling)
+        XCTAssertEqual(turn.request.preference, .balanced, "A way of travelling is not a route preference")
     }
     func testArrivalDeadlineAndConflictingPreference() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺大醫院")] }
@@ -162,15 +163,6 @@ import TransitCore
         XCTAssertEqual(turn.request.review.time, .certain)
         XCTAssertEqual(turn.request.review.preference, .needsConfirmation)
         XCTAssertEqual(turn.request.review.destination, .certain)
-    }
-    func testTwoDestinationsAskWhichFirst() async throws {
-        let context = JourneyAssistantContext(journeys: []) { query in [self.place(query == "台北101" ? "臺北101" : "臺北車站")] }
-        var value = reading("台北車站"); value.otherDestination = "台北101"
-        let turn = try await context.resolve(value, source: "先去北車再去台北101", now: now)
-        XCTAssertEqual(turn.clarification?.options, ["台北車站", "台北101"])
-        let next = try await context.answer(option: 1)
-        XCTAssertEqual(next.request.destination, "台北101")
-        XCTAssertNil(next.clarification)
     }
     func testSearchFailureLeavesTheKeywordEditable() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in throw URLError(.notConnectedToInternet) }

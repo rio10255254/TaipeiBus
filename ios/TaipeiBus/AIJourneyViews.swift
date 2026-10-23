@@ -204,6 +204,27 @@ struct AIJourneyAssistantView: View {
         destinations = turn.destinationCandidates; origins = turn.originCandidates
         selectedDestination = nil; selectedOrigin = nil; confirmed = false
         clarification = turn.clarification; reviewed = true; busy = false
+        if turn.clarification == nil { planRightAway(turn) }
+    }
+    /// After understanding, plan at once: unstated parts mean current location and leaving now, and
+    /// the route screen is where the rider adjusts the rest. The review below appears only when a
+    /// place could not be found or the start is unknown.
+    private func planRightAway(_ turn: AssistantJourneyTurn) {
+        guard let target = turn.destinationCandidates.first else {
+            message = AppText.text("找不到這個目的地，請修改下方的目的地。"); return
+        }
+        selectedDestination = target; selectedOrigin = turn.originCandidates.first
+        guard let start, start.coordinate.isInServiceArea, target.coordinate.isInServiceArea else {
+            message = usesCurrentOrigin ? AppText.text("需要目前位置才能直接規劃，請開啟定位或填寫出發地。")
+                : AppText.text("找不到這個出發地，請修改下方的出發地。")
+            return
+        }
+        if let arrive = turn.request.arriveBy, AssistantJourneyRequest.canPlan(arriveBy: arrive) {
+            deadline = arrive; hasDeadline = true; showingArrival = true
+            return
+        }
+        model.previewAssistantJourney(origin: start, destination: target, preference: preference, mode: turn.mode)
+        planned(); dismiss()
     }
     private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
