@@ -921,5 +921,8 @@
   "需要目前位置才能從這裡出發。": "Your current location is needed to start from here.",
   "需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。": "Speaking needs microphone and speech recognition access. Turn them on in Settings, or type instead.",
   "騎 YouBike 優先": "YouBike first",
-  "騎單車去台大": "Cycle to NTU"
+  "騎單車去台大": "Cycle to NTU",
+  "出發時間：%@": "Leaving at: %@",
+  "預計抵達：%@": "Expected arrival: %@",
+  "目前資料不足以確認這個時間的行程。請改選時間、查看官方班表，並於出發當天重新規劃。": "There is not enough data to confirm a trip at this time. Choose another time, check the official timetable, and plan again on the day."
 }

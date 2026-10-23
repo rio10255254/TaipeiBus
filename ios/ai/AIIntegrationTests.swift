@@ -144,15 +144,27 @@ import TransitCore
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
         // 騎單車去台大 once showed "2026-10-23 -1:-1" as a deadline needing confirmation.
         var dayOnly = reading("國立臺灣大學"); dayOnly.arrivalDay = "2026-10-23"
-        var departure = reading("國立臺灣大學"); departure.departureTime = true; departure.timeEvidence = "明天九點"
-        departure.arrivalDay = "2026-10-23"; departure.arrivalHour = 9
-        for value in [dayOnly, departure] {
+        for value in [dayOnly] {
             let turn = try await context.resolve(value, source: "騎單車去台大", now: now)
             XCTAssertNil(turn.request.arriveBy)
             XCTAssertEqual(turn.request.timeDescription, "")
             XCTAssertEqual(turn.request.review.time, .certain)
             XCTAssertNil(turn.clarification)
         }
+    }
+    func testDepartureTimePlansForThatTime() async throws {
+        // 「明天下三點去台大」 was planned as leaving now.
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        var value = reading("國立臺灣大學"); value.departureTime = true; value.timeEvidence = "明天下午三點"
+        value.arrivalDay = "2026-10-23"; value.arrivalHour = 15
+        let turn = try await context.resolve(value, source: "明天下三點去台大", now: now)
+        XCTAssertEqual(turn.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
+        XCTAssertNil(turn.request.arriveBy, "A departure time is never turned into a deadline")
+        XCTAssertEqual(turn.request.review.time, .certain)
+        XCTAssertNil(turn.clarification)
+        var earlier = reading("國立臺灣大學"); earlier.departureTime = true; earlier.arrivalHour = 9
+        let tomorrow = try await context.resolve(earlier, source: "九點去台大", now: now)
+        XCTAssertEqual(tomorrow.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "Nine o'clock has passed today")
     }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }

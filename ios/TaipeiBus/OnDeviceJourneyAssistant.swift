@@ -92,6 +92,8 @@ struct AssistantJourneyTurn {
     var request: AssistantJourneyRequest
     var clarification: AssistantClarification?
     var mode = AssistantTravelMode.any
+    /// 「明天下午三點去台大」: plan for leaving at this time instead of now.
+    var departAt: Date? = nil
     // Only actual search/library objects can enter the confirmation screen.
     var destinationCandidates: [TravelPlace]
     var originCandidates: [TravelPlace]
@@ -259,10 +261,10 @@ final class JourneyAssistantContext {
             }
             if case .savedChoice = destination { review.preference = .needsConfirmation }
         }
-        // Leave now unless there is a clock deadline. A departure time cannot be planned, a day without
-        // a clock time is not a deadline, and a time already past today means tomorrow.
+        // Leave now unless a clock time was said: a deadline (…前到) or a departure (…點去, …出發).
+        // A day without a clock time is neither, and a time already past today means tomorrow.
         var day = reading.arrivalDay, hour = reading.arrivalHour, minute = reading.arrivalMinute
-        if reading.departureTime || !(0...23).contains(hour) { day = ""; hour = -1; minute = -1 }
+        if !(0...23).contains(hour) { day = ""; hour = -1; minute = -1 }
         else {
             if !(0...59).contains(minute) { minute = 0 }
             if day.isEmpty { day = Self.dayString(now) }
@@ -271,13 +273,18 @@ final class JourneyAssistantContext {
                 day = Self.dayString(tomorrow)
             }
         }
+        var departAt: Date?
+        if reading.departureTime, hour >= 0 {
+            departAt = Self.date(day: day, hour: hour, minute: minute)
+            day = ""; hour = -1; minute = -1
+        }
         let request = try AssistantIntentDraft(destination: target.name, origin: start.name, preference: preference,
             timeEvidence: hour >= 0 ? reading.timeEvidence : "", arrivalDay: day, arrivalHour: hour, arrivalMinute: minute,
             review: review).validated(source: source, now: now)
         let question = clarification()
         pending = question?.pending
         return AssistantJourneyTurn(request: request, clarification: question?.value, mode: reading.travelMode,
-            destinationCandidates: target.candidates, originCandidates: start.candidates)
+            departAt: departAt, destinationCandidates: target.candidates, originCandidates: start.candidates)
     }
 
     /// Only a choice the app cannot make for the rider: which of several saved journeys.
@@ -416,14 +423,15 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
         never places or preferences.
         Preference: faster for 快一點/最快/趕時間, lessWalking for 少走路/不想走路, fewerTransfers for 少轉乘/不要換車,
         conflicting when the user asks for incompatible things, otherwise balanced.
-        Time: only an arrival deadline (…前到, …以前要到) fills arrivalDay/arrivalHour/arrivalMinute, using the given date.
-        現在/馬上/等一下 mean leave now: leave every time field empty. A request to leave at a clock time (…出發)
-        sets departureTime and leaves the arrival fields empty. Never invent places or times.
+        Time: a clock time fills arrivalDay/arrivalHour/arrivalMinute using the given date (下午/晚上 add 12 hours;
+        下三點 is a typo for 下午三點). departureTime is true when it is when to leave (…點去, …點出發, …點走) and
+        false when it is a deadline (…前到, …以前要到). 現在/馬上/等一下 mean leave now: leave every time field empty.
+        Never invent places or times.
         Examples:
         回家，快一點 → destination 家 (home), preference faster.
         明天九點前從公司到北車 → destination 台北車站 (place), origin 公司 (work), arrival tomorrow 9:00.
         騎單車去台大 → destination 國立臺灣大學 (place), travelMode cycling, preference balanced, no time.
-        明天下午三點出發去101 → destination 台北101 (place), departureTime true, timeEvidence 明天下午三點.
+        明天下午三點去台大 → destination 國立臺灣大學 (place), departureTime true, time tomorrow 15:00.
         """)
     }
     func prewarm() { session.prewarm() }
@@ -500,11 +508,11 @@ private struct GeneratedJourneyReading {
     var originKind: GeneratedPlaceKind
     var travelMode: GeneratedTravelMode
     var preference: GeneratedPreference
-    @Guide(description: "The user's words for an arrival deadline or departure time; empty for now or no time.") var timeEvidence: String
-    @Guide(description: "Arrival deadline day as yyyy-MM-dd; empty if there is no arrival deadline.") var arrivalDay: String
-    @Guide(description: "Arrival deadline hour 0-23; -1 if none.") var arrivalHour: Int
-    @Guide(description: "Arrival deadline minute 0-59; -1 if none.") var arrivalMinute: Int
-    @Guide(description: "True only when the user asks to leave at a specific time.") var departureTime: Bool
+    @Guide(description: "The user's words for the time; empty for now or no time.") var timeEvidence: String
+    @Guide(description: "Day of the stated clock time as yyyy-MM-dd; empty if no clock time.") var arrivalDay: String
+    @Guide(description: "Hour 0-23 of the stated clock time; -1 if none.") var arrivalHour: Int
+    @Guide(description: "Minute 0-59 of the stated clock time; -1 if none.") var arrivalMinute: Int
+    @Guide(description: "True when the stated time is when to leave; false when it is an arrival deadline.") var departureTime: Bool
 }
 
 @available(iOS 26.0, *)
