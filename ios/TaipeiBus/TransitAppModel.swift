@@ -593,6 +593,14 @@ final class TransitAppModel: ObservableObject {
         var note: String?
     }
     @Published private(set) var assistantTrip: AssistantTrip?
+    /// 用一句話規劃 for the whole app: the route panel, Siri and the sheet share one request.
+    private(set) lazy var assistant = JourneyAssistantSession(model: self)
+    /// Keep the routes, drop what was understood (the banner's ✕).
+    func forgetAssistantTrip() {
+        assistantTrip = nil
+        planner.preferredMode = .any
+        if !planner.started { planner.plan(metadata: metadata) }
+    }
     /// A sentence from Siri waiting for the route panel to open.
     @Published var pendingAssistantRequest: String?
     /// The understanding only describes the trip it started; another destination hides it.

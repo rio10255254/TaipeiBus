@@ -30,16 +30,14 @@ struct JourneyPlanningView: View {
     @State private var showingPro = false
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
-    /// The sheet is presented with its request, so the sentence or microphone choice is always the current one.
-    private struct AssistantRequest: Identifiable { let id = UUID(); let seed: String?; let listen: Bool }
-    @State private var assistantRequest: AssistantRequest?
+    @ObservedObject private var assistant: JourneyAssistantSession
     @ObservedObject private var assistantRecents = AssistantRecents.shared
     @State private var assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
     @Environment(\.scenePhase) private var scenePhase
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
-        self.model = model; self.planner = planner; self.location = location
+        self.model = model; self.planner = planner; self.location = location; assistant = model.assistant
         _showingItinerary = showingItinerary
         self.compact = compact; self.expand = expand; self.collapse = collapse
         // Start on the page the sheet will actually show. Starting on place search and flipping
@@ -58,6 +56,7 @@ struct JourneyPlanningView: View {
                 VStack(alignment: .leading, spacing: compact && !searchingPlaces ? 12 : 20) {
                     if searchingPlaces { originButton }
                     else if !planner.started && !showingItinerary { routeEndpoints }
+                    AssistantInlineStatus(session: assistant)
                     if searchingPlaces { placeSearch }
                     else {
                         if planner.started || showingItinerary {
@@ -66,7 +65,7 @@ struct JourneyPlanningView: View {
                                 else { showingItinerary = false; collapse() }
                             })
                         } else {
-                            AssistantTripBanner(model: model, planner: planner) { openAssistant(nil) }
+                            AssistantTripBanner(model: model, planner: planner, session: assistant)
                             if planner.destination != nil { JourneyDepartureControl(model: model, planner: planner) }
                             JourneyOptionsView(model: model, planner: planner, collapse: {
                                 showingItinerary = false; collapse()
@@ -184,10 +183,12 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
-        .sheet(item: $assistantRequest) { request in
-            AIJourneyAssistantView(model: model, seed: request.seed, listen: request.listen) {
-                focused = false; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
-            }
+        .sheet(isPresented: $assistant.presented, onDismiss: { assistant.dismissed() }) {
+            AIJourneyAssistantView(session: assistant, model: model)
+        }
+        // A request reached the route screen: show its routes.
+        .onChange(of: assistant.plannedCount) { _, _ in
+            focused = false; query = ""; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
         }
         .bikeStationDetails(model: model)
         .onChange(of: model.pendingAssistantRequest, initial: true) { _, text in
@@ -295,9 +296,10 @@ struct JourneyPlanningView: View {
     private var understandsSentence: Bool {
         assistantAvailable && !editingOrigin && !planner.started && AssistantSentence.looksLikeRequest(query)
     }
+    /// A sentence is understood right here; only a question or a problem opens the sheet.
     private func openAssistant(_ text: String?) {
         focused = false
-        assistantRequest = AssistantRequest(seed: text?.trimmingCharacters(in: .whitespacesAndNewlines), listen: false)
+        if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { assistant.run(text) } else { assistant.open() }
     }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -308,7 +310,8 @@ struct JourneyPlanningView: View {
             }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(MapChrome.secondaryText)
-                TextField(editingOrigin ? AppText.text("出發地、地址或站名") : AppText.text("地點、地址或站名"), text: $query)
+                TextField(editingOrigin ? AppText.text("出發地、地址或站名")
+                          : assistantAvailable && !planner.started ? AppText.text("地點，或一句話：騎單車去台大") : AppText.text("地點、地址或站名"), text: $query)
                     .accessibilityIdentifier("journey-search-field")
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
                     .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
@@ -316,14 +319,14 @@ struct JourneyPlanningView: View {
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
                 if query.isEmpty, assistantAvailable, !editingOrigin, !planner.started {
                     // One tap, then just say where to go.
-                    Button { focused = false; assistantRequest = AssistantRequest(seed: nil, listen: true) } label: {
+                    Button { focused = false; assistant.listen() } label: {
                         Image(systemName: "mic.fill").frame(width: 36, height: 36)
                     }.accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
                 }
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
-            if understandsSentence {
+            if understandsSentence, !assistant.busy {
                 Button { openAssistant(query) } label: {
                     Label(AppText.text("理解並規劃「%@」", query), systemImage: "sparkles").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-understand-sentence")
