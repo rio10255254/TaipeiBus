@@ -924,5 +924,14 @@
   "騎單車去台大": "Cycle to NTU",
   "出發時間：%@": "Leaving at: %@",
   "預計抵達：%@": "Expected arrival: %@",
-  "目前資料不足以確認這個時間的行程。請改選時間、查看官方班表，並於出發當天重新規劃。": "There is not enough data to confirm a trip at this time. Choose another time, check the official timetable, and plan again on the day."
+  "目前資料不足以確認這個時間的行程。請改選時間、查看官方班表，並於出發當天重新規劃。": "There is not enough data to confirm a trip at this time. Choose another time, check the official timetable, and plan again on the day.",
+  "今天 %@": "Today %@",
+  "明天 %@": "Tomorrow %@",
+  "%@ 出發": "Leave %@",
+  "30 分鐘後": "In 30 minutes",
+  "1 小時後": "In 1 hour",
+  "選擇時間…": "Choose a time…",
+  "依當天班表與班距估算，不含即時車況；時間到了再開始導航。": "Estimated from that day's timetables and headways, without live traffic. Start navigation when it's time.",
+  "規劃": "Plan",
+  "出發時間": "Departure time"
 }

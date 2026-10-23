@@ -166,6 +166,21 @@ import TransitCore
         let tomorrow = try await context.resolve(earlier, source: "九點去台大", now: now)
         XCTAssertEqual(tomorrow.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "Nine o'clock has passed today")
     }
+    func testWordsDecideDepartureOrDeadline() async throws {
+        // 「明天下午三點去台大」 came back from a phone as a 15:00 deadline.
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        var value = reading("國立臺灣大學"); value.departureTime = false; value.timeEvidence = "明天下午三點"
+        value.arrivalDay = "2026-10-23"; value.arrivalHour = 15
+        let leave = try await context.resolve(value, source: "明天下午三點去台大", now: now)
+        XCTAssertEqual(leave.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
+        XCTAssertNil(leave.request.arriveBy)
+        value.departureTime = true
+        let deadline = try await context.resolve(value, source: "明天下午三點前到台大", now: now)
+        XCTAssertNil(deadline.departAt)
+        XCTAssertEqual(deadline.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"))
+        let onTheWay = try await context.resolve(value, source: "明天下午三點前往台大", now: now)
+        XCTAssertEqual(onTheWay.departAt, ISO8601DateFormatter().date(from: "2026-10-23T07:00:00Z"), "前往 is going, not a deadline")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

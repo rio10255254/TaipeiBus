@@ -348,16 +348,11 @@ struct AIJourneyAssistantView: View {
             arrival = (start, target, .arriveBy(arrive)); showingArrival = true
             return
         }
-        // A departure more than a few minutes away is planned on the timetable for that time.
-        if let leave = turn.departAt, leave > Date().addingTimeInterval(600), let start = from ?? currentPlace {
-            JourneyDiagnostics.shared.record("ai-plan started departure")
-            arrival = (start, target, .departAt(leave)); showingArrival = true
-            return
-        }
-        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)")
+        // A later departure is planned in the ordinary route view, on that day's timetables and headways.
+        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)\(turn.departAt == nil ? "" : " departure")")
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: trimmed, origin: from, destination: target, alternatives: alternatives,
-                                      preference: preference, mode: turn.mode)
+                                      preference: preference, mode: turn.mode, departure: turn.departAt)
         planned(); dismiss()
     }
     private func stop(_ reason: Problem) {
@@ -513,7 +508,8 @@ struct AssistantTripBanner: View {
                     Image(systemName: "sparkles").foregroundStyle(.tint)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("「" + trip.request + "」").font(.subheadline.weight(.semibold)).lineLimit(2)
-                        Text([trip.destination.localizedName, title(trip.mode), AppText.text("現在出發")].joined(separator: " · "))
+                        Text([trip.destination.localizedName, title(trip.mode),
+                             trip.departure.map { AppText.text("%@ 出發", JourneyDepartureControl.label($0)) } ?? AppText.text("現在出發")].joined(separator: " · "))
                             .font(.caption).foregroundStyle(.secondary).lineLimit(2)
                     }
                     Spacer(minLength: 0)

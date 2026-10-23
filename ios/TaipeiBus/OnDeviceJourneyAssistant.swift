@@ -315,6 +315,14 @@ final class JourneyAssistantContext {
         if !clock {
             value.arrivalDay = ""; value.arrivalHour = -1; value.arrivalMinute = -1
             value.departureTime = false; value.timeEvidence = ""
+        } else if value.arrivalHour >= 0 {
+            // 「明天下午三點去台大」 came back as a deadline on a phone. The words decide:
+            // …前 / 抵達 is when to be there, …點去 / 出發 is when to leave.
+            let plain = ["前往", "目前", "前面"].reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
+            if ["前", "抵達", "到達", "趕到", "趕上", "準時到", "要到", "by "].contains(where: plain.contains) { value.departureTime = false }
+            else if ["出發", "點去", "點走", "點離開", "點從", "分去", "分走", "半去", "半走", "點騎", "點搭", "leave", "depart"].contains(where: plain.contains) {
+                value.departureTime = true
+            }
         }
         return value
     }

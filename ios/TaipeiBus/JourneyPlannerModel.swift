@@ -141,7 +141,7 @@ private actor TripNetwork {
     private var key = ""
     private var builtAt = Date.distantPast
     func options(metadata: TransitMetadata, from: Coordinate, to: Coordinate, preferences: LiveSettings.Planning,
-                 estimates: EstimateFeed, bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil,
+                 estimates: EstimateFeed, at date: Date = Date(), bikeNetwork: BikeNetwork = .empty, bikeAvailability: BikeAvailability? = nil,
                  onPreliminary: (@Sendable ([TransitTrip]) -> Void)? = nil) -> [TransitTrip] {
         guard !Task.isCancelled else { return [] }
         let signature = metadata.revision.uuidString
@@ -151,7 +151,7 @@ private actor TripNetwork {
         let budget = JourneySearchBudget(distance: from.distance(to: to), cycling: preferences.bikeRouting && bikeAvailability != nil)
         guard !Task.isCancelled else { return [] }
         return planner!.plan(from: from, to: to, maximumWalk: preferences.expandedWalkMeters, limit: budget.candidates,
-                             preferences: preferences, estimates: estimates, bikeNetwork: bikeNetwork, bikeAvailability: bikeAvailability,
+                             preferences: preferences, estimates: estimates, at: date, bikeNetwork: bikeNetwork, bikeAvailability: bikeAvailability,
                              onPreliminary: onPreliminary)
 
     }
@@ -183,7 +183,19 @@ final class JourneyPlannerModel: ObservableObject {
     private var task: Task<Void, Never>?
     private var generation = UUID()
     private var directions: [MKDirections] = []
-    private var latestSnapshot = TransitSnapshot()
+    private var receivedSnapshot = TransitSnapshot()
+    private let scheduledSnapshot = TransitSnapshot()
+    /// A trip planned for later has no observed bus to rely on; only timetables and headways count.
+    private var latestSnapshot: TransitSnapshot { scheduledDeparture == nil ? receivedSnapshot : scheduledSnapshot }
+    /// Set for 「明天下午三點出發」: the same planning, ranked on that day's timetables and headways.
+    @Published private(set) var scheduledDeparture: Date?
+    /// The time every timing in this plan is measured from.
+    func clock(_ date: Date) -> Date { scheduledDeparture ?? date }
+    func schedule(_ departure: Date?) {
+        // Within a few minutes it is simply now, with live buses.
+        scheduledDeparture = departure.flatMap { $0.timeIntervalSinceNow > 5 * 60 ? $0 : nil }
+        durationCache.removeAll(keepingCapacity: true)
+    }
     private var preferences = LiveSettings.Planning()
     private var lastMetadata: TransitMetadata?
     private var selectionConfirmed = false
@@ -420,7 +432,8 @@ final class JourneyPlannerModel: ObservableObject {
         else { legs = option.walks }
         return legs.compactMap { $0.bike }.map(\.ride).filter { $0.count >= 2 }
     }
-    func ridingEstimates(_ option: JourneyOption, at date: Date) -> [RidingTimeEstimate] {
+    func ridingEstimates(_ option: JourneyOption, at suppliedDate: Date) -> [RidingTimeEstimate] {
+        let date = clock(suppliedDate)
         if let trip = contextualTrip(option, at: date), let metadata = lastMetadata {
             return forecast.plannedRidingEstimates(trip, metadata: metadata, estimates: latestSnapshot.estimates,
                 walkingDurations: option.walks.map(\.duration), preferences: preferences, at: date,
@@ -442,7 +455,8 @@ final class JourneyPlannerModel: ObservableObject {
             riding: riding ?? trip.rideSeconds, transferDistances: trip.transferDistances, at: date))
     }
     func contextualRides(_ source: [TransitRide], walking: [Double], riding: [Double],
-                         transferDistances: [Double], at date: Date, onboardFirst: Bool = false) -> [TransitRide] {
+                         transferDistances: [Double], at suppliedDate: Date, onboardFirst: Bool = false) -> [TransitRide] {
+        let date = clock(suppliedDate)
         guard let metadata = lastMetadata, walking.count == source.count + 1, riding.count == source.count else { return source }
         var rides = source, cursor = 0.0
         for index in rides.indices {
@@ -464,7 +478,8 @@ final class JourneyPlannerModel: ObservableObject {
         }
         return rides
     }
-    func duration(_ option: JourneyOption, at date: Date) -> JourneyDuration? {
+    func duration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
+        let date = clock(suppliedDate)
         guard option.verified, option.walkIssue == nil else { return nil }
         let bucket = Int(floor(date.timeIntervalSince1970 / 5))
         let walks = option.walks.map(\.duration), from = option.walks.map(\.from), to = option.walks.map(\.to)
@@ -503,7 +518,8 @@ final class JourneyPlannerModel: ObservableObject {
         duration.stationSeconds = option.walks.reduce(0) { $0 + $1.stationAllowance }
         return duration
     }
-    private func connectionStarts(_ option: JourneyOption, at date: Date) -> [Double] {
+    private func connectionStarts(_ option: JourneyOption, at suppliedDate: Date) -> [Double] {
+        let date = clock(suppliedDate)
         guard let trip = option.trip else { return [0] }
         guard option.walks.count == trip.rides.count + 1 else { return Array(repeating: 0, count: option.walks.count) }
         let rides = ridingEstimates(option, at: date).map(\.seconds)
@@ -518,7 +534,8 @@ final class JourneyPlannerModel: ObservableObject {
         }
         return starts
     }
-    private func supplyRisk(_ option: JourneyOption, at date: Date) -> Double {
+    private func supplyRisk(_ option: JourneyOption, at suppliedDate: Date) -> Double {
+        let date = clock(suppliedDate)
         guard option.cycles else { return 0 }
         let starts = connectionStarts(option, at: date)
         return option.walks.enumerated().reduce(0) { result, item in
@@ -559,7 +576,7 @@ final class JourneyPlannerModel: ObservableObject {
             unknownWaits: timing.unknownWaits, supplyRisk: supplyRisk(option, at: date), preferences: preferences)
     }
     private func recommendations(at suppliedDate: Date) -> [JourneyOption] {
-        let date = JourneyDuration.previewDate(suppliedDate)
+        let date = clock(JourneyDuration.previewDate(suppliedDate))
         let valid = verifiedPool.filter { $0.verified && $0.walkIssue == nil && unavailableBoarding($0) == nil }
         let hasTransit = valid.contains { !$0.rides.isEmpty }
         var metrics: [JourneyChoice] = []
@@ -671,8 +688,8 @@ final class JourneyPlannerModel: ObservableObject {
             let request = MKDirections.Request()
             request.source = TravelPlace(name: "出發地", address: "", coordinate: from).mapItem
             request.destination = TravelPlace(name: "目的地", address: "", coordinate: to).mapItem
-            request.transportType = .transit; request.departureDate = Date()
-            let requestedAt = Date()
+            let requestedAt = clock(Date())
+            request.transportType = .transit; request.departureDate = requestedAt
             let operation = MKDirections(request: request); directions.append(operation)
             defer { directions.removeAll { $0 === operation } }
             if let response = try? await DirectionsRequestGate.shared.calculateETA(operation, priority: .alternatives), !Task.isCancelled, token == generation,
@@ -703,7 +720,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func updateSnapshot(_ snapshot: TransitSnapshot, forecast: VehicleArrivalForecast = .init()) {
         durationCache.removeAll(keepingCapacity: true)
-        latestSnapshot = snapshot; self.forecast = forecast
+        receivedSnapshot = snapshot; self.forecast = forecast
         // Refresh the order without changing an inspected route or its map camera.
         if !started, !planning, !checkingWalks, !verifiedPool.isEmpty {
             let date = JourneyDuration.previewDate(Date())
@@ -852,7 +869,8 @@ final class JourneyPlannerModel: ObservableObject {
     }
     /// Compare single and combined access, transfer and egress connections. An indoor
     /// platform change is never turned into a street bike ride. Verification remains bounded.
-    private func bikeConnections(for choices: [JourneyOption], at date: Date) -> [JourneyOption] {
+    private func bikeConnections(for choices: [JourneyOption], at suppliedDate: Date) -> [JourneyOption] {
+        let date = clock(suppliedDate)
         var candidates: [(choice: JourneyOption, score: Double, gain: Double)] = []
         var seen = Set<String>()
         for base in choices where !base.cycles {
@@ -921,7 +939,8 @@ final class JourneyPlannerModel: ObservableObject {
     private var searchedBikeGateways = false
     /// Search independently reachable rail corridors at each end, instead of assuming
     /// that the closest dock towards the destination opens the best transit route.
-    private func bikeGatewayProbes(at date: Date) -> [(Coordinate, Coordinate)] {
+    private func bikeGatewayProbes(at suppliedDate: Date) -> [(Coordinate, Coordinate)] {
+        let date = clock(suppliedDate)
         guard !searchedBikeGateways, preferences.bikeRouting, bikeAvailability != nil,
               let origin, let destination, let metadata = lastMetadata,
               origin.coordinate.distance(to: destination.coordinate) >= 2_000 else { return [] }
@@ -978,7 +997,7 @@ final class JourneyPlannerModel: ObservableObject {
                 let supply = self.bikeAvailability
                 self.lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
                 let routes = await self.network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
-                    preferences: self.preferences, estimates: self.latestSnapshot.estimates,
+                    preferences: self.preferences, estimates: self.latestSnapshot.estimates, at: self.clock(Date()),
                     bikeNetwork: self.bikeNetwork, bikeAvailability: supply)
                 guard !Task.isCancelled, token == self.generation else { return }
                 self.integratedSearchHasSupply = true
@@ -1214,11 +1233,11 @@ final class JourneyPlannerModel: ObservableObject {
         let budget = JourneySearchBudget(distance: origin.coordinate.distance(to: destination.coordinate), cycling: supply != nil)
         task = Task { [weak self] in
             guard let self, !Task.isCancelled, token == generation else { return }
-            let observation = latestSnapshot.estimates
+            let observation = latestSnapshot.estimates, departure = clock(Date())
             let stream = AsyncStream<([TransitTrip], Bool)> { continuation in
                 let search = Task { [network] in
                     let trips = await network.options(metadata: metadata, from: origin.coordinate, to: destination.coordinate,
-                        preferences: preferences, estimates: observation, bikeNetwork: bikes, bikeAvailability: supply,
+                        preferences: preferences, estimates: observation, at: departure, bikeNetwork: bikes, bikeAvailability: supply,
                         onPreliminary: { continuation.yield(($0, false)) })
                     if !Task.isCancelled { continuation.yield((trips, true)) }
                     continuation.finish()
@@ -1229,7 +1248,7 @@ final class JourneyPlannerModel: ObservableObject {
             for await (trips, complete) in stream {
             guard !Task.isCancelled, token == generation else { return }
             integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date(); lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
-            let date = Date()
+            let date = clock(Date())
             let observations = latestSnapshot.estimates, currentForecast = forecast
             let currentSnapshot = latestSnapshot
             let ordered = await Task.detached(priority: .userInitiated) {
@@ -1608,7 +1627,7 @@ final class JourneyPlannerModel: ObservableObject {
         return unresolved
     }
     func begin() {
-        guard let option = selected, canUse(option) else { return }
+        guard scheduledDeparture == nil, let option = selected, canUse(option) else { return }
         defer { onNavigationChange?() }
         cancelRequests()
         started = true; stepIndex = 0; mapRevision += 1
@@ -1621,7 +1640,7 @@ final class JourneyPlannerModel: ObservableObject {
                           bikes: BikeNetwork, availability: BikeAvailability?, cacheFrom: JourneyPlannerModel,
                           maximumWait: Double = 18) async -> JourneyOption? {
         cancelRequests(); origin = start; destination = end; usingLocation = false
-        preferences = settings.planning; latestSnapshot = snapshot; self.forecast = forecast
+        preferences = settings.planning; receivedSnapshot = snapshot; self.forecast = forecast
         bikeNetwork = bikes; bikeAvailability = availability
         walkingCache.merge(cacheFrom.walkingCache) { a, b in a.date > b.date ? a : b }
         evaluatingRemainingJourney = true
@@ -1677,7 +1696,7 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         defer { onNavigationChange?() }
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
-        preferredMode = .any
+        preferredMode = .any; scheduledDeparture = nil
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]
     }
@@ -1686,7 +1705,8 @@ final class JourneyPlannerModel: ObservableObject {
         let source = origin?.mapItem ?? MKMapItem.forCurrentLocation()
         MKMapItem.openMaps(with: [source, destination.mapItem], launchOptions: [MKLaunchOptionsDirectionsModeKey: MKLaunchOptionsDirectionsModeTransit])
     }
-    func unavailableBoarding(_ option: JourneyOption, at date: Date = Date()) -> (route: String, status: Int)? {
+    func unavailableBoarding(_ option: JourneyOption, at suppliedDate: Date = Date()) -> (route: String, status: Int)? {
+        let date = clock(suppliedDate)
         for ride in option.rides {
             if let eta = latestSnapshot.estimates.value(routeID: ride.route.parentID, stopID: ride.boarding.id, at: date),
                [-2, -3, -4].contains(eta) { return (ride.route.localizedName, eta) }
@@ -1769,7 +1789,8 @@ final class JourneyPlannerModel: ObservableObject {
         lastMetadata = metadata
         return try await enrich(option)
     }
-    func auditBikeConnections(_ choices: [JourneyOption], at date: Date = Date()) -> [JourneyOption] {
+    func auditBikeConnections(_ choices: [JourneyOption], at suppliedDate: Date = Date()) -> [JourneyOption] {
+        let date = clock(suppliedDate)
         bikeConnections(for: choices, at: date)
     }
     func auditBikeGatewayProbes(metadata: TransitMetadata, from: Coordinate, to: Coordinate) -> [(Coordinate, Coordinate)] {

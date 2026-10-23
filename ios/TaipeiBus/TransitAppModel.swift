@@ -585,6 +585,8 @@ final class TransitAppModel: ObservableObject {
         var origin: TravelPlace?
         var mode: AssistantTravelMode
         var preference: RoutePreference
+        /// nil means leaving now.
+        var departure: Date? = nil
         /// Set when a requested preference could not be applied, e.g. without Pro.
         var note: String?
     }
@@ -600,16 +602,16 @@ final class TransitAppModel: ObservableObject {
     /// Plans what 用一句話規劃 understood. No origin means the current location. Without Pro a requested
     /// preference falls back to the recommendation, and the note says so.
     func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
-                                 preference: RoutePreference, mode: AssistantTravelMode = .any) {
+                                 preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil) {
         guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
-        planner.preferredMode = mode
+        planner.preferredMode = mode; planner.schedule(departure)
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
         let note = preference != .balanced && !purchases.hasPro
             ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
         assistantTrip = AssistantTrip(request: request, destination: destination,
             alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
-            preference: preference, note: note)
+            preference: preference, departure: planner.scheduledDeparture, note: note)
         if let origin { planner.setOrigin(origin, metadata: metadata) }
         else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
@@ -618,7 +620,15 @@ final class TransitAppModel: ObservableObject {
     func switchAssistantDestination(_ place: TravelPlace) {
         guard let trip = assistantTrip else { return }
         previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
-            alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode)
+            alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode,
+            departure: trip.departure)
+    }
+    /// 「幾點出發」: nil plans for now with live buses; a later time plans on that day's timetables and headways.
+    func setJourneyDeparture(_ departure: Date?) {
+        guard !planner.started else { return }
+        planner.schedule(departure)
+        if assistantTrip != nil { assistantTrip?.departure = planner.scheduledDeparture }
+        planner.plan(metadata: metadata)
     }
     func setAssistantMode(_ mode: AssistantTravelMode) {
         guard assistantTrip != nil, !planner.started else { return }
