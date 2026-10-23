@@ -161,6 +161,24 @@ import TransitCore
         XCTAssertNil(turn.clarification)
         XCTAssertEqual(turn.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
     }
+    func testOnlyWhatTheSentenceSaysIsKept() async throws {
+        // 「回家」 alone came back from the model as cycling with an arrival deadline.
+        let home = place("古亭站")
+        let context = JourneyAssistantContext(journeys: [saved("家", "house.fill", home)]) { _ in [] }
+        var invented = reading("家", .home); invented.travelMode = .cycling
+        invented.timeEvidence = "九點前"; invented.arrivalHour = 9
+        let turn = try await context.resolve(invented, source: "回家", now: now)
+        XCTAssertEqual(turn.mode, .any)
+        XCTAssertNil(turn.request.arriveBy)
+        XCTAssertEqual(turn.request.timeDescription, "")
+        var said = reading("家", .home); said.travelMode = .cycling; said.timeEvidence = "九點前"; said.arrivalHour = 9
+        let kept = try await context.resolve(said, source: "九點前騎單車回家", now: now)
+        XCTAssertEqual(kept.mode, .cycling)
+        XCTAssertNotNil(kept.request.arriveBy)
+        var walk = reading("家", .home); walk.travelMode = .walking
+        let walking = try await context.resolve(walk, source: "走路回家", now: now)
+        XCTAssertEqual(walking.mode, .walking)
+    }
     func testCyclingRequestReachesThePlanner() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
         var value = reading("國立臺灣大學"); value.travelMode = .cycling

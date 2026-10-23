@@ -212,7 +212,11 @@ struct AIJourneyAssistantView: View {
     private func planRightAway(_ turn: AssistantJourneyTurn) {
         guard let target = turn.destinationCandidates.first else {
             JourneyDiagnostics.shared.record("ai-plan stopped=destination")
-            message = AppText.text("找不到這個目的地，請修改下方的目的地。"); return
+            let word = turn.request.destination
+            message = JourneyAssistantContext.category(of: word) != nil
+                ? AppText.text("還沒有儲存「%@」的常用行程。請在下方填寫地址，或先規劃一次並儲存為常用行程。", word)
+                : AppText.text("找不到這個目的地，請修改下方的目的地。")
+            return
         }
         selectedDestination = target; selectedOrigin = turn.originCandidates.first
         guard let start, start.coordinate.isInServiceArea, target.coordinate.isInServiceArea else {

@@ -879,5 +879,6 @@
   "出發地用哪一個常用行程？": "Start from which saved journey?",
   "找不到這個目的地，請修改下方的目的地。": "This destination was not found. Edit it below.",
   "需要目前位置才能直接規劃，請開啟定位或填寫出發地。": "Planning right away needs your current location. Turn on Location or enter a starting point.",
-  "找不到這個出發地，請修改下方的出發地。": "This starting point was not found. Edit it below."
+  "找不到這個出發地，請修改下方的出發地。": "This starting point was not found. Edit it below.",
+  "還沒有儲存「%@」的常用行程。請在下方填寫地址，或先規劃一次並儲存為常用行程。": "There is no saved journey for “%@” yet. Enter the address below, or plan the trip once and save it as a journey."
 }

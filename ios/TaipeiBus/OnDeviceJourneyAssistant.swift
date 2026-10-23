@@ -166,7 +166,8 @@ final class JourneyAssistantContext {
     private var pending: Pending?
 
     func resolve(_ reading: JourneyReading, source: String, now: Date) async throws -> AssistantJourneyTurn {
-        self.reading = reading; self.source = source; self.now = now
+        self.reading = Self.grounded(reading, in: source); self.source = source; self.now = now
+        let reading = self.reading
         destination = try await endpoint(reading.destination, kind: reading.destinationKind, isOrigin: false)
         origin = try await endpoint(reading.origin, kind: reading.originKind, isOrigin: true)
         trace = "dest=\(reading.destinationKind.rawValue)>\(Self.summary(destination)) origin=\(reading.originKind.rawValue)>\(Self.summary(origin))"
@@ -291,6 +292,25 @@ final class JourneyAssistantContext {
     }
 
     // MARK: Helpers
+
+    /// Keeps only what the sentence actually says. On a phone, 「回家」 alone came back as cycling with
+    /// an arrival deadline: a way of travelling needs its words, and a deadline needs a clock time.
+    static func grounded(_ reading: JourneyReading, in source: String) -> JourneyReading {
+        var value = reading
+        let text = normalized(source)
+        func says(_ words: [String]) -> Bool { words.contains { text.contains($0) } }
+        switch value.travelMode {
+        case .cycling where !says(["騎", "單車", "腳踏車", "自行車", "youbike", "ubike", "bike"]): value.travelMode = .any
+        case .walking where !says(["走路", "步行", "走過去", "走去", "走到", "walk"]): value.travelMode = .any
+        default: break
+        }
+        let clock = says(["點", "時", ":", "：", "am", "pm"]) || text.contains(where: \.isNumber)
+        if !clock {
+            value.arrivalDay = ""; value.arrivalHour = -1; value.arrivalMinute = -1
+            value.departureTime = false; value.timeEvidence = ""
+        }
+        return value
+    }
 
     private static func summary(_ endpoint: Endpoint) -> String {
         switch endpoint {

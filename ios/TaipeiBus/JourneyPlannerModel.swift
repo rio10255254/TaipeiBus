@@ -193,6 +193,14 @@ final class JourneyPlannerModel: ObservableObject {
     /// A way of travelling the rider asked for in 用一句話規劃 (e.g. 騎單車): routes made only of
     /// it are listed first. Cleared when the trip is finished.
     var preferredMode = AssistantTravelMode.any
+    /// A rider who asked to cycle gets a whole-trip YouBike route up to 20 km; otherwise rides stay
+    /// within the usual limit (5 km), beyond which public transport is normally the better offer.
+    private var wholeTripBikePreferences: LiveSettings.Planning {
+        guard preferredMode == .cycling else { return preferences }
+        var value = preferences
+        value.bikeMaximumRideMeters = max(value.bikeMaximumRideMeters, 20_000)
+        return value
+    }
     private var forecast = VehicleArrivalForecast()
     private struct CachedDuration {
         let bucket: Int
@@ -764,7 +772,7 @@ final class JourneyPlannerModel: ObservableObject {
         var choices = integratedSearchHasSupply ? [] : bikeConnections(for: Array(connectionBases.values), at: Date())
         if let origin, let destination,
            let whole = BikeRouting.connection(from: origin.coordinate, to: destination.coordinate,
-               network: bikeNetwork, availability: bikeAvailability, preferences: preferences) {
+               network: bikeNetwork, availability: bikeAvailability, preferences: wholeTripBikePreferences) {
             var leg = WalkingLeg(from: origin.coordinate, to: destination.coordinate); leg.bike = BikeLeg(whole)
             let choice = JourneyOption(id: "youbike", trip: nil, walks: [leg])
             if !attemptedBikeConnections.contains(bikeChoiceKey(choice)) { choices.append(choice) }
