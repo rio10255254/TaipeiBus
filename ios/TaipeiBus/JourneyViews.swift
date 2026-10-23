@@ -30,9 +30,9 @@ struct JourneyPlanningView: View {
     @State private var showingPro = false
     @State private var showingSaveJourney = false
     @State private var showingTripPreference = false
-    @State private var showingAssistant = false
-    @State private var assistantSeed: String?
-    @State private var assistantListen = false
+    /// The sheet is presented with its request, so the sentence or microphone choice is always the current one.
+    private struct AssistantRequest: Identifiable { let id = UUID(); let seed: String?; let listen: Bool }
+    @State private var assistantRequest: AssistantRequest?
     @ObservedObject private var assistantRecents = AssistantRecents.shared
     @State private var assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
     @Environment(\.scenePhase) private var scenePhase
@@ -183,8 +183,8 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
-        .sheet(isPresented: $showingAssistant) {
-            AIJourneyAssistantView(model: model, seed: assistantSeed, listen: assistantListen) {
+        .sheet(item: $assistantRequest) { request in
+            AIJourneyAssistantView(model: model, seed: request.seed, listen: request.listen) {
                 focused = false; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
             }
         }
@@ -296,13 +296,12 @@ struct JourneyPlanningView: View {
     }
     private func openAssistant(_ text: String?) {
         focused = false
-        assistantSeed = text?.trimmingCharacters(in: .whitespacesAndNewlines); assistantListen = false
-        showingAssistant = true
+        assistantRequest = AssistantRequest(seed: text?.trimmingCharacters(in: .whitespacesAndNewlines), listen: false)
     }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !editingOrigin, !planner.started, assistantAvailable {
-                Button { focused = false; showingAssistant = true } label: {
+                Button { openAssistant(nil) } label: {
                     Label(AppText.text("用一句話規劃"), systemImage: "sparkles").frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-ai-assistant")
             }
@@ -316,7 +315,7 @@ struct JourneyPlanningView: View {
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
                 if query.isEmpty, assistantAvailable, !editingOrigin, !planner.started {
                     // One tap, then just say where to go.
-                    Button { focused = false; assistantSeed = nil; assistantListen = true; showingAssistant = true } label: {
+                    Button { focused = false; assistantRequest = AssistantRequest(seed: nil, listen: true) } label: {
                         Image(systemName: "mic.fill").frame(width: 36, height: 36)
                     }.accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
                 }
