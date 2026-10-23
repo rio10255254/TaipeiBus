@@ -211,18 +211,22 @@ struct AIJourneyAssistantView: View {
     /// place could not be found or the start is unknown.
     private func planRightAway(_ turn: AssistantJourneyTurn) {
         guard let target = turn.destinationCandidates.first else {
+            JourneyDiagnostics.shared.record("ai-plan stopped=destination")
             message = AppText.text("找不到這個目的地，請修改下方的目的地。"); return
         }
         selectedDestination = target; selectedOrigin = turn.originCandidates.first
         guard let start, start.coordinate.isInServiceArea, target.coordinate.isInServiceArea else {
+            JourneyDiagnostics.shared.record("ai-plan stopped=" + (usesCurrentOrigin ? "location" : "origin"))
             message = usesCurrentOrigin ? AppText.text("需要目前位置才能直接規劃，請開啟定位或填寫出發地。")
                 : AppText.text("找不到這個出發地，請修改下方的出發地。")
             return
         }
         if let arrive = turn.request.arriveBy, AssistantJourneyRequest.canPlan(arriveBy: arrive) {
+            JourneyDiagnostics.shared.record("ai-plan started deadline")
             deadline = arrive; hasDeadline = true; showingArrival = true
             return
         }
+        JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)")
         model.previewAssistantJourney(origin: start, destination: target, preference: preference, mode: turn.mode)
         planned(); dismiss()
     }
@@ -268,8 +272,8 @@ struct AIJourneyAssistantView: View {
     private func record(_ step: String, outcome: String, context: JourneyAssistantContext) {
         let searches = context.toolCalls.filter { $0.hasPrefix("searchPlaces") }.count
         let saved = context.toolCalls.filter { $0.hasPrefix("listSavedJourneys") }.count
-        JourneyDiagnostics.shared.record(String(format: "ai-%@ %@ %.1fs searches=%d search=%.1fs saved=%d",
-            step, outcome, Date().timeIntervalSince(startedAt), searches, context.searchSeconds, saved))
+        JourneyDiagnostics.shared.record(String(format: "ai-%@ %@ %.1fs searches=%d search=%.1fs saved=%d %@",
+            step, outcome, Date().timeIntervalSince(startedAt), searches, context.searchSeconds, saved, context.trace))
     }
     private func manualReview(_ text: String) {
         busy = false

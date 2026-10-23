@@ -140,6 +140,8 @@ final class JourneyAssistantContext {
     var onActivity: (@MainActor (Activity) -> Void)?
     enum Activity { case search, saved }
     func report(_ activity: Activity) { onActivity?(activity) }
+    /// Kinds only, for the troubleshooting history: e.g. "dest=place>places3 origin=absent>current mode=cycling".
+    private(set) var trace = ""
     /// Names of the user's saved journeys, so the model can recognise 去我存的「週末讀書」.
     var savedTitles: [String] { journeys.map(\.title) }
 
@@ -167,6 +169,8 @@ final class JourneyAssistantContext {
         self.reading = reading; self.source = source; self.now = now
         destination = try await endpoint(reading.destination, kind: reading.destinationKind, isOrigin: false)
         origin = try await endpoint(reading.origin, kind: reading.originKind, isOrigin: true)
+        trace = "dest=\(reading.destinationKind.rawValue)>\(Self.summary(destination)) origin=\(reading.originKind.rawValue)>\(Self.summary(origin))"
+            + " mode=\(reading.travelMode.rawValue) time=\(reading.departureTime ? "depart" : reading.arrivalHour >= 0 ? "deadline" : "now")"
         return try turn()
     }
 
@@ -188,6 +192,8 @@ final class JourneyAssistantContext {
 
     private func endpoint(_ text: String, kind: JourneyReading.Kind, isOrigin: Bool) async throws -> Endpoint {
         let text = Self.trimmed(text)
+        // Nothing said about the start means the current location, whatever kind the model chose.
+        if isOrigin && text.isEmpty { return .current }
         // A bare 家/公司/學校 is never searched on the map, whatever kind the model chose.
         let kind = Self.category(of: text) ?? (text.isEmpty && (kind == .place || kind == .saved) ? .none : kind)
         switch kind {
@@ -197,8 +203,9 @@ final class JourneyAssistantContext {
             let matches = Array(Self.relevant(journeys, to: key).prefix(Self.resultLimit))
             if matches.count == 1 { return .saved(matches[0]) }
             if matches.count > 1 { return .savedChoice(key, matches) }
-            // A named place the model took for a saved journey is still a place.
-            if kind == .saved { return .places(text, try await find(text)) }
+            // A named place the model labelled as home, work, school or a saved journey is still a place;
+            // only a bare 家/公司/學校 without a saved journey stays for the rider to fill in.
+            if !text.isEmpty && Self.category(of: text) == nil { return .places(text, try await find(text)) }
             return .unresolved(key)
         case .place, .none:
             if text.isEmpty { return isOrigin ? .current : .unresolved("") }
@@ -284,6 +291,17 @@ final class JourneyAssistantContext {
     }
 
     // MARK: Helpers
+
+    private static func summary(_ endpoint: Endpoint) -> String {
+        switch endpoint {
+        case .current: "current"
+        case .unresolved(let text): text.isEmpty ? "empty" : "unresolved"
+        case .saved: "saved"
+        case .savedChoice(_, let values): "savedChoice\(values.count)"
+        case .places(_, let values): "places\(values.count)"
+        case .chosen: "chosen"
+        }
+    }
 
     private static func trimmed(_ text: String) -> String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// Distinct option labels, with the values they stand for kept in the same order.

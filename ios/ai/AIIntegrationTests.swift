@@ -80,6 +80,20 @@ import TransitCore
         }
         XCTAssertFalse(searched.contains("公司"))
     }
+    func testMislabelledKindsStillPlan() async throws {
+        // On a phone every request ended with no place search: the model labelled ordinary places
+        // and an unstated start as home/work/saved.
+        var searched: [String] = []
+        let context = JourneyAssistantContext(journeys: []) { query in searched.append(query); return [self.place("國立臺灣大學")] }
+        for kind in [JourneyReading.Kind.home, .work, .school, .saved] {
+            let turn = try await context.resolve(reading("國立臺灣大學", kind, origin: "", originKind: kind),
+                                                 source: "騎單車去台大", now: now)
+            XCTAssertEqual(turn.destinationCandidates.first?.name, "國立臺灣大學", kind.rawValue)
+            XCTAssertEqual(turn.request.origin, "", "An unstated start is the current location")
+            XCTAssertEqual(turn.request.review.origin, .certain)
+        }
+        XCTAssertEqual(searched.count, 4)
+    }
     func testHomeUsesTheSavedJourneyAndItsPreferenceUnlessTheUserAsksForAnother() async throws {
         let home = place("古亭站")
         let context = JourneyAssistantContext(journeys: [saved("家", "house.fill", home, .lessWalking)]) { _ in
