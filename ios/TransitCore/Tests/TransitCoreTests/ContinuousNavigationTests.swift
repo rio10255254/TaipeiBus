@@ -111,6 +111,12 @@ final class ContinuousNavigationTests: XCTestCase {
         XCTAssertLessThan(last,4_410)
     }
     func testPublicFleetCrossingsActuallyCalibrateANewVehiclesFallback() throws {
+        // Isolate the session calibration from the measured hourly pace factors, which would
+        // otherwise already close most of this fixture's gap before calibration is tested.
+        defer { ForecastTuning.current = ForecastTuning() }
+        var neutral = ForecastTuning()
+        neutral.workdayPaceFactors = Array(repeating:1,count:24); neutral.holidayPaceFactors = Array(repeating:1,count:24)
+        ForecastTuning.current = neutral
         let (metadata,ride) = fixture()
         func vehicle(_ id: String, meters: Double, at time: Date) -> BusVehicle {
             let raw = BusVehicle(id:id,plate:id,routeID:"route",parentRouteID:"family",routeName:"284",direction:"0",
