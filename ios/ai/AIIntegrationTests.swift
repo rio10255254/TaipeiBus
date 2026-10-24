@@ -296,6 +296,33 @@ import TransitCore
         let unsure = try await none.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
         XCTAssertTrue(unsure.destinationCandidates.isEmpty, "No match: the rider picks instead of a guess")
     }
+    func testTheOnlineModelPicksAmongSearchResults() async throws {
+        // Names alone could not tell which result 台大機械館 means; the model picks the second.
+        let context = JourneyAssistantContext(journeys: [], matches: { _, _ in false }) { _ in
+            [self.place("國立臺灣大學圖書館"), self.place("工學院綜合大樓", 25.02)]
+        }
+        var asked: [String] = []
+        context.choose = { words, _, places in asked.append(words); return places.count == 2 ? 1 : nil }
+        let turn = try await context.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
+        XCTAssertEqual(asked, ["台大機械館"])
+        XCTAssertEqual(turn.destinationCandidates.first?.name, "工學院綜合大樓")
+        context.choose = { _, _, _ in -1 }
+        let none = try await context.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
+        XCTAssertTrue(none.destinationCandidates.isEmpty, "Nothing fits: the rider picks")
+        let exact = JourneyAssistantContext(journeys: []) { _ in [self.place("台北車站")] }
+        exact.choose = { _, _, _ in XCTFail("An exact name needs no model"); return nil }
+        _ = try await exact.resolve(reading("台北車站"), source: "去台北車站", now: now)
+    }
+    func testTheOnlineModelsTimeIsTrusted() async throws {
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        context.note(reader: "online")
+        var value = reading("國立臺灣大學"); value.departureTime = true; value.arrivalDay = "2026-10-22"; value.arrivalHour = 18
+        let afterWork = try await context.resolve(value, source: "下班後去台大", now: now)
+        XCTAssertEqual(afterWork.departAt, ISO8601DateFormatter().date(from: "2026-10-22T10:00:00Z"), "下班後 has no clock words; the model's 18:00 stays")
+        var past = value; past.arrivalDay = "2026-10-20"
+        let morning = try await context.resolve(past, source: "明天早上去台大", now: now)
+        XCTAssertEqual(morning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "An impossible model date gives way to the words")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

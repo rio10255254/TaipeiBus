@@ -211,12 +211,20 @@ final class JourneyAssistantSession: ObservableObject {
     private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
-        return JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { query in
+        let context = JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { query in
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
             return try await toolSearch.find(text: query, queryLimit: 3, timeout: 4)
         }
+        // Asked at the moment of choosing, so a consent given after this context was made counts.
+        if OnlineJourneyReader.configured {
+            let pro = model.purchases.hasPro
+            context.choose = { words, sentence, places in
+                await OnlineJourneyReader.choose(words, sentence: sentence, places: places, pro: pro)
+            }
+        }
+        return context
     }
     private func track(_ context: JourneyAssistantContext) {
         context.onActivity = { [weak self] value in
@@ -632,7 +640,7 @@ struct OnlineConsentAlert: ViewModifier {
             Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
-            Text(AppText.text("為了更準確，你說或打的那一句話和今天日期會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
         }
     }
 }

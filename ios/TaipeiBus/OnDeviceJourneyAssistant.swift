@@ -339,9 +339,19 @@ final class JourneyAssistantContext {
     private var destination = Endpoint.unresolved("")
     private var origin = Endpoint.current
     private var pending: Pending?
+    /// The online model, when available, picks among search results that names alone cannot settle:
+    /// it sees the words, the sentence and each result's name and address. It returns an index, or
+    /// -1 when none fits; nil when it could not answer.
+    var choose: (@MainActor (_ words: String, _ sentence: String, _ places: [TravelPlace]) async -> Int?)?
+    /// Results the model picked, accepted even when the names differ; words it said nothing fits.
+    private var picked = Set<String>(), rejected = Set<String>()
+    /// The reading came from the online model, whose time is trusted unless it is impossible.
+    private var modelTime = false
 
     func resolve(_ reading: JourneyReading, source: String, now: Date) async throws -> AssistantJourneyTurn {
-        self.reading = Self.grounded(reading, in: source); self.source = source; self.now = now
+        let online = readerNote.hasPrefix("online")
+        self.reading = Self.grounded(reading, in: source, trustTime: online); self.source = source; self.now = now
+        modelTime = online && self.reading.arrivalHour >= 0; picked = []; rejected = []
         let reading = self.reading
         destination = try await endpoint(reading.destination, kind: reading.destinationKind, isOrigin: false)
         origin = try await endpoint(reading.origin, kind: reading.originKind, isOrigin: true)
@@ -396,10 +406,23 @@ final class JourneyAssistantContext {
         do {
             let places = try await searchPlaces(text)
             try Task.checkCancellation()
-            let found = Array(places.filter { $0.coordinate.isInServiceArea }.prefix(Self.resultLimit))
+            let found = Array(places.filter { $0.coordinate.isInServiceArea }.prefix(5))
             let key = Self.normalized(text)
             // An exact name match goes first so it is the obvious choice.
-            return found.filter { Self.normalized($0.name) == key } + found.filter { Self.normalized($0.name) != key }
+            var ordered = found.filter { Self.normalized($0.name) == key } + found.filter { Self.normalized($0.name) != key }
+            let named = ordered.filter { matches($0, text) }
+            // Names settle it when exactly the first result matches; otherwise the online model picks.
+            if let choose, let first = ordered.first, Self.normalized(first.name) != key,
+               !(named.count == 1 && named[0].id == first.id) {
+                toolCalls.append("choosePlace: \(text)")
+                switch await choose(text, source, ordered) {
+                case let index? where ordered.indices.contains(index):
+                    let place = ordered.remove(at: index); ordered.insert(place, at: 0); picked.insert(place.id)
+                case .some(-1): rejected.insert(text)
+                default: break
+                }
+            }
+            return Array(ordered.prefix(Self.resultLimit))
         } catch {
             try Task.checkCancellation()
             // A failed search leaves the keyword for the user to edit.
@@ -416,7 +439,8 @@ final class JourneyAssistantContext {
         case .places(let text, let values):
             // The best matching result is used right away; the planner lets the rider change it.
             // A result whose name does not match the words (台大機械館 → 臺大圖書館) is never a guess.
-            let named = values.filter { matches($0, text) }
+            guard !rejected.contains(text) else { return (text, .needsConfirmation, []) }
+            let named = values.filter { picked.contains($0.id) || matches($0, text) }
             guard let best = named.first else { return (text, .needsConfirmation, []) }
             return (best.name, .certain, named + values.filter { place in !named.contains { $0.id == place.id } })
         case .chosen(let place): return (place.name, .certain, [place])
@@ -455,7 +479,11 @@ final class JourneyAssistantContext {
         }
         // The sentence's own words decide the time when they say one: 「明天早上」 leaves at nine,
         // 「週六下午三點」 is that Saturday. The model only fills in what this reading cannot.
-        if let spoken = SpokenTime.read(source, now: now) {
+        // The online model's time is used when it is possible (ahead, within 60 days); otherwise
+        // the sentence's own words decide, as they do for the rules and the on-device model.
+        let modelDate = departAt ?? (hour >= 0 ? Self.date(day: day, hour: hour, minute: minute) : nil)
+        let modelTimeUsable = modelTime && modelDate.map { $0 > now.addingTimeInterval(-300) && $0 < now.addingTimeInterval(60 * 86_400) } == true
+        if !modelTimeUsable, let spoken = SpokenTime.read(source, now: now) {
             switch spoken.kind {
             case .departure:
                 departAt = spoken.date; day = ""; hour = -1; minute = -1
@@ -490,7 +518,9 @@ final class JourneyAssistantContext {
 
     /// Keeps only what the sentence actually says. On a phone, 「回家」 alone came back as cycling with
     /// an arrival deadline: a way of travelling needs its words, and a deadline needs a clock time.
-    static func grounded(_ reading: JourneyReading, in source: String) -> JourneyReading {
+    /// `trustTime`: the online model reads 「下班後」 or 「趕上九點的會」 better than these words do, so its
+    /// time stays; only 「…前」 still makes it a deadline.
+    static func grounded(_ reading: JourneyReading, in source: String, trustTime: Bool = false) -> JourneyReading {
         var value = reading
         let text = normalized(source)
         func says(_ words: [String]) -> Bool { words.contains { text.contains($0) } }
@@ -500,7 +530,10 @@ final class JourneyAssistantContext {
         default: break
         }
         let clock = says(["點", "時", ":", "：", "am", "pm"]) || text.contains(where: \.isNumber)
-        if !clock {
+        if trustTime {
+            let plain = ["前往", "目前", "前面"].reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
+            if value.arrivalHour >= 0, plain.contains("前") { value.departureTime = false }
+        } else if !clock {
             value.arrivalDay = ""; value.arrivalHour = -1; value.arrivalMinute = -1
             value.departureTime = false; value.timeEvidence = ""
         } else if value.arrivalHour >= 0 {
@@ -686,6 +719,47 @@ enum OnlineJourneyReader {
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
         guard status == 200 else { throw Failure.http(status) }
         return try parse(data)
+    }
+
+    /// Which search result the words mean (台大機械館: the 機械工程學系館, not the library). Only the words,
+    /// the sentence and the results' public names and addresses are sent. nil when it cannot answer.
+    static func choose(_ words: String, sentence: String, places: [TravelPlace], pro: Bool, session: URLSession = .shared) async -> Int? {
+        guard enabled, places.count <= 8 else { return nil }
+        let list = places.enumerated().map { "\($0.offset). \($0.element.name)｜\(String($0.element.address.prefix(40)))" }.joined(separator: "\n")
+        let prompt = "使用者說：「\(sentence)」\n要找的地點：「\(words)」\n搜尋結果：\n\(list)\n只輸出 JSON {\"index\": 數字}：最符合的結果編號；都不是同一個地方就輸出 -1。"
+        for model in models(pro: pro) {
+            guard let content = try? await complete(system: "你判斷搜尋結果是否就是使用者要去的地方。不要解釋。", user: prompt,
+                                                   model: model, limit: 300, session: session) else { continue }
+            if let data = content.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let index = value["index"] as? Int {
+                JourneyDiagnostics.shared.record("ai-online choose model=\(model) index=\(index)")
+                return index
+            }
+        }
+        return nil
+    }
+
+    /// One chat completion's JSON object as text.
+    private static func complete(system: String, user: String, model: String, limit: Int, session: URLSession) async throws -> String {
+        let body: [String: Any] = [
+            "model": model, "temperature": 0, "max_completion_tokens": limit,
+            "reasoning_effort": "low", "include_reasoning": false,
+            "response_format": ["type": "json_object"],
+            "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
+        ]
+        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 5)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw Failure.http(status) }
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let reply = (choices.first?["message"] as? [String: Any])?["content"] as? String,
+              let open = reply.firstIndex(of: "{"), let close = reply.lastIndex(of: "}"), open < close else { throw Failure.invalid }
+        return String(reply[open...close])
     }
 
     /// The chat reply's content as a reading; anything unexpected is rejected rather than guessed.
