@@ -44,23 +44,33 @@ final class AssistantRecents: ObservableObject {
 final class SpeechInput: ObservableObject {
     @Published private(set) var transcript = ""
     @Published private(set) var listening = false
+    /// Tapped, waiting for permission or the microphone: shown at once so the tap is never silent.
+    @Published private(set) var preparing = false
     @Published private(set) var problem: String?
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private var silence: Task<Void, Never>?
     private var finished: ((String) -> Void)?
+    /// Bumped by every start and stop, so a late callback from an earlier attempt is ignored.
+    private var attempt = 0
 
     func start(language: AppLanguage = .current, finished: @escaping (String) -> Void) async {
         stop()
-        transcript = ""; problem = nil; self.finished = finished
-        guard await Self.authorized() else {
+        transcript = ""; problem = nil; preparing = true
+        let current = attempt
+        JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
+        let allowed = await Self.permissions()
+        guard current == attempt else { return }
+        guard allowed else {
+            preparing = false
             JourneyDiagnostics.shared.record("speech denied")
             problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
             return
         }
         let locale = language == .english ? Locale(identifier: "en-US") : Locale(identifier: "zh-TW")
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
+            preparing = false
             JourneyDiagnostics.shared.record("speech unavailable")
             problem = AppText.text("語音辨識目前無法使用，請直接打字。")
             return
@@ -83,9 +93,8 @@ final class SpeechInput: ObservableObject {
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
             input.removeTap(onBus: 0)
-            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
-                request.append(buffer)
-            }
+            // The audio thread calls this; it must not belong to the main actor.
+            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request))
             engine.prepare()
             try engine.start()
         } catch {
@@ -94,33 +103,33 @@ final class SpeechInput: ObservableObject {
             stop(); return
         }
         self.request = request
-        listening = true
+        preparing = false; listening = true
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            let text = result?.bestTranscription.formattedString
-            let final = result?.isFinal ?? false
-            let code = (error as NSError?).map { "\($0.domain) \($0.code)" }
-            Task { @MainActor in
-                guard let self, self.listening else { return }
-                if let text, !text.isEmpty { self.transcript = text; self.waitForSilence(1.2) }
-                if let code, self.transcript.isEmpty {
-                    JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
-                    let finished = self.finished
-                    self.stop()
-                    if onDevice, let finished {
-                        self.finished = finished
-                        self.begin(recognizer, onDevice: false)
-                    } else {
-                        self.problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。")
-                    }
-                    return
-                }
-                if final || error != nil { self.finish() }
-            }
-        }
+        let current = attempt
+        // Recognition results arrive on a background queue; they are handed to the main actor here.
+        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, final, code in
+            Task { @MainActor in self?.receive(text: text, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice) }
+        })
         // Nothing said at all: stop instead of listening forever, and say so.
         waitForSilence(6)
+    }
+    private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
+        guard current == attempt, listening else { return }
+        if let text, !text.isEmpty { transcript = text; waitForSilence(1.2) }
+        if let code, transcript.isEmpty {
+            JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
+            let finished = self.finished
+            stop()
+            if onDevice, let finished {
+                self.finished = finished
+                begin(recognizer, onDevice: false)
+            } else {
+                problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。")
+            }
+            return
+        }
+        if final || code != nil { finish() }
     }
     private enum SpeechFailure: Error { case noMicrophone }
 
@@ -129,15 +138,18 @@ final class SpeechInput: ObservableObject {
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         let done = finished
         stop()
+        JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
         if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。") }
         else { done?(text) }
     }
 
     func stop() {
+        attempt += 1
         silence?.cancel(); silence = nil
-        if engine.isRunning { engine.stop(); engine.inputNode.removeTap(onBus: 0) }
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
-        request = nil; task = nil; listening = false; finished = nil
+        request = nil; task = nil; listening = false; preparing = false; finished = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -149,12 +161,31 @@ final class SpeechInput: ObservableObject {
         }
     }
 
-    private static func authorized() async -> Bool {
-        let speech = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+    // These run off the main actor: iOS calls permission, audio and recognition callbacks on its own
+    // queues, and a closure that belongs to the main actor stops the app or never returns there.
+    nonisolated private static func permissions() async -> Bool {
+        var speech = SFSpeechRecognizer.authorizationStatus()
+        if speech == .notDetermined {
+            speech = await withCheckedContinuation { continuation in
+                SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0) }
+            }
         }
-        guard speech else { return false }
-        return await AVAudioApplication.requestRecordPermission()
+        guard speech == .authorized else { return false }
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted: return true
+        case .denied: return false
+        default: return await AVAudioApplication.requestRecordPermission()
+        }
+    }
+    nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest) -> AVAudioNodeTapBlock {
+        { buffer, _ in request.append(buffer) }
+    }
+    nonisolated private static func results(_ deliver: @escaping @Sendable (String?, Bool, String?) -> Void)
+        -> (SFSpeechRecognitionResult?, Error?) -> Void {
+        { result, error in
+            deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false,
+                    (error as NSError?).map { "\($0.domain) \($0.code)" })
+        }
     }
 }
 

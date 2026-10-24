@@ -315,8 +315,8 @@ struct JourneyPlanningView: View {
                 if query.isEmpty, assistantAvailable, !editingOrigin, !planner.started {
                     // One tap, then just say where to go.
                     Button { focused = false; assistant.listen() } label: {
-                        Image(systemName: "mic.fill").frame(width: 36, height: 36)
-                    }.accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
+                        Image(systemName: "mic.fill").frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.buttonStyle(.borderless).accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
                 }
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))

@@ -435,7 +435,16 @@ struct AssistantInlineStatus: View {
         AppText.text("%@ 秒", "\(max(0, Int(date.timeIntervalSince(session.startedAt))))")
     }
     var body: some View {
-        if speech.listening, !session.presented {
+        if speech.preparing, !session.presented {
+            HStack(spacing: 12) {
+                ProgressView()
+                Text(AppText.text("正在開啟麥克風…")).font(.subheadline)
+                Spacer(minLength: 0)
+                Button(AppText.text("取消")) { session.cancel() }.font(.subheadline).frame(minHeight: 44)
+            }
+            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
+            .accessibilityIdentifier("ai-inline-preparing")
+        } else if speech.listening, !session.presented {
             HStack(spacing: 12) {
                 Image(systemName: "waveform").foregroundStyle(.tint).symbolEffect(.variableColor.iterative)
                 Text(speech.transcript.isEmpty ? AppText.text("請說出要去哪裡…") : speech.transcript)
@@ -533,7 +542,9 @@ struct AIJourneyAssistantView: View {
                     .accessibilityLabel(speech.listening ? AppText.text("停止聆聽") : AppText.text("用說的"))
                     .accessibilityIdentifier("ai-voice")
             }
-            if speech.listening {
+            if speech.preparing {
+                Label(AppText.text("正在開啟麥克風…"), systemImage: "mic").foregroundStyle(.secondary)
+            } else if speech.listening {
                 Label(speech.transcript.isEmpty ? AppText.text("請說出要去哪裡…") : speech.transcript, systemImage: "waveform")
                     .foregroundStyle(.secondary).accessibilityIdentifier("ai-listening")
             }
