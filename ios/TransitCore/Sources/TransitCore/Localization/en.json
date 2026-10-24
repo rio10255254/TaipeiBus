@@ -952,5 +952,14 @@
   "開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "When on, the sentence you say or type and today's date, and when needed the names and addresses of places found, are first sent to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account is sent; without a connection or once the allowance is used, the phone's model or rules are used. Free: %@ a day. Pro: %@ a day with a larger model.",
   "更聰明的一句話規劃": "Smarter one-sentence planning",
   "用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。": "A larger online model reads your trip, more accurate with complex wording, and more uses each day.",
-  "接著去%@": "Then to %@"
+  "接著去%@": "Then to %@",
+  "不搭公車": "No buses",
+  "不搭捷運": "No metro",
+  "不騎 YouBike": "No YouBike",
+  "避開%@": "Avoid %@",
+  "沒有完全符合的路線，先顯示一般推薦。": "No route fits all of that; showing the usual recommendations.",
+  "用說的修改": "Change by voice",
+  "還要怎麼改？例如：改騎車、晚一點、不要搭公車": "Change anything? e.g. bike instead, later, no buses",
+  "修改": "Change",
+  "正在理解你的修改…": "Understanding your change…"
 }

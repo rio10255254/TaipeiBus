@@ -593,6 +593,7 @@ final class TransitAppModel: ObservableObject {
         var note: String?
         /// The second stop of 「先去…然後再去…」, offered as 接著去 once this leg is planned.
         var nextStop: String? = nil
+        var constraints = TripConstraints()
     }
     @Published private(set) var assistantTrip: AssistantTrip?
     /// 用一句話規劃 for the whole app: the route panel, Siri and the sheet share one request.
@@ -615,17 +616,18 @@ final class TransitAppModel: ObservableObject {
     /// preference falls back to the recommendation, and the note says so.
     func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
                                  preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil, arriveBy: Date? = nil,
-                                 nextStop: String? = nil) {
+                                 nextStop: String? = nil, constraints: TripConstraints = TripConstraints()) {
         guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
-        planner.preferredMode = mode; planner.schedule(departure, arriveBy: arriveBy)
+        planner.preferredMode = mode; planner.schedule(departure, arriveBy: arriveBy); planner.constraints = constraints
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
         let note = preference != .balanced && !purchases.hasPro
             ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
         assistantTrip = AssistantTrip(request: request, destination: destination,
             alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
             preference: preference, departure: planner.scheduledDeparture,
-            arriveBy: planner.arrivalDeadline, note: note, nextStop: nextStop.flatMap { $0.isEmpty ? nil : $0 })
+            arriveBy: planner.arrivalDeadline, note: note, nextStop: nextStop.flatMap { $0.isEmpty ? nil : $0 },
+            constraints: constraints)
         if let origin { planner.setOrigin(origin, metadata: metadata) }
         else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
@@ -635,7 +637,29 @@ final class TransitAppModel: ObservableObject {
         guard let trip = assistantTrip else { return }
         previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
             alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode,
-            departure: trip.departure, arriveBy: trip.arriveBy, nextStop: trip.nextStop)
+            departure: trip.departure, arriveBy: trip.arriveBy, nextStop: trip.nextStop, constraints: trip.constraints)
+    }
+    /// Applies a change said on the route screen (「改騎車」, 「晚一點」, 「不要搭公車」) in one new plan.
+    func applyAssistantChange(_ change: AssistantChange, request: String) {
+        guard var trip = assistantTrip, !planner.started else { return }
+        if let mode = change.mode { trip.mode = mode; planner.preferredMode = mode }
+        if let raw = change.preference, let preference = RoutePreference(rawValue: raw.rawValue) {
+            trip.preference = preference
+            tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
+            trip.note = preference != .balanced && !purchases.hasPro ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
+        }
+        if let constraints = change.constraints { trip.constraints = constraints; planner.constraints = constraints }
+        switch change.time {
+        case .now?: planner.schedule(nil)
+        case .depart(let date)?: planner.schedule(date)
+        case .arrive(let date)?: planner.schedule(nil, arriveBy: date)
+        case nil: break
+        }
+        trip.departure = planner.scheduledDeparture; trip.arriveBy = planner.arrivalDeadline
+        if !change.next.isEmpty { trip.nextStop = change.next }
+        trip.request = request
+        assistantTrip = trip
+        planner.plan(metadata: metadata)
     }
     /// 「幾點出發」: nil plans for now with live buses; a later time plans on that day's timetables and headways.
     /// An arrival time (「三點前到」) is worked back to the latest sensible departure.

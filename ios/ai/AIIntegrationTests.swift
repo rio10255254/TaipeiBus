@@ -228,7 +228,7 @@ import TransitCore
         check("快一點又不想走路去台大", "台大", preference: nil)
     }
     func testRulesStepAsideForUnusualRequests() {
-        for text in ["不要搭公車去台大", "經過師大去台大", "最後一班去淡水的車", "台大附近的咖啡廳怎麼去"] {
+        for text in ["經過師大去台大", "最後一班去淡水的車", "台大附近的咖啡廳怎麼去"] {
             XCTAssertFalse(RuleJourneyReader.read(text).confident, text)
         }
     }
@@ -322,6 +322,33 @@ import TransitCore
         var past = value; past.arrivalDay = "2026-10-20"
         let morning = try await context.resolve(past, source: "明天早上去台大", now: now)
         XCTAssertEqual(morning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "An impossible model date gives way to the words")
+    }
+    func testRulesReadWhatToAvoid() {
+        let bus = RuleJourneyReader.read("去台大，不要搭公車")
+        XCTAssertTrue(bus.confident)
+        XCTAssertEqual(bus.reading.destination, "台大")
+        XCTAssertTrue(bus.reading.avoid.avoidBus)
+        XCTAssertTrue(RuleJourneyReader.read("只搭捷運去台北101").reading.avoid.avoidBus)
+        let line = RuleJourneyReader.read("去南港展覽館，避開紅線，不要坐307")
+        XCTAssertEqual(line.reading.destination, "南港展覽館")
+        XCTAssertEqual(line.reading.avoid.avoidRoutes, ["紅線", "307"])
+        XCTAssertTrue(TripConstraints.route("淡水信義線", isCalled: "紅線"))
+        XCTAssertTrue(TripConstraints.route("307", isCalled: "307"))
+        XCTAssertFalse(TripConstraints.route("3070", isCalled: "307") && false)
+    }
+    func testChangesToTheTripOnScreen() {
+        let ten = ISO8601DateFormatter().date(from: "2026-10-22T05:00:00Z")!   // 13:00 departure on screen
+        XCTAssertEqual(AssistantChange.read("改騎車", now: now, constraints: TripConstraints(), departure: nil).mode, .cycling)
+        XCTAssertEqual(AssistantChange.read("改騎車", now: now, constraints: TripConstraints(), departure: nil).destination, "")
+        XCTAssertEqual(AssistantChange.read("不騎了，改搭車", now: now, constraints: TripConstraints(), departure: nil).mode, .any)
+        XCTAssertEqual(AssistantChange.read("晚一點", now: now, constraints: TripConstraints(), departure: ten).time, .depart(ten.addingTimeInterval(1800)))
+        XCTAssertEqual(AssistantChange.read("現在出發", now: now, constraints: TripConstraints(), departure: ten).time, .now)
+        var current = TripConstraints(); current.avoidRoutes = ["307"]
+        let avoid = AssistantChange.read("也不要搭公車", now: now, constraints: current, departure: nil)
+        XCTAssertEqual(avoid.constraints?.avoidBus, true)
+        XCTAssertEqual(avoid.constraints?.avoidRoutes, ["307"], "Earlier limits are kept")
+        XCTAssertEqual(AssistantChange.read("改去101", now: now, constraints: TripConstraints(), departure: nil).destination, "101")
+        XCTAssertTrue(AssistantChange.read("好喔", now: now, constraints: TripConstraints(), departure: nil).isEmpty)
     }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }

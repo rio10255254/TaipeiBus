@@ -232,6 +232,10 @@ final class JourneyPlannerModel: ObservableObject {
     /// A way of travelling the rider asked for in 用一句話規劃 (e.g. 騎單車): routes made only of
     /// it are listed first. Cleared when the trip is finished.
     var preferredMode = AssistantTravelMode.any
+    /// 「不要搭公車」, 「只搭捷運」, 「避開紅線」: routes that break them are left out while others exist.
+    var constraints = TripConstraints() { didSet { if constraints != oldValue { durationCache.removeAll(keepingCapacity: true) } } }
+    /// No route kept the constraints, so the usual ones are shown with a note.
+    @Published private(set) var constraintsUnmet = false
     /// A rider who asked to cycle gets a whole-trip YouBike route up to 20 km; otherwise rides stay
     /// within the usual limit (5 km), beyond which public transport is normally the better offer.
     /// Why no whole-trip YouBike route can be offered for a rider who asked to cycle, or nil when
@@ -618,11 +622,17 @@ final class JourneyPlannerModel: ObservableObject {
                 transitLed: isTransitLed(option,timing:timing,hasTransit:hasTransit)))
         }
         let byID = Dictionary(uniqueKeysWithValues: valid.map { ($0.id, $0) })
-        let ranked = JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
+        var ranked = JourneyChoiceRanking.recommended(metrics).compactMap { byID[$0] }
+        if !constraints.isEmpty {
+            let kept = ranked.filter(constraints.allows)
+            let unmet = kept.isEmpty && !ranked.isEmpty && !planning && !checkingWalks
+            if constraintsUnmet != unmet { constraintsUnmet = unmet }
+            if !kept.isEmpty { ranked = kept }
+        } else if constraintsUnmet { constraintsUnmet = false }
         let wanted: [JourneyOption]
         switch preferredMode {
         case .any: return ranked
-        case .cycling: wanted = valid.filter(\.bikeOnly)
+        case .cycling: wanted = valid.filter(\.bikeOnly).filter(constraints.allows)
         case .walking: wanted = valid.filter(\.walkingOnly)
         }
         let fastest = wanted.sorted { (duration($0, at: date)?.totalSeconds ?? .infinity) < (duration($1, at: date)?.totalSeconds ?? .infinity) }
@@ -1724,7 +1734,7 @@ final class JourneyPlannerModel: ObservableObject {
     func finish() {
         defer { onNavigationChange?() }
         cancelRequests(); started = false; destination = nil; options = []; selectedID = nil; message = nil; stepIndex = 0; mapRevision += 1
-        preferredMode = .any; scheduledDeparture = nil; arrivalDeadline = nil
+        preferredMode = .any; scheduledDeparture = nil; arrivalDeadline = nil; constraints = TripConstraints(); constraintsUnmet = false
         verifiedPool = []; connectionBases = [:]; attemptedBikeConnections = []; searchedBikeGateways = false; comparisonChanged = false; optionLabels = [:]
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast; stationRefinements = [:]
     }
@@ -1952,4 +1962,16 @@ final class JourneyPlannerModel: ObservableObject {
         selectedID = trip.id; message = nil; mapRevision += 1
     }
 #endif
+}
+
+extension TripConstraints {
+    func allows(_ option: JourneyOption) -> Bool {
+        if avoidBike, option.cycles { return false }
+        for ride in option.rides {
+            if avoidBus, ride.route.mode == .bus { return false }
+            if avoidMetro, ride.route.mode != .bus { return false }
+            if avoidRoutes.contains(where: { Self.route(ride.route.name, isCalled: $0) }) { return false }
+        }
+        return true
+    }
 }

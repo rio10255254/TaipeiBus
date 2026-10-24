@@ -77,11 +77,91 @@ final class JourneyAssistantSession: ObservableObject {
     func open() {
         cancel(); input = ""; prepare(); presented = true
     }
-    /// One tap, then speak: understanding starts when the rider stops talking.
-    func listen() {
+    /// One tap, then speak: understanding starts when the rider stops talking. On the route screen
+    /// (`refining`), what is said changes the trip shown instead of starting a new one.
+    func listen(refining: Bool = false) {
         guard unavailable == nil else { presented = true; return }
         cancel(); prepare()
-        Task { await speech.start { [weak self] text in self?.run(text) } }
+        Task { await speech.start { [weak self] text in if refining { self?.refine(text) } else { self?.run(text) } } }
+    }
+
+    /// 「改騎車」, 「晚一點」, 「不要搭公車」, 「改去101」 for the trip on screen. The online model reads the
+    /// change with the trip described in words; the rules fill what it leaves out or read it alone.
+    func refine(_ text: String) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty, value.count <= 300 else { return }
+        guard let trip = model.currentAssistantTrip else { run(value); return }
+        if OnlineJourneyReader.needsConsent {
+            speech.stop(); waitingForConsent = value; waitingToRefine = true; askingConsent = true
+            return
+        }
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        busy = true; message = nil; source = value; startedAt = Date(); activity = AppText.text("正在理解你的修改…")
+        let pro = model.purchases.hasPro
+        let now = Date()
+        operation = Task { @MainActor in
+            let rules = AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
+            var change = rules, reader = "rules"
+            if OnlineJourneyReader.enabled,
+               let online = try? await OnlineJourneyReader.refine(value, trip: Self.describe(trip), now: now, pro: pro) {
+                change = online.filled(from: rules); reader = "online"
+            }
+            guard !Task.isCancelled else { return }
+            busy = false
+            JourneyDiagnostics.shared.record("ai-refine reader=\(reader) mode=\(change.mode != nil) time=\(change.time != nil) avoid=\(change.constraints != nil) place=\(!change.destination.isEmpty)")
+            if change.isEmpty {
+                // Nothing to change: it was a new request after all.
+                run(value); return
+            }
+            if !change.destination.isEmpty || !change.origin.isEmpty {
+                await replace(trip, with: change, request: value)
+            } else {
+                model.applyAssistantChange(change, request: value)
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }
+        }
+    }
+    private var waitingToRefine = false
+
+    /// A new destination or start keeps everything else the rider already set.
+    private func replace(_ trip: TransitAppModel.AssistantTrip, with change: AssistantChange, request: String) async {
+        func place(_ words: String, near: Coordinate?) async -> TravelPlace? {
+            search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
+            search.setContext(near)
+            let found = ((try? await search.find(text: words, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
+            return found.first { Self.matches($0, words) }
+        }
+        busy = true; activity = AppText.text("正在搜尋地點…")
+        let destination = change.destination.isEmpty ? trip.destination : await place(change.destination, near: model.location.usableCoordinate)
+        let origin = change.origin.isEmpty ? trip.origin : await place(change.origin, near: model.location.usableCoordinate)
+        busy = false
+        guard let destination, change.origin.isEmpty || origin != nil else {
+            // Not sure which place: the rider picks, as for a new request.
+            run(request); return
+        }
+        var departure = trip.departure, arriveBy = trip.arriveBy
+        switch change.time {
+        case .now?: departure = nil; arriveBy = nil
+        case .depart(let date)?: departure = date; arriveBy = nil
+        case .arrive(let date)?: departure = nil; arriveBy = date
+        case nil: break
+        }
+        let preference = change.preference.flatMap { RoutePreference(rawValue: $0.rawValue) } ?? trip.preference
+        model.previewAssistantJourney(request: request, origin: origin, destination: destination, preference: preference,
+                                      mode: change.mode ?? trip.mode, departure: departure, arriveBy: arriveBy,
+                                      nextStop: change.next.isEmpty ? trip.nextStop : change.next,
+                                      constraints: change.constraints ?? trip.constraints)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        plannedCount += 1
+    }
+    /// The trip in words for the online model: places, way of travelling, time and limits, no coordinates.
+    private static func describe(_ trip: TransitAppModel.AssistantTrip) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        let time = trip.arriveBy.map { "\(formatter.string(from: $0)) 前抵達" } ?? trip.departure.map { "\(formatter.string(from: $0)) 出發" } ?? "現在出發"
+        let limits = trip.constraints.isEmpty ? "無" : trip.constraints.summary
+        return "從\(trip.origin?.name ?? "目前位置")到\(trip.destination.name)；交通方式 \(trip.mode.rawValue)；偏好 \(trip.preference.rawValue)；\(time)；限制 \(limits)"
     }
     /// Understands the sentence and plans it, without opening anything when nothing needs asking.
     func run(_ text: String) {
@@ -145,8 +225,8 @@ final class JourneyAssistantSession: ObservableObject {
     func answerConsent(_ allowed: Bool) {
         UserDefaults.standard.set(allowed, forKey: OnlineJourneyReader.enabledKey)
         askingConsent = false
-        let text = waitingForConsent; waitingForConsent = ""
-        if !text.isEmpty { run(text) }
+        let text = waitingForConsent, refining = waitingToRefine; waitingForConsent = ""; waitingToRefine = false
+        if !text.isEmpty { if refining { refine(text) } else { run(text) } }
     }
     /// Editing the sentence discards an answer that belonged to the old one.
     func edited() {
@@ -295,7 +375,7 @@ final class JourneyAssistantSession: ObservableObject {
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
-                                      nextStop: turn.nextStop)
+                                      nextStop: turn.nextStop, constraints: turn.avoid)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1
@@ -538,6 +618,8 @@ struct AssistantTripBanner: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     @ObservedObject var session: JourneyAssistantSession
+    @State private var change = ""
+    @FocusState private var changing: Bool
     private func title(_ mode: AssistantTravelMode) -> String {
         switch mode {
         case .any: AppText.text("推薦路線")
@@ -570,8 +652,8 @@ struct AssistantTripBanner: View {
                     Text("「" + trip.request + "」").font(.subheadline.weight(.semibold)).lineLimit(2)
                         .accessibilityLabel(AppText.text("你說的：%@", trip.request))
                     Spacer(minLength: 0)
-                    Button { session.listen() } label: { Image(systemName: "mic").frame(width: 40, height: 44) }
-                        .accessibilityLabel(AppText.text("重新說一次")).accessibilityIdentifier("assistant-trip-respeak")
+                    Button { session.listen(refining: true) } label: { Image(systemName: "mic").frame(width: 40, height: 44) }
+                        .accessibilityLabel(AppText.text("用說的修改")).accessibilityIdentifier("assistant-trip-respeak")
                     Button { model.forgetAssistantTrip() } label: { Image(systemName: "xmark").frame(width: 40, height: 44) }
                         .foregroundStyle(.secondary)
                         .accessibilityLabel(AppText.text("改回一般路線")).accessibilityIdentifier("assistant-trip-dismiss")
@@ -612,6 +694,25 @@ struct AssistantTripBanner: View {
                         if trip.preference != .balanced, trip.note == nil {
                             chip(trip.preference.title, "slider.horizontal.3", menu: false)
                         }
+                    }
+                }
+                HStack(spacing: 8) {
+                    TextField(AppText.text("還要怎麼改？例如：改騎車、晚一點、不要搭公車"), text: $change)
+                        .font(.subheadline).submitLabel(.done).focused($changing)
+                        .onSubmit { let text = change; change = ""; session.refine(text) }
+                        .accessibilityIdentifier("assistant-trip-change")
+                    if !change.isEmpty {
+                        Button(AppText.text("修改")) { let text = change; change = ""; changing = false; session.refine(text) }
+                            .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .padding(.horizontal, 10).frame(minHeight: 40)
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
+                if !trip.constraints.isEmpty {
+                    Label(trip.constraints.summary, systemImage: "nosign").font(.caption).foregroundStyle(.secondary)
+                        .accessibilityIdentifier("assistant-trip-constraints")
+                    if planner.constraintsUnmet {
+                        Text(AppText.text("沒有完全符合的路線，先顯示一般推薦。")).font(.caption).foregroundStyle(.orange)
                     }
                 }
                 if let note = trip.note { Text(note).font(.caption).foregroundStyle(.orange) }

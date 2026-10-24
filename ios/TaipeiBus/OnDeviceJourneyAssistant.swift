@@ -113,6 +113,7 @@ struct AssistantJourneyTurn {
     var originCandidates: [TravelPlace]
     /// 「先去台大機械館，然後再去內湖站」: the second stop, offered after the first is planned.
     var nextStop = ""
+    var avoid = TripConstraints()
 }
 
 @MainActor
@@ -143,6 +144,104 @@ struct JourneyReading: Equatable, Sendable {
     var travelMode = AssistantTravelMode.any
     /// A second stop, planned afterwards from the first.
     var next = ""
+    /// 不要搭公車, 只搭捷運, 避開紅線.
+    var avoid = TripConstraints()
+}
+
+/// What a rider said to avoid: a kind of transport, YouBike, or named lines (307, 紅線, 板南線).
+struct TripConstraints: Equatable, Sendable {
+    var avoidBus = false
+    var avoidMetro = false
+    var avoidBike = false
+    var avoidRoutes: [String] = []
+    var isEmpty: Bool { !avoidBus && !avoidMetro && !avoidBike && avoidRoutes.isEmpty }
+
+    /// Metro colours as people say them, and the line names the route data uses.
+    static let lineNames: [String: [String]] = [
+        "紅線": ["淡水信義", "淡水", "信義線"], "藍線": ["板南"], "綠線": ["松山新店", "新店線", "松山線"],
+        "橘線": ["中和新蘆", "中和", "新蘆"], "棕線": ["文湖"], "黃線": ["環狀"],
+    ]
+    static func route(_ route: String, isCalled said: String) -> Bool {
+        let key = said.replacingOccurrences(of: "捷運", with: "").replacingOccurrences(of: "路公車", with: "")
+            .replacingOccurrences(of: "公車", with: "").trimmingCharacters(in: .whitespaces)
+        guard !key.isEmpty else { return false }
+        if route == key || (key.count >= 2 && route.contains(key)) { return true }
+        return (lineNames[key] ?? []).contains { route.contains($0) }
+    }
+    /// A short description for the banner: 不搭公車 · 避開紅線.
+    var summary: String {
+        var parts: [String] = []
+        if avoidBus { parts.append(AppText.text("不搭公車")) }
+        if avoidMetro { parts.append(AppText.text("不搭捷運")) }
+        if avoidBike { parts.append(AppText.text("不騎 YouBike")) }
+        parts += avoidRoutes.map { AppText.text("避開%@", $0) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// A change to the trip already on screen: 「改騎車」, 「晚一點」, 「不要搭公車」, 「改去101」.
+/// nil fields stay as they are.
+struct AssistantChange: Equatable, Sendable {
+    enum Time: Equatable, Sendable { case now, depart(Date), arrive(Date) }
+    var mode: AssistantTravelMode?
+    var preference: AssistantIntentDraft.Preference?
+    var time: Time?
+    var constraints: TripConstraints?
+    var destination = ""
+    var origin = ""
+    var next = ""
+    var isEmpty: Bool {
+        mode == nil && preference == nil && time == nil && constraints == nil && destination.isEmpty && origin.isEmpty && next.isEmpty
+    }
+    /// The model's change, completed by what the rules read and it left out.
+    func filled(from other: AssistantChange) -> AssistantChange {
+        var value = self
+        value.mode = mode ?? other.mode; value.preference = preference ?? other.preference
+        value.time = time ?? other.time; value.constraints = constraints ?? other.constraints
+        if value.destination.isEmpty { value.destination = other.destination }
+        if value.origin.isEmpty { value.origin = other.origin }
+        if value.next.isEmpty { value.next = other.next }
+        return value
+    }
+
+    /// The rules' reading of a change, relative to the trip's current constraints and departure.
+    @MainActor
+    static func read(_ text: String, now: Date, constraints current: TripConstraints, departure: Date?) -> AssistantChange {
+        var change = AssistantChange()
+        let plain = text.folding(options: [.widthInsensitive, .caseInsensitive], locale: Locale(identifier: "zh_TW"))
+        let reading = RuleJourneyReader.read(text).reading
+        if ["搭車", "坐車", "大眾運輸", "不騎了", "不要騎了", "不用騎", "搭捷運或公車", "一般路線"].contains(where: plain.contains) { change.mode = .any }
+        else if reading.travelMode != .any { change.mode = reading.travelMode }
+        if ["推薦的", "用推薦", "都可以"].contains(where: plain.contains) { change.preference = .balanced }
+        else if reading.preference != .balanced { change.preference = reading.preference }
+        if ["什麼都可以搭", "都可以搭", "不限", "取消限制"].contains(where: plain.contains) { change.constraints = TripConstraints() }
+        else if !reading.avoid.isEmpty {
+            var merged = current
+            merged.avoidBus = merged.avoidBus || reading.avoid.avoidBus
+            merged.avoidMetro = merged.avoidMetro || reading.avoid.avoidMetro
+            merged.avoidBike = merged.avoidBike || reading.avoid.avoidBike
+            merged.avoidRoutes += reading.avoid.avoidRoutes.filter { !merged.avoidRoutes.contains($0) }
+            change.constraints = merged
+        }
+        let base = max(departure ?? now, now)
+        if ["現在出發", "現在走", "馬上走", "馬上出發", "現在就"].contains(where: plain.contains) { change.time = .now }
+        else if ["晚一點", "晚點", "晚半小時", "晚一些"].contains(where: plain.contains) { change.time = .depart(base.addingTimeInterval(30 * 60)) }
+        else if ["早一點", "早點", "提早"].contains(where: plain.contains), let departure, departure.timeIntervalSince(now) > 40 * 60 {
+            change.time = .depart(departure.addingTimeInterval(-30 * 60))
+        } else if let spoken = SpokenTime.read(text, now: now) {
+            change.time = spoken.kind == .departure ? .depart(spoken.date) : .arrive(spoken.date)
+        }
+        // A new place only when the sentence names one with 去/到/改去 (「改騎車」 is not a place).
+        let names = ["去", "到", "前往", "回", "換成", "改成"].contains(where: plain.contains)
+        let stripped = ["改成", "換成", "改", "換", "改去", "改到"].reduce(reading.destination) { $0.replacingOccurrences(of: $1, with: "") }
+            .trimmingCharacters(in: .whitespaces)
+        if names, !stripped.isEmpty, change.mode == nil || reading.destination.count > 2, !["騎車", "走路", "搭車"].contains(stripped) {
+            change.destination = stripped
+        }
+        change.origin = reading.origin
+        change.next = reading.next
+        return change
+    }
 }
 
 /// Reads the usual ways a trip is said without any language model, so 用一句話規劃 works on every
@@ -169,7 +268,7 @@ enum RuleJourneyReader {
     /// Asking for the usual recommendation is no preference at all.
     private static let balanced = ["用推薦的路線", "推薦的路線", "推薦路線", "照推薦"]
     /// Wishes these rules do not turn into a plan; the model (or the rider) handles them.
-    private static let unsure = ["經過", "順路", "順便", "避開", "不要搭", "不搭", "只搭", "只坐", "不要坐", "然後", "再去", "或是",
+    private static let unsure = ["經過", "順路", "順便", "然後", "再去", "或是",
         "還是", "如果", "最後一班", "末班", "哪裡", "什麼", "多久", "多少錢", "附近的"]
     private static let destinationMarkers = ["前往", "回到", "抵達", "到達", "去", "到", "回", "往", "至"]
     /// What follows a place but is not part of it: 去台大醫院看診, 到台北車站的走法.
@@ -194,6 +293,7 @@ enum RuleJourneyReader {
             }
         }
         for word in balanced { value = value.replacingOccurrences(of: word, with: " ") }
+        (reading.avoid, value) = constraints(in: value)
         reading.preference = wanted.count > 1 ? nil : wanted.first ?? .balanced
         if cycling.contains(where: value.contains) { reading.travelMode = .cycling }
         else if walking.contains(where: value.contains) || value.hasPrefix("走去") || value.contains("走到") { reading.travelMode = .walking }
@@ -250,6 +350,24 @@ enum RuleJourneyReader {
         let plausible = (1...24).contains(destination.count) && !destination.contains(where: { "怎麼哪".contains($0) }) &&
             reading.origin.count <= 24 && leftover.joined().count <= 2
         return Result(reading: reading, confident: plausible && !unsure && markers <= 2)
+    }
+
+    /// 不要搭公車 / 只搭捷運 / 不騎車 / 避開紅線 / 不要坐307, and the sentence without them.
+    static func constraints(in text: String) -> (TripConstraints, String) {
+        var value = text, result = TripConstraints()
+        func take(_ pattern: String) -> String? {
+            guard let range = value.range(of: pattern, options: .regularExpression) else { return nil }
+            let found = String(value[range]); value.replaceSubrange(range, with: " "); return found
+        }
+        if take("(只搭|只坐|只要|只想搭)捷運") != nil || take("(不要|不想|別|不)(搭|坐)?公車") != nil { result.avoidBus = true }
+        if take("(只搭|只坐|只要|只想搭)公車") != nil || take("(不要|不想|別|不)(搭|坐)?捷運") != nil { result.avoidMetro = true }
+        if take("(不要|不想|別|不)(騎)?(youbike|ubike|單車|腳踏車|自行車)") != nil || take("不騎車?") != nil { result.avoidBike = true }
+        while let found = take("(避開|不要搭|不要坐|不搭|不坐|別搭|別坐)\\s*([0-9a-z]{1,5}路?|[紅藍綠橘棕黃]線|[\\p{Han}]{2,4}線)") {
+            let line = found.replacingOccurrences(of: "^(避開|不要搭|不要坐|不搭|不坐|別搭|別坐)\\s*", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "路$", with: "", options: .regularExpression)
+            if !line.isEmpty, !result.avoidRoutes.contains(line) { result.avoidRoutes.append(line) }
+        }
+        return (result, value)
     }
 
     /// Takes out what SpokenTime reads, so 「明天早上九點前」 is not mistaken for a place.
@@ -500,7 +618,7 @@ final class JourneyAssistantContext {
         pending = question?.pending
         return AssistantJourneyTurn(request: request, clarification: question?.value, mode: reading.travelMode,
             departAt: departAt, destinationCandidates: target.candidates, originCandidates: start.candidates,
-            nextStop: reading.next)
+            nextStop: reading.next, avoid: reading.avoid)
     }
 
     /// Only a choice the app cannot make for the rider: which of several saved journeys.
@@ -670,9 +788,10 @@ enum OnlineJourneyReader {
     static let instructions = """
     只輸出 JSON：{"destination":"","destinationKind":"place|home|work|school|none","origin":"","originKind":"place|home|work|school|none",\
     "preference":"balanced|faster|lessWalking|fewerTransfers|conflicting","travelMode":"any|cycling|walking",\
-    "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":""}
+    "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
+    "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
     目的地照原文，北車→台北車站、台大→國立臺灣大學；家=home，公司/上班=work，學校=school；沒說從哪出發就留空。
-    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure。兩個目的地時第一個填 destination、第二個填 next。不要編造。
+    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
     """
 
     static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
@@ -762,6 +881,64 @@ enum OnlineJourneyReader {
         return String(reply[open...close])
     }
 
+    /// A change to the trip on screen, read by the online model with the trip described in words.
+    static func refine(_ text: String, trip: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> AssistantChange {
+        guard enabled else { throw Failure.notConfigured }
+        guard takeAllowance(now: now, pro: pro) else { throw Failure.limit }
+        let formatter = DateFormatter()
+        formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
+        let system = """
+        使用者正在看一條大眾運輸路線，又說了一句話要修改。只輸出 JSON，沒提到的欄位用 keep 或空字串：
+        {"mode":"keep|any|cycling|walking","preference":"keep|balanced|faster|lessWalking|fewerTransfers",\
+        "time":{"kind":"keep|now|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"destination":"","origin":"","next":"",\
+        "avoid":{"change":false,"bus":false,"metro":false,"bike":false,"routes":[]}}
+        改搭車/不騎了=any；晚一點=目前出發時間加30分鐘的 departure；改去某地填 destination；不要搭公車/避開紅線時 avoid.change=true 並列出全部限制（含原本的）。
+        """
+        let user = "現在（台北）：\(formatter.string(from: now))\n目前路線：\(trip)\n使用者說：\(text)"
+        var lastError: Error = Failure.invalid
+        for model in models(pro: pro) {
+            do {
+                let content = try await complete(system: system, user: user, model: model, limit: 500, session: session)
+                guard let data = content.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else { lastError = Failure.invalid; continue }
+                JourneyDiagnostics.shared.record("ai-online refine model=\(model)")
+                return change(value, now: now)
+            } catch Failure.http(let status) { lastError = Failure.http(status) }
+        }
+        throw lastError
+    }
+    static func change(_ value: [String: Any], now: Date) -> AssistantChange {
+        func text(_ key: String) -> String { String(((value[key] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60)) }
+        var change = AssistantChange()
+        let mode = text("mode"); if mode != "keep" { change.mode = AssistantTravelMode(rawValue: mode) }
+        let preference = text("preference"); if preference != "keep" { change.preference = AssistantIntentDraft.Preference(rawValue: preference) }
+        if let time = value["time"] as? [String: Any], let kind = time["kind"] as? String {
+            if kind == "now" { change.time = .now }
+            else if kind == "departure" || kind == "arrival", let hour = time["hour"] as? Int, (0...23).contains(hour) {
+                let day = (time["day"] as? String) ?? ""
+                let parts = day.split(separator: "-").compactMap { Int($0) }
+                var components = AssistantJourneyRequest.calendar.dateComponents([.year, .month, .day], from: now)
+                if parts.count == 3 { components.year = parts[0]; components.month = parts[1]; components.day = parts[2] }
+                components.hour = hour; components.minute = min(59, max(0, (time["minute"] as? Int) ?? 0))
+                if let date = AssistantJourneyRequest.calendar.date(from: components),
+                   date > now.addingTimeInterval(-300), date < now.addingTimeInterval(60 * 86_400) {
+                    change.time = kind == "departure" ? .depart(date) : .arrive(date)
+                }
+            }
+        }
+        if let avoid = value["avoid"] as? [String: Any], avoid["change"] as? Bool == true {
+            var constraints = TripConstraints()
+            constraints.avoidBus = avoid["bus"] as? Bool ?? false
+            constraints.avoidMetro = avoid["metro"] as? Bool ?? false
+            constraints.avoidBike = avoid["bike"] as? Bool ?? false
+            constraints.avoidRoutes = ((avoid["routes"] as? [String]) ?? []).map { String($0.prefix(12)) }.filter { !$0.isEmpty }.prefix(4).map { $0 }
+            change.constraints = constraints
+        }
+        change.destination = text("destination"); change.origin = text("origin"); change.next = text("next")
+        return change
+    }
+
     /// The chat reply's content as a reading; anything unexpected is rejected rather than guessed.
     static func parse(_ data: Data) throws -> JourneyReading {
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -791,6 +968,12 @@ enum OnlineJourneyReader {
         }
         reading.travelMode = AssistantTravelMode(rawValue: text("travelMode")) ?? .any
         reading.next = text("next")
+        if let avoid = value["avoid"] as? [String: Any] {
+            reading.avoid.avoidBus = avoid["bus"] as? Bool ?? false
+            reading.avoid.avoidMetro = avoid["metro"] as? Bool ?? false
+            reading.avoid.avoidBike = avoid["bike"] as? Bool ?? false
+            reading.avoid.avoidRoutes = ((avoid["routes"] as? [String]) ?? []).map { String($0.prefix(12)) }.filter { !$0.isEmpty }.prefix(4).map { $0 }
+        }
         if let time = value["time"] as? [String: Any], let kind = time["kind"] as? String, kind != "none",
            let hour = time["hour"] as? Int, (0...23).contains(hour) {
             reading.departureTime = kind == "departure"
@@ -856,6 +1039,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         if reading.destination.isEmpty { reading.destination = rules.destination; reading.destinationKind = rules.destinationKind }
         if reading.travelMode == .any { reading.travelMode = rules.travelMode }
         if reading.next.isEmpty { reading.next = rules.next }
+        if reading.avoid.isEmpty { reading.avoid = rules.avoid }
         if reading.preference == .balanced, let preference = rules.preference, preference != .balanced { reading.preference = preference }
         let plain = source.replacingOccurrences(of: "臺", with: "台")
         if !reading.origin.isEmpty, rules.origin.isEmpty,
