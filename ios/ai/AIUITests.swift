@@ -1,6 +1,11 @@
 import XCTest
 
 final class AIUITests: XCTestCase {
+    /// Screens kept for the spacing review of each build.
+    private func keep(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Tour " + name; shot.lifetime = .keepAlways; add(shot)
+    }
     func testSimulatorCameraFallbackReturnsToManualPlateSelection() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
@@ -88,11 +93,17 @@ final class AIUITests: XCTestCase {
         let field = app.textFields["journey-search-field"]
         XCTAssertTrue(field.waitForExistence(timeout: 30))
         XCTAssertTrue(app.buttons["journey-voice"].exists, "One tap to speak from the search box")
+        keep("2 search")
         field.tap(); field.typeText("回家")
         XCTAssertTrue(app.buttons["journey-understand-sentence"].waitForExistence(timeout: 5))
+        keep("3 typed sentence")
         field.typeText("\n")
         // Return on a sentence opens the assistant, which starts understanding without another tap.
         XCTAssertTrue(app.buttons["ai-choice-0"].waitForExistence(timeout: 15))
+        keep("4 question")
+        app.buttons["ai-choice-0"].tap()
+        _ = app.descendants(matching: .any).matching(identifier: "assistant-trip").firstMatch.waitForExistence(timeout: 20)
+        keep("5 routes")
     }
 
 
@@ -105,8 +116,7 @@ final class AIUITests: XCTestCase {
         let mic = app.buttons["home-voice"]
         XCTAssertTrue(mic.waitForExistence(timeout: 60), "The mic is on the home screen")
         XCTAssertTrue(mic.isHittable)
-        let home = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        home.name = "Home mic"; home.lifetime = .keepAlways; add(home)
+        keep("1 home")
         mic.tap()
         // A fresh simulator has never been asked: the app explains first, before any system prompt.
         XCTAssertTrue(app.buttons["voice-allow"].waitForExistence(timeout: 10))

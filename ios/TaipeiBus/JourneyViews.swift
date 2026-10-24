@@ -46,6 +46,13 @@ struct JourneyPlanningView: View {
     }
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
+    private var scale: CGFloat { CGFloat(live.appearance.spacingScale) }
+    private var fieldShape: RoundedRectangle { RoundedRectangle(cornerRadius: Metrics.fieldRadius * CGFloat(live.appearance.cornerScale), style: .continuous) }
+    /// A titled group in search results; it lines up with the text inside the fields above.
+    private func sectionHeader(_ text: String) -> some View {
+        Text(text).liveFont(.footnote, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
+            .padding(.top, (Metrics.section - Metrics.gap) * scale).padding(.horizontal, Metrics.inset)
+    }
     private var searchContext: Coordinate? {
         planner.usingLocation ? location.usableCoordinate ?? location.displayCoordinate : planner.origin?.coordinate
     }
@@ -53,7 +60,7 @@ struct JourneyPlanningView: View {
         NavigationStack {
             ScrollViewReader { scroll in
             ScrollView {
-                VStack(alignment: .leading, spacing: compact && !searchingPlaces ? 12 : 20) {
+                VStack(alignment: .leading, spacing: (searchingPlaces || compact ? Metrics.gap : Metrics.margin) * scale) {
                     if searchingPlaces { originButton }
                     else if !planner.started && !showingItinerary { routeEndpoints }
                     AssistantInlineStatus(session: assistant)
@@ -255,49 +262,57 @@ struct JourneyPlanningView: View {
             Button { edit(origin: true) } label: {
                 HStack(spacing: 12) {
                     Image(systemName: planner.usingLocation ? "location.circle.fill" : "mappin.circle.fill")
-                        .foregroundStyle(.blue).liveFont(.title2).frame(width: 28)
+                        .foregroundStyle(.blue).liveFont(.title2).frame(width: Metrics.icon)
                     Text(planner.origin?.localizedName ?? AppText.text("選擇出發地"))
                         .frame(maxWidth: .infinity, alignment: .leading).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                         .fixedSize(horizontal: false, vertical: true)
                     Image(systemName: "chevron.down").liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
-                }.frame(minHeight: 44).contentShape(Rectangle())
+                }.frame(minHeight: 48).contentShape(Rectangle())
             }.accessibilityIdentifier("journey-edit-origin")
-            Divider().padding(.leading, 40)
+            Divider().padding(.leading, Metrics.icon + 12)
             Button { edit(origin: false) } label: {
                 HStack(spacing: 12) {
-                    Image(systemName: "mappin.circle.fill").foregroundStyle(.red).liveFont(.title2).frame(width: 28)
+                    Image(systemName: "mappin.circle.fill").foregroundStyle(.red).liveFont(.title2).frame(width: Metrics.icon)
                     Text(planner.destination?.localizedName ?? AppText.text("目的地"))
                         .frame(maxWidth: .infinity, alignment: .leading).lineLimit(dynamicTypeSize.isAccessibilitySize ? 3 : 1)
                         .fixedSize(horizontal: false, vertical: true)
                     Image(systemName: "chevron.down").liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
-                }.frame(minHeight: 44).contentShape(Rectangle())
+                }.frame(minHeight: 48).contentShape(Rectangle())
             }.accessibilityIdentifier("journey-edit-destination")
         }.liveFont(.subheadline, weight: .medium).foregroundStyle(.primary).buttonStyle(PhonePressStyle())
-            .padding(.horizontal, 12).padding(.vertical, 4)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 18))
+            .padding(.horizontal, Metrics.inset).padding(.vertical, 2)
+            .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
     }
+    /// The start, shaped and aligned exactly like the search field below it.
     private var originButton: some View {
-        HStack(spacing: 10) {
-            Image(systemName: planner.usingLocation ? "location.fill" : "circle.fill").foregroundStyle(Color(liveHex: live.appearance.accentColor))
+        HStack(spacing: 0) {
             Button { edit(origin: true) } label: {
-                HStack(spacing: 8) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(planner.origin?.localizedName ?? (location.requesting ? AppText.text("取得位置中") : AppText.text("選擇出發地")))
-                        .liveFont(.subheadline, weight: .semibold).lineLimit(1)
-                    if planner.origin == nil {
-                        Text(location.message.map(live.text) ?? AppText.text("可使用定位，或輸入出發地／站名")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                Image(systemName: "chevron.down").liveFont(.caption, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
-                }.padding(10).frame(minHeight: 44).contentShape(RoundedRectangle(cornerRadius: 12))
-                    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                HStack(spacing: 12) {
+                    Image(systemName: planner.usingLocation ? "location.fill" : "circle.fill")
+                        .foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: Metrics.icon)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(planner.origin?.localizedName ?? (location.requesting ? AppText.text("取得位置中") : AppText.text("選擇出發地")))
+                            .liveFont(.subheadline, weight: .semibold).lineLimit(1)
+                        if planner.origin == nil {
+                            Text(location.message.map(live.text) ?? AppText.text("可使用定位，或輸入出發地／站名")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    Image(systemName: "chevron.down").liveFont(.caption, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
+                }
+                .padding(.leading, Metrics.inset).padding(.trailing, planner.usingLocation ? Metrics.inset : Metrics.tight)
+                .frame(minHeight: Metrics.field).contentShape(Rectangle())
             }.buttonStyle(PhonePressStyle())
-            Button {
-                planner.useLocation(location.usableCoordinate, metadata: model.metadata); location.request()
-                editingOrigin = false; editingDestination = planner.destination == nil; query = ""
-            } label: { Image(systemName: "location.circle").liveFont(.title2).frame(width: 44, height: 44) }
-                .accessibilityLabel(live.text("使用目前位置出發"))
-        }.padding(.vertical, 4)
+            // Only offered when the start is somewhere else; with 目前位置 it would repeat itself.
+            if !planner.usingLocation {
+                Divider().frame(height: 24)
+                Button {
+                    planner.useLocation(location.usableCoordinate, metadata: model.metadata); location.request()
+                    editingOrigin = false; editingDestination = planner.destination == nil; query = ""
+                } label: { Image(systemName: "location.circle").liveFont(.title3).frame(width: 48, height: Metrics.field) }
+                    .accessibilityLabel(live.text("使用目前位置出發"))
+            }
+        }
+        .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
     }
     /// A sentence such as 「騎單車去台大」 typed in the ordinary search box is understood, not searched.
     private var understandsSentence: Bool {
@@ -309,9 +324,9 @@ struct JourneyPlanningView: View {
         if let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { assistant.run(text) } else { assistant.open() }
     }
     private var placeSearch: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(MapChrome.secondaryText)
+        VStack(alignment: .leading, spacing: Metrics.gap * scale) {
+            HStack(spacing: 12) {
+                Image(systemName: "magnifyingglass").foregroundStyle(MapChrome.secondaryText).frame(width: Metrics.icon)
                 TextField(editingOrigin ? AppText.text("出發地、地址或站名")
                           : assistantAvailable && !planner.started ? AppText.text("地點，或一句話：騎單車去台大") : AppText.text("地點、地址或站名"), text: $query)
                     .accessibilityIdentifier("journey-search-field")
@@ -319,8 +334,8 @@ struct JourneyPlanningView: View {
                     .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
-            }.padding(14).frame(minHeight: 52)
-                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
+            }.padding(.horizontal, Metrics.inset).frame(minHeight: Metrics.field)
+                .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
             // One clear action for what was typed: plan the sentence, or search the place.
             if understandsSentence, !assistant.busy {
@@ -343,22 +358,25 @@ struct JourneyPlanningView: View {
                 if !editingOrigin, !planner.started, assistantAvailable {
                     // Zero typing: one row of what was said before, after the way in to type a sentence.
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) {
+                        HStack(spacing: Metrics.tight) {
                             Button { openAssistant(nil) } label: {
                                 Label(AppText.text("一句話規劃"), systemImage: "sparkles").font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 12).frame(minHeight: 36)
+                                    .padding(.horizontal, 12).frame(minHeight: Metrics.chip)
                                     .background(Color.accentColor.opacity(0.16), in: Capsule())
                             }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("journey-ai-assistant")
                             ForEach(assistantRecents.items.prefix(6), id: \.self) { text in
                                 Button { openAssistant(text) } label: {
                                     Label(text, systemImage: "clock.arrow.circlepath").font(.subheadline).lineLimit(1)
-                                        .padding(.horizontal, 12).frame(minHeight: 36)
+                                        .padding(.horizontal, 12).frame(minHeight: Metrics.chip)
                                         .background(Color(uiColor: .secondarySystemFill), in: Capsule())
                                 }.buttonStyle(.plain).foregroundStyle(.primary).accessibilityIdentifier("journey-recent-request")
                                     .contextMenu { Button(AppText.text("從最近說過移除"), role: .destructive) { assistantRecents.remove(text) } }
                             }
                         }
                     }
+                    // Scrolls to the panel's edges instead of being cut off at its margin.
+                    .contentMargins(.horizontal, Metrics.margin * scale, for: .scrollContent)
+                    .padding(.horizontal, -Metrics.margin * scale)
                 }
                 if !editingOrigin, !planner.started {
                     CommuteHabitSuggestions(habits: model.commuteHabits, library: model.commutes) { saved in
@@ -371,7 +389,7 @@ struct JourneyPlanningView: View {
                     }
                 }
                 if !editingOrigin && !planner.recentPlaces.isEmpty {
-                    Text(live.text("最近目的地")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
+                    sectionHeader(live.text("最近目的地"))
                     ForEach(planner.recentPlaces) { place in
                         placeButton(place, symbol: "clock")
                             .contextMenu { Button(AppText.text("從最近目的地移除"), role: .destructive) { planner.removeRecentPlace(place.id) } }
@@ -388,25 +406,25 @@ struct JourneyPlanningView: View {
                 }
             }
             if !search.places.isEmpty {
-                Text(live.text("地點搜尋結果")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
+                sectionHeader(live.text("地點搜尋結果"))
                 ForEach(search.places) { place in placeButton(place, symbol: "mappin.circle.fill") }
             }
-            if !search.suggestions.isEmpty && search.places.isEmpty { Text(live.text("地點")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale)) }
+            if !search.suggestions.isEmpty && search.places.isEmpty { sectionHeader(live.text("地點")) }
             ForEach(Array((search.places.isEmpty ? Array(search.suggestions.prefix(6)) : []).enumerated()), id: \.offset) { _, completion in
                 Button { resolve(text: completion.title, completion: completion) } label: {
                     HStack(spacing: 12) {
-                        Image(systemName: "mappin.circle").liveFont(.title2).foregroundStyle(Color(liveHex: live.appearance.accentColor))
+                        Image(systemName: "mappin.circle").liveFont(.title2).foregroundStyle(Color(liveHex: live.appearance.accentColor)).frame(width: Metrics.icon)
                         VStack(alignment: .leading, spacing: 4) {
                             Text(completion.title).liveFont(.body, weight: .medium)
                             Text(completion.subtitle).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).lineLimit(1)
                         }
                         Spacer(minLength: 0); Image(systemName: "arrow.up.left").liveFont(.caption).foregroundStyle(.tertiary)
-                    }.frame(maxWidth: .infinity, minHeight: 52, alignment: .leading).contentShape(Rectangle())
+                    }.padding(.horizontal, Metrics.inset).frame(maxWidth: .infinity, minHeight: Metrics.row, alignment: .leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).disabled(resolving)
-                Divider()
+                Divider().padding(.leading, Metrics.inset + Metrics.icon + 12)
             }
             let stations = stationResultQuery == query ? stationResults : []
-            if !stations.isEmpty { Text(live.text("車站與站牌")).liveFont(.subheadline, weight: .semibold).padding(.top, 8 * CGFloat(live.appearance.spacingScale)) }
+            if !stations.isEmpty { sectionHeader(live.text("車站與站牌")) }
             ForEach(StationSearch.groups(stations)) { group in
                 DisclosureGroup {
                 ForEach(group.stations) { station in
@@ -431,7 +449,7 @@ struct JourneyPlanningView: View {
                         Spacer(minLength: 4)
                         Text(AppText.text("%@ 處", group.stations.count)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
                     }.frame(minHeight: 44)
-                }.accessibilityIdentifier("journey-stations-" + group.name)
+                }.padding(.horizontal, Metrics.inset).accessibilityIdentifier("journey-stations-" + group.name)
             }
         }
     }
@@ -445,7 +463,7 @@ struct JourneyPlanningView: View {
                     if !place.coordinate.isInServiceArea { Text(live.text("公車規劃範圍外")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText) }
                 }
                 Spacer(); Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
-            }.frame(minHeight: 58).contentShape(Rectangle())
+            }.padding(.horizontal, Metrics.inset).frame(minHeight: Metrics.row).contentShape(Rectangle())
         }.buttonStyle(.plain).disabled(resolving)
     }
     private func edit(origin: Bool) {

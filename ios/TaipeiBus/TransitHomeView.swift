@@ -629,6 +629,31 @@ struct PhoneGlassGroup<Content: View>: View {
     }
 }
 
+/// One spacing system for every screen, so fields, cards, chips and rows line up and breathe the
+/// same way. Values are points before the live spacing scale.
+enum Metrics {
+    /// Side margin of a page or panel.
+    static let margin: CGFloat = 16
+    /// Between related controls in a group (a field and the card under it).
+    static let gap: CGFloat = 12
+    /// Between items inside a control (chips in a row, icon and text).
+    static let tight: CGFloat = 8
+    /// Before a new titled section.
+    static let section: CGFloat = 24
+    /// Inside a field or row, from its edge to its icon; list rows use it too so icons line up.
+    static let inset: CGFloat = 14
+    /// Width of the leading icon column in fields and rows.
+    static let icon: CGFloat = 24
+    /// Text fields and single-line controls.
+    static let field: CGFloat = 52
+    /// List rows with a title and a subtitle.
+    static let row: CGFloat = 56
+    /// Chips and small capsules; still a comfortable tap with their padding.
+    static let chip: CGFloat = 36
+    static let fieldRadius: CGFloat = 14
+    static let cardRadius: CGFloat = 20
+}
+
 struct PhonePressStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion

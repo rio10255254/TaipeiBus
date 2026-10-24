@@ -770,7 +770,7 @@ struct TripConditionsBar: View {
             if menu { Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }
             if removable { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
         }
-        .padding(.horizontal, 12).frame(minHeight: 34)
+        .padding(.horizontal, 12).frame(minHeight: Metrics.chip)
         .foregroundStyle(tint ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
         .background(tint ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: Capsule())
         .contentShape(Capsule())
@@ -778,10 +778,10 @@ struct TripConditionsBar: View {
 
     var body: some View {
         let trip = model.currentAssistantTrip
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
             if let trip { requestRow(trip) }
             // Chips wrap onto a second line rather than hiding off the edge.
-            ChipFlow(spacing: 8) {
+            ChipFlow(spacing: Metrics.tight) {
                 timeMenu
                 modeMenu(trip?.mode ?? planner.preferredMode)
                 if let trip, !trip.alternatives.isEmpty { placeMenu(trip) }
@@ -797,15 +797,15 @@ struct TripConditionsBar: View {
                     Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
                         .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
                 }
-                .padding(10).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
                 .accessibilityIdentifier("journey-comparison")
             }
             if let trip, let next = trip.nextStop {
                 // The second stop is the next step of this trip: its own clear button, not one more chip.
                 Button { session.continueTrip() } label: {
                     Label(AppText.text("接著去%@", next), systemImage: "arrow.turn.down.right")
-                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 40)
-                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
                 }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("assistant-trip-next")
             }
             footnotes(trip)
@@ -820,8 +820,9 @@ struct TripConditionsBar: View {
     // MARK: Parts
 
     private func requestRow(_ trip: TransitAppModel.AssistantTrip) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "sparkles").font(.caption).foregroundStyle(.tint).accessibilityHidden(true)
+        // Icon and text sit in the same columns as the start and destination rows above.
+        HStack(spacing: 12) {
+            Image(systemName: "sparkles").font(.caption).foregroundStyle(.tint).frame(width: Metrics.icon).accessibilityHidden(true)
             Text(trip.request).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
                 .accessibilityLabel(AppText.text("你說的：%@", trip.request))
             Spacer(minLength: 4)
@@ -838,6 +839,7 @@ struct TripConditionsBar: View {
                 Image(systemName: "ellipsis.circle").frame(width: 36, height: 36)
             }.accessibilityLabel(AppText.text("更多"))
         }
+        .padding(.leading, Metrics.inset)
     }
 
     private var timeMenu: some View {
@@ -1578,24 +1580,24 @@ struct VoiceStartCard: View {
             action()
         } label: {
             HStack(spacing: 14) {
-                VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true).frame(width: 56, height: 56)
+                VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true).frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(AppText.text("按一下，說出要去哪裡")).font(.headline).foregroundStyle(.primary)
                     Text(AppText.text("例如：明天九點前到台大、騎單車去101")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.vertical, 12).padding(.horizontal, 12)
+            .padding(.vertical, Metrics.gap).padding(.leading, Metrics.inset - 4).padding(.trailing, Metrics.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
                     .strokeBorder(LinearGradient(colors: [Color(red: 0.28, green: 0.48, blue: 1).opacity(0.6),
                                                           Color(red: 0.66, green: 0.36, blue: 1).opacity(0.5),
                                                           Color(red: 0.18, green: 0.82, blue: 0.96).opacity(0.5)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(VoicePressStyle())
         .accessibilityLabel(AppText.text("用說的規劃"))
