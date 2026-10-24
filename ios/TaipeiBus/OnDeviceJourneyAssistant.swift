@@ -41,7 +41,9 @@ enum OnDeviceJourneyAssistant {
     }
 
     @MainActor
-    static func conversation(context: JourneyAssistantContext, language: AppLanguage = .current) throws -> any JourneyAssistantConversation {
+    /// `modelOnly` is the on-device model by itself, for the AI benchmark that measures it.
+    static func conversation(context: JourneyAssistantContext, language: AppLanguage = .current, pro: Bool = false,
+                             modelOnly: Bool = false) throws -> any JourneyAssistantConversation {
         guard plannerUnavailableReason(language: language) == nil else { throw Failure.unavailable }
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--test-ai-review") { return ReviewFixtureConversation() }
@@ -50,7 +52,11 @@ enum OnDeviceJourneyAssistant {
 #if canImport(FoundationModels)
         if #available(iOS 26.0, *), unavailableReason(language: language) == nil { model = FoundationJourneyConversation(context: context) }
 #endif
-        return RuleFirstConversation(context: context, model: model, useRules: language != .english)
+        if modelOnly {
+            guard let model else { throw Failure.unavailable }
+            return model
+        }
+        return RuleFirstConversation(context: context, model: model, useRules: language != .english, pro: pro)
     }
 
     /// A short failure category for troubleshooting, e.g. generation.guardrailViolation.
@@ -580,10 +586,11 @@ enum ContextWindowRetry {
 enum OnlineJourneyReader {
     static let enabledKey = "assistantOnline.v1"
     private static let countKey = "assistantOnlineCount.v1"
-    /// Requests per phone per day; the free Groq allowance is shared by every rider.
-    static let dailyLimit = 100
-    /// The larger model first; the smaller one when its free allowance is used up.
-    static let models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+    /// Requests per phone per day; the Groq allowance is shared by every rider.
+    static func dailyLimit(pro: Bool) -> Int { pro ? 100 : 20 }
+    /// Pro reads with the larger model, and the smaller one when its allowance is used up;
+    /// everyone else with the smaller model, then the phone's own model.
+    static func models(pro: Bool) -> [String] { pro ? ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] : ["llama-3.1-8b-instant"] }
     enum Failure: Error { case notConfigured, limit, http(Int), invalid }
 
     private static var key: String {
@@ -597,32 +604,32 @@ enum OnlineJourneyReader {
     /// Apple asks apps to get permission before sending what a person types to another company's AI.
     static var needsConsent: Bool { configured && consent == nil }
 
-    private static func takeAllowance(now: Date) -> Bool {
+    private static func takeAllowance(now: Date, pro: Bool) -> Bool {
         let day = AssistantJourneyRequest.calendar.startOfDay(for: now).timeIntervalSince1970
         let stored = UserDefaults.standard.array(forKey: countKey) as? [Double] ?? []
         let used = stored.count == 2 && stored[0] == day ? Int(stored[1]) : 0
-        guard used < dailyLimit else { return false }
+        guard used < dailyLimit(pro: pro) else { return false }
         UserDefaults.standard.set([day, Double(used + 1)], forKey: countKey)
         return true
     }
 
+    /// Kept short: every token counts against the shared daily allowance.
     static let instructions = """
-    你負責讀懂一句台北大眾運輸的行程需求，只輸出 JSON，不要規劃路線或解釋。
-    欄位：destination（目的地原文，展開常見簡稱如北車→台北車站、台大→國立臺灣大學）、destinationKind（place/home/work/school/none）、
-    origin（使用者有說從哪裡出發才填，否則空字串）、originKind、preference（balanced/faster/lessWalking/fewerTransfers/conflicting）、
-    travelMode（any/cycling/walking）、time（{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0-23,"minute":0-59}）。
-    家/回家是 home，公司/上班是 work，學校/上學是 school。說了時間但沒說「出發」時是抵達時間；「早上/晚上」等時段沒有幾點時是出發時間。
-    不要編造地點或時間；沒說的就留空或 none。若有兩個目的地，只填第一個。
+    只輸出 JSON：{"destination":"","destinationKind":"place|home|work|school|none","origin":"","originKind":"place|home|work|school|none",\
+    "preference":"balanced|faster|lessWalking|fewerTransfers|conflicting","travelMode":"any|cycling|walking",\
+    "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0}}
+    目的地照原文，北車→台北車站、台大→國立臺灣大學；家=home，公司/上班=work，學校=school；沒說從哪出發就留空。
+    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure。兩個目的地只填第一個。不要編造。
     """
 
-    static func read(_ text: String, now: Date, session: URLSession = .shared) async throws -> JourneyReading {
+    static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
         guard configured else { throw Failure.notConfigured }
-        guard takeAllowance(now: now) else { throw Failure.limit }
+        guard takeAllowance(now: now, pro: pro) else { throw Failure.limit }
         let formatter = DateFormatter()
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
         var lastError: Error = Failure.invalid
-        for model in models {
+        for model in models(pro: pro) {
             do { return try await read(text, at: formatter.string(from: now), model: model, session: session) }
             catch Failure.http(let status) where [429, 498, 503].contains(status) || status >= 500 { lastError = Failure.http(status) }
         }
@@ -631,7 +638,7 @@ enum OnlineJourneyReader {
 
     private static func read(_ text: String, at clock: String, model: String, session: URLSession) async throws -> JourneyReading {
         let body: [String: Any] = [
-            "model": model, "temperature": 0, "max_tokens": 300,
+            "model": model, "temperature": 0, "max_tokens": 160,
             "response_format": ["type": "json_object"],
             "messages": [["role": "system", "content": instructions],
                          ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)"]],
@@ -691,10 +698,11 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     private let context: JourneyAssistantContext
     private let model: (any JourneyAssistantConversation)?
     private let useRules: Bool
+    private let pro: Bool
     /// How the last request was read, for the troubleshooting history: online, model, rules or rules-guess.
     private(set) var reader = ""
-    init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true) {
-        self.context = context; self.model = model; self.useRules = useRules
+    init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true, pro: Bool = false) {
+        self.context = context; self.model = model; self.useRules = useRules; self.pro = pro
     }
     func prewarm() { model?.prewarm() }
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
@@ -702,8 +710,8 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         // 1. Online, when the rider agreed; read at the moment of asking, so a fresh answer counts.
         if OnlineJourneyReader.enabled {
             do {
-                let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now), rules: rules, source: text)
-                reader = "online"; context.note(reader: reader)
+                let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now, pro: pro), rules: rules, source: text)
+                reader = pro ? "online-pro" : "online"; context.note(reader: reader)
                 return try await context.resolve(reading, source: text, now: now)
             } catch {
                 guard !Task.isCancelled else { throw error }

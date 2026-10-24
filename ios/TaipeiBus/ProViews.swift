@@ -136,6 +136,7 @@ struct ProPurchaseView: View {
         ("square.grid.2x2.fill","桌面小工具","常用行程的下一班車與建議出門時間，直接顯示在主畫面。"),
         ("house.fill","常用行程捷徑","把回家、上班與常去的地方存好，一點就能預覽路線。"),
         ("slider.horizontal.3","個人路線偏好","選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。"),
+        ("sparkles","更聰明的一句話規劃","用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。"),
     ]
     private func benefit(_ symbol: String,title: String,detail: String) -> some View {
         HStack(alignment:.top,spacing:14) {

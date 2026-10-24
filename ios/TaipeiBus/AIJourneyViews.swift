@@ -103,7 +103,7 @@ final class JourneyAssistantSession: ObservableObject {
         startDeadline("understand", context: context)
         operation = Task { @MainActor in
             do {
-                let session = try ready?.conversation ?? OnDeviceJourneyAssistant.conversation(context: context)
+                let session = try ready?.conversation ?? OnDeviceJourneyAssistant.conversation(context: context, pro: model.purchases.hasPro)
                 conversation = session
                 let result = try await session.begin(value, at: Date())
                 try Task.checkCancellation()
@@ -167,7 +167,7 @@ final class JourneyAssistantSession: ObservableObject {
     func prepare() {
         guard unavailable == nil, prepared == nil else { return }
         let context = makeContext()
-        guard let session = try? OnDeviceJourneyAssistant.conversation(context: context) else { return }
+        guard let session = try? OnDeviceJourneyAssistant.conversation(context: context, pro: model.purchases.hasPro) else { return }
         session.prewarm()
         prepared = (context, session)
     }

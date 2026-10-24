@@ -156,7 +156,7 @@ enum JourneyBenchmark {
         }
         do {
             guard let now = ISO8601DateFormatter().date(from: sample.now) else { throw CocoaError(.coderInvalidValue) }
-            let session = try OnDeviceJourneyAssistant.conversation(context: context, language: .traditionalChinese)
+            let session = try OnDeviceJourneyAssistant.conversation(context: context, language: .traditionalChinese, modelOnly: true)
             let turn = try await session.begin(sample.text, at: now)
             row.observed = Observation(turn); row.fieldCorrect = score(turn, expected: sample.expected)
             row.fieldAccuracy = Double(row.fieldCorrect.values.filter { $0 }.count) / Double(fields.count)
