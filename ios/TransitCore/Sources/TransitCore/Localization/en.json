@@ -846,7 +846,6 @@
   "擷取原文重點": "Extract key paragraphs",
   "暫時無法擷取重點，請閱讀下方原文。": "Could not extract key paragraphs. Read the original below.",
   "原文重點摘錄": "Selected source paragraphs",
-  "裝置端模型僅選取原文段落，可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。": "The on-device model only selects original paragraphs and may omit important conditions. Check the full text, restriction dates, direction and attachments. Excerpts do not change routing or arrival times.",
   "公告全文": "Original notice",
   "重點摘錄目前無法使用，仍可閱讀下方全文。": "Excerpts are unavailable. You can read the full original below.",
   "路線或公告關鍵字": "Route or notice keywords",
@@ -966,5 +965,10 @@
   "只搜尋地點": "Search for a place instead",
   "一句話規劃": "Plan in a sentence",
   "更多": "More",
-  "取消限制：%@": "Lift limit: %@"
+  "取消限制：%@": "Lift limit: %@",
+  "模型僅選取原文段落（同意線上理解時由 Groq 上的開源模型，否則在手機上），可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。": "The model only selects original paragraphs (an open model on Groq if you allowed online understanding, otherwise on your phone) and may leave out important conditions. Always check the full notice, dates, directions and attachments. Excerpts never change route planning or arrival times.",
+  "幫我比較": "Compare for me",
+  "暫時無法比較，請直接看下方路線。": "Couldn't compare right now; see the routes below.",
+  "全程步行": "Walk all the way",
+  "全程 YouBike": "YouBike all the way"
 }

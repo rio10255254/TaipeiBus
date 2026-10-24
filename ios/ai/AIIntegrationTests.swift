@@ -360,6 +360,18 @@ import TransitCore
         XCTAssertEqual(searched, ["台大機械館", "國立臺灣大學機械工程學系館"])
         XCTAssertEqual(turn.destinationCandidates.first?.name, "國立臺灣大學機械工程學系館")
     }
+    func testAModelTimeNeedsATimeInTheSentence() async throws {
+        // 「我要先去品都然後回內湖站」 at 22:59 came back as a 22:59 departure and was planned for tomorrow.
+        let late = ISO8601DateFormatter().date(from: "2026-10-24T14:59:00Z")!
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("品都串燒攤")] }
+        context.note(reader: "online-pro")
+        var value = reading("品都"); value.departureTime = true; value.arrivalDay = "2026-10-24"; value.arrivalHour = 22; value.arrivalMinute = 59
+        let turn = try await context.resolve(value, source: "我要先去品都然後回內湖站", now: late)
+        XCTAssertNil(turn.departAt, "No time in the sentence: leave now")
+        XCTAssertNil(turn.request.arriveBy)
+        let echoed = try await context.resolve(value, source: "等等去品都", now: late)
+        XCTAssertNil(echoed.departAt, "The current time echoed back is now, not tomorrow")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

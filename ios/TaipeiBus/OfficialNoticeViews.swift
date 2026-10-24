@@ -94,7 +94,7 @@ private struct OfficialNoticeDetail: View {
                 Link(AppText.text("完整公告與附件"), destination: notice.source)
             }
             Section {
-                if OnDeviceJourneyAssistant.unavailableReason(language: .traditionalChinese) != nil {
+                if OnDeviceJourneyAssistant.unavailableReason(language: .traditionalChinese) != nil, !OnlineJourneyReader.enabled {
                     Text(AppText.text("重點摘錄目前無法使用，仍可閱讀下方全文。"))
                 }
                 else if document.canSummarize {
@@ -113,7 +113,7 @@ private struct OfficialNoticeDetail: View {
                 if failed { Text(AppText.text("暫時無法擷取重點，請閱讀下方原文。")) }
                 ForEach(Array(excerpts.enumerated()), id: \.offset) { Text($0.element) }
             } header: { Text(AppText.text("原文重點摘錄")) }
-            footer: { Text(AppText.text("裝置端模型僅選取原文段落，可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。")) }
+            footer: { Text(AppText.text("模型僅選取原文段落（同意線上理解時由 Groq 上的開源模型，否則在手機上），可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。")) }
             Section(AppText.text("公告全文")) { Text(notice.body).textSelection(.enabled) }
         }.navigationTitle(AppText.text("交通公告")).navigationBarTitleDisplayMode(.inline)
             .onDisappear { operation?.cancel() }

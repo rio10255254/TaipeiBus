@@ -629,6 +629,8 @@ struct TripConditionsBar: View {
     @State private var editing = false
     @State private var change = ""
     @FocusState private var changeFocused: Bool
+    @State private var comparison: String?
+    @State private var comparing = false
 
     static func label(_ date: Date, now: Date = Date()) -> String {
         let calendar = AssistantJourneyRequest.calendar
@@ -671,9 +673,9 @@ struct TripConditionsBar: View {
             if menu { Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }
             if removable { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
         }
-        .padding(.horizontal, 11).frame(minHeight: 36)
+        .padding(.horizontal, 12).frame(minHeight: 34)
         .foregroundStyle(tint ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
-        .background(tint ? AnyShapeStyle(Color.accentColor.opacity(0.16)) : AnyShapeStyle(Color(uiColor: .secondarySystemFill)), in: Capsule())
+        .background(tint ? AnyShapeStyle(Color.accentColor.opacity(0.14)) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: Capsule())
         .contentShape(Capsule())
     }
 
@@ -681,24 +683,41 @@ struct TripConditionsBar: View {
         let trip = model.currentAssistantTrip
         VStack(alignment: .leading, spacing: 8) {
             if let trip { requestRow(trip) }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    timeMenu
-                    modeMenu(trip?.mode ?? planner.preferredMode)
-                    if let trip, !trip.alternatives.isEmpty { placeMenu(trip) }
-                    if let trip { constraintChips(trip) }
-                    if let trip, let next = trip.nextStop {
-                        Button { session.continueTrip() } label: { chip(AppText.text("接著去%@", next), "arrow.right", menu: false, tint: true) }
-                            .buttonStyle(.plain).accessibilityIdentifier("assistant-trip-next")
-                    }
-                }
+            // Chips wrap onto a second line rather than hiding off the edge.
+            ChipFlow(spacing: 8) {
+                timeMenu
+                modeMenu(trip?.mode ?? planner.preferredMode)
+                if let trip, !trip.alternatives.isEmpty { placeMenu(trip) }
+                if let trip { constraintChips(trip) }
+                if OnlineJourneyReader.enabled, planner.options.count >= 2, !planner.planning { compareChip(trip) }
             }
             if trip != nil, editing { changeField }
+            if let comparison {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "sparkles").font(.caption).foregroundStyle(.tint)
+                    Text(comparison).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
+                        .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
+                }
+                .padding(10).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .accessibilityIdentifier("journey-comparison")
+            }
+            if let trip, let next = trip.nextStop {
+                // The second stop is the next step of this trip: its own clear button, not one more chip.
+                Button { session.continueTrip() } label: {
+                    Label(AppText.text("接著去%@", next), systemImage: "arrow.turn.down.right")
+                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 40)
+                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: 12))
+                }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("assistant-trip-next")
+            }
             footnotes(trip)
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(trip == nil ? "journey-conditions" : "assistant-trip")
         .sheet(isPresented: $choosingTime) { timeSheet }
+        // A comparison belongs to the routes it compared.
+        .onChange(of: planner.options.map(\.id)) { _, _ in comparison = nil }
     }
 
     // MARK: Parts
@@ -733,7 +752,7 @@ struct TripConditionsBar: View {
             Button(AppText.text("指定抵達時間…"), systemImage: "flag.checkered") { chooseTime(arriving: true) }
         } label: {
             chip(timeTitle, planner.scheduledDeparture == nil ? "clock" : "calendar.badge.clock")
-        }.accessibilityIdentifier("journey-departure-time")
+        }.tint(.primary).accessibilityIdentifier("journey-departure-time")
     }
 
     private func modeMenu(_ current: AssistantTravelMode) -> some View {
@@ -744,6 +763,7 @@ struct TripConditionsBar: View {
                 }
             }
         } label: { chip(title(current), symbol(current)) }
+            .tint(.primary)
             .accessibilityLabel(AppText.text("交通方式：%@", title(current)))
             .accessibilityIdentifier("assistant-trip-adjust")
     }
@@ -756,7 +776,7 @@ struct TripConditionsBar: View {
                 }
             }
         } label: { chip(AppText.text("不是這裡？"), "mappin") }
-            .accessibilityIdentifier("assistant-trip-place")
+            .tint(.primary).accessibilityIdentifier("assistant-trip-place")
     }
 
     /// Each limit is its own chip; tapping it lifts that limit.
@@ -780,6 +800,34 @@ struct TripConditionsBar: View {
             .buttonStyle(.plain)
                 .accessibilityLabel(AppText.text("取消限制：%@", item.0))
                 .accessibilityIdentifier("assistant-trip-constraints")
+        }
+    }
+
+    /// 幫我比較: the online model explains the routes on screen in a sentence or two.
+    private func compareChip(_ trip: TransitAppModel.AssistantTrip?) -> some View {
+        Button {
+            comparing = true
+            let summaries = routeSummaries(), request = trip?.request ?? "", pro = model.purchases.hasPro
+            Task { @MainActor in
+                comparison = await OnlineJourneyReader.compare(summaries, request: request, pro: pro)
+                    ?? AppText.text("暫時無法比較，請直接看下方路線。")
+                comparing = false
+            }
+        } label: {
+            if comparing { HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(AppText.text("比較中")).font(.subheadline) }
+                .padding(.horizontal, 12).frame(minHeight: 34).background(Color(uiColor: .tertiarySystemFill), in: Capsule()) }
+            else { chip(AppText.text("幫我比較"), "sparkles", menu: false, tint: true) }
+        }.buttonStyle(.plain).disabled(comparing).accessibilityIdentifier("journey-compare")
+    }
+    /// What the comparison is given: each route's name, minutes, walking, waiting, transfers and arrival.
+    private func routeSummaries() -> [String] {
+        planner.options.prefix(4).enumerated().compactMap { index, option in
+            guard let timing = model.journeyDuration(option, at: Date()) else { return nil }
+            let name = option.walkingOnly ? AppText.text("全程步行") : option.bikeOnly ? AppText.text("全程 YouBike")
+                : option.rides.map(\.route.localizedName).joined(separator: "→")
+            let label = planner.optionLabels[option.id].map { "（\($0)）" } ?? ""
+            let walk = Int(max(0, timing.walkingSeconds - timing.cyclingSeconds) / 60)
+            return "\(index + 1). \(name)\(label)：共 \(Int(timing.totalSeconds / 60)) 分，走路 \(walk) 分，候車 \(Int(timing.waitingSeconds / 60)) 分，轉乘 \(max(0, option.rides.count - 1)) 次，\(timing.expectedArrivalLabel)"
         }
     }
 
@@ -861,6 +909,30 @@ struct OnlineConsentAlert: ViewModifier {
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
             Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+        }
+    }
+}
+
+/// Lays chips out left to right and wraps them onto further lines.
+struct ChipFlow: Layout {
+    var spacing: CGFloat = 8
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > width { x = 0; y += line + spacing; line = 0 }
+            x += size.width + spacing; line = max(line, size.height); widest = max(widest, x - spacing)
+        }
+        return CGSize(width: min(widest, width), height: y + line)
+    }
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
+        for view in subviews {
+            let size = view.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }
+            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
+            x += size.width + spacing; line = max(line, size.height)
         }
     }
 }
