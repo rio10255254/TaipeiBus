@@ -616,13 +616,37 @@ struct AIJourneyAssistantView: View {
     }
 }
 
-/// What was understood, above the routes. Each part is changed where it is shown.
-struct AssistantTripBanner: View {
+/// Everything that shapes the routes below in one place: when, how, what to avoid, the next stop,
+/// and for a trip planned from a sentence, what was said and how to change it. One row of chips
+/// instead of stacked panels; notes collapse into one footnote.
+struct TripConditionsBar: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     @ObservedObject var session: JourneyAssistantSession
+    @State private var choosingTime = false
+    @State private var arriving = false
+    @State private var chosen = Date()
+    @State private var editing = false
     @State private var change = ""
-    @FocusState private var changing: Bool
+    @FocusState private var changeFocused: Bool
+
+    static func label(_ date: Date, now: Date = Date()) -> String {
+        let calendar = AssistantJourneyRequest.calendar
+        let locale = AppLanguage.current.locale
+        let clock = date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
+            calendar: calendar, timeZone: calendar.timeZone))
+        if calendar.isDate(date, inSameDayAs: now) { return AppText.text("今天 %@", clock) }
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
+            return AppText.text("明天 %@", clock)
+        }
+        let day = date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
+            .month(.defaultDigits).day().weekday(.abbreviated))
+        return day + " " + clock
+    }
+    private static func clock(_ date: Date) -> String {
+        date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: AppLanguage.current.locale,
+            calendar: AssistantJourneyRequest.calendar, timeZone: AssistantJourneyRequest.calendar.timeZone))
+    }
     private func title(_ mode: AssistantTravelMode) -> String {
         switch mode {
         case .any: AppText.text("推薦路線")
@@ -631,104 +655,196 @@ struct AssistantTripBanner: View {
         }
     }
     private func symbol(_ mode: AssistantTravelMode) -> String {
-        switch mode {
-        case .any: "tram.fill"
-        case .cycling: "bicycle"
-        case .walking: "figure.walk"
-        }
+        switch mode { case .any: "tram.fill"; case .cycling: "bicycle"; case .walking: "figure.walk" }
     }
-    private func chip(_ text: String, _ image: String, menu: Bool = true) -> some View {
+    private var timeTitle: String {
+        if let deadline = planner.arrivalDeadline {
+            let leave = planner.scheduledDeparture.map { " · " + AppText.text("%@ 出發", Self.clock($0)) } ?? ""
+            return AppText.text("%@ 前抵達", Self.label(deadline)) + leave
+        }
+        return planner.scheduledDeparture.map { AppText.text("%@ 出發", Self.label($0)) } ?? AppText.text("現在出發")
+    }
+    private func chip(_ text: String, _ image: String, menu: Bool = true, tint: Bool = false, removable: Bool = false) -> some View {
         HStack(spacing: 4) {
             Image(systemName: image).font(.caption)
-            Text(text).font(.subheadline).lineLimit(1)
+            Text(text).font(.subheadline.weight(tint ? .semibold : .regular)).lineLimit(1)
             if menu { Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }
+            if removable { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)).foregroundStyle(.secondary) }
         }
-        .padding(.horizontal, 10).frame(minHeight: 36)
-        .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+        .padding(.horizontal, 11).frame(minHeight: 36)
+        .foregroundStyle(tint ? AnyShapeStyle(.tint) : AnyShapeStyle(.primary))
+        .background(tint ? AnyShapeStyle(Color.accentColor.opacity(0.16)) : AnyShapeStyle(Color(uiColor: .secondarySystemFill)), in: Capsule())
         .contentShape(Capsule())
     }
+
     var body: some View {
-        if let trip = model.currentAssistantTrip {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(alignment: .center, spacing: 6) {
-                    Image(systemName: "sparkles").foregroundStyle(.tint).accessibilityHidden(true)
-                    Text("「" + trip.request + "」").font(.subheadline.weight(.semibold)).lineLimit(2)
-                        .accessibilityLabel(AppText.text("你說的：%@", trip.request))
-                    Spacer(minLength: 0)
-                    Button { session.listen(refining: true) } label: { Image(systemName: "mic").frame(width: 40, height: 44) }
-                        .accessibilityLabel(AppText.text("用說的修改")).accessibilityIdentifier("assistant-trip-respeak")
-                    Button { model.forgetAssistantTrip() } label: { Image(systemName: "xmark").frame(width: 40, height: 44) }
-                        .foregroundStyle(.secondary)
-                        .accessibilityLabel(AppText.text("改回一般路線")).accessibilityIdentifier("assistant-trip-dismiss")
-                }
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                        if !trip.alternatives.isEmpty {
-                            Menu {
-                                Section(AppText.text("不是這裡？")) {
-                                    ForEach(trip.alternatives) { place in
-                                        Button(place.localizedName) { model.switchAssistantDestination(place) }
-                                    }
-                                }
-                            } label: { chip(trip.destination.localizedName, "mappin") }
-                                .accessibilityLabel(AppText.text("目的地：%@，可改成其他搜尋結果", trip.destination.localizedName))
-                                .accessibilityIdentifier("assistant-trip-place")
-                        }
-                        Menu {
-                            ForEach([AssistantTravelMode.any, .cycling, .walking], id: \.self) { mode in
-                                Button { model.setAssistantMode(mode) } label: {
-                                    if trip.mode == mode { Label(title(mode), systemImage: "checkmark") } else { Text(title(mode)) }
-                                }
-                            }
-                        } label: { chip(title(trip.mode), symbol(trip.mode)) }
-                            .accessibilityLabel(AppText.text("交通方式：%@", title(trip.mode)))
-                            .accessibilityIdentifier("assistant-trip-adjust")
-                        if let next = trip.nextStop {
-                            Button { session.continueTrip() } label: {
-                                HStack(spacing: 4) {
-                                    Text(AppText.text("接著去%@", next)).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    Image(systemName: "arrow.right").font(.caption.weight(.bold))
-                                }
-                                .padding(.horizontal, 12).frame(minHeight: 36)
-                                .background(Color.accentColor.opacity(0.18), in: Capsule())
-                            }.buttonStyle(.plain).foregroundStyle(.tint)
-                                .accessibilityIdentifier("assistant-trip-next")
-                        }
-                        if trip.preference != .balanced, trip.note == nil {
-                            chip(trip.preference.title, "slider.horizontal.3", menu: false)
-                        }
-                    }
-                }
+        let trip = model.currentAssistantTrip
+        VStack(alignment: .leading, spacing: 8) {
+            if let trip { requestRow(trip) }
+            ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    TextField(AppText.text("還要怎麼改？例如：改騎車、晚一點、不要搭公車"), text: $change)
-                        .font(.subheadline).submitLabel(.done).focused($changing)
-                        .onSubmit { let text = change; change = ""; session.refine(text) }
-                        .accessibilityIdentifier("assistant-trip-change")
-                    if !change.isEmpty {
-                        Button(AppText.text("修改")) { let text = change; change = ""; changing = false; session.refine(text) }
-                            .font(.subheadline.weight(.semibold))
+                    timeMenu
+                    modeMenu(trip?.mode ?? planner.preferredMode)
+                    if let trip, !trip.alternatives.isEmpty { placeMenu(trip) }
+                    if let trip { constraintChips(trip) }
+                    if let trip, let next = trip.nextStop {
+                        Button { session.continueTrip() } label: { chip(AppText.text("接著去%@", next), "arrow.right", menu: false, tint: true) }
+                            .buttonStyle(.plain).accessibilityIdentifier("assistant-trip-next")
                     }
-                }
-                .padding(.horizontal, 10).frame(minHeight: 40)
-                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
-                if !trip.constraints.isEmpty {
-                    Label(trip.constraints.summary, systemImage: "nosign").font(.caption).foregroundStyle(.secondary)
-                        .accessibilityIdentifier("assistant-trip-constraints")
-                    if planner.constraintsUnmet {
-                        Text(AppText.text("沒有完全符合的路線，先顯示一般推薦。")).font(.caption).foregroundStyle(.orange)
-                    }
-                }
-                if let note = trip.note { Text(note).font(.caption).foregroundStyle(.orange) }
-                if let issue = planner.wholeTripBikeIssue() {
-                    Text(AppText.text("沒有全程 YouBike 路線：%@", issue)).font(.caption).foregroundStyle(.orange)
-                        .accessibilityIdentifier("assistant-trip-bike-issue")
                 }
             }
-            .padding(12)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("assistant-trip")
+            if trip != nil, editing { changeField }
+            footnotes(trip)
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier(trip == nil ? "journey-conditions" : "assistant-trip")
+        .sheet(isPresented: $choosingTime) { timeSheet }
+    }
+
+    // MARK: Parts
+
+    private func requestRow(_ trip: TransitAppModel.AssistantTrip) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "sparkles").font(.caption).foregroundStyle(.tint).accessibilityHidden(true)
+            Text(trip.request).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                .accessibilityLabel(AppText.text("你說的：%@", trip.request))
+            Spacer(minLength: 4)
+            Button(editing ? AppText.text("完成") : AppText.text("修改")) {
+                editing.toggle(); changeFocused = editing
+            }.font(.subheadline.weight(.semibold)).frame(minHeight: 36).accessibilityIdentifier("assistant-trip-edit")
+            Menu {
+                Button(AppText.text("用說的修改"), systemImage: "mic") { session.listen(refining: true) }
+                    .accessibilityIdentifier("assistant-trip-respeak")
+                Button(AppText.text("重新說一次"), systemImage: "arrow.counterclockwise") { session.listen() }
+                Button(AppText.text("改回一般路線"), systemImage: "xmark") { model.forgetAssistantTrip() }
+                    .accessibilityIdentifier("assistant-trip-dismiss")
+            } label: {
+                Image(systemName: "ellipsis.circle").frame(width: 36, height: 36)
+            }.accessibilityLabel(AppText.text("更多"))
+        }
+    }
+
+    private var timeMenu: some View {
+        Menu {
+            Button(AppText.text("現在出發")) { model.setJourneyDeparture(nil) }
+            Button(AppText.text("30 分鐘後")) { model.setJourneyDeparture(Date().addingTimeInterval(30 * 60)) }
+            Button(AppText.text("1 小時後")) { model.setJourneyDeparture(Date().addingTimeInterval(3600)) }
+            Button(AppText.text("指定出發時間…"), systemImage: "calendar") { chooseTime(arriving: false) }
+            Button(AppText.text("指定抵達時間…"), systemImage: "flag.checkered") { chooseTime(arriving: true) }
+        } label: {
+            chip(timeTitle, planner.scheduledDeparture == nil ? "clock" : "calendar.badge.clock")
+        }.accessibilityIdentifier("journey-departure-time")
+    }
+
+    private func modeMenu(_ current: AssistantTravelMode) -> some View {
+        Menu {
+            ForEach([AssistantTravelMode.any, .cycling, .walking], id: \.self) { mode in
+                Button { model.setTravelMode(mode) } label: {
+                    if current == mode { Label(title(mode), systemImage: "checkmark") } else { Text(title(mode)) }
+                }
+            }
+        } label: { chip(title(current), symbol(current)) }
+            .accessibilityLabel(AppText.text("交通方式：%@", title(current)))
+            .accessibilityIdentifier("assistant-trip-adjust")
+    }
+
+    private func placeMenu(_ trip: TransitAppModel.AssistantTrip) -> some View {
+        Menu {
+            Section(AppText.text("不是這裡？")) {
+                ForEach(trip.alternatives) { place in
+                    Button(place.localizedName) { model.switchAssistantDestination(place) }
+                }
+            }
+        } label: { chip(AppText.text("不是這裡？"), "mappin") }
+            .accessibilityIdentifier("assistant-trip-place")
+    }
+
+    /// Each limit is its own chip; tapping it lifts that limit.
+    @ViewBuilder private func constraintChips(_ trip: TransitAppModel.AssistantTrip) -> some View {
+        let limits = trip.constraints
+        let items: [(String, TripConstraints)] = {
+            var list: [(String, TripConstraints)] = []
+            if limits.avoidBus { var c = limits; c.avoidBus = false; list.append((AppText.text("不搭公車"), c)) }
+            if limits.avoidMetro { var c = limits; c.avoidMetro = false; list.append((AppText.text("不搭捷運"), c)) }
+            if limits.avoidBike { var c = limits; c.avoidBike = false; list.append((AppText.text("不騎 YouBike"), c)) }
+            for route in limits.avoidRoutes {
+                var c = limits; c.avoidRoutes.removeAll { $0 == route }; list.append((AppText.text("避開%@", route), c))
+            }
+            return list
+        }()
+        ForEach(items, id: \.0) { item in
+            Button {
+                var lifted = AssistantChange(); lifted.constraints = item.1
+                model.applyAssistantChange(lifted, request: trip.request)
+            } label: { chip(item.0, "nosign", menu: false, removable: true) }
+            .buttonStyle(.plain)
+                .accessibilityLabel(AppText.text("取消限制：%@", item.0))
+                .accessibilityIdentifier("assistant-trip-constraints")
+        }
+    }
+
+    private var changeField: some View {
+        HStack(spacing: 8) {
+            TextField(AppText.text("還要怎麼改？例如：改騎車、晚一點、不要搭公車"), text: $change)
+                .font(.subheadline).submitLabel(.done).focused($changeFocused)
+                .onSubmit { submitChange() }
+                .accessibilityIdentifier("assistant-trip-change")
+            Button { session.listen(refining: true) } label: { Image(systemName: "mic").frame(width: 32, height: 36) }
+                .accessibilityLabel(AppText.text("用說的修改"))
+            if !change.isEmpty {
+                Button(AppText.text("修改")) { submitChange() }.font(.subheadline.weight(.semibold))
+            }
+        }
+        .padding(.horizontal, 10).frame(minHeight: 40)
+        .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
+    }
+    private func submitChange() {
+        let text = change; change = ""; editing = false; changeFocused = false
+        session.refine(text)
+    }
+
+    /// Warnings first (orange), then what the times are based on, in at most a few short lines.
+    @ViewBuilder private func footnotes(_ trip: TransitAppModel.AssistantTrip?) -> some View {
+        let warnings: [String] = [
+            planner.arrivalDeadline.flatMap { deadline in
+                planner.expectedArrival.flatMap { $0 > deadline ? AppText.text("最快約 %@ 抵達，會晚於指定時間。", Self.label($0)) : nil }
+            },
+            trip != nil && !(trip!.constraints.isEmpty) && planner.constraintsUnmet ? AppText.text("沒有完全符合的路線，先顯示一般推薦。") : nil,
+            trip?.note,
+            trip != nil ? planner.wholeTripBikeIssue().map { AppText.text("沒有全程 YouBike 路線：%@", $0) } : nil,
+        ].compactMap { $0 }
+        if !warnings.isEmpty {
+            Text(warnings.joined(separator: "\n")).font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("assistant-trip-bike-issue")
+        }
+        if planner.scheduledDeparture != nil {
+            Text(AppText.text("依當天班表與班距估算，不含即時車況；時間到了再開始導航。"))
+                .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("journey-departure-note")
+        }
+    }
+
+    private func chooseTime(arriving: Bool) {
+        self.arriving = arriving
+        chosen = (arriving ? planner.arrivalDeadline : planner.scheduledDeparture) ?? Date().addingTimeInterval(3600)
+        choosingTime = true
+    }
+    private var timeSheet: some View {
+        NavigationStack {
+            DatePicker(arriving ? AppText.text("抵達時間") : AppText.text("出發時間"), selection: $chosen,
+                       in: Date()...Date().addingTimeInterval(30 * 86_400))
+                .datePickerStyle(.graphical).padding()
+                .navigationTitle(arriving ? AppText.text("抵達時間") : AppText.text("出發時間")).navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button(AppText.text("取消")) { choosingTime = false } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button(AppText.text("規劃")) {
+                            choosingTime = false
+                            if arriving { model.setJourneyDeparture(nil, arriveBy: chosen) } else { model.setJourneyDeparture(chosen) }
+                        }.accessibilityIdentifier("journey-departure-confirm")
+                    }
+                }
+        }.presentationDetents([.large])
     }
 }
 

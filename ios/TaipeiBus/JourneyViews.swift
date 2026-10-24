@@ -65,8 +65,7 @@ struct JourneyPlanningView: View {
                                 else { showingItinerary = false; collapse() }
                             })
                         } else {
-                            AssistantTripBanner(model: model, planner: planner, session: assistant)
-                            if planner.destination != nil { JourneyDepartureControl(model: model, planner: planner) }
+                            if planner.destination != nil { TripConditionsBar(model: model, planner: planner, session: assistant) }
                             JourneyOptionsView(model: model, planner: planner, collapse: {
                                 showingItinerary = false; collapse()
                             }, compact: compact, expand: expand, showSteps: {
@@ -304,11 +303,6 @@ struct JourneyPlanningView: View {
     }
     private var placeSearch: some View {
         VStack(alignment: .leading, spacing: 10) {
-            if !editingOrigin, !planner.started, assistantAvailable {
-                Button { openAssistant(nil) } label: {
-                    Label(AppText.text("用一句話規劃"), systemImage: "sparkles").frame(minHeight: 44)
-                }.accessibilityIdentifier("journey-ai-assistant")
-            }
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(MapChrome.secondaryText)
                 TextField(editingOrigin ? AppText.text("出發地、地址或站名")
@@ -327,25 +321,38 @@ struct JourneyPlanningView: View {
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
+            // One clear action for what was typed: plan the sentence, or search the place.
             if understandsSentence, !assistant.busy {
                 Button { openAssistant(query) } label: {
-                    Label(AppText.text("理解並規劃「%@」", query), systemImage: "sparkles").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
+                    Label(AppText.text("規劃「%@」", query), systemImage: "sparkles").liveFont(.subheadline, weight: .semibold)
+                        .lineLimit(2).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 }.accessibilityIdentifier("journey-understand-sentence")
-            }
-            if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button(AppText.text("只搜尋地點")) { resolve(text: query) }
+                    .font(.footnote).foregroundStyle(MapChrome.secondaryText).disabled(resolving)
+            } else if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button { resolve(text: query) } label: {
                     Label(AppText.text("搜尋「%@」", query), systemImage: "arrow.up.right").liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
-                if !editingOrigin, !planner.started, assistantAvailable, !assistantRecents.items.isEmpty {
-                    // Zero typing: what was said before, one tap to plan it again.
-                    Text(AppText.text("最近說過")).liveFont(.subheadline, weight: .semibold)
-                    ForEach(assistantRecents.items.prefix(3), id: \.self) { text in
-                        Button { openAssistant(text) } label: {
-                            Label(text, systemImage: "sparkles").frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                        }.accessibilityIdentifier("journey-recent-request")
-                            .contextMenu { Button(AppText.text("從最近說過移除"), role: .destructive) { assistantRecents.remove(text) } }
+                if !editingOrigin, !planner.started, assistantAvailable {
+                    // Zero typing: one row of what was said before, after the way in to type a sentence.
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            Button { openAssistant(nil) } label: {
+                                Label(AppText.text("一句話規劃"), systemImage: "sparkles").font(.subheadline.weight(.semibold))
+                                    .padding(.horizontal, 12).frame(minHeight: 36)
+                                    .background(Color.accentColor.opacity(0.16), in: Capsule())
+                            }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("journey-ai-assistant")
+                            ForEach(assistantRecents.items.prefix(6), id: \.self) { text in
+                                Button { openAssistant(text) } label: {
+                                    Label(text, systemImage: "clock.arrow.circlepath").font(.subheadline).lineLimit(1)
+                                        .padding(.horizontal, 12).frame(minHeight: 36)
+                                        .background(Color(uiColor: .secondarySystemFill), in: Capsule())
+                                }.buttonStyle(.plain).foregroundStyle(.primary).accessibilityIdentifier("journey-recent-request")
+                                    .contextMenu { Button(AppText.text("從最近說過移除"), role: .destructive) { assistantRecents.remove(text) } }
+                            }
+                        }
                     }
                 }
                 if !editingOrigin, !planner.started {
@@ -2093,87 +2100,5 @@ private struct WalkingBannerContent: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 16).padding(.vertical, 15)
-    }
-}
-
-/// 「幾點出發」 for the ordinary route view. Now uses live buses; a later time is planned on
-/// that day's timetables and headways, with the same cards, map and steps.
-struct JourneyDepartureControl: View {
-    @ObservedObject var model: TransitAppModel
-    @ObservedObject var planner: JourneyPlannerModel
-    @State private var choosing = false
-    @State private var arriving = false
-    @State private var chosen = Date()
-    static func label(_ date: Date, now: Date = Date()) -> String {
-        let calendar = AssistantJourneyRequest.calendar
-        let locale = AppLanguage.current.locale
-        let clock = date.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: locale,
-            calendar: calendar, timeZone: calendar.timeZone))
-        if calendar.isDate(date, inSameDayAs: now) { return AppText.text("今天 %@", clock) }
-        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now), calendar.isDate(date, inSameDayAs: tomorrow) {
-            return AppText.text("明天 %@", clock)
-        }
-        let day = date.formatted(Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
-            .month(.defaultDigits).day().weekday(.abbreviated))
-        return day + " " + clock
-    }
-    private var title: String {
-        if let deadline = planner.arrivalDeadline { return AppText.text("%@ 前抵達", Self.label(deadline)) }
-        return planner.scheduledDeparture.map { AppText.text("%@ 出發", Self.label($0)) } ?? AppText.text("現在出發")
-    }
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 8) {
-                Image(systemName: planner.scheduledDeparture == nil ? "clock" : "calendar.badge.clock").foregroundStyle(.secondary)
-                Menu {
-                    Button(AppText.text("現在出發")) { model.setJourneyDeparture(nil) }
-                    Button(AppText.text("30 分鐘後")) { model.setJourneyDeparture(Date().addingTimeInterval(30 * 60)) }
-                    Button(AppText.text("1 小時後")) { model.setJourneyDeparture(Date().addingTimeInterval(3600)) }
-                    Button(AppText.text("指定出發時間…"), systemImage: "calendar") { choose(arriving: false) }
-                    Button(AppText.text("指定抵達時間…"), systemImage: "flag.checkered") { choose(arriving: true) }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text(title).font(.subheadline.weight(.semibold))
-                        Image(systemName: "chevron.down").font(.system(size: 10, weight: .bold))
-                    }.frame(minHeight: 44)
-                }.accessibilityIdentifier("journey-departure-time")
-                Spacer(minLength: 0)
-            }
-            if planner.arrivalDeadline != nil, let leave = planner.scheduledDeparture {
-                Text(AppText.text("建議 %@ 出發", Self.label(leave))).font(.subheadline)
-                    .accessibilityIdentifier("journey-suggested-departure")
-                if let deadline = planner.arrivalDeadline, let arrival = planner.expectedArrival, arrival > deadline {
-                    Text(AppText.text("最快約 %@ 抵達，會晚於指定時間。", Self.label(arrival)))
-                        .font(.caption).foregroundStyle(.orange).accessibilityIdentifier("journey-arrival-late")
-                }
-            }
-            if planner.scheduledDeparture != nil {
-                Text(AppText.text("依當天班表與班距估算，不含即時車況；時間到了再開始導航。"))
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("journey-departure-note")
-            }
-        }
-        .sheet(isPresented: $choosing) {
-            NavigationStack {
-                DatePicker(arriving ? AppText.text("抵達時間") : AppText.text("出發時間"), selection: $chosen,
-                           in: Date()...Date().addingTimeInterval(30 * 86_400))
-                    .datePickerStyle(.graphical).padding()
-                    .navigationTitle(arriving ? AppText.text("抵達時間") : AppText.text("出發時間")).navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .cancellationAction) { Button(AppText.text("取消")) { choosing = false } }
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button(AppText.text("規劃")) {
-                                choosing = false
-                                if arriving { model.setJourneyDeparture(nil, arriveBy: chosen) } else { model.setJourneyDeparture(chosen) }
-                            }.accessibilityIdentifier("journey-departure-confirm")
-                        }
-                    }
-            }.presentationDetents([.large])
-        }
-    }
-    private func choose(arriving: Bool) {
-        self.arriving = arriving
-        chosen = (arriving ? planner.arrivalDeadline : planner.scheduledDeparture) ?? Date().addingTimeInterval(3600)
-        choosing = true
     }
 }

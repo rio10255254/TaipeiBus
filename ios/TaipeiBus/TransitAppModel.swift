@@ -671,6 +671,13 @@ final class TransitAppModel: ObservableObject {
         }
         planner.plan(metadata: metadata)
     }
+    /// The way-of-travelling chip, for any trip: a planned-from-a-sentence trip keeps it too.
+    func setTravelMode(_ mode: AssistantTravelMode) {
+        guard !planner.started else { return }
+        if assistantTrip != nil { assistantTrip?.mode = mode }
+        planner.preferredMode = mode
+        planner.plan(metadata: metadata)
+    }
     func setAssistantMode(_ mode: AssistantTravelMode) {
         guard assistantTrip != nil, !planner.started else { return }
         assistantTrip?.mode = mode
