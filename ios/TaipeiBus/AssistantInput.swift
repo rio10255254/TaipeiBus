@@ -47,6 +47,8 @@ final class SpeechInput: ObservableObject {
     /// Tapped, waiting for permission or the microphone: shown at once so the tap is never silent.
     @Published private(set) var preparing = false
     @Published private(set) var problem: String?
+    /// How loud the voice is right now, 0…1, for the listening animation.
+    @Published private(set) var level: Double = 0
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -94,7 +96,9 @@ final class SpeechInput: ObservableObject {
             guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
             input.removeTap(onBus: 0)
             // The audio thread calls this; it must not belong to the main actor.
-            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request))
+            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request) { [weak self] value in
+                Task { @MainActor in if self?.listening == true { self?.level = value } }
+            })
             engine.prepare()
             try engine.start()
         } catch {
@@ -149,7 +153,7 @@ final class SpeechInput: ObservableObject {
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
-        request = nil; task = nil; listening = false; preparing = false; finished = nil
+        request = nil; task = nil; listening = false; preparing = false; finished = nil; level = 0
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -177,8 +181,20 @@ final class SpeechInput: ObservableObject {
         default: return await AVAudioApplication.requestRecordPermission()
         }
     }
-    nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest) -> AVAudioNodeTapBlock {
-        { buffer, _ in request.append(buffer) }
+    /// Feeds the recogniser and, about fifteen times a second, reports how loud the voice is.
+    nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest,
+                                        level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+        let meter = LevelMeter()
+        return { buffer, _ in
+            request.append(buffer)
+            guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0, meter.due() else { return }
+            var sum: Float = 0
+            for index in 0..<Int(buffer.frameLength) { sum += samples[index] * samples[index] }
+            let rms = sqrt(sum / Float(buffer.frameLength))
+            // Speech sits around -50…-10 dB; map that to 0…1.
+            let decibels = 20 * log10(max(rms, 0.000_01))
+            level(Double(min(1, max(0, (decibels + 50) / 40))))
+        }
     }
     nonisolated private static func results(_ deliver: @escaping @Sendable (String?, Bool, String?) -> Void)
         -> (SFSpeechRecognitionResult?, Error?) -> Void {
@@ -186,6 +202,18 @@ final class SpeechInput: ObservableObject {
             deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false,
                     (error as NSError?).map { "\($0.domain) \($0.code)" })
         }
+    }
+}
+
+/// Limits level reports from the audio thread to about fifteen a second.
+private final class LevelMeter: @unchecked Sendable {
+    private var last: TimeInterval = 0
+    private let lock = NSLock()
+    func due() -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - last >= 0.066 else { return false }
+        last = now; return true
     }
 }
 

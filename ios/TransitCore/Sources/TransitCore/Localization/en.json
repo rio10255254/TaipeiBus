@@ -971,5 +971,15 @@
   "暫時無法比較，請直接看下方路線。": "Couldn't compare right now; see the routes below.",
   "全程步行": "Walk all the way",
   "全程 YouBike": "YouBike all the way",
-  "正在開啟麥克風…": "Turning on the microphone…"
+  "正在開啟麥克風…": "Turning on the microphone…",
+  "請說出要去哪裡": "Say where you want to go",
+  "好的，路線來了": "Got it, here are your routes",
+  "第一次使用會詢問麥克風權限": "The first time, you will be asked for microphone access",
+  "例如：騎單車去台大、明天九點前到公司": "For example: bike to NTU, or be at work by 9 tomorrow",
+  "說完停一下就會開始規劃": "Pause when you are done and planning starts",
+  "改用打字": "Type instead",
+  "說完了": "Done",
+  "再說一次": "Try again",
+  "按一下，說出要去哪裡": "Tap and say where to go",
+  "例如：明天九點前到台大、騎單車去101": "For example: be at NTU by 9 tomorrow, or bike to Taipei 101"
 }

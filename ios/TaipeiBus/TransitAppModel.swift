@@ -606,6 +606,8 @@ final class TransitAppModel: ObservableObject {
     }
     /// A sentence from Siri waiting for the route panel to open.
     @Published var pendingAssistantRequest: String?
+    /// The home mic was tapped: the journey panel opens straight into listening.
+    @Published var pendingVoice = false
     /// The understanding only describes the trip it started; another destination hides it.
     var currentAssistantTrip: AssistantTrip? {
         guard let trip = assistantTrip, let destination = planner.destination, destination.id == trip.destination.id else { return nil }

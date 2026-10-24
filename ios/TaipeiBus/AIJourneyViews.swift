@@ -24,8 +24,13 @@ final class JourneyAssistantSession: ObservableObject {
     }
 
     @Published var input = ""
-    /// The sheet: typing from scratch, or something only the rider can answer.
-    @Published var presented = false
+    /// The sheet: typing from scratch, or something only the rider can answer. It takes over
+    /// from the voice screen when a question or problem needs it.
+    @Published var presented = false { didSet { if presented { voiceActive = false } } }
+    /// The voice assistant screen: from the tap until the routes appear.
+    @Published private(set) var voiceActive = false
+    /// The short ✓ moment before the voice screen gives way to the routes.
+    @Published private(set) var celebrating = false
     /// The sentence being understood or planned.
     @Published private(set) var source = ""
     @Published private(set) var clarification: AssistantClarification?
@@ -82,6 +87,7 @@ final class JourneyAssistantSession: ObservableObject {
     func listen(refining: Bool = false) {
         guard unavailable == nil else { presented = true; return }
         cancel(); prepare()
+        voiceRound += 1; voiceActive = true; celebrating = false
         Task { await speech.start { [weak self] text in if refining { self?.refine(text) } else { self?.run(text) } } }
     }
 
@@ -92,7 +98,7 @@ final class JourneyAssistantSession: ObservableObject {
         guard !value.isEmpty, value.count <= 300 else { return }
         guard let trip = model.currentAssistantTrip else { run(value); return }
         if OnlineJourneyReader.needsConsent {
-            speech.stop(); waitingForConsent = value; waitingToRefine = true; askingConsent = true
+            speech.stop(); waitingForConsent = value; waitingToRefine = true; source = value; askingConsent = true
             return
         }
         speech.stop(); operation?.cancel(); deadlineTask?.cancel()
@@ -118,6 +124,7 @@ final class JourneyAssistantSession: ObservableObject {
             } else {
                 model.applyAssistantChange(change, request: value)
                 UINotificationFeedbackGenerator().notificationOccurred(.success)
+                finishVoice()
             }
         }
     }
@@ -152,7 +159,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       nextStop: change.next.isEmpty ? trip.nextStop : change.next,
                                       constraints: change.constraints ?? trip.constraints)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        plannedCount += 1
+        plannedCount += 1; finishVoice()
     }
     /// The trip in words for the online model: places, way of travelling, time and limits, no coordinates.
     private static func describe(_ trip: TransitAppModel.AssistantTrip) -> String {
@@ -169,7 +176,7 @@ final class JourneyAssistantSession: ObservableObject {
         guard unavailable == nil else { input = value; presented = true; return }
         guard !value.isEmpty, value.count <= 600 else { return }
         if OnlineJourneyReader.needsConsent {
-            speech.stop(); waitingForConsent = value; input = value; askingConsent = true
+            speech.stop(); waitingForConsent = value; input = value; source = value; askingConsent = true
             return
         }
         speech.stop(); operation?.cancel(); deadlineTask?.cancel()
@@ -233,6 +240,21 @@ final class JourneyAssistantSession: ObservableObject {
         guard !busy, input != source else { return }
         clarification = nil; conversation = nil; problem = nil; message = nil
     }
+    /// Closes the voice screen after a brief ✓ when it led to routes.
+    private func finishVoice() {
+        guard voiceActive else { return }
+        celebrating = true
+        voiceRound += 1
+        let round = voiceRound
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(700))
+            // Listening again in the meantime keeps its own screen open.
+            guard round == voiceRound else { return }
+            celebrating = false; voiceActive = false
+        }
+    }
+    private var voiceRound = 0
+    func closeVoice() { voiceRound += 1; cancel(); voiceActive = false; celebrating = false }
     func cancel() {
         operation?.cancel(); deadlineTask?.cancel(); search.cancel(); speech.stop()
         busy = false; clarification = nil; problem = nil; message = nil; conversation = nil; turn = nil
@@ -381,7 +403,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       nextStop: turn.nextStop, constraints: turn.avoid)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         conversation = nil; clarification = nil; problem = nil; message = nil
-        presented = false; input = ""; plannedCount += 1
+        presented = false; input = ""; plannedCount += 1; finishVoice()
     }
     /// Whether a found place is what the words named (台大機械館 matches 機械工程學系館, not 圖書館).
     static func matches(_ place: TravelPlace, _ words: String) -> Bool {
@@ -416,7 +438,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       destination: place, alternatives: Array(alternatives.filter { $0.id != place.id }.prefix(3)),
                                       preference: trip.preference, mode: trip.mode)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
-        problem = nil; message = nil; presented = false; input = ""; plannedCount += 1
+        problem = nil; message = nil; presented = false; input = ""; plannedCount += 1; finishVoice()
     }
     private func stop(_ reason: Problem) {
         JourneyDiagnostics.shared.record("ai-plan stopped=\(reason.isOrigin ? "origin" : "destination")\(reason.unsaved ? "-unsaved" : "")")
@@ -944,6 +966,200 @@ struct ChipFlow: Layout {
             if x > bounds.minX, x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }
             view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
             x += size.width + spacing; line = max(line, size.height)
+        }
+    }
+}
+
+/// The voice assistant: a full screen that answers the tap at once and shows each step — an orb that
+/// moves with your voice, the words as they are heard, a shimmer while they are understood, and a
+/// ✓ before the routes appear.
+struct VoiceAssistantOverlay: View {
+    @ObservedObject var session: JourneyAssistantSession
+    @ObservedObject private var speech: SpeechInput
+    let typeInstead: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    init(session: JourneyAssistantSession, typeInstead: @escaping () -> Void) {
+        self.session = session; speech = session.speech; self.typeInstead = typeInstead
+    }
+    private enum Phase { case preparing, listening, understanding, done, problem }
+    private var phase: Phase {
+        if session.celebrating { return .done }
+        if session.busy || session.askingConsent { return .understanding }
+        if speech.listening { return .listening }
+        if speech.preparing { return .preparing }
+        return speech.problem != nil || session.message != nil ? .problem : .preparing
+    }
+    private var headline: String {
+        switch phase {
+        case .preparing: AppText.text("正在開啟麥克風…")
+        case .listening: speech.transcript.isEmpty ? AppText.text("請說出要去哪裡") : speech.transcript
+        case .understanding: "「" + session.source + "」"
+        case .done: AppText.text("好的，路線來了")
+        case .problem: speech.problem ?? session.message ?? AppText.text("沒有聽到聲音，請再說一次，或直接打字。")
+        }
+    }
+    private var caption: String {
+        switch phase {
+        case .preparing: AppText.text("第一次使用會詢問麥克風權限")
+        case .listening: speech.transcript.isEmpty ? AppText.text("例如：騎單車去台大、明天九點前到公司") : AppText.text("說完停一下就會開始規劃")
+        case .understanding: session.activity
+        case .done: ""
+        case .problem: ""
+        }
+    }
+    var body: some View {
+        ZStack {
+            Rectangle().fill(.ultraThinMaterial).ignoresSafeArea()
+            VStack(spacing: 28) {
+                HStack {
+                    Spacer()
+                    Button { session.closeVoice() } label: {
+                        Image(systemName: "xmark").font(.body.weight(.semibold)).frame(width: 44, height: 44)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                    }.foregroundStyle(.primary).accessibilityLabel(AppText.text("關閉")).accessibilityIdentifier("voice-close")
+                }
+                Spacer(minLength: 0)
+                VoiceOrb(phase: orbPhase, level: speech.level, reduceMotion: reduceMotion)
+                    .frame(width: 220, height: 220)
+                    .onTapGesture { if phase == .listening { speech.finish() } }
+                    .accessibilityHidden(true)
+                VStack(spacing: 10) {
+                    Text(headline).font(phase == .listening && !speech.transcript.isEmpty ? .title2.weight(.semibold) : .title3.weight(.semibold))
+                        .multilineTextAlignment(.center).lineLimit(4)
+                        .contentTransition(.opacity).animation(.easeOut(duration: 0.15), value: headline)
+                        .accessibilityIdentifier("voice-headline")
+                    if !caption.isEmpty {
+                        Text(caption).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                }.padding(.horizontal, 24)
+                Spacer(minLength: 0)
+                HStack(spacing: 14) {
+                    Button { session.closeVoice(); typeInstead() } label: {
+                        Label(AppText.text("改用打字"), systemImage: "keyboard").font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18).frame(minHeight: 50)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                    }.foregroundStyle(.primary).accessibilityIdentifier("voice-type")
+                    switch phase {
+                    case .listening:
+                        Button { speech.finish() } label: {
+                            Label(AppText.text("說完了"), systemImage: "checkmark").font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 22).frame(minHeight: 50)
+                                .background(Color.accentColor, in: Capsule()).foregroundStyle(.white)
+                        }.accessibilityIdentifier("voice-done")
+                    case .problem:
+                        Button { session.listen() } label: {
+                            Label(AppText.text("再說一次"), systemImage: "mic.fill").font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 22).frame(minHeight: 50)
+                                .background(Color.accentColor, in: Capsule()).foregroundStyle(.white)
+                        }.accessibilityIdentifier("voice-retry")
+                    default: EmptyView()
+                    }
+                }.padding(.bottom, 12)
+            }
+            .padding(.horizontal, 20)
+        }
+        .transition(.opacity.combined(with: .scale(scale: 1.04)))
+        .accessibilityElement(children: .contain).accessibilityIdentifier("voice-assistant")
+        // Feel each step: the mic opening, and a problem.
+        .onChange(of: speech.listening) { _, on in if on { UIImpactFeedbackGenerator(style: .light).impactOccurred() } }
+        .onChange(of: speech.problem) { _, problem in if problem != nil { UINotificationFeedbackGenerator().notificationOccurred(.warning) } }
+    }
+    private var orbPhase: VoiceOrb.Phase {
+        switch phase {
+        case .preparing: .idle
+        case .listening: .listening
+        case .understanding: .thinking
+        case .done: .done
+        case .problem: .problem
+        }
+    }
+}
+
+/// The animated orb: breathes while waiting, swells with the voice, swirls while thinking.
+struct VoiceOrb: View {
+    enum Phase { case idle, listening, thinking, done, problem }
+    let phase: Phase
+    let level: Double
+    let reduceMotion: Bool
+    private var colors: [Color] {
+        switch phase {
+        case .problem: [.orange, .red.opacity(0.8), .orange]
+        case .done: [.green, .mint, .green]
+        default: [.blue, .purple, .cyan, .blue]
+        }
+    }
+    var body: some View {
+        TimelineView(.animation(paused: reduceMotion)) { timeline in
+            let t = timeline.date.timeIntervalSinceReferenceDate
+            let breathe = reduceMotion ? 0 : (sin(t * 2) + 1) / 2
+            let voice = phase == .listening ? level : 0
+            let scale = 0.78 + 0.06 * breathe + 0.28 * voice
+            ZStack {
+                // Rings that ripple outward while listening.
+                if phase == .listening && !reduceMotion {
+                    ForEach(0..<3, id: \.self) { ring in
+                        let progress = (t * 0.6 + Double(ring) / 3).truncatingRemainder(dividingBy: 1)
+                        Circle().stroke(Color.accentColor.opacity(0.35 * (1 - progress)), lineWidth: 2)
+                            .scaleEffect(0.8 + 0.5 * progress)
+                    }
+                }
+                Circle()
+                    .fill(AngularGradient(colors: colors, center: .center,
+                                          angle: .degrees(reduceMotion ? 0 : t * (phase == .thinking ? 220 : 40))))
+                    .blur(radius: 18).opacity(0.85)
+                    .scaleEffect(scale)
+                Circle()
+                    .fill(RadialGradient(colors: [.white.opacity(0.9), .white.opacity(0)], center: .center, startRadius: 2, endRadius: 70))
+                    .scaleEffect(scale * 0.7).blendMode(.plusLighter)
+                Image(systemName: symbol).font(.system(size: 44, weight: .semibold)).foregroundStyle(.white)
+                    .contentTransition(.symbolEffect(.replace))
+            }
+            .animation(.spring(response: 0.25, dampingFraction: 0.6), value: level)
+        }
+    }
+    private var symbol: String {
+        switch phase {
+        case .idle: "mic.fill"
+        case .listening: "waveform"
+        case .thinking: "sparkles"
+        case .done: "checkmark"
+        case .problem: "exclamationmark"
+        }
+    }
+}
+
+/// The big way in on the search screen: tap once and say where to go.
+struct VoiceStartCard: View {
+    let action: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+    var body: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            action()
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle().fill(Color.accentColor.opacity(0.25)).scaleEffect(pulse ? 1.35 : 1).opacity(pulse ? 0 : 1)
+                    Circle().fill(LinearGradient(colors: [.accentColor, .purple], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    Image(systemName: "mic.fill").font(.title2.weight(.bold)).foregroundStyle(.white)
+                }.frame(width: 56, height: 56)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(AppText.text("按一下，說出要去哪裡")).font(.headline).foregroundStyle(.primary)
+                    Text(AppText.text("例如：明天九點前到台大、騎單車去101")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(AppText.text("用說的規劃"))
+        .accessibilityIdentifier("journey-voice")
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeOut(duration: 1.6).repeatForever(autoreverses: false)) { pulse = true }
         }
     }
 }

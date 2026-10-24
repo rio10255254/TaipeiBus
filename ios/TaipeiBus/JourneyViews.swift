@@ -191,6 +191,17 @@ struct JourneyPlanningView: View {
             focused = false; query = ""; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
         }
         .bikeStationDetails(model: model)
+        .overlay {
+            if assistant.voiceActive && !assistant.presented {
+                VoiceAssistantOverlay(session: assistant) { openAssistant(nil) }
+            }
+        }
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: assistant.voiceActive)
+        .onChange(of: model.pendingVoice, initial: true) { _, pending in
+            guard pending else { return }
+            model.pendingVoice = false
+            if assistantAvailable { focused = false; assistant.listen() }
+        }
         .onChange(of: model.pendingAssistantRequest, initial: true) { _, text in
             guard let text, assistantAvailable else { return }
             model.pendingAssistantRequest = nil
@@ -312,12 +323,6 @@ struct JourneyPlanningView: View {
                     .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
-                if query.isEmpty, assistantAvailable, !editingOrigin, !planner.started {
-                    // One tap, then just say where to go.
-                    Button { focused = false; assistant.listen() } label: {
-                        Image(systemName: "mic.fill").frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.buttonStyle(.borderless).accessibilityLabel(AppText.text("用說的規劃")).accessibilityIdentifier("journey-voice")
-                }
             }.padding(14).frame(minHeight: 52)
                 .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
@@ -335,6 +340,10 @@ struct JourneyPlanningView: View {
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
+                if !editingOrigin, !planner.started, assistantAvailable, !focused {
+                    // Most people don't type a whole sentence: speaking is the first, largest choice.
+                    VoiceStartCard { focused = false; assistant.listen() }
+                }
                 if !editingOrigin, !planner.started, assistantAvailable {
                     // Zero typing: one row of what was said before, after the way in to type a sentence.
                     ScrollView(.horizontal, showsIndicators: false) {

@@ -319,7 +319,11 @@ struct TransitHomeView: View {
             }
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
-                          browse: openBrowse)
+                          browse: openBrowse,
+                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? {
+                              model.pendingVoice = true
+                              showJourneyItinerary = false; journeyDetent = .large; showJourney = true
+                          } : nil)
         }
     }
     }
@@ -745,6 +749,8 @@ private struct HomeSearchRow: View {
     let hasSelection: Bool
     let search: () -> Void
     let browse: (BrowseMode) -> Void
+    /// Speak instead of type: the first thing on the home screen, like a voice assistant.
+    var voice: (() -> Void)? = nil
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     private func circle(_ symbol: String) -> some View {
         Image(systemName: symbol).liveFont(.title3).frame(width: 56, height: 56).contentShape(Circle())
@@ -757,6 +763,7 @@ private struct HomeSearchRow: View {
                     if !hasSelection {
                         Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
                         Spacer(minLength: 0)
+                        if voice != nil { Color.clear.frame(width: 40, height: 40) }
                     }
                 }
                 .padding(.horizontal, hasSelection ? 0 : 18 * CGFloat(live.appearance.spacingScale))
@@ -767,6 +774,24 @@ private struct HomeSearchRow: View {
             .phoneGlass(in: Capsule())
             .accessibilityLabel(live.text("搜尋目的地"))
             .accessibilityIdentifier("home-destination-search")
+            .overlay(alignment: .trailing) {
+                if !hasSelection, let voice {
+                    Button {
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        voice()
+                    } label: {
+                        Image(systemName: "mic.fill").liveFont(.body, weight: .bold).foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(LinearGradient(colors: [accent, .purple], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
+                            .shadow(color: accent.opacity(0.35), radius: 6, y: 2)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(PhonePressStyle())
+                    .padding(.trailing, 6)
+                    .accessibilityLabel(live.text("用說的規劃"))
+                    .accessibilityIdentifier("home-voice")
+                }
+            }
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.
             HStack(spacing: 0) {
