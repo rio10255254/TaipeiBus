@@ -687,6 +687,17 @@ final class JourneyAssistantContext {
         case .walking where !says(["走路", "步行", "走過去", "走去", "走到", "walk"]): value.travelMode = .any
         default: break
         }
+        // 家, 公司 and 學校 need those words; a named campus building is a place, not 「學校」.
+        func generic(_ kind: JourneyReading.Kind) -> Bool {
+            switch kind {
+            case .home: says(["家", "home"])
+            case .work: says(["公司", "上班", "辦公室", "work", "office"])
+            case .school: says(["學校", "上學", "上課", "school"])
+            default: true
+            }
+        }
+        if !generic(value.destinationKind) { value.destinationKind = .place }
+        if !generic(value.originKind) { value.originKind = .place }
         let clock = says(["點", "時", ":", "：", "am", "pm"]) || text.contains(where: \.isNumber)
         if trustTime {
             let plain = ["前往", "目前", "前面"].reduce(text) { $0.replacingOccurrences(of: $1, with: "") }
@@ -830,7 +841,7 @@ enum OnlineJourneyReader {
     "preference":"balanced|faster|lessWalking|fewerTransfers|conflicting","travelMode":"any|cycling|walking",\
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
-    目的地照原文，北車→台北車站、台大→國立臺灣大學；家=home，公司/上班=work，學校=school；沒說從哪出發就留空。
+    目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
     說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
     """
 
@@ -1131,6 +1142,15 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         if reading.avoid.isEmpty { reading.avoid = rules.avoid }
         if reading.preference == .balanced, let preference = rules.preference, preference != .balanced { reading.preference = preference }
         let plain = source.replacingOccurrences(of: "臺", with: "台")
+        // A named place said in full stays in full. On a phone 「台大機械館」 came back as 國立臺灣大學
+        // (a school), and the library was planned. The model's name wins only when it appears in the
+        // sentence or keeps the rider's words (北車 → 台北車站 contains 北車).
+        let said = rules.destination.replacingOccurrences(of: "臺", with: "台")
+        let named = reading.destination.replacingOccurrences(of: "臺", with: "台")
+        if said.count >= 3, plain.contains(said), !plain.contains(named), !named.contains(said) {
+            reading.destination = rules.destination
+            reading.destinationKind = rules.destinationKind == .none ? .place : rules.destinationKind
+        }
         if !reading.origin.isEmpty, rules.origin.isEmpty,
            !["從", "由", "出發"].contains(where: plain.contains),
            !plain.contains(reading.origin.replacingOccurrences(of: "臺", with: "台")) {
@@ -1152,7 +1172,7 @@ private final class FoundationJourneyConversation: JourneyAssistantConversation 
     private static func session() -> LanguageModelSession {
         LanguageModelSession(instructions: """
         Read one Taipei public-transport trip request and fill the fields. Do not plan routes or look anything up.
-        Places: copy the user's words and expand obvious nicknames (北車→台北車站, 台大→國立臺灣大學, 101→台北101).
+        Places: copy the user's words in full (台大機械館 stays 台大機械館) and expand a nickname only when it stands alone (北車→台北車站, 台大→國立臺灣大學, 101→台北101).
         Kind: home for 家/回家, work for 公司/上班, school for 學校/上學, saved when the user names one of the listed
         saved journeys (copy that name), place for any other place, absent when not said.
         Origin stays empty with kind absent unless the user says where they start (從…, …出發的地方).

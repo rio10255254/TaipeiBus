@@ -273,6 +273,16 @@ import TransitCore
         XCTAssertEqual(merged.origin, "", "A start the sentence never mentions is dropped")
         let stated = RuleFirstConversation.merge(online, rules: RuleJourneyReader.read("從北車去台大"), source: "從北車去台大")
         XCTAssertEqual(stated.origin, "台北車站")
+        // Device: 「我明天下午三點要去台大機械館」 came back as 國立臺灣大學, a school.
+        let sentence = "我明天下午三點要去台大機械館"
+        let campus = RuleFirstConversation.merge(JourneyReading(destination: "國立臺灣大學", destinationKind: .school),
+                                                 rules: RuleJourneyReader.read(sentence), source: sentence)
+        XCTAssertEqual(campus.destination, "台大機械館", "A named place said in full stays in full")
+        XCTAssertEqual(JourneyAssistantContext.grounded(JourneyReading(destination: "台大機械館", destinationKind: .school), in: sentence).destinationKind,
+                       .place, "A named building is a place, not 學校")
+        XCTAssertEqual(JourneyAssistantContext.grounded(JourneyReading(destination: "", destinationKind: .school), in: "去學校").destinationKind, .school)
+        XCTAssertEqual(RuleFirstConversation.merge(online, rules: RuleJourneyReader.read("去北車"), source: "去北車").destination, "國立臺灣大學",
+                       "A nickname the model expanded is kept")
     }
     func testTwoStopsPlanTheFirstAndOfferTheSecond() async throws {
         let rules = RuleJourneyReader.read("我要先去台大機械館，然後再去內湖站")

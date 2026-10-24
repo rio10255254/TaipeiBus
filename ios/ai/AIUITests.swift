@@ -73,6 +73,15 @@ final class AIUITests: XCTestCase {
         let settings = app.buttons["map"]
         XCTAssertTrue(settings.waitForExistence(timeout: 60)); settings.tap()
         XCTAssertTrue(app.buttons["settings-pro"].waitForExistence(timeout: 15))
+        keep("6 settings")
+        let assistant = app.buttons["settings-assistant"]
+        if assistant.exists {
+            assistant.tap()
+            XCTAssertTrue(app.navigationBars["語音與 AI"].waitForExistence(timeout: 5))
+            keep("7 voice and AI settings")
+            app.navigationBars["語音與 AI"].buttons.element(boundBy: 0).tap()
+            XCTAssertTrue(app.buttons["settings-pro"].waitForExistence(timeout: 5))
+        }
         let entry = app.buttons["settings-ai-benchmark"]
         for _ in 0..<10 where !(entry.exists && entry.isHittable) { app.swipeUp() }
         XCTAssertTrue(entry.isHittable); entry.tap()

@@ -1061,6 +1061,12 @@ enum VoiceStyle: String, CaseIterable, Identifiable {
         case .fullScreen: AppText.text("全螢幕")
         }
     }
+    var detail: String {
+        switch self {
+        case .glow: AppText.text("螢幕邊緣發光，可以一邊看地圖一邊說")
+        case .fullScreen: AppText.text("專心說話的獨立畫面")
+        }
+    }
 }
 
 /// What the voice screens show, shared by the full screen and the edge glow.
@@ -1185,7 +1191,7 @@ struct VoiceAssistantView: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 8)
-                VoiceOrb(mood: mood, level: speech.level, reduceMotion: reduceMotion)
+                VoiceOrb(mood: mood, level: speech.meter, reduceMotion: reduceMotion)
                     .frame(width: 250, height: 250)
                     .scaleEffect(shown ? 1 : 0.55)
                     .contentShape(Circle())
@@ -1398,21 +1404,24 @@ struct VoiceAssistantView: View {
     }
 }
 
-/// Fills while silence is timed after the words; empties when the voice starts again.
+/// Fills while silence is timed after the words; empties when the voice starts again. One linear
+/// animation per pause, run by the render server, instead of redrawing every frame.
 private struct SilenceRing: View {
     let since: Date?
     let length: Double
+    @State private var progress: Double = 0
     var body: some View {
-        TimelineView(.animation(paused: since == nil)) { timeline in
-            let progress = since.map { min(1, max(0, timeline.date.timeIntervalSince($0) / max(length, 0.1))) } ?? 0
-            Circle().trim(from: 0, to: progress)
-                .stroke(Color.accentColor.opacity(0.9), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-                // Only the pause shows, not every gap between words.
-                .opacity(progress > 0.2 ? 1 : 0)
-                .animation(.easeOut(duration: 0.15), value: progress > 0.2)
-        }
-        .allowsHitTesting(false)
+        Circle().trim(from: 0, to: progress)
+            .stroke(Color.accentColor.opacity(0.9), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+            .rotationEffect(.degrees(-90))
+            .opacity(since == nil ? 0 : 1)
+            .allowsHitTesting(false)
+            .onChange(of: since, initial: true) { _, start in
+                var reset = Transaction(); reset.disablesAnimations = true
+                withTransaction(reset) { progress = 0 }
+                guard start != nil else { return }
+                withAnimation(.linear(duration: max(length, 0.1))) { progress = 1 }
+            }
     }
 }
 
@@ -1433,22 +1442,21 @@ private struct LiveDot: View {
 /// A light that sweeps across text while it is being understood.
 private struct Shimmer: ViewModifier {
     let active: Bool
+    @State private var sweep = false
     @ViewBuilder func body(content: Content) -> some View {
         if active {
             content.overlay {
-                TimelineView(.animation) { timeline in
-                    let cycle = timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 1.8) / 1.8
-                    GeometryReader { box in
-                        LinearGradient(colors: [.white.opacity(0), .white.opacity(0.75), .white.opacity(0)],
-                                       startPoint: .leading, endPoint: .trailing)
-                            .frame(width: box.size.width * 0.45)
-                            .offset(x: box.size.width * 1.45 * cycle - box.size.width * 0.45)
-                    }
+                GeometryReader { box in
+                    LinearGradient(colors: [.white.opacity(0), .white.opacity(0.75), .white.opacity(0)],
+                                   startPoint: .leading, endPoint: .trailing)
+                        .frame(width: box.size.width * 0.45)
+                        .offset(x: sweep ? box.size.width : -box.size.width * 0.45)
                 }
                 .mask { content }
                 .blendMode(.plusLighter)
                 .allowsHitTesting(false)
             }
+            .onAppear { withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { sweep = true } }
         } else {
             content
         }
@@ -1465,27 +1473,20 @@ struct VoicePressStyle: ButtonStyle {
     }
 }
 
-/// Smooths the microphone level frame by frame: quick to rise, slow to fall, like a VU meter.
-private final class LevelSmoother {
-    private var value: Double = 0
-    func next(_ target: Double) -> Double {
-        value += (target - value) * (target > value ? 0.35 : 0.08)
-        return value
-    }
-}
-
-/// Soft blobs of colour that drift calmly, swell with the voice, swirl while thinking and turn
-/// green when done; a glass core carries the symbol.
+/// Soft colour that turns calmly, swells with the voice, spins faster while thinking and turns
+/// green when done; a glass core carries the symbol. Built like Siri's orb: the blurred colour is
+/// drawn once and only rotated and scaled after that, so the render server animates it and the
+/// app never redraws it frame by frame.
 struct VoiceOrb: View {
     enum Mood: Equatable { case calm, listening, thinking, done, warning }
     let mood: Mood
-    var level: Double = 0
+    var level: VoiceLevel = .silent
     var reduceMotion = false
-    /// The small orb on the search screen redraws less often.
+    /// The small orb in cards and on the search screen.
     var compact = false
-    @State private var smoother = LevelSmoother()
+    @State private var spin = false
+    @State private var breathe = false
 
-    private var palette: [Color] { Self.colors(mood) }
     static func colors(_ mood: Mood) -> [Color] {
         switch mood {
         case .calm, .listening:
@@ -1515,28 +1516,27 @@ struct VoiceOrb: View {
     var body: some View {
         GeometryReader { box in
             let side = min(box.size.width, box.size.height)
+            let colors = Self.colors(mood)
             ZStack {
-                TimelineView(.animation(minimumInterval: compact ? 1 / 30 : nil, paused: reduceMotion)) { timeline in
-                    let time = timeline.date.timeIntervalSinceReferenceDate
-                    let energy = smoother.next(mood == .listening ? level : 0)
-                    ZStack {
-                        Canvas { context, size in draw(in: &context, size: size, time: time, energy: energy) }
-                        if mood == .listening && !reduceMotion && !compact {
-                            ForEach(0..<2, id: \.self) { ring in
-                                let progress = (time * 0.55 + Double(ring) * 0.5).truncatingRemainder(dividingBy: 1)
-                                Circle()
-                                    .stroke(Color.white.opacity((0.12 + 0.4 * energy) * (1 - progress)), lineWidth: 1.5)
-                                    .scaleEffect(0.5 + 0.42 * progress)
-                            }
-                        }
-                    }
-                }
-                // Glass core.
+                // Two layers of blurred colour turning opposite ways read as moving liquid.
+                Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
+                    .frame(width: side * 0.78, height: side * 0.78)
+                    .blur(radius: side * (compact ? 0.08 : 0.12))
+                    .drawingGroup()
+                    .rotationEffect(.degrees(spin ? 360 : 0))
+                Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))
+                    .frame(width: side * 0.6, height: side * 0.6)
+                    .blur(radius: side * (compact ? 0.06 : 0.1))
+                    .drawingGroup()
+                    .rotationEffect(.degrees(spin ? -540 : 0))
+                    .opacity(0.75)
+                Circle().fill(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0)], center: .center,
+                                             startRadius: 0, endRadius: side * 0.3))
+                    .frame(width: side * 0.6, height: side * 0.6)
+                    .blendMode(.plusLighter)
                 Circle().fill(.white.opacity(0.16))
                     .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: compact ? 0.5 : 1))
                     .frame(width: side * (compact ? 0.5 : 0.34), height: side * (compact ? 0.5 : 0.34))
-                    .scaleEffect(1 + (mood == .listening ? 0.14 * level : 0))
-                    .animation(.spring(response: 0.18, dampingFraction: 0.6), value: level)
                 Image(systemName: symbol)
                     .font(.system(size: side * (compact ? 0.24 : 0.13), weight: .semibold))
                     .foregroundStyle(.white)
@@ -1545,28 +1545,27 @@ struct VoiceOrb: View {
                     .symbolEffect(.bounce, value: mood == .done)
                     .contentTransition(.symbolEffect(.replace))
             }
+            .modifier(VoiceSwell(level: level, amount: mood == .listening ? 0.22 : 0))
+            .scaleEffect(breathe ? 1.03 : 0.97)
             .frame(width: box.size.width, height: box.size.height)
         }
-        .animation(.easeInOut(duration: 0.5), value: mood)
-    }
-
-    private func draw(in context: inout GraphicsContext, size: CGSize, time: Double, energy: Double) {
-        let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        // Kept well inside the canvas so the blur never shows a square edge.
-        let radius = min(size.width, size.height) / 2 * (compact ? 0.72 : 0.56)
-        let speed = mood == .thinking ? 2.6 : mood == .listening ? 0.8 + 1.6 * energy : 0.4
-        let spread = radius * (mood == .thinking ? 0.32 : 0.12 + 0.24 * energy)
-        let breathe = reduceMotion ? 0 : sin(time * 1.6)
-        let swell = mood == .done ? 0.86 : 0.64 + 0.05 * breathe + 0.3 * energy
-        context.addFilter(.blur(radius: radius * 0.24))
-        for (index, color) in palette.enumerated() {
-            let offset = Double(index) * .pi * 2 / Double(palette.count)
-            let angle = (reduceMotion ? 0 : time * speed * (1 + Double(index) * 0.17)) + offset
-            let point = CGPoint(x: center.x + cos(angle) * spread, y: center.y + sin(angle * 1.21) * spread)
-            let blob = radius * swell * (0.8 + 0.12 * (reduceMotion ? 0 : sin(time * 2.1 + offset)))
-            context.fill(Path(ellipseIn: CGRect(x: point.x - blob, y: point.y - blob, width: blob * 2, height: blob * 2)),
-                         with: .color(color.opacity(0.92)))
+        .animation(.easeInOut(duration: 0.45), value: mood)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: compact ? 9 : 6).repeatForever(autoreverses: false)) { spin = true }
+            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { breathe = true }
         }
+    }
+}
+
+/// Scales with the voice; only this small view follows the microphone level.
+private struct VoiceSwell: ViewModifier {
+    @ObservedObject var level: VoiceLevel
+    let amount: Double
+    func body(content: Content) -> some View {
+        content
+            .scaleEffect(1 + amount * level.value)
+            .animation(.spring(response: 0.2, dampingFraction: 0.65), value: level.value)
     }
 }
 
@@ -1641,45 +1640,67 @@ final class VoiceGlowOverlay {
     }
 }
 
-/// The glow around the screen edge, Apple Intelligence style: colours circle the edge, swell
-/// with the voice, race while thinking and turn green when done.
+/// The glow around the screen edge, Apple Intelligence style: colours circle the edge, brighten
+/// with the voice and turn green when done. The blurred edge masks are drawn once; the colour
+/// under them only rotates, and the voice only changes opacity, so the render server animates
+/// everything and the main thread stays free.
 struct EdgeGlow: View {
     let mood: VoiceOrb.Mood
-    var level: Double = 0
+    var level: VoiceLevel = .silent
     var reduceMotion = false
-    @State private var smoother = LevelSmoother()
+    @State private var spin = false
+    @State private var pulse = false
     var body: some View {
         GeometryReader { box in
             // Rounded like the display on Face ID iPhones; the blur hides small differences.
             let corner: CGFloat = box.safeAreaInsets.bottom > 0 ? 54 : 0
-            TimelineView(.animation(paused: reduceMotion)) { timeline in
-                let time = timeline.date.timeIntervalSinceReferenceDate
-                let energy = smoother.next(target(at: time))
-                let colors = VoiceOrb.colors(mood)
-                let gradient = AngularGradient(colors: colors + [colors[0]], center: .center,
-                                               angle: .degrees(reduceMotion ? 0 : time * (mood == .thinking ? 200 : 70)))
-                let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-                ZStack {
-                    shape.strokeBorder(gradient, lineWidth: 34 + 34 * energy).blur(radius: 36).opacity(0.75)
-                    shape.strokeBorder(gradient, lineWidth: 12 + 16 * energy).blur(radius: 12)
-                    shape.strokeBorder(gradient, lineWidth: 3 + 4 * energy)
-                }
+            let width = box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing
+            let height = box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom
+            let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+            let colors = VoiceOrb.colors(mood)
+            let wheel = Rectangle()
+                .fill(AngularGradient(colors: colors + [colors[0]], center: .center))
+                .frame(width: hypot(width, height), height: hypot(width, height))
+                .rotationEffect(.degrees(spin ? 360 : 0))
+                .frame(width: width, height: height)
+            ZStack {
+                // Wide soft glow: follows the voice.
+                wheel.mask { shape.strokeBorder(lineWidth: 56).blur(radius: 34).drawingGroup() }
+                    .modifier(GlowLevel(level: level, mood: mood))
+                // Middle glow: breathes while thinking.
+                wheel.mask { shape.strokeBorder(lineWidth: 18).blur(radius: 10).drawingGroup() }
+                    .opacity(mood == .thinking ? (pulse ? 1 : 0.55) : 0.9)
+                // Crisp edge.
+                wheel.mask { shape.strokeBorder(lineWidth: 3) }
             }
-            .frame(width: box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing,
-                   height: box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom)
+            .compositingGroup()
+            .frame(width: width, height: height)
             .offset(x: -box.safeAreaInsets.leading, y: -box.safeAreaInsets.top)
         }
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 0.5), value: mood)
-    }
-    private func target(at time: Double) -> Double {
-        switch mood {
-        case .listening: return 0.15 + 0.85 * level
-        case .thinking: return reduceMotion ? 0.45 : 0.45 + 0.2 * sin(time * 5)
-        case .done: return 0.7
-        case .warning: return 0.35
-        case .calm: return 0.2
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { spin = true }
+            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { pulse = true }
         }
+    }
+}
+
+/// The wide glow's brightness: the voice while listening, steady otherwise.
+private struct GlowLevel: ViewModifier {
+    @ObservedObject var level: VoiceLevel
+    let mood: VoiceOrb.Mood
+    func body(content: Content) -> some View {
+        let value: Double = switch mood {
+        case .listening: 0.25 + 0.75 * level.value
+        case .thinking: 0.7
+        case .done: 0.85
+        case .warning, .calm: 0.4
+        }
+        content
+            .opacity(value)
+            .animation(.easeOut(duration: 0.15), value: level.value)
     }
 }
 
@@ -1699,7 +1720,7 @@ struct VoiceGlowView: View {
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            EdgeGlow(mood: session.voiceMood, level: speech.level, reduceMotion: reduceMotion)
+            EdgeGlow(mood: session.voiceMood, level: speech.meter, reduceMotion: reduceMotion)
                 .opacity(shown ? 1 : 0)
                 .scaleEffect(shown || reduceMotion ? 1 : 1.04)
             card
@@ -1767,7 +1788,7 @@ struct VoiceGlowView: View {
     private var card: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
-                VoiceOrb(mood: session.voiceMood, level: speech.level, reduceMotion: reduceMotion, compact: true)
+                VoiceOrb(mood: session.voiceMood, level: speech.meter, reduceMotion: reduceMotion, compact: true)
                     .frame(width: 46, height: 46)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {

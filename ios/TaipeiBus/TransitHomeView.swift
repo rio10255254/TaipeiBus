@@ -1606,72 +1606,68 @@ private struct AppInformationView: View {
 
     var body: some View {
         NavigationStack {
+            // Short and grouped like iOS Settings: what people change is on top; sources, licences
+            // and every privacy explanation sit one level deeper.
             List {
                 Section {
                     NavigationLink { ProSettingsView(model:model) } label: {
                         Label(AppText.text("台北公車 Pro"),systemImage:"star.circle")
                     }.accessibilityIdentifier("settings-pro")
                 }
-                Section(live.text("語言")) {
-                    Toggle("English", isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) }))
-                        .accessibilityIdentifier("app-language-toggle")
-                }
-                CommuteHabitSettings(habits: model.commuteHabits)
-                if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
-                if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil { VoiceStyleSettings() }
-                Section(AppText.text("即時資料")) {
-                    Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
-                    Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
-                    if let error = model.snapshot.vehicleError { Label(live.text(error), systemImage: "wifi.exclamationmark") }
-                    if let error = model.snapshot.estimates.error { Text(live.text(error)) }
-                    if let notice = model.metadataNotice { Text(live.text(notice)) }
-                    Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
-                    Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
-                    Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
-                    Text(AppText.text("站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。"))
-                    Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
-                    Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
-                    Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
-                    Text(AppText.text("YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。"))
-                    Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
-                    Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
-                }
-                Section(AppText.text("地圖")) {
-                    Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
-                    if live.display.bikeStations {
-                        Toggle(AppText.text("顯示 YouBike 站點"), isOn: $model.bikeStationsOn)
-                            .accessibilityIdentifier("bike-stations-toggle")
-                        Text(live.text("放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。"))
-                    }
-                    Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
-                    Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
-                    Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
-                    NavigationLink(AppText.text("開源授權")) { LicenseView() }
-                }
-                Section(AppText.text("定位")) {
-                    Text(live.text("定位只在使用期間尋找附近站牌，可直接手動搜尋；位置不會傳到公車資料來源。"))
-                    Button(live.text("開啟系統設定")) {
-                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                // Only problems surface here; the full data notes live under 資料來源.
+                if model.snapshot.vehicleError != nil || model.snapshot.estimates.error != nil || model.metadataNotice != nil {
+                    Section {
+                        if let error = model.snapshot.vehicleError { Label(live.text(error), systemImage: "wifi.exclamationmark") }
+                        if let error = model.snapshot.estimates.error { Label(live.text(error), systemImage: "exclamationmark.triangle") }
+                        if let notice = model.metadataNotice { Label(live.text(notice), systemImage: "info.circle") }
                     }
                 }
                 Section {
-                    NavigationLink(AppText.text("交通公告")) { OfficialNoticesView() }
-                        .accessibilityIdentifier("official-service-notices")
+                    Toggle(isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) })) {
+                        Label("English", systemImage: "character.bubble")
+                    }.accessibilityIdentifier("app-language-toggle")
+                    if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
+                        NavigationLink { AssistantSettingsView() } label: {
+                            Label(AppText.text("語音與 AI"), systemImage: "waveform")
+                        }.accessibilityIdentifier("settings-assistant")
+                    }
+                    NavigationLink { MapSettingsView(model: model) } label: {
+                        Label(AppText.text("地圖"), systemImage: "map")
+                    }.accessibilityIdentifier("settings-map")
+                    NavigationLink {
+                        List { CommuteHabitSettings(habits: model.commuteHabits) }
+                            .navigationTitle(AppText.text("通勤提示")).navigationBarTitleDisplayMode(.inline)
+                    } label: {
+                        Label(AppText.text("通勤提示"), systemImage: "clock.arrow.2.circlepath")
+                    }.accessibilityIdentifier("settings-commute")
                 }
-                Section(AppText.text("隱私")) {
-                    NavigationLink(AppText.text("隱私權說明")) { PrivacyExplanationView() }
-                    Link(AppText.text("完整隱私政策"), destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!)
-                        .accessibilityIdentifier("app-privacy-policy")
-                    Link(AppText.text("支援與聯絡"), destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!)
-                        .accessibilityIdentifier("app-support")
+                Section {
+                    NavigationLink { OfficialNoticesView() } label: {
+                        Label(AppText.text("交通公告"), systemImage: "megaphone")
+                    }.accessibilityIdentifier("official-service-notices")
+                }
+                Section {
+                    NavigationLink { DataSourcesView(model: model) } label: {
+                        Label(AppText.text("資料來源"), systemImage: "server.rack")
+                    }.accessibilityIdentifier("settings-sources")
+                    NavigationLink { PrivacyExplanationView() } label: {
+                        Label(AppText.text("隱私"), systemImage: "hand.raised")
+                    }.accessibilityIdentifier("settings-privacy")
+                    Link(destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!) {
+                        Label(AppText.text("完整隱私政策"), systemImage: "doc.text")
+                    }.accessibilityIdentifier("app-privacy-policy")
+                    Link(destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!) {
+                        Label(AppText.text("支援與聯絡"), systemImage: "questionmark.circle")
+                    }.accessibilityIdentifier("app-support")
                     ShareLink(item:diagnostics.report) {
                         Label(AppText.text("分享路線規劃紀錄"),systemImage:"square.and.arrow.up")
                     }.accessibilityIdentifier("share-journey-diagnostics")
-                }
+                } header: { Text(AppText.text("關於")) }
                 if testerBuild {
                     Section {
-                        NavigationLink(AppText.text("AI 測試")) { JourneyBenchmarkView() }
-                            .accessibilityIdentifier("settings-ai-benchmark")
+                        NavigationLink { JourneyBenchmarkView() } label: {
+                            Label(AppText.text("AI 測試"), systemImage: "checklist")
+                        }.accessibilityIdentifier("settings-ai-benchmark")
                     } footer: { Text(AppText.text("只在測試版顯示。")) }
                 }
             }
@@ -1680,6 +1676,72 @@ private struct AppInformationView: View {
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }
         }
+    }
+}
+
+/// 語音與 AI: how the voice assistant looks and whether sentences are understood online.
+private struct AssistantSettingsView: View {
+    var body: some View {
+        List {
+            VoiceStyleSettings()
+            if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
+        }
+        .navigationTitle(AppText.text("語音與 AI")).navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// 地圖: the switches; credits are under 資料來源.
+private struct MapSettingsView: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    var body: some View {
+        List {
+            Section {
+                Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
+                if live.display.bikeStations {
+                    Toggle(AppText.text("顯示 YouBike 站點"), isOn: $model.bikeStationsOn)
+                        .accessibilityIdentifier("bike-stations-toggle")
+                }
+            } footer: {
+                if live.display.bikeStations { Text(live.text("放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。")) }
+            }
+        }
+        .navigationTitle(AppText.text("地圖")).navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Where the data comes from, with links and licences.
+private struct DataSourcesView: View {
+    @Environment(\.liveSettings) private var live
+    @ObservedObject var model: TransitAppModel
+    var body: some View {
+        List {
+            Section(AppText.text("公車")) {
+                Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
+                Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
+                Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
+                Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
+                Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
+                Text(AppText.text("站間車程來自交通部運輸資料流通服務平臺（TDX）；來源不足時仍標示估計。"))
+                Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
+            }
+            Section(AppText.text("捷運")) {
+                Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
+                Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
+            }
+            Section("YouBike") {
+                Text(AppText.text("YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。"))
+                Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
+                Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
+            }
+            Section(AppText.text("地圖")) {
+                Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
+                Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
+                Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                NavigationLink(AppText.text("開源授權")) { LicenseView() }
+            }
+        }
+        .navigationTitle(AppText.text("資料來源")).navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1695,6 +1757,10 @@ private struct PrivacyExplanationView: View {
                 Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
             }
             Section(AppText.text("你的位置")) {
+                Text(live.text("定位只在使用期間尋找附近站牌，可直接手動搜尋；位置不會傳到公車資料來源。"))
+                Button(live.text("開啟系統設定")) {
+                    if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                }
                 Text(AppText.text("定位為選用，只在使用 App 時尋找附近站牌、規劃行程與定位地圖。也能拒絕定位，手動選擇出發地、站牌或路線。App 不會將定位座標加入公車資料查詢。"))
                 Text(AppText.text("地點搜尋與步行路線由 Apple 地圖提供；搜尋文字及路線起終點由 Apple 處理。"))
                 Text(AppText.text("地圖供應者會收到目前畫面需要的圖磚請求及網路連線資訊，因此可能得知你正在查看的大致區域。"))
@@ -1777,7 +1843,10 @@ private struct VoiceStyleSettings: View {
         Section {
             Picker(AppText.text("語音助理樣式"), selection: $style) {
                 ForEach(VoiceStyle.allCases) { option in
-                    Text(option.title).tag(option.rawValue)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(option.title)
+                        Text(option.detail).font(.caption).foregroundStyle(.secondary)
+                    }.tag(option.rawValue)
                 }
             }
             .pickerStyle(.inline)
@@ -1785,8 +1854,6 @@ private struct VoiceStyleSettings: View {
             .accessibilityIdentifier("voice-style-picker")
         } header: {
             Text(AppText.text("語音助理樣式"))
-        } footer: {
-            Text(AppText.text("邊框光暈：螢幕邊緣發光，一邊看地圖一邊說，下方小卡片即時顯示聽到的話。全螢幕：專心說話的獨立畫面。"))
         }
     }
 }
@@ -1797,10 +1864,18 @@ private struct OnlineUnderstandingSettings: View {
     var body: some View {
         Section {
             Toggle(AppText.text("使用線上 AI 理解"), isOn: $enabled).accessibilityIdentifier("online-understanding-toggle")
+            // The full explanation sits one level deeper.
+            NavigationLink(AppText.text("資料如何使用")) {
+                List {
+                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。",
+                                      "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
+                }
+                .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
+            }
         } header: {
             Text(AppText.text("用一句話規劃"))
         } footer: {
-            Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。",
+            Text(AppText.text("更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。",
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
     }

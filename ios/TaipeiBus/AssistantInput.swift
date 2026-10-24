@@ -48,7 +48,8 @@ final class SpeechInput: ObservableObject {
     @Published private(set) var preparing = false
     @Published private(set) var problem: String?
     /// How loud the voice is right now, 0…1, for the listening animation.
-    @Published private(set) var level: Double = 0
+    /// Kept in its own object so only the glow and orb redraw at the microphone's pace.
+    let meter = VoiceLevel()
     /// Microphone or speech recognition was turned off: only Settings can turn it back on.
     @Published private(set) var blocked = false
     /// After words were heard, listening ends by itself once this much silence has passed.
@@ -113,7 +114,7 @@ final class SpeechInput: ObservableObject {
             input.removeTap(onBus: 0)
             // The audio thread calls this; it must not belong to the main actor.
             input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request) { [weak self] value in
-                Task { @MainActor in if self?.listening == true { self?.level = value } }
+                Task { @MainActor in if self?.listening == true { self?.meter.value = value } }
             })
             engine.prepare()
             try engine.start()
@@ -172,7 +173,7 @@ final class SpeechInput: ObservableObject {
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
-        request = nil; task = nil; listening = false; preparing = false; finished = nil; level = 0; silenceSince = nil
+        request = nil; task = nil; listening = false; preparing = false; finished = nil; meter.value = 0; silenceSince = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -224,6 +225,13 @@ final class SpeechInput: ObservableObject {
                     (error as NSError?).map { "\($0.domain) \($0.code)" })
         }
     }
+}
+
+/// How loud the voice is, 0…1, about fifteen times a second while listening.
+final class VoiceLevel: ObservableObject {
+    @Published var value: Double = 0
+    /// For orbs that do not listen, such as the one on the search screen.
+    static let silent = VoiceLevel()
 }
 
 /// Limits level reports from the audio thread to about fifteen a second.

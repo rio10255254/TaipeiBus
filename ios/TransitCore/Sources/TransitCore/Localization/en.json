@@ -997,6 +997,14 @@
   "邊框光暈": "Edge glow",
   "全螢幕": "Full screen",
   "語音助理樣式": "Voice assistant style",
-  "邊框光暈：螢幕邊緣發光，一邊看地圖一邊說，下方小卡片即時顯示聽到的話。全螢幕：專心說話的獨立畫面。": "Edge glow: the screen edge lights up so you can keep looking at the map while you speak, with a small card showing what is heard. Full screen: a separate screen just for speaking.",
-  "這個時段公車與捷運大多已停駛，時間無法確認；可以改晚一點出發。": "Buses and the metro mostly stop at this hour, so times cannot be confirmed; try leaving later."
+  "這個時段公車與捷運大多已停駛，時間無法確認；可以改晚一點出發。": "Buses and the metro mostly stop at this hour, so times cannot be confirmed; try leaving later.",
+  "語音與 AI": "Voice & AI",
+  "資料來源": "Data Sources",
+  "關於": "About",
+  "公車": "Bus",
+  "資料如何使用": "How data is used",
+  "線上 AI 理解": "Online AI understanding",
+  "更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "Understands what you say more accurately. Free: %@ a day; Pro: %@ a day with a larger model.",
+  "螢幕邊緣發光，可以一邊看地圖一邊說": "The screen edge glows so you can keep looking at the map",
+  "專心說話的獨立畫面": "A separate screen just for speaking"
 }
