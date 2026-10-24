@@ -1006,5 +1006,6 @@
   "線上 AI 理解": "Online AI understanding",
   "更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "Understands what you say more accurately. Free: %@ a day; Pro: %@ a day with a larger model.",
   "螢幕邊緣發光，可以一邊看地圖一邊說": "The screen edge glows so you can keep looking at the map",
-  "專心說話的獨立畫面": "A separate screen just for speaking"
+  "專心說話的獨立畫面": "A separate screen just for speaking",
+  "第 %@ 站：%@": "Stop %@: %@"
 }

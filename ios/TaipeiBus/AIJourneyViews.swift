@@ -321,7 +321,7 @@ final class JourneyAssistantSession: ObservableObject {
     func cancel() {
         operation?.cancel(); deadlineTask?.cancel(); search.cancel(); speech.stop()
         busy = false; clarification = nil; problem = nil; message = nil; conversation = nil; turn = nil
-        fixResults = []; fixSearching = false; pendingNext = nil
+        fixResults = []; fixSearching = false; pendingLeg = nil
         askingConsent = false; waitingForConsent = ""; waitingToRefine = false
     }
     /// The sheet was closed: nothing half-asked stays behind.
@@ -355,7 +355,12 @@ final class JourneyAssistantSession: ObservableObject {
     }
     func chooseFix(_ place: TravelPlace) {
         guard let problem else { return }
-        if let trip = pendingNext { pendingNext = nil; planNext(trip, to: place); return }
+        if let leg = pendingLeg {
+            pendingLeg = nil
+            model.resolveAssistantStop(leg, place: place); model.showAssistantLeg(leg)
+            self.problem = nil; message = nil; presented = false; input = ""
+            return
+        }
         if problem.unsaved, saveFix, model.purchases.hasPro {
             let word = problem.keyword
             let symbol = JourneyAssistantContext.category(of: word) == .work ? "briefcase.fill"
@@ -465,6 +470,7 @@ final class JourneyAssistantSession: ObservableObject {
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
                                       nextStop: turn.nextStop, constraints: turn.avoid)
+        if let next = turn.nextStop, !next.isEmpty { findStop(1, words: next, near: target) }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1; finishVoice()
@@ -476,33 +482,39 @@ final class JourneyAssistantSession: ObservableObject {
         return StationSearch.placeRank(name: place.name, address: place.address, query: text) != nil
     }
 
-    /// 接著去: plans the second stop from where the first leg ends.
-    func continueTrip() {
-        guard let trip = model.assistantTrip, let next = trip.nextStop, !busy else { return }
-        busy = true; source = AppText.text("接著去%@", next); startedAt = Date(); activity = AppText.text("正在搜尋地點…")
-        search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
-        search.setContext(trip.destination.coordinate)
-        operation = Task { @MainActor in
-            let found = ((try? await search.find(text: next, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
+    /// A later stop of 「先去 A 再去 B」 is looked up in the background as soon as the first leg is
+    /// planned, so its number appears on the map and tapping it only switches legs.
+    private func findStop(_ index: Int, words: String, near: TravelPlace) {
+        stopSearch?.cancel()
+        let finder = PlaceSearch()
+        finder.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
+        finder.setContext(near.coordinate)
+        stopSearch = Task { @MainActor in
+            let found = ((try? await finder.find(text: words, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
             guard !Task.isCancelled else { return }
-            busy = false
-            if let place = found.first(where: { Self.matches($0, next) }) {
-                planNext(trip, to: place, alternatives: found)
-            } else {
-                // Not sure which place: the rider picks, then the leg is planned from the first stop.
-                pendingNext = trip; turn = nil; input = source
-                problem = .destination(next); fixQuery = next; fixResults = Array(found.prefix(6)); present()
+            stopCandidates[index] = found
+            if let place = found.first(where: { Self.matches($0, words) }) {
+                model.resolveAssistantStop(index, place: place)
+                JourneyDiagnostics.shared.record("ai-plan stop=\(index + 1) found")
             }
         }
     }
-    private var pendingNext: TransitAppModel.AssistantTrip?
-    private func planNext(_ trip: TransitAppModel.AssistantTrip, to place: TravelPlace, alternatives: [TravelPlace] = []) {
-        JourneyDiagnostics.shared.record("ai-plan next")
-        model.previewAssistantJourney(request: AppText.text("接著去%@", trip.nextStop ?? place.localizedName), origin: trip.destination,
-                                      destination: place, alternatives: Array(alternatives.filter { $0.id != place.id }.prefix(3)),
-                                      preference: trip.preference, mode: trip.mode)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
-        problem = nil; message = nil; presented = false; input = ""; plannedCount += 1; finishVoice()
+    private var stopSearch: Task<Void, Never>?
+    private var stopCandidates: [Int: [TravelPlace]] = [:]
+    private var pendingLeg: Int?
+    /// The numbered stops above the routes: show that leg, or ask which place when unsure.
+    func showLeg(_ index: Int) {
+        guard let trip = model.assistantTrip, trip.stops.indices.contains(index), index != trip.leg, !busy else { return }
+        UISelectionFeedbackGenerator().selectionChanged()
+        if trip.stops[index].place != nil {
+            JourneyDiagnostics.shared.record("ai-plan leg=\(index + 1)")
+            model.showAssistantLeg(index)
+            return
+        }
+        let words = trip.stops[index].name
+        pendingLeg = index; turn = nil; input = AppText.text("接著去%@", words); source = input
+        problem = .destination(words); fixQuery = words; fixResults = Array((stopCandidates[index] ?? []).prefix(6)); present()
+        if fixResults.isEmpty { findFix() }
     }
     private func stop(_ reason: Problem) {
         JourneyDiagnostics.shared.record("ai-plan stopped=\(reason.isOrigin ? "origin" : "destination")\(reason.unsaved ? "-unsaved" : "")")
@@ -800,14 +812,7 @@ struct TripConditionsBar: View {
                 .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
                 .accessibilityIdentifier("journey-comparison")
             }
-            if let trip, let next = trip.nextStop {
-                // The second stop is the next step of this trip: its own clear button, not one more chip.
-                Button { session.continueTrip() } label: {
-                    Label(AppText.text("接著去%@", next), systemImage: "arrow.turn.down.right")
-                        .font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
-                        .background(Color.accentColor.opacity(0.14), in: RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
-                }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("assistant-trip-next")
-            }
+            if let trip, trip.stops.count > 1 { stopStrip(trip) }
             footnotes(trip)
         }
         .accessibilityElement(children: .contain)
@@ -819,6 +824,39 @@ struct TripConditionsBar: View {
 
     // MARK: Parts
 
+    /// 「先去 A 再去 B」: every stop numbered like the pins on the map; tap one to see that leg.
+    /// A later leg leaves when the one before it arrives.
+    private func stopStrip(_ trip: TransitAppModel.AssistantTrip) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(Array(trip.stops.enumerated()), id: \.offset) { index, stop in
+                    if index > 0 {
+                        Image(systemName: "chevron.right").font(.caption2.weight(.bold)).foregroundStyle(.tertiary)
+                    }
+                    let current = index == trip.leg
+                    Button { session.showLeg(index) } label: {
+                        HStack(spacing: 6) {
+                            Text("\(index + 1)").font(.caption.weight(.bold)).monospacedDigit()
+                                .frame(width: 22, height: 22)
+                                .background(Circle().fill(current ? Color.white : Color.accentColor))
+                                .foregroundStyle(current ? Color.accentColor : Color.white)
+                            Text(stop.place?.localizedName ?? stop.name).font(.subheadline.weight(current ? .semibold : .regular)).lineLimit(1)
+                            if stop.place == nil { Image(systemName: "questionmark.circle").font(.caption).foregroundStyle(.secondary) }
+                        }
+                        .padding(.leading, 6).padding(.trailing, 12).frame(minHeight: Metrics.chip)
+                        .foregroundStyle(current ? Color.white : Color.primary)
+                        .background(current ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: Capsule())
+                        .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(AppText.text("第 %@ 站：%@", "\(index + 1)", stop.place?.localizedName ?? stop.name))
+                    .accessibilityAddTraits(current ? .isSelected : [])
+                    .accessibilityIdentifier("assistant-trip-stop-\(index + 1)")
+                }
+            }
+        }
+        .accessibilityIdentifier("assistant-trip-next")
+    }
     private func requestRow(_ trip: TransitAppModel.AssistantTrip) -> some View {
         // Icon and text sit in the same columns as the start and destination rows above.
         HStack(spacing: 12) {
@@ -1024,23 +1062,30 @@ struct OnlineConsentAlert: ViewModifier {
 /// Lays chips out left to right and wraps them onto further lines.
 struct ChipFlow: Layout {
     var spacing: CGFloat = 8
-    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-        let width = proposal.width ?? .infinity
-        var x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
+    /// Measuring and placing share one line-breaking pass, so they can never disagree. They did:
+    /// the measured width came back as the placing width and a rounding difference wrapped the
+    /// last chip onto a line nobody had made room for, over the route card.
+    private func rows(_ subviews: Subviews, width: CGFloat) -> (origins: [CGPoint], size: CGSize) {
+        var origins: [CGPoint] = [], x: CGFloat = 0, y: CGFloat = 0, line: CGFloat = 0, widest: CGFloat = 0
         for view in subviews {
             let size = view.sizeThatFits(.unspecified)
-            if x > 0, x + size.width > width { x = 0; y += line + spacing; line = 0 }
+            if x > 0, x + size.width > width + 0.5 { x = 0; y += line + spacing; line = 0 }
+            origins.append(CGPoint(x: x, y: y))
             x += size.width + spacing; line = max(line, size.height); widest = max(widest, x - spacing)
         }
-        return CGSize(width: min(widest, width), height: y + line)
+        return (origins, CGSize(width: widest, height: y + line))
+    }
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let laid = rows(subviews, width: width)
+        return CGSize(width: proposal.width ?? laid.size.width, height: laid.size.height)
     }
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-        var x = bounds.minX, y = bounds.minY, line: CGFloat = 0
-        for view in subviews {
+        let laid = rows(subviews, width: proposal.width ?? bounds.width)
+        for (view, origin) in zip(subviews, laid.origins) {
             let size = view.sizeThatFits(.unspecified)
-            if x > bounds.minX, x + size.width > bounds.maxX { x = bounds.minX; y += line + spacing; line = 0 }
-            view.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
-            x += size.width + spacing; line = max(line, size.height)
+            view.place(at: CGPoint(x: bounds.minX + origin.x, y: bounds.minY + origin.y),
+                       proposal: ProposedViewSize(width: min(size.width, bounds.width), height: size.height))
         }
     }
 }

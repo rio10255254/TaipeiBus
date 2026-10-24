@@ -594,6 +594,54 @@ final class TransitAppModel: ObservableObject {
         /// The second stop of 「先去…然後再去…」, offered as 接著去 once this leg is planned.
         var nextStop: String? = nil
         var constraints = TripConstraints()
+        /// Every stop of 「先去 A 再去 B」 in order. The routes show one leg at a time; the map numbers
+        /// each stop once its place is known.
+        var stops: [Stop] = []
+        var leg = 0
+        /// The first leg's start (nil = current location) and time, to show it again later.
+        var start: TravelPlace?
+        var startDeparture: Date?
+        var startArriveBy: Date?
+        /// When each later leg leaves: when the one before it is expected to arrive, plus a little.
+        var legDepartures: [Int: Date] = [:]
+        struct Stop { var name: String; var place: TravelPlace? }
+    }
+    /// Bumped when a stop's place is found, so the map redraws its numbers.
+    @Published private(set) var assistantStopsRevision = 0
+    /// Numbered pins for the map: every known stop of a trip with several stops.
+    var assistantStopPins: [(number: Int, place: TravelPlace)] {
+        guard let trip = assistantTrip, trip.stops.count > 1 else { return [] }
+        return trip.stops.enumerated().compactMap { index, stop in stop.place.map { (index + 1, $0) } }
+    }
+    func resolveAssistantStop(_ index: Int, place: TravelPlace) {
+        guard assistantTrip?.stops.indices.contains(index) == true else { return }
+        assistantTrip?.stops[index].place = place
+        assistantStopsRevision += 1
+    }
+    /// Shows one leg of a trip with several stops. A later leg leaves when the leg before it is
+    /// expected to arrive (it used to restart at 現在出發).
+    func showAssistantLeg(_ index: Int) {
+        guard var trip = assistantTrip, trip.stops.indices.contains(index), index != trip.leg,
+              let destination = trip.stops[index].place, !planner.started else { return }
+        let origin = index == 0 ? trip.start : trip.stops[index - 1].place
+        var departure: Date?, arriveBy: Date?
+        if index == 0 {
+            departure = trip.startDeparture; arriveBy = trip.startArriveBy
+        } else if index == trip.leg + 1, let arrival = planner.expectedArrival ?? planner.scheduledDeparture?.addingTimeInterval(45 * 60) {
+            // No timing for the leg before (待確認): a typical trip length rather than 現在.
+            departure = arrival.addingTimeInterval(5 * 60); trip.legDepartures[index] = departure
+        } else {
+            departure = trip.legDepartures[index]
+        }
+        planner.finish(); clearWalkingMap(); clearSelection()
+        planner.preferredMode = trip.mode; planner.schedule(departure, arriveBy: arriveBy); planner.constraints = trip.constraints
+        trip.leg = index; trip.origin = origin; trip.destination = destination; trip.alternatives = []
+        trip.departure = planner.scheduledDeparture; trip.arriveBy = planner.arrivalDeadline
+        assistantTrip = trip
+        if let origin { planner.setOrigin(origin, metadata: metadata) }
+        else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
+        assistantStopsRevision += 1
     }
     @Published private(set) var assistantTrip: AssistantTrip?
     /// 用一句話規劃 for the whole app: the route panel, Siri and the sheet share one request.
@@ -623,11 +671,15 @@ final class TransitAppModel: ObservableObject {
         tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
         let note = preference != .balanced && !purchases.hasPro
             ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
+        let next = nextStop.flatMap { $0.isEmpty ? nil : $0 }
         assistantTrip = AssistantTrip(request: request, destination: destination,
             alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
             preference: preference, departure: planner.scheduledDeparture,
-            arriveBy: planner.arrivalDeadline, note: note, nextStop: nextStop.flatMap { $0.isEmpty ? nil : $0 },
-            constraints: constraints)
+            arriveBy: planner.arrivalDeadline, note: note, nextStop: next,
+            constraints: constraints,
+            stops: next.map { [AssistantTrip.Stop(name: destination.localizedName, place: destination), AssistantTrip.Stop(name: $0, place: nil)] } ?? [],
+            start: origin, startDeparture: planner.scheduledDeparture, startArriveBy: planner.arrivalDeadline)
+        assistantStopsRevision += 1
         if let origin { planner.setOrigin(origin, metadata: metadata) }
         else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
