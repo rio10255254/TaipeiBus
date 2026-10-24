@@ -340,7 +340,7 @@ struct JourneyPlanningView: View {
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
-                if !editingOrigin, !planner.started, assistantAvailable, !focused {
+                if !editingOrigin, !planner.started, assistantAvailable {
                     // Most people don't type a whole sentence: speaking is the first, largest choice.
                     VoiceStartCard { focused = false; assistant.listen() }
                 }
