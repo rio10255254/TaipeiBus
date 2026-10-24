@@ -58,7 +58,7 @@ final class JourneyAssistantSession: ObservableObject {
 
     init(model: TransitAppModel) { self.model = model }
 
-    var unavailable: String? { OnDeviceJourneyAssistant.unavailableReason() }
+    var unavailable: String? { OnDeviceJourneyAssistant.plannerUnavailableReason() }
     var currentPlace: TravelPlace? {
         model.location.usableCoordinate.flatMap { point in
             point.isInServiceArea ? TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: point) : nil

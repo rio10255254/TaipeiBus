@@ -195,6 +195,56 @@ import TransitCore
         XCTAssertNil(saturday.departAt, "The model's guessed day and kind give way to the words")
         XCTAssertEqual(saturday.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-24T07:00:00Z"))
     }
+    func testRulesReadCommonSentences() {
+        func read(_ text: String, saved: [String] = []) -> RuleJourneyReader.Result { RuleJourneyReader.read(text, savedTitles: saved) }
+        func check(_ text: String, _ destination: String, _ kind: JourneyReading.Kind = .place, origin: String = "",
+                   mode: AssistantTravelMode = .any, preference: AssistantIntentDraft.Preference? = .balanced,
+                   saved: [String] = [], line: UInt = #line) {
+            let result = read(text, saved: saved)
+            XCTAssertTrue(result.confident, "\(text) should be read without the model", line: line)
+            XCTAssertEqual(result.reading.destination, destination, text, line: line)
+            XCTAssertEqual(result.reading.destinationKind, kind, text, line: line)
+            XCTAssertEqual(result.reading.origin, origin, text, line: line)
+            XCTAssertEqual(result.reading.travelMode, mode, text, line: line)
+            XCTAssertEqual(result.reading.preference, preference, text, line: line)
+        }
+        check("回家", "家", .home)
+        check("回家，快一點", "家", .home, preference: .faster)
+        check("我要回到家了", "家", .home)
+        check("騎單車去台大", "台大", mode: .cycling)
+        check("騎 YouBike 到市政府", "市政府", mode: .cycling)
+        check("走路去中正紀念堂", "中正紀念堂", mode: .walking)
+        check("我想去台北101", "台北101")
+        check("帶我去台大機械館", "台大機械館")
+        check("到台北車站怎麼走", "台北車站")
+        check("明天早上九點前從公司到北車", "北車", origin: "公司")
+        check("公司出發去北車，少走路", "北車", origin: "公司", preference: .lessWalking)
+        check("從台大到101要怎麼去", "101", origin: "台大")
+        check("明天下午三點出發去台大", "台大")
+        check("週六下午去淡水老街", "淡水老街")
+        check("現在去松山機場", "松山機場")
+        check("去週末讀書", "週末讀書", .saved, saved: ["週末讀書"])
+        check("去公司", "公司", .work)
+        check("快一點又不想走路去台大", "台大", preference: nil)
+    }
+    func testRulesStepAsideForUnusualRequests() {
+        for text in ["去台大然後去101", "先去台大再去101", "不要搭公車去台大", "經過師大去台大", "最後一班去淡水的車", "台大附近的咖啡廳怎麼去"] {
+            XCTAssertFalse(RuleJourneyReader.read(text).confident, text)
+        }
+    }
+    func testRulesPlanWithoutAModel() async throws {
+        // A phone without Apple Intelligence: the rules alone plan 騎單車去台大.
+        var searched: [String] = []
+        let context = JourneyAssistantContext(journeys: []) { query in searched.append(query); return [self.place("國立臺灣大學")] }
+        let conversation = RuleFirstConversation(context: context, model: nil)
+        let turn = try await conversation.begin("騎單車去台大", at: now)
+        XCTAssertEqual(searched, ["台大"])
+        XCTAssertEqual(turn.mode, .cycling)
+        XCTAssertEqual(turn.destinationCandidates.first?.name, "國立臺灣大學")
+        XCTAssertTrue(context.trace.hasPrefix("reader=rules "))
+        let morning = try await RuleFirstConversation(context: context, model: nil).begin("明天早上去台大", at: now)
+        XCTAssertEqual(morning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

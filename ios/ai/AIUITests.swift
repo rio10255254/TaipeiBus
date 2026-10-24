@@ -21,7 +21,7 @@ final class AIUITests: XCTestCase {
         app.buttons["onboard-choose-TEST-03"].tap()
         XCTAssertTrue(app.buttons["journey-onboard-vehicle"].label.contains("TEST-03"))
     }
-    func testUnavailableModelPreservesManualSearch() {
+    func testWithoutTheModelOneSentenceStillWorks() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
@@ -30,9 +30,11 @@ final class AIUITests: XCTestCase {
         XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
         app.buttons["home-destination-search"].tap()
         XCTAssertTrue(app.textFields["journey-search-field"].waitForExistence(timeout: 60))
-        XCTAssertFalse(app.buttons["journey-ai-assistant"].exists)
+        // Without Apple Intelligence the rules still read Chinese sentences, so the entry stays.
+        XCTAssertTrue(app.buttons["journey-ai-assistant"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["journey-voice"].exists)
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "Unavailable model hides assistant entry"; shot.lifetime = .keepAlways; add(shot)
+        shot.name = "Without the model the sentence entry stays"; shot.lifetime = .keepAlways; add(shot)
     }
     func testChoiceThenPlansRightAway() {
         continueAfterFailure = false

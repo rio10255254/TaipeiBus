@@ -32,7 +32,7 @@ struct JourneyPlanningView: View {
     @State private var showingTripPreference = false
     @ObservedObject private var assistant: JourneyAssistantSession
     @ObservedObject private var assistantRecents = AssistantRecents.shared
-    @State private var assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
+    @State private var assistantAvailable = OnDeviceJourneyAssistant.plannerUnavailableReason() == nil
     @Environment(\.scenePhase) private var scenePhase
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
@@ -197,13 +197,13 @@ struct JourneyPlanningView: View {
             openAssistant(text)
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil }
+            if phase == .active { assistantAvailable = OnDeviceJourneyAssistant.plannerUnavailableReason() == nil }
         }
         .onChange(of: AppLanguage.current) { _, _ in
-            assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
+            assistantAvailable = OnDeviceJourneyAssistant.plannerUnavailableReason() == nil
         }
         .onAppear {
-            assistantAvailable = OnDeviceJourneyAssistant.unavailableReason() == nil
+            assistantAvailable = OnDeviceJourneyAssistant.plannerUnavailableReason() == nil
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(searchContext)
             editingDestination = planner.destination == nil

@@ -33,16 +33,24 @@ enum OnDeviceJourneyAssistant {
         return AppText.text("此裝置目前無法使用裝置端模型，仍可手動搜尋與規劃行程。")
     }
 
+    /// 用一句話規劃 itself: the rules read Chinese on every phone, so only an English request on a phone
+    /// without the on-device model has nothing to read it.
+    static func plannerUnavailableReason(language: AppLanguage = .current) -> String? {
+        guard let reason = unavailableReason(language: language) else { return nil }
+        return language == .english ? reason : nil
+    }
+
     @MainActor
     static func conversation(context: JourneyAssistantContext, language: AppLanguage = .current) throws -> any JourneyAssistantConversation {
-        guard unavailableReason(language: language) == nil else { throw Failure.unavailable }
+        guard plannerUnavailableReason(language: language) == nil else { throw Failure.unavailable }
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--test-ai-review") { return ReviewFixtureConversation() }
 #endif
+        var model: (any JourneyAssistantConversation)?
 #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) { return FoundationJourneyConversation(context: context) }
+        if #available(iOS 26.0, *), unavailableReason(language: language) == nil { model = FoundationJourneyConversation(context: context) }
 #endif
-        throw Failure.unavailable
+        return RuleFirstConversation(context: context, model: model, useRules: language != .english)
     }
 
     /// A short failure category for troubleshooting, e.g. generation.guardrailViolation.
@@ -127,6 +135,147 @@ struct JourneyReading: Equatable, Sendable {
     var travelMode = AssistantTravelMode.any
 }
 
+/// Reads the usual ways a trip is said without any language model, so 用一句話規劃 works on every
+/// phone and the common sentences answer at once. The on-device model, when there is one, only
+/// reads what these rules are not sure about (two stops, 經過/避開, unusual wording).
+@MainActor
+enum RuleJourneyReader {
+    struct Result: Equatable { var reading: JourneyReading; var confident: Bool }
+
+    private static let fillers = ["要怎麼去", "要怎麼走", "要怎麼到", "我現在要", "我現在想", "我等一下要", "我要", "我想要", "我想", "想要", "我得", "我需要", "需要",
+        "幫我", "麻煩", "請問", "請", "帶我", "給我", "規劃一下", "規劃", "路線", "怎麼走", "怎麼去", "要怎麼", "怎麼",
+        "如何", "可以", "一下", "趕快", "準備"]
+    private static let particles = ["嗎", "呢", "吧", "啊", "喔", "哦", "啦", "耶", "了", "囉", "嘛"]
+    private static let now = ["現在", "馬上", "立刻", "立即", "等一下", "等等", "待會", "稍後", "趕快"]
+    private static let cycling = ["騎youbike", "騎ubike", "騎單車", "騎腳踏車", "騎自行車", "騎車", "youbike", "ubike", "單車", "腳踏車", "自行車"]
+    private static let walking = ["用走的", "走路", "步行", "走過去"]
+    /// Each preference as patterns, because people say it many ways: 少走路, 走路越少越好, 不想走很多路.
+    private static let preferences: [(patterns: [String], value: AssistantIntentDraft.Preference)] = [
+        (["越快越好", "快一點", "快點", "最快", "趕時間", "時間優先", "最短時間", "快就好", "早點到", "早一點到"], .faster),
+        (["(少|不想|不要|別|完全不要|不太想)(一直)?(走路|走很多路|走太多路|走太久|走)", "走(路)?(越少越好|少一點|太多|太久|很多路|太多路)",
+          "少走"], .lessWalking),
+        (["(少|不要|別|不想)(一直)?(轉|換)(車|乘)", "(不要|別|不想)?(一直)?(轉|換)(太多|那麼多|很多)次?(車)?", "少轉", "直達", "不轉車"], .fewerTransfers),
+    ]
+    /// Asking for the usual recommendation is no preference at all.
+    private static let balanced = ["用推薦的路線", "推薦的路線", "推薦路線", "照推薦"]
+    /// Wishes these rules do not turn into a plan; the model (or the rider) handles them.
+    private static let unsure = ["經過", "順路", "順便", "避開", "不要搭", "不搭", "只搭", "只坐", "不要坐", "然後", "再去", "或是",
+        "還是", "如果", "最後一班", "末班", "哪裡", "什麼", "多久", "多少錢", "附近的"]
+    private static let destinationMarkers = ["前往", "回到", "抵達", "到達", "去", "到", "回", "往", "至"]
+    /// What follows a place but is not part of it: 去台大醫院看診, 到台北車站的走法.
+    private static let purposes = ["的走法", "的路線", "的方法", "怎麼走", "看診", "看病", "上課", "上班", "吃飯", "開會", "買東西", "找朋友", "玩"]
+    /// Clauses left over that carry nothing: 這次, 就好, 我帶長輩.
+    private static let filler = Set(["我", "這次", "這一次", "就好", "就可以", "最好", "能", "但要", "要", "請", "可以", "好嗎", "謝謝", "拜託", "我帶長輩", "我帶小孩", "今天"])
+
+    static func read(_ text: String, savedTitles: [String] = []) -> Result {
+        var value = text.folding(options: [.widthInsensitive, .caseInsensitive], locale: Locale(identifier: "zh_TW"))
+            .replacingOccurrences(of: "臺", with: "台")
+        value = value.components(separatedBy: CharacterSet(charactersIn: "，,。.!！?？、；;~～")).joined(separator: " ")
+        for mark in ["「", "」", "『", "』", "\"", "“", "”", "我存的", "我儲存的", "存的"] { value = value.replacingOccurrences(of: mark, with: " ") }
+        let unsure = Self.unsure.contains(where: value.contains)
+        var reading = JourneyReading()
+
+        // Preference, then way of travelling, are taken out before the places are read
+        // (少走路 is a preference, not walking).
+        var wanted = Set<AssistantIntentDraft.Preference>()
+        for preference in preferences {
+            for pattern in preference.patterns where value.range(of: pattern, options: .regularExpression) != nil {
+                wanted.insert(preference.value)
+                value = value.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+            }
+        }
+        for word in balanced { value = value.replacingOccurrences(of: word, with: " ") }
+        reading.preference = wanted.count > 1 ? nil : wanted.first ?? .balanced
+        if cycling.contains(where: value.contains) { reading.travelMode = .cycling }
+        else if walking.contains(where: value.contains) || value.hasPrefix("走去") || value.contains("走到") { reading.travelMode = .walking }
+        for word in cycling + walking + now { value = value.replacingOccurrences(of: word, with: " ") }
+        value = removeTime(value)
+        for word in fillers { value = value.replacingOccurrences(of: word, with: " ") }
+        value = value.replacingOccurrences(of: "走去", with: "去").replacingOccurrences(of: "走到", with: "到")
+        value = value.replacingOccurrences(of: "騎去", with: "去").replacingOccurrences(of: "騎到", with: "到")
+
+        // 從公司到北車, 公司出發去北車, 由台大到101.
+        if let match = value.range(of: "(從|由|自)\\s*([^\\s]+?)\\s*(出發|開始)?\\s*(?=(前往|回到|抵達|到達|去|到|回|往|至))", options: .regularExpression) {
+            reading.origin = clean(String(value[match]).replacingOccurrences(of: "^(從|由|自)", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "(出發|開始)$", with: "", options: .regularExpression))
+            value.removeSubrange(match)
+        } else if let match = value.range(of: "^\\s*([^\\s]+?)\\s*出發\\s*(?=(前往|回到|抵達|到達|去|到|回|往|至))", options: .regularExpression) {
+            reading.origin = clean(String(value[match]).replacingOccurrences(of: "出發", with: ""))
+            value.removeSubrange(match)
+        }
+        // 從目前位置去… is the usual start.
+        if ["目前位置", "現在位置", "這裡", "這邊", "我這裡", "我這邊", "所在位置", "我的位置"].contains(reading.origin) { reading.origin = "" }
+        value = value.replacingOccurrences(of: "出發", with: " ")
+
+        // 回家 / 回公司 / 去學校, then 去台大 / 到北車 / 前往101; a bare place name is the destination.
+        let found = destinationMarkers.flatMap { marker in value.ranges(of: marker) }
+        var rest = value
+        // The earliest marker wins; at the same place the longer one (回到 before 回).
+        if let range = found.min(by: { $0.lowerBound != $1.lowerBound ? $0.lowerBound < $1.lowerBound
+                                                                       : value.distance(from: $0.lowerBound, to: $0.upperBound) > value.distance(from: $1.lowerBound, to: $1.upperBound) }) {
+            rest = String(value[range.upperBound...])
+        }
+        let markers = Set(found.map(\.lowerBound)).count
+        // The place is the first clause after the marker; later clauses must carry nothing new.
+        var clauses = rest.components(separatedBy: .whitespaces).map(clean).filter { !$0.isEmpty }
+        var destination = clauses.isEmpty ? "" : clauses.removeFirst()
+        for purpose in purposes where destination.hasSuffix(purpose) && destination.count > purpose.count + 1 {
+            destination = String(destination.dropLast(purpose.count))
+        }
+        destination = clean(destination)
+        if destination == "家裡" || destination == "我家" { destination = "家" }
+        let leftover = clauses.filter { !filler.contains($0) && !purposes.contains($0) }
+        reading.destination = destination
+        reading.destinationKind = kind(destination, savedTitles: savedTitles)
+        if !reading.origin.isEmpty { reading.originKind = kind(reading.origin, savedTitles: savedTitles) }
+
+        let plausible = (1...24).contains(destination.count) && !destination.contains(where: { "怎麼哪".contains($0) }) &&
+            reading.origin.count <= 24 && leftover.joined().count <= 2
+        return Result(reading: reading, confident: plausible && !unsure && markers <= 2)
+    }
+
+    /// Takes out what SpokenTime reads, so 「明天早上九點前」 is not mistaken for a place.
+    static func removeTime(_ text: String) -> String {
+        let number = "([0-9]{1,2}|[零〇一二兩三四五六七八九十]{1,3})"
+        let patterns = [
+            "(大後天|後天|明天|今天|明早|明晚|今早|今晚|明日|今日)",
+            "(下下|下個|下|這個|這|本)?(週|周|星期|禮拜)[一二三四五六日天1-7]",
+            "(凌晨|清晨|一大早|一早|早上|上午|早晨|中午|下午|傍晚|黃昏|晚上|晚間|夜裡|半夜|深夜)",
+            "([01]?[0-9]|2[0-4])[:：][0-5][0-9]",
+            number + "\\s*(點鐘|點|時)\\s*(半|一刻|三刻|" + number + "\\s*分?)?",
+            "(之前|以前|前)\\s*(要到|要抵達|抵達|到達)?(?=\\s*(到|抵達|去|回|\\s|$))",
+        ]
+        var value = text
+        for pattern in patterns {
+            value = value.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+        }
+        return value
+    }
+
+    private static func clean(_ text: String) -> String {
+        var value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var changed = true
+        while changed {
+            changed = false
+            for particle in particles + ["那邊", "那裡", "這邊", "一趟"] where value.hasSuffix(particle) && value.count > particle.count {
+                value = String(value.dropLast(particle.count)).trimmingCharacters(in: .whitespaces); changed = true
+            }
+            for prefix in ["那個", "一下", "要", "先"] where value.hasPrefix(prefix) && value.count > prefix.count + 1 {
+                value = String(value.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces); changed = true
+            }
+        }
+        return value.components(separatedBy: .whitespaces).filter { !$0.isEmpty }.joined(separator: " ")
+    }
+    private static func category(_ text: String) -> JourneyReading.Kind? { JourneyAssistantContext.category(of: text) }
+    private static func kind(_ text: String, savedTitles: [String]) -> JourneyReading.Kind {
+        guard !text.isEmpty else { return .none }
+        if let category = category(text) { return category }
+        let key = JourneyAssistantContext.normalized(text)
+        if savedTitles.contains(where: { JourneyAssistantContext.normalized($0) == key }) { return .saved }
+        return .place
+    }
+}
+
 /// Resolves a reading against the user's saved journeys and Apple Maps search, and asks a
 /// choice question only when there are real alternatives to pick from.
 @MainActor
@@ -144,6 +293,9 @@ final class JourneyAssistantContext {
     func report(_ activity: Activity) { onActivity?(activity) }
     /// Kinds only, for the troubleshooting history: e.g. "dest=place>places3 origin=absent>current mode=cycling".
     private(set) var trace = ""
+    private var readerNote = ""
+    /// Which reader produced the reading (rules, model, rules-fallback), shown in the trace.
+    func note(reader: String) { readerNote = reader }
     /// Names of the user's saved journeys, so the model can recognise 去我存的「週末讀書」.
     var savedTitles: [String] { journeys.map(\.title) }
 
@@ -172,7 +324,7 @@ final class JourneyAssistantContext {
         let reading = self.reading
         destination = try await endpoint(reading.destination, kind: reading.destinationKind, isOrigin: false)
         origin = try await endpoint(reading.origin, kind: reading.originKind, isOrigin: true)
-        trace = "dest=\(reading.destinationKind.rawValue)>\(Self.summary(destination)) origin=\(reading.originKind.rawValue)>\(Self.summary(origin))"
+        trace = (readerNote.isEmpty ? "" : "reader=\(readerNote) ") + "dest=\(reading.destinationKind.rawValue)>\(Self.summary(destination)) origin=\(reading.originKind.rawValue)>\(Self.summary(origin))"
             + " mode=\(reading.travelMode.rawValue) time=\(reading.departureTime ? "depart" : reading.arrivalHour >= 0 ? "deadline" : "now")"
         return try turn()
     }
@@ -424,6 +576,41 @@ enum ContextWindowRetry {
 #if canImport(FoundationModels)
 @available(iOS 26.0, *)
 @MainActor
+/// The rules answer what they are sure of at once; the on-device model reads the rest. Without a
+/// model, the rules' best reading is planned and the route screen is where it is corrected.
+@MainActor
+final class RuleFirstConversation: JourneyAssistantConversation {
+    private let context: JourneyAssistantContext
+    private let model: (any JourneyAssistantConversation)?
+    private let useRules: Bool
+    /// How the last request was read, for the troubleshooting history: rules, model or rules-fallback.
+    private(set) var reader = ""
+    init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true) {
+        self.context = context; self.model = model; self.useRules = useRules
+    }
+    func prewarm() { model?.prewarm() }
+    func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
+        let rules = useRules ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
+        if let rules, rules.confident || model == nil {
+            guard !rules.reading.destination.isEmpty else { throw AssistantIntentDraft.ValidationError.input }
+            reader = rules.confident ? "rules" : "rules-guess"
+            context.note(reader: reader)
+            return try await context.resolve(rules.reading, source: text, now: now)
+        }
+        guard let model else { throw OnDeviceJourneyAssistant.Failure.unavailable }
+        do {
+            reader = "model"; context.note(reader: reader)
+            return try await model.begin(text, at: now)
+        } catch {
+            // The model failed; the rules' reading is better than nothing.
+            guard !Task.isCancelled, let rules, !rules.reading.destination.isEmpty else { throw error }
+            reader = "rules-fallback"; context.note(reader: reader)
+            return try await context.resolve(rules.reading, source: text, now: now)
+        }
+    }
+    func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }
+}
+
 private final class FoundationJourneyConversation: JourneyAssistantConversation {
     private var session = FoundationJourneyConversation.session()
     private let context: JourneyAssistantContext
