@@ -581,8 +581,9 @@ enum OnlineJourneyReader {
     static let enabledKey = "assistantOnline.v1"
     private static let countKey = "assistantOnlineCount.v1"
     /// Requests per phone per day; the free Groq allowance is shared by every rider.
-    static let dailyLimit = 40
-    static let model = "llama-3.3-70b-versatile"
+    static let dailyLimit = 100
+    /// The larger model first; the smaller one when its free allowance is used up.
+    static let models = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     enum Failure: Error { case notConfigured, limit, http(Int), invalid }
 
     private static var key: String {
@@ -590,7 +591,11 @@ enum OnlineJourneyReader {
     }
     /// The build carries a key (TestFlight builds from the repository secret).
     static var configured: Bool { key.hasPrefix("gsk_") }
-    static var enabled: Bool { configured && UserDefaults.standard.bool(forKey: enabledKey) }
+    /// The rider's answer to the one-time question; nil until asked.
+    static var consent: Bool? { UserDefaults.standard.object(forKey: enabledKey) as? Bool }
+    static var enabled: Bool { configured && consent == true }
+    /// Apple asks apps to get permission before sending what a person types to another company's AI.
+    static var needsConsent: Bool { configured && consent == nil }
 
     private static func takeAllowance(now: Date) -> Bool {
         let day = AssistantJourneyRequest.calendar.startOfDay(for: now).timeIntervalSince1970
@@ -616,13 +621,22 @@ enum OnlineJourneyReader {
         let formatter = DateFormatter()
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
+        var lastError: Error = Failure.invalid
+        for model in models {
+            do { return try await read(text, at: formatter.string(from: now), model: model, session: session) }
+            catch Failure.http(let status) where [429, 498, 503].contains(status) || status >= 500 { lastError = Failure.http(status) }
+        }
+        throw lastError
+    }
+
+    private static func read(_ text: String, at clock: String, model: String, session: URLSession) async throws -> JourneyReading {
         let body: [String: Any] = [
             "model": model, "temperature": 0, "max_tokens": 300,
             "response_format": ["type": "json_object"],
             "messages": [["role": "system", "content": instructions],
-                         ["role": "user", "content": "現在（台北）：\(formatter.string(from: now))\n需求：\(text)"]],
+                         ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)"]],
         ]
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 8)
+        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 6)
         request.httpMethod = "POST"
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -670,46 +684,25 @@ enum OnlineJourneyReader {
     }
 }
 
-/// The rules answer what they are sure of at once; the on-device model reads the rest. Without a
-/// model, the rules' best reading is planned and the route screen is where it is corrected.
+/// Reading order: the open model online (with the rules filling what it misses), then the on-device
+/// model when there is no connection, and the rules alone only when both are out of reach.
 @MainActor
 final class RuleFirstConversation: JourneyAssistantConversation {
     private let context: JourneyAssistantContext
     private let model: (any JourneyAssistantConversation)?
     private let useRules: Bool
-    /// 線上理解 was turned on and this build carries a key.
-    private let online: Bool
-    /// How the last request was read, for the troubleshooting history: rules, model or rules-fallback.
+    /// How the last request was read, for the troubleshooting history: online, model, rules or rules-guess.
     private(set) var reader = ""
     init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true) {
-        self.context = context; self.model = model; self.useRules = useRules; online = useRules && OnlineJourneyReader.enabled
+        self.context = context; self.model = model; self.useRules = useRules
     }
     func prewarm() { model?.prewarm() }
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
         let rules = useRules ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
-        if let rules, rules.confident || (model == nil && !online) {
-            guard !rules.reading.destination.isEmpty else { throw AssistantIntentDraft.ValidationError.input }
-            reader = rules.confident ? "rules" : "rules-guess"
-            context.note(reader: reader)
-            return try await context.resolve(rules.reading, source: text, now: now)
-        }
-        if let model {
+        // 1. Online, when the rider agreed; read at the moment of asking, so a fresh answer counts.
+        if OnlineJourneyReader.enabled {
             do {
-                reader = "model"; context.note(reader: reader)
-                return try await model.begin(text, at: now)
-            } catch {
-                guard !Task.isCancelled else { throw error }
-                if online == false, let rules, !rules.reading.destination.isEmpty {
-                    reader = "rules-fallback"; context.note(reader: reader)
-                    return try await context.resolve(rules.reading, source: text, now: now)
-                }
-                if !online { throw error }
-            }
-        }
-        // 線上理解, when the rider turned it on; then the rules' best reading.
-        if online {
-            do {
-                let reading = try await OnlineJourneyReader.read(text, now: now)
+                let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now), rules: rules, source: text)
                 reader = "online"; context.note(reader: reader)
                 return try await context.resolve(reading, source: text, now: now)
             } catch {
@@ -717,11 +710,40 @@ final class RuleFirstConversation: JourneyAssistantConversation {
                 JourneyDiagnostics.shared.record("ai-online failed \(String(describing: error).prefix(40))")
             }
         }
-        guard let rules, !rules.reading.destination.isEmpty else { throw OnDeviceJourneyAssistant.Failure.unavailable }
-        reader = "rules-guess"; context.note(reader: reader)
+        // 2. The on-device model, for a sentence the rules are not sure of.
+        if let model, !(rules?.confident ?? false) {
+            do {
+                reader = "model"; context.note(reader: reader)
+                return try await model.begin(text, at: now)
+            } catch {
+                guard !Task.isCancelled, rules?.reading.destination.isEmpty == false else { throw error }
+            }
+        }
+        // 3. The rules alone.
+        guard let rules, !rules.reading.destination.isEmpty else {
+            throw model == nil ? OnDeviceJourneyAssistant.Failure.unavailable : AssistantIntentDraft.ValidationError.input
+        }
+        reader = rules.confident ? "rules" : "rules-guess"; context.note(reader: reader)
         return try await context.resolve(rules.reading, source: text, now: now)
     }
     func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }
+
+    /// The online reading leads; the rules fill what it left out (a way of travelling, a preference,
+    /// a destination), and a start the sentence never mentions is dropped.
+    static func merge(_ online: JourneyReading, rules: RuleJourneyReader.Result?, source: String) -> JourneyReading {
+        var reading = online
+        guard let rules = rules?.reading else { return reading }
+        if reading.destination.isEmpty { reading.destination = rules.destination; reading.destinationKind = rules.destinationKind }
+        if reading.travelMode == .any { reading.travelMode = rules.travelMode }
+        if reading.preference == .balanced, let preference = rules.preference, preference != .balanced { reading.preference = preference }
+        let plain = source.replacingOccurrences(of: "臺", with: "台")
+        if !reading.origin.isEmpty, rules.origin.isEmpty,
+           !["從", "由", "出發"].contains(where: plain.contains),
+           !plain.contains(reading.origin.replacingOccurrences(of: "臺", with: "台")) {
+            reading.origin = ""; reading.originKind = .none
+        }
+        return reading
+    }
 }
 
 #if canImport(FoundationModels)

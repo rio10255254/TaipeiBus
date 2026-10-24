@@ -260,6 +260,18 @@ import TransitCore
         XCTAssertNil(try? OnlineJourneyReader.parse(empty), "No destination is not a reading")
         XCTAssertFalse(OnlineJourneyReader.configured, "Tests carry no key")
     }
+    func testOnlineReadingIsCompletedByTheRules() {
+        var online = JourneyReading(destination: "國立臺灣大學", destinationKind: .place, origin: "台北車站", originKind: .place)
+        online.preference = .balanced
+        let rules = RuleJourneyReader.read("騎單車去台大，少走路")
+        let merged = RuleFirstConversation.merge(online, rules: rules, source: "騎單車去台大，少走路")
+        XCTAssertEqual(merged.destination, "國立臺灣大學", "The online reading leads")
+        XCTAssertEqual(merged.travelMode, .cycling, "The rules fill a way of travelling the model missed")
+        XCTAssertEqual(merged.preference, .lessWalking)
+        XCTAssertEqual(merged.origin, "", "A start the sentence never mentions is dropped")
+        let stated = RuleFirstConversation.merge(online, rules: RuleJourneyReader.read("從北車去台大"), source: "從北車去台大")
+        XCTAssertEqual(stated.origin, "台北車站")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

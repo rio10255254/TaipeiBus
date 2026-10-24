@@ -943,7 +943,11 @@
   "麥克風目前無法使用，請直接打字。": "The microphone isn't available right now. Please type instead.",
   "沒有辨識到內容，請再說一次，或直接打字。": "Nothing was recognised. Try again, or type instead.",
   "沒有聽到聲音，請再說一次，或直接打字。": "Didn't hear anything. Try again, or type instead.",
-  "線上理解複雜句子": "Understand complex sentences online",
-  "常見說法都在手機上理解。開啟後，手機看不懂的句子（例如兩個目的地或特殊要求）會把「那一句話和今天日期」傳給 Groq 上的開源模型讀懂，不傳送位置、常用行程或帳號；每天最多 %@ 次。": "Common requests are understood on your phone. When on, a sentence the phone cannot read (two stops or special wishes) is sent, with today's date only, to an open model on Groq. No location, saved trips or account is sent; up to %@ times a day.",
-  "行程需求先在手機上理解；只有在設定開啟「線上理解複雜句子」時，手機看不懂的句子才會傳給 Groq 上的開源模型。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "Trip requests are understood on your phone first. Only when Understand complex sentences online is on are sentences the phone cannot read sent to an open model on Groq. Place keywords and route endpoints are handled by Apple Maps."
+  "使用線上 AI 理解？": "Use online AI understanding?",
+  "使用線上理解": "Use online understanding",
+  "只在手機上理解": "Only on this phone",
+  "為了更準確，你說或打的那一句話和今天日期會傳給 Groq 上的開源模型（Meta Llama）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。": "For better accuracy, the sentence you say or type and today's date are sent to an open model (Meta Llama) on Groq. No location, saved trips or account is included, and the app keeps nothing. Without a connection, your phone understands it instead. You can change this in Info & Settings.",
+  "使用線上 AI 理解": "Use online AI understanding",
+  "開啟時，你說或打的那一句話和今天日期會先傳給 Groq 上的開源模型（Meta Llama）讀懂，不傳送位置、常用行程或帳號；沒有網路時改用手機上的模型或規則。每天最多 %@ 次。": "When on, the sentence you say or type and today's date are first sent to an open model (Meta Llama) on Groq. No location, saved trips or account is sent; without a connection the phone's model or rules are used. Up to %@ times a day.",
+  "同意使用線上 AI 理解後，行程那一句話和日期會傳給 Groq 上的開源模型讀懂；未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "If you allow online AI understanding, the trip sentence and the date are sent to an open model on Groq; otherwise, or without a connection, it is understood on your phone. Place keywords and route endpoints are handled by Apple Maps."
 }

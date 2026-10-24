@@ -38,6 +38,9 @@ final class JourneyAssistantSession: ObservableObject {
     @Published private(set) var fixResults: [TravelPlace] = []
     @Published private(set) var fixSearching = false
     @Published var saveFix = true
+    /// The one-time question before the first sentence goes online.
+    @Published var askingConsent = false
+    private var waitingForConsent = ""
     /// Counts requests that reached the route screen, so the panel can step aside.
     @Published private(set) var plannedCount = 0
     let speech = SpeechInput()
@@ -85,6 +88,10 @@ final class JourneyAssistantSession: ObservableObject {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard unavailable == nil else { input = value; presented = true; return }
         guard !value.isEmpty, value.count <= 600 else { return }
+        if OnlineJourneyReader.needsConsent {
+            speech.stop(); waitingForConsent = value; input = value; askingConsent = true
+            return
+        }
         speech.stop(); operation?.cancel(); deadlineTask?.cancel()
         input = value; source = value
         busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
@@ -133,6 +140,13 @@ final class JourneyAssistantSession: ObservableObject {
                 fail(AppText.text("這個選擇暫時無法處理，請再試一次。"))
             }
         }
+    }
+    /// Remembered for good; it can be changed in 資訊與設定. The waiting sentence then goes ahead.
+    func answerConsent(_ allowed: Bool) {
+        UserDefaults.standard.set(allowed, forKey: OnlineJourneyReader.enabledKey)
+        askingConsent = false
+        let text = waitingForConsent; waitingForConsent = ""
+        if !text.isEmpty { run(text) }
     }
     /// Editing the sentence discards an answer that belonged to the old one.
     func edited() {
@@ -363,6 +377,7 @@ struct AIJourneyAssistantView: View {
             .navigationTitle(AppText.text("用一句話規劃")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("關閉")) { dismiss() } } }
         }
+        .modifier(OnlineConsentAlert(session: session, inSheet: true))
         .onChange(of: session.input) { _, _ in session.edited() }
         .onChange(of: location.usableCoordinate == nil) { _, _ in session.locationReady() }
         .onAppear {
@@ -553,6 +568,23 @@ struct AssistantTripBanner: View {
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("assistant-trip")
+        }
+    }
+}
+
+/// The one-time question before a sentence is first sent to the online model.
+struct OnlineConsentAlert: ViewModifier {
+    @ObservedObject var session: JourneyAssistantSession
+    /// The route panel asks unless the sheet is open; the sheet asks while it is.
+    let inSheet: Bool
+    func body(content: Content) -> some View {
+        content.alert(AppText.text("使用線上 AI 理解？"), isPresented: Binding(
+            get: { session.askingConsent && session.presented == inSheet },
+            set: { if !$0, session.askingConsent { session.answerConsent(false) } })) {
+            Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
+            Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
+        } message: {
+            Text(AppText.text("為了更準確，你說或打的那一句話和今天日期會傳給 Groq 上的開源模型（Meta Llama）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
         }
     }
 }

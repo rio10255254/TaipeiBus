@@ -183,6 +183,7 @@ struct JourneyPlanningView: View {
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
         .sheet(isPresented:$showingTripPreference) { TripPreferenceView(model:model) }
+        .modifier(OnlineConsentAlert(session: assistant, inSheet: false))
         .sheet(isPresented: $assistant.presented, onDismiss: { assistant.dismissed() }) {
             AIJourneyAssistantView(session: assistant, model: model)
         }
