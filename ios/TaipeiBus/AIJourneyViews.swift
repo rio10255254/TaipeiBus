@@ -303,6 +303,9 @@ final class JourneyAssistantSession: ObservableObject {
             context.choose = { words, sentence, places in
                 await OnlineJourneyReader.choose(words, sentence: sentence, places: places, pro: pro)
             }
+            context.rewrite = { words, sentence in
+                await OnlineJourneyReader.rewrite(words, sentence: sentence, pro: pro)
+            }
         }
         return context
     }

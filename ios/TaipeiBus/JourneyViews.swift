@@ -449,8 +449,16 @@ struct JourneyPlanningView: View {
         resolving = true; resolvingQuery = query; searchError = nil
         resolveTask = Task {
             do {
-                let places = try await search.find(text: text, completion: completion)
+                var places = try await search.find(text: text, completion: completion)
                 guard !Task.isCancelled, token == resolveToken else { return }
+                // Nothing found: with online understanding on, ask what the place is officially called.
+                if places.isEmpty, completion == nil, OnlineJourneyReader.enabled {
+                    for name in await OnlineJourneyReader.rewrite(text, sentence: text, pro: model.purchases.hasPro) {
+                        places = (try? await search.find(text: name)) ?? []
+                        guard !Task.isCancelled, token == resolveToken else { return }
+                        if !places.isEmpty { break }
+                    }
+                }
                 resolving = false
                 if completion != nil, let place = places.first { choose(place) }
                 else if places.isEmpty { searchError = "找不到相符地點，試試地址或站牌" }

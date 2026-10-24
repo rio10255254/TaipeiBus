@@ -350,6 +350,16 @@ import TransitCore
         XCTAssertEqual(AssistantChange.read("改去101", now: now, constraints: TripConstraints(), departure: nil).destination, "101")
         XCTAssertTrue(AssistantChange.read("好喔", now: now, constraints: TripConstraints(), departure: nil).isEmpty)
     }
+    func testTheOnlineModelNamesAPlaceSearchMissed() async throws {
+        var searched: [String] = []
+        let context = JourneyAssistantContext(journeys: [], matches: { place, words in place.name == words }) { query in
+            searched.append(query); return query == "國立臺灣大學機械工程學系館" ? [self.place("國立臺灣大學機械工程學系館")] : []
+        }
+        context.rewrite = { _, _ in ["國立臺灣大學機械工程學系館"] }
+        let turn = try await context.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
+        XCTAssertEqual(searched, ["台大機械館", "國立臺灣大學機械工程學系館"])
+        XCTAssertEqual(turn.destinationCandidates.first?.name, "國立臺灣大學機械工程學系館")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

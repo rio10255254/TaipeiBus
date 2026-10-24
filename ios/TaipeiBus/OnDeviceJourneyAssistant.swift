@@ -461,6 +461,8 @@ final class JourneyAssistantContext {
     /// it sees the words, the sentence and each result's name and address. It returns an index, or
     /// -1 when none fits; nil when it could not answer.
     var choose: (@MainActor (_ words: String, _ sentence: String, _ places: [TravelPlace]) async -> Int?)?
+    /// When a search finds nothing, the online model may suggest what the place is officially called.
+    var rewrite: (@MainActor (_ words: String, _ sentence: String) async -> [String])?
     /// Results the model picked, accepted even when the names differ; words it said nothing fits.
     private var picked = Set<String>(), rejected = Set<String>()
     /// The reading came from the online model, whose time is trusted unless it is impossible.
@@ -522,9 +524,19 @@ final class JourneyAssistantContext {
         let started = Date()
         defer { searchSeconds += Date().timeIntervalSince(started) }
         do {
-            let places = try await searchPlaces(text)
+            var places = try await searchPlaces(text).filter { $0.coordinate.isInServiceArea }
             try Task.checkCancellation()
-            let found = Array(places.filter { $0.coordinate.isInServiceArea }.prefix(5))
+            // Nothing found: the place's official name (台大機械館 → 國立臺灣大學機械工程學系館) is searched instead.
+            if places.isEmpty, let rewrite {
+                for query in await rewrite(text, source).prefix(2) where !query.isEmpty && query != text {
+                    toolCalls.append("searchPlaces: \(query)")
+                    let more = (try? await searchPlaces(query))?.filter { $0.coordinate.isInServiceArea } ?? []
+                    for place in more where matches(place, query) { picked.insert(place.id) }
+                    places += more
+                    if !more.isEmpty { break }
+                }
+            }
+            let found = Array(places.prefix(5))
             let key = Self.normalized(text)
             // An exact name match goes first so it is the obvious choice.
             var ordered = found.filter { Self.normalized($0.name) == key } + found.filter { Self.normalized($0.name) != key }
@@ -879,6 +891,22 @@ enum OnlineJourneyReader {
               let reply = (choices.first?["message"] as? [String: Any])?["content"] as? String,
               let open = reply.firstIndex(of: "{"), let close = reply.lastIndex(of: "}"), open < close else { throw Failure.invalid }
         return String(reply[open...close])
+    }
+
+    /// Other names to search when the words found nothing: the official or full name, or a nearby landmark.
+    static func rewrite(_ words: String, sentence: String, pro: Bool, session: URLSession = .shared) async -> [String] {
+        guard enabled else { return [] }
+        let prompt = "使用者說：「\(sentence)」\n在台北地圖上找不到：「\(words)」\n只輸出 JSON {\"queries\": [最多兩個字串]}：這個地點在地圖上的正式全名或常見名稱；不知道就輸出空陣列。"
+        for model in models(pro: pro) {
+            guard let content = try? await complete(system: "你熟悉台北的地名、學校、建築與店家。不要解釋。", user: prompt,
+                                                   model: model, limit: 300, session: session),
+                  let data = content.data(using: .utf8),
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+            let queries = ((value["queries"] as? [String]) ?? []).map { String($0.prefix(40)) }.filter { !$0.isEmpty }
+            JourneyDiagnostics.shared.record("ai-online rewrite model=\(model) count=\(queries.count)")
+            return Array(queries.prefix(2))
+        }
+        return []
     }
 
     /// A change to the trip on screen, read by the online model with the trip described in words.
