@@ -18,6 +18,7 @@
   <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
   <key>NSLocationWhenInUseUsageDescription</key><string>從目前位置規劃公車行程，尋找附近上車站牌與步行路線；導航進行中也會在背景更新下車提醒與即時動態。</string>
   <key>NSMicrophoneUsageDescription</key><string>按下麥克風說出要去哪裡時使用；聲音只用來轉成文字，不儲存或上傳。</string>
+  <key>BusGroqKey</key><string></string>
   <key>NSSpeechRecognitionUsageDescription</key><string>把你說的行程轉成文字並規劃路線；支援時在手機上辨識，不儲存錄音。</string>
   <key>NSCameraUsageDescription</key><string>在手機上辨識公車車牌，協助你從同路線附近的車輛中確認搭乘車輛。影像不儲存、不上傳。</string>
   <key>NSLocationTemporaryUsageDescriptionDictionary</key><dict>

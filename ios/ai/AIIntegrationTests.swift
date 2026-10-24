@@ -245,6 +245,21 @@ import TransitCore
         let morning = try await RuleFirstConversation(context: context, model: nil).begin("明天早上去台大", at: now)
         XCTAssertEqual(morning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
     }
+    func testOnlineReplyBecomesAReading() throws {
+        let content = #"{"destination":"國立臺灣大學","destinationKind":"place","origin":"","originKind":"none","preference":"lessWalking","travelMode":"cycling","time":{"kind":"arrival","day":"2026-10-23","hour":15,"minute":0}}"#
+        let reply = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": content]]]])
+        let reading = try OnlineJourneyReader.parse(reply)
+        XCTAssertEqual(reading.destination, "國立臺灣大學")
+        XCTAssertEqual(reading.destinationKind, .place)
+        XCTAssertEqual(reading.originKind, .none)
+        XCTAssertEqual(reading.preference, .lessWalking)
+        XCTAssertEqual(reading.travelMode, .cycling)
+        XCTAssertEqual(reading.arrivalHour, 15)
+        XCTAssertFalse(reading.departureTime)
+        let empty = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": #"{"destination":""}"#]]]])
+        XCTAssertNil(try? OnlineJourneyReader.parse(empty), "No destination is not a reading")
+        XCTAssertFalse(OnlineJourneyReader.configured, "Tests carry no key")
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

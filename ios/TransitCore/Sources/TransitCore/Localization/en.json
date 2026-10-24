@@ -824,7 +824,6 @@
   "確認使用車牌 %@": "Confirm plate %@",
   "確認步行與班距資料": "Checking walks and service intervals",
   "確認行程條件": "Review trip conditions",
-  "行程需求只在手機上的模型處理，不上傳完整提示文字。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "Trip requests are processed by the on-device model; full prompts are not uploaded. Confirmed place keywords and route endpoints are still processed by Apple Maps.",
   "裝置端模型尚未準備完成，請稍後再試或使用手動搜尋。": "The on-device model is not ready. Try later or search manually.",
   "裝置端模型目前不支援所選語言，請使用手動搜尋。": "The on-device model does not support the selected language. Search manually.",
   "請先在系統設定開啟 Apple Intelligence；也可以繼續手動搜尋。": "Enable Apple Intelligence in Settings, or continue with manual search.",
@@ -943,5 +942,8 @@
   "地點，或一句話：騎單車去台大": "A place, or a sentence: bike to NTU",
   "麥克風目前無法使用，請直接打字。": "The microphone isn't available right now. Please type instead.",
   "沒有辨識到內容，請再說一次，或直接打字。": "Nothing was recognised. Try again, or type instead.",
-  "沒有聽到聲音，請再說一次，或直接打字。": "Didn't hear anything. Try again, or type instead."
+  "沒有聽到聲音，請再說一次，或直接打字。": "Didn't hear anything. Try again, or type instead.",
+  "線上理解複雜句子": "Understand complex sentences online",
+  "常見說法都在手機上理解。開啟後，手機看不懂的句子（例如兩個目的地或特殊要求）會把「那一句話和今天日期」傳給 Groq 上的開源模型讀懂，不傳送位置、常用行程或帳號；每天最多 %@ 次。": "Common requests are understood on your phone. When on, a sentence the phone cannot read (two stops or special wishes) is sent, with today's date only, to an open model on Groq. No location, saved trips or account is sent; up to %@ times a day.",
+  "行程需求先在手機上理解；只有在設定開啟「線上理解複雜句子」時，手機看不懂的句子才會傳給 Groq 上的開源模型。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "Trip requests are understood on your phone first. Only when Understand complex sentences online is on are sentences the phone cannot read sent to an open model on Groq. Place keywords and route endpoints are handled by Apple Maps."
 }

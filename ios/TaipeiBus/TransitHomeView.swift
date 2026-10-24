@@ -1566,6 +1566,7 @@ private struct AppInformationView: View {
                         .accessibilityIdentifier("app-language-toggle")
                 }
                 CommuteHabitSettings(habits: model.commuteHabits)
+                if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
                 Section(AppText.text("即時資料")) {
                     Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
                     Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
@@ -1636,7 +1637,7 @@ private struct PrivacyExplanationView: View {
         List {
             Section(AppText.text("智慧輔助與相機")) {
                 Text(AppText.text("開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。"))
-                Text(AppText.text("行程需求只在手機上的模型處理，不上傳完整提示文字。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
+                Text(AppText.text("行程需求先在手機上理解；只有在設定開啟「線上理解複雜句子」時，手機看不懂的句子才會傳給 Groq 上的開源模型。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
                 Text(AppText.text("按麥克風或對 Siri 說出行程時，聲音只用來轉成文字（支援時在手機上辨識），不儲存錄音。最近說過的句子只存在這支手機，可長按移除。"))
                 Text(AppText.text("掃描車牌才會請求相機權限；影像在手機辨識，不儲存或上傳。拒絕權限仍可手動選車。"))
                 Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
@@ -1703,3 +1704,17 @@ private struct DebugZoomPerformanceControls: View {
     }
 }
 #endif
+
+/// 線上理解: off unless the rider turns it on, and then only for sentences the phone cannot read itself.
+private struct OnlineUnderstandingSettings: View {
+    @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
+    var body: some View {
+        Section {
+            Toggle(AppText.text("線上理解複雜句子"), isOn: $enabled).accessibilityIdentifier("online-understanding-toggle")
+        } header: {
+            Text(AppText.text("用一句話規劃"))
+        } footer: {
+            Text(AppText.text("常見說法都在手機上理解。開啟後，手機看不懂的句子（例如兩個目的地或特殊要求）會把「那一句話和今天日期」傳給 Groq 上的開源模型讀懂，不傳送位置、常用行程或帳號；每天最多 %@ 次。", "\(OnlineJourneyReader.dailyLimit)"))
+        }
+    }
+}

@@ -573,6 +573,103 @@ enum ContextWindowRetry {
     }
 }
 
+/// 線上理解 (opt-in, off by default): when the rules are unsure and the phone has no on-device model
+/// (or it failed), the sentence and today's date, and nothing else, are read by an open model on
+/// Groq. The reading then goes through the same place search and checks as every other reading.
+@MainActor
+enum OnlineJourneyReader {
+    static let enabledKey = "assistantOnline.v1"
+    private static let countKey = "assistantOnlineCount.v1"
+    /// Requests per phone per day; the free Groq allowance is shared by every rider.
+    static let dailyLimit = 40
+    static let model = "llama-3.3-70b-versatile"
+    enum Failure: Error { case notConfigured, limit, http(Int), invalid }
+
+    private static var key: String {
+        ((Bundle.main.object(forInfoDictionaryKey: "BusGroqKey") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// The build carries a key (TestFlight builds from the repository secret).
+    static var configured: Bool { key.hasPrefix("gsk_") }
+    static var enabled: Bool { configured && UserDefaults.standard.bool(forKey: enabledKey) }
+
+    private static func takeAllowance(now: Date) -> Bool {
+        let day = AssistantJourneyRequest.calendar.startOfDay(for: now).timeIntervalSince1970
+        let stored = UserDefaults.standard.array(forKey: countKey) as? [Double] ?? []
+        let used = stored.count == 2 && stored[0] == day ? Int(stored[1]) : 0
+        guard used < dailyLimit else { return false }
+        UserDefaults.standard.set([day, Double(used + 1)], forKey: countKey)
+        return true
+    }
+
+    static let instructions = """
+    你負責讀懂一句台北大眾運輸的行程需求，只輸出 JSON，不要規劃路線或解釋。
+    欄位：destination（目的地原文，展開常見簡稱如北車→台北車站、台大→國立臺灣大學）、destinationKind（place/home/work/school/none）、
+    origin（使用者有說從哪裡出發才填，否則空字串）、originKind、preference（balanced/faster/lessWalking/fewerTransfers/conflicting）、
+    travelMode（any/cycling/walking）、time（{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0-23,"minute":0-59}）。
+    家/回家是 home，公司/上班是 work，學校/上學是 school。說了時間但沒說「出發」時是抵達時間；「早上/晚上」等時段沒有幾點時是出發時間。
+    不要編造地點或時間；沒說的就留空或 none。若有兩個目的地，只填第一個。
+    """
+
+    static func read(_ text: String, now: Date, session: URLSession = .shared) async throws -> JourneyReading {
+        guard configured else { throw Failure.notConfigured }
+        guard takeAllowance(now: now) else { throw Failure.limit }
+        let formatter = DateFormatter()
+        formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
+        formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
+        let body: [String: Any] = [
+            "model": model, "temperature": 0, "max_tokens": 300,
+            "response_format": ["type": "json_object"],
+            "messages": [["role": "system", "content": instructions],
+                         ["role": "user", "content": "現在（台北）：\(formatter.string(from: now))\n需求：\(text)"]],
+        ]
+        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 8)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await session.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        guard status == 200 else { throw Failure.http(status) }
+        return try parse(data)
+    }
+
+    /// The chat reply's content as a reading; anything unexpected is rejected rather than guessed.
+    static func parse(_ data: Data) throws -> JourneyReading {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = root["choices"] as? [[String: Any]],
+              let message = choices.first?["message"] as? [String: Any],
+              let content = (message["content"] as? String)?.data(using: .utf8),
+              let value = try JSONSerialization.jsonObject(with: content) as? [String: Any] else { throw Failure.invalid }
+        func text(_ key: String) -> String {
+            String(((value[key] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
+        }
+        func kind(_ key: String, for place: String) -> JourneyReading.Kind {
+            guard !place.isEmpty else { return .none }
+            let raw = JourneyReading.Kind(rawValue: text(key)) ?? .place
+            return raw == .none ? .place : raw
+        }
+        var reading = JourneyReading()
+        reading.destination = text("destination")
+        reading.destinationKind = kind("destinationKind", for: reading.destination)
+        reading.origin = text("origin")
+        reading.originKind = kind("originKind", for: reading.origin)
+        switch text("preference") {
+        case "conflicting": reading.preference = nil
+        case let raw: reading.preference = AssistantIntentDraft.Preference(rawValue: raw) ?? .balanced
+        }
+        reading.travelMode = AssistantTravelMode(rawValue: text("travelMode")) ?? .any
+        if let time = value["time"] as? [String: Any], let kind = time["kind"] as? String, kind != "none",
+           let hour = time["hour"] as? Int, (0...23).contains(hour) {
+            reading.departureTime = kind == "departure"
+            reading.arrivalDay = (time["day"] as? String) ?? ""
+            reading.arrivalHour = hour
+            reading.arrivalMinute = min(59, max(0, (time["minute"] as? Int) ?? 0))
+        }
+        guard !reading.destination.isEmpty else { throw Failure.invalid }
+        return reading
+    }
+}
+
 /// The rules answer what they are sure of at once; the on-device model reads the rest. Without a
 /// model, the rules' best reading is planned and the route screen is where it is corrected.
 @MainActor
@@ -580,30 +677,49 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     private let context: JourneyAssistantContext
     private let model: (any JourneyAssistantConversation)?
     private let useRules: Bool
+    /// 線上理解 was turned on and this build carries a key.
+    private let online: Bool
     /// How the last request was read, for the troubleshooting history: rules, model or rules-fallback.
     private(set) var reader = ""
     init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true) {
-        self.context = context; self.model = model; self.useRules = useRules
+        self.context = context; self.model = model; self.useRules = useRules; online = useRules && OnlineJourneyReader.enabled
     }
     func prewarm() { model?.prewarm() }
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
         let rules = useRules ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
-        if let rules, rules.confident || model == nil {
+        if let rules, rules.confident || (model == nil && !online) {
             guard !rules.reading.destination.isEmpty else { throw AssistantIntentDraft.ValidationError.input }
             reader = rules.confident ? "rules" : "rules-guess"
             context.note(reader: reader)
             return try await context.resolve(rules.reading, source: text, now: now)
         }
-        guard let model else { throw OnDeviceJourneyAssistant.Failure.unavailable }
-        do {
-            reader = "model"; context.note(reader: reader)
-            return try await model.begin(text, at: now)
-        } catch {
-            // The model failed; the rules' reading is better than nothing.
-            guard !Task.isCancelled, let rules, !rules.reading.destination.isEmpty else { throw error }
-            reader = "rules-fallback"; context.note(reader: reader)
-            return try await context.resolve(rules.reading, source: text, now: now)
+        if let model {
+            do {
+                reader = "model"; context.note(reader: reader)
+                return try await model.begin(text, at: now)
+            } catch {
+                guard !Task.isCancelled else { throw error }
+                if online == false, let rules, !rules.reading.destination.isEmpty {
+                    reader = "rules-fallback"; context.note(reader: reader)
+                    return try await context.resolve(rules.reading, source: text, now: now)
+                }
+                if !online { throw error }
+            }
         }
+        // 線上理解, when the rider turned it on; then the rules' best reading.
+        if online {
+            do {
+                let reading = try await OnlineJourneyReader.read(text, now: now)
+                reader = "online"; context.note(reader: reader)
+                return try await context.resolve(reading, source: text, now: now)
+            } catch {
+                guard !Task.isCancelled else { throw error }
+                JourneyDiagnostics.shared.record("ai-online failed \(String(describing: error).prefix(40))")
+            }
+        }
+        guard let rules, !rules.reading.destination.isEmpty else { throw OnDeviceJourneyAssistant.Failure.unavailable }
+        reader = "rules-guess"; context.note(reader: reader)
+        return try await context.resolve(rules.reading, source: text, now: now)
     }
     func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }
 }
