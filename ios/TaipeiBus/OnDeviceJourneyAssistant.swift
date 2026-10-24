@@ -111,6 +111,8 @@ struct AssistantJourneyTurn {
     // Only actual search/library objects can enter the confirmation screen.
     var destinationCandidates: [TravelPlace]
     var originCandidates: [TravelPlace]
+    /// 「先去台大機械館，然後再去內湖站」: the second stop, offered after the first is planned.
+    var nextStop = ""
 }
 
 @MainActor
@@ -139,6 +141,8 @@ struct JourneyReading: Equatable, Sendable {
     var arrivalMinute = -1
     var departureTime = false
     var travelMode = AssistantTravelMode.any
+    /// A second stop, planned afterwards from the first.
+    var next = ""
 }
 
 /// Reads the usual ways a trip is said without any language model, so 用一句話規劃 works on every
@@ -178,7 +182,6 @@ enum RuleJourneyReader {
             .replacingOccurrences(of: "臺", with: "台")
         value = value.components(separatedBy: CharacterSet(charactersIn: "，,。.!！?？、；;~～")).joined(separator: " ")
         for mark in ["「", "」", "『", "』", "\"", "“", "”", "我存的", "我儲存的", "存的"] { value = value.replacingOccurrences(of: mark, with: " ") }
-        let unsure = Self.unsure.contains(where: value.contains)
         var reading = JourneyReading()
 
         // Preference, then way of travelling, are taken out before the places are read
@@ -199,6 +202,15 @@ enum RuleJourneyReader {
         for word in fillers { value = value.replacingOccurrences(of: word, with: " ") }
         value = value.replacingOccurrences(of: "走去", with: "去").replacingOccurrences(of: "走到", with: "到")
         value = value.replacingOccurrences(of: "騎去", with: "去").replacingOccurrences(of: "騎到", with: "到")
+        // 先去台大，然後再去內湖站: the first stop is planned now, the second offered after it.
+        if let split = value.range(of: "\\s*(然後再|然後|之後再|之後|接著再|接著|再)\\s*(去|到|回|前往)", options: .regularExpression),
+           split.lowerBound > value.startIndex {
+            reading.next = clean(String(value[split.upperBound...]))
+            if reading.next == "家裡" || reading.next == "我家" || reading.next == "家" { reading.next = "家" }
+            value = String(value[..<split.lowerBound])
+            if let first = value.range(of: "先") { value.replaceSubrange(first, with: " ") }
+        }
+        let unsure = Self.unsure.contains(where: value.contains) || reading.next.contains(where: { "然再".contains($0) })
 
         // 從公司到北車, 公司出發去北車, 由台大到101.
         if let match = value.range(of: "(從|由|自)\\s*([^\\s]+?)\\s*(出發|開始)?\\s*(?=(前往|回到|抵達|到達|去|到|回|往|至))", options: .regularExpression) {
@@ -305,8 +317,11 @@ final class JourneyAssistantContext {
     /// Names of the user's saved journeys, so the model can recognise 去我存的「週末讀書」.
     var savedTitles: [String] { journeys.map(\.title) }
 
-    init(journeys: [SavedJourney], searchPlaces: @escaping @MainActor (String) async throws -> [TravelPlace]) {
-        self.journeys = journeys.filter(\.valid); self.searchPlaces = searchPlaces
+    /// Whether a search result is what the words named; the app passes the place-name matcher.
+    private let matches: @MainActor (TravelPlace, String) -> Bool
+    init(journeys: [SavedJourney], matches: @escaping @MainActor (TravelPlace, String) -> Bool = { _, _ in true },
+         searchPlaces: @escaping @MainActor (String) async throws -> [TravelPlace]) {
+        self.journeys = journeys.filter(\.valid); self.searchPlaces = searchPlaces; self.matches = matches
     }
 
     private enum Endpoint {
@@ -399,9 +414,11 @@ final class JourneyAssistantContext {
         case .saved(let journey): return (journey.destination.name, .certain, [journey.destination])
         case .savedChoice(let text, let values): return (text, .needsConfirmation, values.map(\.destination))
         case .places(let text, let values):
-            // The best result is used right away; the planner lets the rider change it.
-            guard let best = values.first else { return (text, .needsConfirmation, []) }
-            return (best.name, .certain, values)
+            // The best matching result is used right away; the planner lets the rider change it.
+            // A result whose name does not match the words (台大機械館 → 臺大圖書館) is never a guess.
+            let named = values.filter { matches($0, text) }
+            guard let best = named.first else { return (text, .needsConfirmation, []) }
+            return (best.name, .certain, named + values.filter { place in !named.contains { $0.id == place.id } })
         case .chosen(let place): return (place.name, .certain, [place])
         }
     }
@@ -454,7 +471,8 @@ final class JourneyAssistantContext {
         let question = clarification()
         pending = question?.pending
         return AssistantJourneyTurn(request: request, clarification: question?.value, mode: reading.travelMode,
-            departAt: departAt, destinationCandidates: target.candidates, originCandidates: start.candidates)
+            departAt: departAt, destinationCandidates: target.candidates, originCandidates: start.candidates,
+            nextStop: reading.next)
     }
 
     /// Only a choice the app cannot make for the rider: which of several saved journeys.
@@ -617,9 +635,9 @@ enum OnlineJourneyReader {
     static let instructions = """
     只輸出 JSON：{"destination":"","destinationKind":"place|home|work|school|none","origin":"","originKind":"place|home|work|school|none",\
     "preference":"balanced|faster|lessWalking|fewerTransfers|conflicting","travelMode":"any|cycling|walking",\
-    "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0}}
+    "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":""}
     目的地照原文，北車→台北車站、台大→國立臺灣大學；家=home，公司/上班=work，學校=school；沒說從哪出發就留空。
-    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure。兩個目的地只填第一個。不要編造。
+    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure。兩個目的地時第一個填 destination、第二個填 next。不要編造。
     """
 
     static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
@@ -679,6 +697,7 @@ enum OnlineJourneyReader {
         case let raw: reading.preference = AssistantIntentDraft.Preference(rawValue: raw) ?? .balanced
         }
         reading.travelMode = AssistantTravelMode(rawValue: text("travelMode")) ?? .any
+        reading.next = text("next")
         if let time = value["time"] as? [String: Any], let kind = time["kind"] as? String, kind != "none",
            let hour = time["hour"] as? Int, (0...23).contains(hour) {
             reading.departureTime = kind == "departure"
@@ -743,6 +762,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         guard let rules = rules?.reading else { return reading }
         if reading.destination.isEmpty { reading.destination = rules.destination; reading.destinationKind = rules.destinationKind }
         if reading.travelMode == .any { reading.travelMode = rules.travelMode }
+        if reading.next.isEmpty { reading.next = rules.next }
         if reading.preference == .balanced, let preference = rules.preference, preference != .balanced { reading.preference = preference }
         let plain = source.replacingOccurrences(of: "臺", with: "台")
         if !reading.origin.isEmpty, rules.origin.isEmpty,

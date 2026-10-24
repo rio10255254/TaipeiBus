@@ -228,7 +228,7 @@ import TransitCore
         check("快一點又不想走路去台大", "台大", preference: nil)
     }
     func testRulesStepAsideForUnusualRequests() {
-        for text in ["去台大然後去101", "先去台大再去101", "不要搭公車去台大", "經過師大去台大", "最後一班去淡水的車", "台大附近的咖啡廳怎麼去"] {
+        for text in ["不要搭公車去台大", "經過師大去台大", "最後一班去淡水的車", "台大附近的咖啡廳怎麼去"] {
             XCTAssertFalse(RuleJourneyReader.read(text).confident, text)
         }
     }
@@ -271,6 +271,28 @@ import TransitCore
         XCTAssertEqual(merged.origin, "", "A start the sentence never mentions is dropped")
         let stated = RuleFirstConversation.merge(online, rules: RuleJourneyReader.read("從北車去台大"), source: "從北車去台大")
         XCTAssertEqual(stated.origin, "台北車站")
+    }
+    func testTwoStopsPlanTheFirstAndOfferTheSecond() async throws {
+        let rules = RuleJourneyReader.read("我要先去台大機械館，然後再去內湖站")
+        XCTAssertTrue(rules.confident)
+        XCTAssertEqual(rules.reading.destination, "台大機械館")
+        XCTAssertEqual(rules.reading.next, "內湖站")
+        XCTAssertEqual(RuleJourneyReader.read("先去北車再去台北101").reading.next, "台北101")
+        XCTAssertEqual(RuleJourneyReader.read("去台大").reading.next, "")
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學機械工程學系館")] }
+        let turn = try await context.resolve(rules.reading, source: "我要先去台大機械館，然後再去內湖站", now: now)
+        XCTAssertEqual(turn.nextStop, "內湖站")
+    }
+    func testAResultThatDoesNotMatchTheWordsIsNotPlanned() async throws {
+        // 台大機械館 was planned to 國立臺灣大學圖書館 on a phone.
+        let context = JourneyAssistantContext(journeys: [], matches: { place, words in place.name.contains("機械") || words.isEmpty }) { _ in
+            [self.place("國立臺灣大學圖書館"), self.place("國立臺灣大學機械工程學系館")]
+        }
+        let turn = try await context.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
+        XCTAssertEqual(turn.destinationCandidates.first?.name, "國立臺灣大學機械工程學系館", "A matching result goes first")
+        let none = JourneyAssistantContext(journeys: [], matches: { _, _ in false }) { _ in [self.place("國立臺灣大學圖書館")] }
+        let unsure = try await none.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
+        XCTAssertTrue(unsure.destinationCandidates.isEmpty, "No match: the rider picks instead of a guess")
     }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }

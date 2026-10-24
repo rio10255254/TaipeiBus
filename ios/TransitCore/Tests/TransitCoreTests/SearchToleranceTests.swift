@@ -25,6 +25,9 @@ final class SearchToleranceTests: XCTestCase {
         XCTAssertTrue(queries.contains("台大機械系館"))
         XCTAssertTrue(queries.contains("國立台灣大學 機械館"))
         XCTAssertNotNil(StationSearch.placeRank(name: "國立臺灣大學機械工程學系館", address: "", query: "台大機械館"))
+        XCTAssertNotNil(StationSearch.placeRank(name: "國立臺灣大學機械工程學系館", address: "", query: "國立臺灣大學機械館"))
+        XCTAssertNil(StationSearch.placeRank(name: "國立臺灣大學圖書館", address: "臺北市大安區羅斯福路四段1號", query: "台大機械館"),
+                     "The library is not the mechanical engineering building")
         XCTAssertEqual(StationSearch.placeQueries("台大醫院"), ["台大醫院"], "A familiar place is not split into 台大 + 醫院")
         XCTAssertFalse(StationSearch.placeQueries("故宮博物館").contains("故宮博物系館"))
     }

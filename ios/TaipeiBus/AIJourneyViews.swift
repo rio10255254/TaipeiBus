@@ -156,7 +156,7 @@ final class JourneyAssistantSession: ObservableObject {
     func cancel() {
         operation?.cancel(); deadlineTask?.cancel(); search.cancel(); speech.stop()
         busy = false; clarification = nil; problem = nil; message = nil; conversation = nil; turn = nil
-        fixResults = []; fixSearching = false
+        fixResults = []; fixSearching = false; pendingNext = nil
     }
     /// The sheet was closed: nothing half-asked stays behind.
     func dismissed() {
@@ -189,6 +189,7 @@ final class JourneyAssistantSession: ObservableObject {
     }
     func chooseFix(_ place: TravelPlace) {
         guard let problem else { return }
+        if let trip = pendingNext { pendingNext = nil; planNext(trip, to: place); return }
         if problem.unsaved, saveFix, model.purchases.hasPro {
             let word = problem.keyword
             let symbol = JourneyAssistantContext.category(of: word) == .work ? "briefcase.fill"
@@ -210,7 +211,7 @@ final class JourneyAssistantSession: ObservableObject {
     private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
-        return JourneyAssistantContext(journeys: model.commutes.journeys) { query in
+        return JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { query in
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
@@ -285,10 +286,46 @@ final class JourneyAssistantSession: ObservableObject {
         JourneyDiagnostics.shared.record("ai-plan started mode=\(turn.mode.rawValue)\(timing)")
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
-                                      preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy)
+                                      preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
+                                      nextStop: turn.nextStop)
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1
+    }
+    /// Whether a found place is what the words named (台大機械館 matches 機械工程學系館, not 圖書館).
+    static func matches(_ place: TravelPlace, _ words: String) -> Bool {
+        let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, JourneyAssistantContext.category(of: text) == nil else { return true }
+        return StationSearch.placeRank(name: place.name, address: place.address, query: text) != nil
+    }
+
+    /// 接著去: plans the second stop from where the first leg ends.
+    func continueTrip() {
+        guard let trip = model.assistantTrip, let next = trip.nextStop, !busy else { return }
+        busy = true; source = AppText.text("接著去%@", next); startedAt = Date(); activity = AppText.text("正在搜尋地點…")
+        search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
+        search.setContext(trip.destination.coordinate)
+        operation = Task { @MainActor in
+            let found = ((try? await search.find(text: next, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
+            guard !Task.isCancelled else { return }
+            busy = false
+            if let place = found.first(where: { Self.matches($0, next) }) {
+                planNext(trip, to: place, alternatives: found)
+            } else {
+                // Not sure which place: the rider picks, then the leg is planned from the first stop.
+                pendingNext = trip; turn = nil; input = source
+                problem = .destination(next); fixQuery = next; fixResults = Array(found.prefix(6)); presented = true
+            }
+        }
+    }
+    private var pendingNext: TransitAppModel.AssistantTrip?
+    private func planNext(_ trip: TransitAppModel.AssistantTrip, to place: TravelPlace, alternatives: [TravelPlace] = []) {
+        JourneyDiagnostics.shared.record("ai-plan next")
+        model.previewAssistantJourney(request: AppText.text("接著去%@", trip.nextStop ?? place.localizedName), origin: trip.destination,
+                                      destination: place, alternatives: Array(alternatives.filter { $0.id != place.id }.prefix(3)),
+                                      preference: trip.preference, mode: trip.mode)
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        problem = nil; message = nil; presented = false; input = ""; plannedCount += 1
     }
     private func stop(_ reason: Problem) {
         JourneyDiagnostics.shared.record("ai-plan stopped=\(reason.isOrigin ? "origin" : "destination")\(reason.unsaved ? "-unsaved" : "")")
@@ -553,6 +590,17 @@ struct AssistantTripBanner: View {
                         } label: { chip(title(trip.mode), symbol(trip.mode)) }
                             .accessibilityLabel(AppText.text("交通方式：%@", title(trip.mode)))
                             .accessibilityIdentifier("assistant-trip-adjust")
+                        if let next = trip.nextStop {
+                            Button { session.continueTrip() } label: {
+                                HStack(spacing: 4) {
+                                    Text(AppText.text("接著去%@", next)).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Image(systemName: "arrow.right").font(.caption.weight(.bold))
+                                }
+                                .padding(.horizontal, 12).frame(minHeight: 36)
+                                .background(Color.accentColor.opacity(0.18), in: Capsule())
+                            }.buttonStyle(.plain).foregroundStyle(.tint)
+                                .accessibilityIdentifier("assistant-trip-next")
+                        }
                         if trip.preference != .balanced, trip.note == nil {
                             chip(trip.preference.title, "slider.horizontal.3", menu: false)
                         }
