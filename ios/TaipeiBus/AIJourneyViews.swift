@@ -924,7 +924,9 @@ struct TripConditionsBar: View {
                 : option.rides.map(\.route.localizedName).joined(separator: "→")
             let label = planner.optionLabels[option.id].map { "（\($0)）" } ?? ""
             let walk = Int(max(0, timing.walkingSeconds - timing.cyclingSeconds) / 60)
-            return "\(index + 1). \(name)\(label)：共 \(Int(timing.totalSeconds / 60)) 分，走路 \(walk) 分，候車 \(Int(timing.waitingSeconds / 60)) 分，轉乘 \(max(0, option.rides.count - 1)) 次，\(timing.expectedArrivalLabel)"
+            // Unknown waits (no timetable at that hour) are said as unknown, never as minutes.
+            let total = timing.unknownWaits > 0 ? "總時間不明（候車時間無法確認，可能沒有班次）" : "共 \(Int(timing.totalSeconds / 60)) 分，候車 \(Int(timing.waitingSeconds / 60)) 分，\(timing.expectedArrivalLabel)"
+            return "\(name)\(label)：\(total)，走路 \(walk) 分，轉乘 \(max(0, option.rides.count - 1)) 次"
         }
     }
 
@@ -962,7 +964,13 @@ struct TripConditionsBar: View {
             Text(warnings.joined(separator: "\n")).font(.caption).foregroundStyle(.orange)
                 .fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("assistant-trip-bike-issue")
         }
-        if planner.scheduledDeparture != nil {
+        if let departure = planner.scheduledDeparture {
+            // Between about 1:00 and 5:00 almost nothing runs; say so instead of leaving 待確認 unexplained.
+            if (1..<5).contains(AssistantJourneyRequest.calendar.component(.hour, from: departure)) {
+                Text(AppText.text("這個時段公車與捷運大多已停駛，時間無法確認；可以改晚一點出發。"))
+                    .font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("journey-night-note")
+            }
             Text(AppText.text("依當天班表與班距估算，不含即時車況；時間到了再開始導航。"))
                 .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("journey-departure-note")

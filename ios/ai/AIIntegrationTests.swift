@@ -322,6 +322,13 @@ import TransitCore
         var past = value; past.arrivalDay = "2026-10-20"
         let morning = try await context.resolve(past, source: "明天早上去台大", now: now)
         XCTAssertEqual(morning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"), "An impossible model date gives way to the words")
+        var midnight = reading("國立臺灣大學"); midnight.departureTime = true; midnight.arrivalDay = "2026-10-23"; midnight.arrivalHour = 0; midnight.arrivalMinute = 0
+        let tomorrowMorning = try await context.resolve(midnight, source: "我明天早上要去台大", now: now)
+        XCTAssertEqual(tomorrowMorning.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"),
+                       "Device: the model said tomorrow 00:00 for 明天早上; the words mean 09:00")
+        var wrongClock = value; wrongClock.arrivalDay = "2026-10-22"; wrongClock.arrivalHour = 16
+        let three = try await context.resolve(wrongClock, source: "下午三點出發去台大", now: now)
+        XCTAssertEqual(three.departAt, ISO8601DateFormatter().date(from: "2026-10-22T07:00:00Z"), "A clock time in the words wins")
     }
     func testRulesReadWhatToAvoid() {
         let bus = RuleJourneyReader.read("去台大，不要搭公車")

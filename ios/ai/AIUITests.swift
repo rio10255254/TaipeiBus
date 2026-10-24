@@ -104,6 +104,9 @@ final class AIUITests: XCTestCase {
         app.launch()
         let mic = app.buttons["home-voice"]
         XCTAssertTrue(mic.waitForExistence(timeout: 60), "The mic is on the home screen")
+        XCTAssertTrue(mic.isHittable)
+        let home = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        home.name = "Home mic"; home.lifetime = .keepAlways; add(home)
         mic.tap()
         // A fresh simulator has never been asked: the app explains first, before any system prompt.
         XCTAssertTrue(app.buttons["voice-allow"].waitForExistence(timeout: 10))

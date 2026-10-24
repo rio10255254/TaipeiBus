@@ -762,51 +762,36 @@ private struct HomeSearchRow: View {
     }
     var body: some View {
         HStack(spacing: 10) {
+            Button(action: search) {
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
+                    if !hasSelection {
+                        Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                }
+                .padding(.horizontal, hasSelection ? 0 : 18 * CGFloat(live.appearance.spacingScale))
+                .frame(maxWidth: hasSelection ? 56 : .infinity, minHeight: 56).frame(width: hasSelection ? 56 : nil)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(PhonePressStyle())
+            .phoneGlass(in: Capsule())
+            .accessibilityLabel(live.text("搜尋目的地"))
+            .accessibilityIdentifier("home-destination-search")
             if !hasSelection, let voice {
-                // Search and speak share one capsule; the mic is the strongest thing in it.
-                HStack(spacing: 0) {
-                    Button(action: search) {
-                        HStack(spacing: 10) {
-                            Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
-                            Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                        .padding(.leading, 18 * CGFloat(live.appearance.spacingScale))
-                        .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
-                    }
-                    .buttonStyle(PhonePressStyle())
-                    .accessibilityLabel(live.text("搜尋目的地"))
-                    .accessibilityIdentifier("home-destination-search")
-                    Button {
-                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                        voice()
-                    } label: {
-                        Image(systemName: "mic.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
-                            .frame(width: 44, height: 44).background(accent, in: Circle())
-                            .padding(.horizontal, 6).frame(height: 56).contentShape(Rectangle())
-                    }
-                    .buttonStyle(VoicePressStyle())
-                    .accessibilityLabel(live.text("用說的規劃"))
-                    .accessibilityIdentifier("home-voice")
+                // Speaking is the first way to plan: a tinted glass button of its own, never content
+                // inside the search glass (there it rendered as a blurred glow on phones).
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    voice()
+                } label: {
+                    Image(systemName: "mic.fill").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
+                        .frame(width: 56, height: 56).contentShape(Circle())
                 }
-                .phoneGlass(in: Capsule(), interactive: false)
-            } else {
-                Button(action: search) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
-                        if !hasSelection {
-                            Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
-                            Spacer(minLength: 0)
-                        }
-                    }
-                    .padding(.horizontal, hasSelection ? 0 : 18 * CGFloat(live.appearance.spacingScale))
-                    .frame(maxWidth: hasSelection ? 56 : .infinity, minHeight: 56).frame(width: hasSelection ? 56 : nil)
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(PhonePressStyle())
-                .phoneGlass(in: Capsule())
-                .accessibilityLabel(live.text("搜尋目的地"))
-                .accessibilityIdentifier("home-destination-search")
+                .buttonStyle(VoicePressStyle())
+                .modifier(TintedGlassCircle(tint: accent))
+                .accessibilityLabel(live.text("用說的規劃"))
+                .accessibilityIdentifier("home-voice")
             }
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.
@@ -1747,7 +1732,19 @@ private struct DebugZoomPerformanceControls: View {
 }
 #endif
 
-/// 線上理解: asked once before the first sentence goes online; changed here at any time.
+/// A solid accent circle: tinted Liquid Glass on iOS 26, plain colour before or with reduced transparency.
+private struct TintedGlassCircle: ViewModifier {
+    let tint: Color
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            content.glassEffect(.regular.tint(tint).interactive(), in: Circle())
+        } else {
+            content.background(tint, in: Circle())
+        }
+    }
+}
+
 /// How the voice assistant looks: a glow around the edge over the map, or a full screen.
 private struct VoiceStyleSettings: View {
     @AppStorage(VoiceStyle.key) private var style = VoiceStyle.glow.rawValue
@@ -1769,6 +1766,7 @@ private struct VoiceStyleSettings: View {
     }
 }
 
+/// 線上理解: asked once before the first sentence goes online; changed here at any time.
 private struct OnlineUnderstandingSettings: View {
     @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
     var body: some View {

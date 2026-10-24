@@ -626,8 +626,15 @@ final class JourneyAssistantContext {
         // The online model's time is used when it is possible (ahead, within 60 days); otherwise
         // the sentence's own words decide, as they do for the rules and the on-device model.
         let modelDate = departAt ?? (hour >= 0 ? Self.date(day: day, hour: hour, minute: minute) : nil)
-        let modelTimeUsable = modelTime && modelDate.map { $0 > now.addingTimeInterval(-300) && $0 < now.addingTimeInterval(60 * 86_400) } == true
-        if !modelTimeUsable, let spoken = SpokenTime.read(source, now: now) {
+        var modelTimeUsable = modelTime && modelDate.map { $0 > now.addingTimeInterval(-300) && $0 < now.addingTimeInterval(60 * 86_400) } == true
+        let spokenTime = SpokenTime.read(source, now: now)
+        // The words win over the model whenever they are clear: a clock time always, and a part of the
+        // day unless the model only refines it (下班 → 18:00). On a phone 「我明天早上要去台大」 came back
+        // from the online model as tomorrow 00:00 and was planned for midnight.
+        if modelTimeUsable, let spokenTime, let modelDate {
+            modelTimeUsable = !spokenTime.exact && abs(modelDate.timeIntervalSince(spokenTime.date)) <= 3 * 3600
+        }
+        if !modelTimeUsable, let spoken = spokenTime {
             switch spoken.kind {
             case .departure:
                 departAt = spoken.date; day = ""; hour = -1; minute = -1
@@ -824,7 +831,7 @@ enum OnlineJourneyReader {
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
     目的地照原文，北車→台北車站、台大→國立臺灣大學；家=home，公司/上班=work，學校=school；沒說從哪出發就留空。
-    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
+    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
     """
 
     static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
@@ -934,7 +941,7 @@ enum OnlineJourneyReader {
     /// One or two plain sentences comparing the routes on screen, from their summaries only.
     static func compare(_ routes: [String], request: String, pro: Bool, session: URLSession = .shared) async -> String? {
         guard enabled, routes.count >= 2 else { return nil }
-        let system = "你是台北大眾運輸助理。用繁體中文、最多兩句（60字內）比較這幾條路線，說明各自的取捨並建議一條，只根據提供的數字，不要編造。只輸出 JSON {\"text\":\"...\"}。"
+        let system = "你是台北大眾運輸助理。用繁體中文、最多兩句（60字內）比較這幾條路線，說明各自的取捨並建議一條。用路線名稱（例如「BR→673」）稱呼，不要用編號。只根據提供的數字；總時間不明的路線不能說它最快或最慢，全部都不明時直接說時間無法確認、建議改時間。不要編造。只輸出 JSON {\"text\":\"...\"}。"
         let user = (request.isEmpty ? "" : "使用者的需求：\(request)\n") + "路線：\n" + routes.joined(separator: "\n")
         for model in models(pro: pro) {
             guard let content = try? await complete(system: system, user: user, model: model, limit: 500, session: session),
