@@ -95,4 +95,46 @@ final class AIUITests: XCTestCase {
         XCTAssertTrue(app.buttons["ai-choice-0"].waitForExistence(timeout: 15))
     }
 
+
+    func testHomeMicAsksInItsOwnWordsThenTypingTakesOver() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--usability-fixture", "--test-ai-ui", "--test-ai-review"]
+        app.launch()
+        let mic = app.buttons["home-voice"]
+        XCTAssertTrue(mic.waitForExistence(timeout: 60), "The mic is on the home screen")
+        mic.tap()
+        // A fresh simulator has never been asked: the app explains first, before any system prompt.
+        XCTAssertTrue(app.buttons["voice-allow"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["voice-close"].exists)
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "The voice screen replaces the keyboard")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Voice screen asks for the microphone"; shot.lifetime = .keepAlways; add(shot)
+        app.buttons["voice-type"].tap()
+        // The route panel opens with the typing sheet.
+        let input = app.textFields["ai-request"].exists ? app.textFields["ai-request"] : app.textViews["ai-request"]
+        XCTAssertTrue(input.waitForExistence(timeout: 15))
+        XCTAssertFalse(app.buttons["voice-allow"].exists)
+    }
+    func testSearchVoiceCardOpensAndClosesTheVoiceScreen() {
+        continueAfterFailure = false
+        let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
+            "--usability-fixture", "--test-ai-ui", "--test-ai-review"]
+        app.launch()
+        XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
+        app.buttons["home-destination-search"].tap()
+        let card = app.buttons["journey-voice"]
+        XCTAssertTrue(card.waitForExistence(timeout: 30))
+        card.tap()
+        let close = app.buttons["voice-close"]
+        XCTAssertTrue(close.waitForExistence(timeout: 10))
+        XCTAssertFalse(app.keyboards.firstMatch.exists, "The voice screen replaces the keyboard")
+        close.tap()
+        let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
+        XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)
+        XCTAssertTrue(app.textFields["journey-search-field"].exists, "Closing returns to the search screen")
+    }
+
 }

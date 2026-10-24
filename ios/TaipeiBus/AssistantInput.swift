@@ -49,6 +49,21 @@ final class SpeechInput: ObservableObject {
     @Published private(set) var problem: String?
     /// How loud the voice is right now, 0…1, for the listening animation.
     @Published private(set) var level: Double = 0
+    /// Microphone or speech recognition was turned off: only Settings can turn it back on.
+    @Published private(set) var blocked = false
+    /// After words were heard, listening ends by itself once this much silence has passed.
+    @Published private(set) var silenceSince: Date?
+    @Published private(set) var silenceLength: Double = 1.3
+
+    enum Permission { case undetermined, granted, denied }
+    /// Read without asking, so the app can explain before iOS shows its prompts.
+    static var permission: Permission {
+        let speech = SFSpeechRecognizer.authorizationStatus()
+        let microphone = AVAudioApplication.shared.recordPermission
+        if speech == .denied || speech == .restricted || microphone == .denied { return .denied }
+        if speech == .authorized && microphone == .granted { return .granted }
+        return .undetermined
+    }
     private let engine = AVAudioEngine()
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -59,7 +74,7 @@ final class SpeechInput: ObservableObject {
 
     func start(language: AppLanguage = .current, finished: @escaping (String) -> Void) async {
         stop()
-        transcript = ""; problem = nil; preparing = true
+        transcript = ""; problem = nil; blocked = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
         let allowed = await Self.permissions()
@@ -67,6 +82,7 @@ final class SpeechInput: ObservableObject {
         guard allowed else {
             preparing = false
             JourneyDiagnostics.shared.record("speech denied")
+            blocked = true
             problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
             return
         }
@@ -108,7 +124,7 @@ final class SpeechInput: ObservableObject {
         }
         self.request = request
         preparing = false; listening = true
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9)
         JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
         let current = attempt
         // Recognition results arrive on a background queue; they are handed to the main actor here.
@@ -120,7 +136,7 @@ final class SpeechInput: ObservableObject {
     }
     private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
-        if let text, !text.isEmpty { transcript = text; waitForSilence(1.2) }
+        if let text, !text.isEmpty { transcript = text; waitForSilence(1.3, counting: true) }
         if let code, transcript.isEmpty {
             JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
             let finished = self.finished
@@ -147,18 +163,23 @@ final class SpeechInput: ObservableObject {
         else { done?(text) }
     }
 
+    /// A new attempt starts clean, so an old problem never flashes on the voice screen.
+    func reset() { stop(); transcript = ""; problem = nil; blocked = false }
+
     func stop() {
         attempt += 1
         silence?.cancel(); silence = nil
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
-        request = nil; task = nil; listening = false; preparing = false; finished = nil; level = 0
+        request = nil; task = nil; listening = false; preparing = false; finished = nil; level = 0; silenceSince = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
-    private func waitForSilence(_ seconds: Double) {
+    /// `counting` shows the countdown: words were heard and the pause is being timed.
+    private func waitForSilence(_ seconds: Double, counting: Bool = false) {
         silence?.cancel()
+        silenceSince = counting ? Date() : nil; silenceLength = seconds
         silence = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
             self?.finish()

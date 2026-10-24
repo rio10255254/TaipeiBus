@@ -320,10 +320,7 @@ struct TransitHomeView: View {
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse,
-                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? {
-                              model.pendingVoice = true
-                              showJourneyItinerary = false; journeyDetent = .large; showJourney = true
-                          } : nil)
+                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? { model.assistant.listen() } : nil)
         }
     }
     }
@@ -405,6 +402,12 @@ struct TransitHomeView: View {
         .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
         // A sentence said to Siri opens the route panel, which understands and plans it.
         .onReceive(NotificationCenter.default.publisher(for: AssistantLaunch.notification)) { _ in takeAssistantLaunch() }
+        // The home mic opens the voice screen over the map; the route panel follows with the result.
+        .modifier(HomeVoiceHost(session: model.assistant, enabled: !showJourney && !showDetails && !showSearch && !showInformation) { forSheet in
+            showJourneyItinerary = false
+            journeyDetent = forSheet || planner.destination == nil ? .large : journeyPreviewDetent
+            showJourney = true
+        })
         .onAppear { takeAssistantLaunch() }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
             guard requested else { return }
@@ -441,7 +444,9 @@ struct TransitHomeView: View {
         }
         .onChange(of: planner.mapRevision) { _, _ in
             guard !stationWalk.isActive else { return }
-            if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail {
+            // While the voice screen is up it opens the panel itself, after its check mark.
+            if planner.selected != nil, !planner.started, !showJourney, !showDetails, !showSearch, !pendingJourneyDetail,
+               !model.assistant.voiceActive {
                 showJourneyItinerary = false; journeyDetent = journeyPreviewDetent; showJourney = true
             }
             if planner.selected != nil, model.cityFleetMode { model.leaveCityForJourney() }
@@ -757,40 +762,51 @@ private struct HomeSearchRow: View {
     }
     var body: some View {
         HStack(spacing: 10) {
-            Button(action: search) {
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
-                    if !hasSelection {
-                        Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
-                        Spacer(minLength: 0)
-                        if voice != nil { Color.clear.frame(width: 40, height: 40) }
+            if !hasSelection, let voice {
+                // Search and speak share one capsule; the mic is the strongest thing in it.
+                HStack(spacing: 0) {
+                    Button(action: search) {
+                        HStack(spacing: 10) {
+                            Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
+                            Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.leading, 18 * CGFloat(live.appearance.spacingScale))
+                        .frame(maxWidth: .infinity, minHeight: 56).contentShape(Rectangle())
                     }
-                }
-                .padding(.horizontal, hasSelection ? 0 : 18 * CGFloat(live.appearance.spacingScale))
-                .frame(maxWidth: hasSelection ? 56 : .infinity, minHeight: 56).frame(width: hasSelection ? 56 : nil)
-                .contentShape(Capsule())
-            }
-            .buttonStyle(PhonePressStyle())
-            .phoneGlass(in: Capsule())
-            .accessibilityLabel(live.text("搜尋目的地"))
-            .accessibilityIdentifier("home-destination-search")
-            .overlay(alignment: .trailing) {
-                if !hasSelection, let voice {
+                    .buttonStyle(PhonePressStyle())
+                    .accessibilityLabel(live.text("搜尋目的地"))
+                    .accessibilityIdentifier("home-destination-search")
                     Button {
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         voice()
                     } label: {
-                        Image(systemName: "mic.fill").liveFont(.body, weight: .bold).foregroundStyle(.white)
-                            .frame(width: 44, height: 44)
-                            .background(LinearGradient(colors: [accent, .purple], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                            .shadow(color: accent.opacity(0.35), radius: 6, y: 2)
-                            .contentShape(Circle())
+                        Image(systemName: "mic.fill").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
+                            .frame(width: 44, height: 44).background(accent, in: Circle())
+                            .padding(.horizontal, 6).frame(height: 56).contentShape(Rectangle())
                     }
-                    .buttonStyle(PhonePressStyle())
-                    .padding(.trailing, 6)
+                    .buttonStyle(VoicePressStyle())
                     .accessibilityLabel(live.text("用說的規劃"))
                     .accessibilityIdentifier("home-voice")
                 }
+                .phoneGlass(in: Capsule(), interactive: false)
+            } else {
+                Button(action: search) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").liveFont(.body, weight: .semibold).foregroundStyle(.secondary)
+                        if !hasSelection {
+                            Text(live.text("搜尋目的地")).liveFont(.body).foregroundStyle(.secondary).lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                    .padding(.horizontal, hasSelection ? 0 : 18 * CGFloat(live.appearance.spacingScale))
+                    .frame(maxWidth: hasSelection ? 56 : .infinity, minHeight: 56).frame(width: hasSelection ? 56 : nil)
+                    .contentShape(Capsule())
+                }
+                .buttonStyle(PhonePressStyle())
+                .phoneGlass(in: Capsule())
+                .accessibilityLabel(live.text("搜尋目的地"))
+                .accessibilityIdentifier("home-destination-search")
             }
             if hasSelection { Spacer(minLength: 0) }
             // Touching circles blend into one capsule inside the bottom glass container.

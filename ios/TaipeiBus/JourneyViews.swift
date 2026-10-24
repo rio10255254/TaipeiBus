@@ -191,17 +191,8 @@ struct JourneyPlanningView: View {
             focused = false; query = ""; editingOrigin = false; editingDestination = false; showingItinerary = false; collapse()
         }
         .bikeStationDetails(model: model)
-        .overlay {
-            if assistant.voiceActive && !assistant.presented {
-                VoiceAssistantOverlay(session: assistant) { openAssistant(nil) }
-            }
-        }
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: assistant.voiceActive)
-        .onChange(of: model.pendingVoice, initial: true) { _, pending in
-            guard pending else { return }
-            model.pendingVoice = false
-            if assistantAvailable { focused = false; assistant.listen() }
-        }
+        // The typing sheet listens in place; everywhere else speaking opens the voice screen.
+        .modifier(VoiceAssistantPresenter(session: assistant, enabled: !assistant.presented))
         .onChange(of: model.pendingAssistantRequest, initial: true) { _, text in
             guard let text, assistantAvailable else { return }
             model.pendingAssistantRequest = nil
@@ -223,6 +214,11 @@ struct JourneyPlanningView: View {
                 if location.usableCoordinate == nil { location.request() }
             }
             focused = editingDestination
+            // The voice screen started on the map and needs the sheet: open it once this panel is up.
+            if assistant.reopenSheetInPanel {
+                assistant.reopenSheetInPanel = false
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { assistant.presented = true }
+            }
 #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("--preview-journey-search") {
                 focused = false
