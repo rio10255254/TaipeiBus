@@ -148,6 +148,8 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
             places = cached.1; return cached.1
         }
         var matches: [TravelPlace] = []
+        /// Apple's own results that our name matching did not recognise, kept as a last resort.
+        var unmatched: [TravelPlace] = []
         var lastError: Error?
         let clean = StationSearch.cleanQuery(text)
         let addressQuery = StationSearch.isAddressQuery(clean)
@@ -183,7 +185,10 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
                     let place = TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "", coordinate: coordinate,
                         isTransitPlace: item.pointOfInterestCategory == .publicTransport)
                     let relevant = matchers.contains { $0.rank(name: place.name, address: place.address) != nil }
-                    guard completion != nil || relevant || (category != nil && item.pointOfInterestCategory == category) else { continue }
+                    guard completion != nil || relevant || (category != nil && item.pointOfInterestCategory == category) else {
+                        if !unmatched.contains(where: { $0.coordinate.distance(to: place.coordinate) < 30 }) { unmatched.append(place) }
+                        continue
+                    }
                     if !matches.contains(where: { StationSearch.normalize($0.name) == StationSearch.normalize(place.name) && $0.coordinate.distance(to: place.coordinate) < 30 }) { matches.append(place) }
                 }
             } catch {
@@ -193,6 +198,11 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
                 lastError = error
             }
             if completion != nil || category != nil || matches.contains(where: { place in matchers.contains { ($0.rank(name: place.name, address: place.address) ?? 9) <= 1 } }) { break }
+        }
+        // An address written another way, or a building Apple names differently (台大機械館 / 機械工程學系館):
+        // rather than nothing, offer what Apple Maps found, after anything that matched by name.
+        if matches.isEmpty || addressQuery {
+            matches += unmatched.filter { $0.coordinate.isInServiceArea }.prefix(addressQuery ? 3 : 2)
         }
         if matches.isEmpty, let lastError { throw lastError }
         let scored = matches.map { place in (place, matchers.compactMap { $0.rank(name: place.name, address: place.address) }.min() ?? 9) }

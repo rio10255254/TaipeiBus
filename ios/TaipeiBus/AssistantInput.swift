@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import UIKit
 import Speech
 import AppIntents
 import TransitCore
@@ -54,58 +55,87 @@ final class SpeechInput: ObservableObject {
         stop()
         transcript = ""; problem = nil; self.finished = finished
         guard await Self.authorized() else {
+            JourneyDiagnostics.shared.record("speech denied")
             problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
             return
         }
         let locale = language == .english ? Locale(identifier: "en-US") : Locale(identifier: "zh-TW")
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
+            JourneyDiagnostics.shared.record("speech unavailable")
             problem = AppText.text("語音辨識目前無法使用，請直接打字。")
             return
         }
+        self.finished = finished
+        begin(recognizer, onDevice: recognizer.supportsOnDeviceRecognition)
+    }
+
+    /// On the phone when it can; if the phone's recogniser fails before hearing anything (its
+    /// language may not be downloaded), once more with Apple's recognition service.
+    private func begin(_ recognizer: SFSpeechRecognizer, onDevice: Bool) {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
-        if recognizer.supportsOnDeviceRecognition { request.requiresOnDeviceRecognition = true }
+        request.requiresOnDeviceRecognition = onDevice
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
             try session.setActive(true, options: .notifyOthersOnDeactivation)
             let input = engine.inputNode
-            input.installTap(onBus: 0, bufferSize: 1024, format: input.outputFormat(forBus: 0)) { buffer, _ in
+            let format = input.outputFormat(forBus: 0)
+            guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
+            input.removeTap(onBus: 0)
+            input.installTap(onBus: 0, bufferSize: 1024, format: format) { buffer, _ in
                 request.append(buffer)
             }
             engine.prepare()
             try engine.start()
         } catch {
-            problem = AppText.text("語音辨識目前無法使用，請直接打字。")
+            JourneyDiagnostics.shared.record("speech audio-error \((error as NSError).domain) \((error as NSError).code)")
+            problem = AppText.text("麥克風目前無法使用，請直接打字。")
             stop(); return
         }
         self.request = request
         listening = true
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
         task = recognizer.recognitionTask(with: request) { [weak self] result, error in
             let text = result?.bestTranscription.formattedString
             let final = result?.isFinal ?? false
+            let code = (error as NSError?).map { "\($0.domain) \($0.code)" }
             Task { @MainActor in
                 guard let self, self.listening else { return }
                 if let text, !text.isEmpty { self.transcript = text; self.waitForSilence(1.2) }
+                if let code, self.transcript.isEmpty {
+                    JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
+                    let finished = self.finished
+                    self.stop()
+                    if onDevice, let finished {
+                        self.finished = finished
+                        self.begin(recognizer, onDevice: false)
+                    } else {
+                        self.problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。")
+                    }
+                    return
+                }
                 if final || error != nil { self.finish() }
             }
         }
-        // Nothing said at all: stop instead of listening forever.
-        waitForSilence(5)
+        // Nothing said at all: stop instead of listening forever, and say so.
+        waitForSilence(6)
     }
+    private enum SpeechFailure: Error { case noMicrophone }
 
     func finish() {
         guard listening else { return }
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         let done = finished
         stop()
-        if !text.isEmpty { done?(text) }
+        if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。") }
+        else { done?(text) }
     }
 
     func stop() {
         silence?.cancel(); silence = nil
-        if engine.isRunning { engine.stop() }
-        engine.inputNode.removeTap(onBus: 0)
+        if engine.isRunning { engine.stop(); engine.inputNode.removeTap(onBus: 0) }
         request?.endAudio(); task?.cancel()
         request = nil; task = nil; listening = false; finished = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)

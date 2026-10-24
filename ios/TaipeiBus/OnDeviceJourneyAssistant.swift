@@ -278,6 +278,18 @@ final class JourneyAssistantContext {
             departAt = Self.date(day: day, hour: hour, minute: minute)
             day = ""; hour = -1; minute = -1
         }
+        // The sentence's own words decide the time when they say one: 「明天早上」 leaves at nine,
+        // 「週六下午三點」 is that Saturday. The model only fills in what this reading cannot.
+        if let spoken = SpokenTime.read(source, now: now) {
+            switch spoken.kind {
+            case .departure:
+                departAt = spoken.date; day = ""; hour = -1; minute = -1
+            case .arrival:
+                departAt = nil; day = Self.dayString(spoken.date)
+                let parts = AssistantJourneyRequest.calendar.dateComponents([.hour, .minute], from: spoken.date)
+                hour = parts.hour ?? -1; minute = parts.minute ?? 0
+            }
+        }
         let request = try AssistantIntentDraft(destination: target.name, origin: start.name, preference: preference,
             timeEvidence: hour >= 0 ? reading.timeEvidence : "", arrivalDay: day, arrivalHour: hour, arrivalMinute: minute,
             review: review).validated(source: source, now: now)

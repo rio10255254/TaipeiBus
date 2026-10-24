@@ -50,10 +50,69 @@ public enum StationSearch {
         let traditional = text.applyingTransform(StringTransform(rawValue: "Simplified-Traditional"), reverse: false) ?? text
         var value = traditional.folding(options: [.caseInsensitive, .widthInsensitive, .diacriticInsensitive], locale: Locale(identifier: "zh_TW"))
             .replacingOccurrences(of: "臺", with: "台")
-        for (index, digit) in Array("一二三四五六七八九").enumerated() {
-            value = value.replacingOccurrences(of: String(digit) + "段", with: String(index + 1) + "段")
-        }
+        value = arabicAddressNumbers(value)
         return value.filter { $0.isLetter || $0.isNumber }
+    }
+    private static let chineseDigits: [Character: Int] = ["零": 0, "〇": 0, "一": 1, "二": 2, "兩": 2, "三": 3, "四": 4,
+                                                          "五": 5, "六": 6, "七": 7, "八": 8, "九": 9]
+    private static let addressUnits = Set("段巷弄號号樓楼")
+    /// 「四段一號」, 「十二巷」 and 「4段1號」 are the same address.
+    static func arabicAddressNumbers(_ text: String) -> String {
+        guard text.contains(where: { addressUnits.contains($0) }),
+              text.contains(where: { chineseDigits[$0] != nil || $0 == "十" || $0 == "百" }) else { return text }
+        var result = "", run = ""
+        func flush(before unit: Character?) {
+            if let unit, addressUnits.contains(unit), let number = chineseNumber(run) { result += String(number) }
+            else { result += run }
+            run = ""
+        }
+        for character in text {
+            if chineseDigits[character] != nil || character == "十" || character == "百" { run.append(character); continue }
+            flush(before: character); result.append(character)
+        }
+        flush(before: nil)
+        return result
+    }
+    /// 一 → 1, 十二 → 12, 二十 → 20, 一百零五 → 105, 三五 → 35.
+    static func chineseNumber(_ text: String) -> Int? {
+        guard !text.isEmpty, text.count <= 6 else { return nil }
+        if !text.contains("十"), !text.contains("百") {
+            var value = 0
+            for character in text { guard let digit = chineseDigits[character] else { return nil }; value = value * 10 + digit }
+            return value
+        }
+        var total = 0, current = 0
+        for character in text {
+            if let digit = chineseDigits[character] { current = digit }
+            else if character == "十" { total += (current == 0 ? 1 : current) * 10; current = 0 }
+            else if character == "百" { total += (current == 0 ? 1 : current) * 100; current = 0 }
+            else { return nil }
+        }
+        return total + current
+    }
+    /// 「台大機械館」 is also 「國立台灣大學 機械館」: a familiar short name at the start is spelled out.
+    /// Returns the other names of that place, each with the rest of the query after a space.
+    fileprivate static func expandedPrefixes(_ normalized: String) -> [String] {
+        // 「台大醫院」 is a place of its own, not 「台大」 plus 「醫院」.
+        guard !familiarAliases.contains(where: { $0.contains(normalized) }) else { return [] }
+        var values: [String] = []
+        for names in familiarNames {
+            let forms = names.map(normalize).filter { $0.count >= 2 && $0.contains(where: { !$0.isASCII }) }
+            guard let short = forms.filter({ normalized.hasPrefix($0) && normalized.count > $0.count }).max(by: { $0.count < $1.count })
+            else { continue }
+            let rest = String(normalized.dropFirst(short.count))
+            values += forms.filter { $0 != short && !normalized.hasPrefix($0) }.map { $0 + " " + rest }
+        }
+        return values
+    }
+    /// A building is named both ways: 機械館 and 機械系館.
+    fileprivate static func buildingVariants(_ normalized: String) -> [String] {
+        if normalized.hasSuffix("系館"), normalized.count > 3 { return [String(normalized.dropLast(2)) + "館"] }
+        if normalized.hasSuffix("館"), !normalized.hasSuffix("系館"), normalized.count > 2,
+           !["圖書館", "博物館", "美術館", "體育館", "旅館", "會館", "展覽館", "紀念館", "科學館", "天文館", "大使館", "領事館", "咖啡館", "餐館", "賓館"].contains(where: normalized.hasSuffix) {
+            return [String(normalized.dropLast()) + "系館"]
+        }
+        return []
     }
     fileprivate static func baseName(_ text: String) -> String {
         text.components(separatedBy: CharacterSet(charactersIn: "(（")).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? text
@@ -121,6 +180,23 @@ public enum StationSearch {
         if let aliases = queryNames[normalized] { return Array((aliases + [text]).prefix(3)) }
         let traditional = text.applyingTransform(StringTransform(rawValue: "Simplified-Traditional"), reverse: false) ?? text
         let standard = traditional.replacingOccurrences(of: "臺", with: "台")
+        // A street address (not 「民權西路站」, which is a metro station named after its road).
+        if SearchQuery(text).addressLike, !isTransitQuery(text), text.contains(where: { $0.isNumber || "號号巷弄樓楼".contains($0) }) {
+            // Postal codes, floors and rooms make Apple Maps miss an address that it knows without them.
+            let bare = standard
+                .replacingOccurrences(of: "^\\s*\\d{3,6}\\s*", with: "", options: .regularExpression)
+                .replacingOccurrences(of: "\\s*([0-9０-９]+|[一二三四五六七八九十]+)\\s*(樓|楼|[Ff]).*$", with: "", options: .regularExpression)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let spelled = arabicAddressNumbers(bare)
+            var seen = Set<String>()
+            return [spelled, bare, text].filter { !$0.isEmpty && seen.insert($0).inserted }
+        }
+        let building = buildingVariants(normalized), expanded = expandedPrefixes(normalized)
+        if !building.isEmpty || !expanded.isEmpty {
+            // The rider's words first, then the other way a building is named, then the full campus name.
+            var seen = Set<String>()
+            return ([standard] + building + expanded.suffix(1)).filter { seen.insert($0).inserted }
+        }
         if normalized.hasSuffix("站"), !normalized.hasPrefix("捷運"), !normalized.hasSuffix("車站"), !normalized.hasSuffix("捷運站") {
             for city in ["台北市", "新北市", "台北", "新北"] where normalized.hasPrefix(city) && normalized.count > city.count + 2 {
                 return [city + " 捷運" + String(normalized.dropFirst(city.count)), standard]
@@ -163,6 +239,10 @@ fileprivate struct SearchQuery: Sendable {
         for city in ["台北市", "新北市", "台北", "新北"] where text.hasPrefix(city) && text.count > city.count + 1 {
             names.formUnion(StationSearch.aliases(String(text.dropFirst(city.count))))
         }
+        for spelled in StationSearch.expandedPrefixes(text).map(StationSearch.normalize) {
+            names.insert(spelled); names.formUnion(StationSearch.buildingVariants(spelled))
+        }
+        names.formUnion(StationSearch.buildingVariants(text))
         aliases = vocabulary.expand(names)
         let minimumLength = text.count == 1 ? 1 : 2
         partial = aliases.filter { !$0.allSatisfy(\.isNumber) && $0.count >= minimumLength }.sorted()

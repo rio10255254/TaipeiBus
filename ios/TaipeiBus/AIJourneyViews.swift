@@ -200,7 +200,7 @@ final class JourneyAssistantSession: ObservableObject {
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
-            return try await toolSearch.find(text: query, queryLimit: 2, timeout: 4)
+            return try await toolSearch.find(text: query, queryLimit: 3, timeout: 4)
         }
     }
     private func track(_ context: JourneyAssistantContext) {

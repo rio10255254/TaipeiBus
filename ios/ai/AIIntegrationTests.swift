@@ -184,6 +184,17 @@ import TransitCore
         let before = try await context.resolve(value, source: "明天下午三點前出發去台大", now: now)
         XCTAssertEqual(before.request.arriveBy, three, "…前 is a deadline even with 出發")
     }
+    func testPartOfTheDayLeavesAtAUsualHour() async throws {
+        // 「明天早上」 should not mean leaving now: it is tomorrow at nine.
+        let context = JourneyAssistantContext(journeys: []) { _ in [self.place("國立臺灣大學")] }
+        let turn = try await context.resolve(reading("國立臺灣大學"), source: "明天早上去台大", now: now)
+        XCTAssertEqual(turn.departAt, ISO8601DateFormatter().date(from: "2026-10-23T01:00:00Z"))
+        XCTAssertNil(turn.request.arriveBy)
+        var guessed = reading("國立臺灣大學"); guessed.arrivalDay = "2026-10-24"; guessed.arrivalHour = 9; guessed.departureTime = true
+        let saturday = try await context.resolve(guessed, source: "週六下午三點去台大", now: now)
+        XCTAssertNil(saturday.departAt, "The model's guessed day and kind give way to the words")
+        XCTAssertEqual(saturday.request.arriveBy, ISO8601DateFormatter().date(from: "2026-10-24T07:00:00Z"))
+    }
     func testDeadlineAlreadyPassedTodayMeansTomorrow() async throws {
         let context = JourneyAssistantContext(journeys: []) { _ in [self.place("臺北車站")] }
         var value = reading("台北車站"); value.timeEvidence = "九點以前"; value.arrivalHour = 9

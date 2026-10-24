@@ -940,5 +940,8 @@
   "改回一般路線": "Back to ordinary routes",
   "目的地：%@，可改成其他搜尋結果": "Destination: %@. Can be changed to another search result",
   "交通方式：%@": "Way to travel: %@",
-  "地點，或一句話：騎單車去台大": "A place, or a sentence: bike to NTU"
+  "地點，或一句話：騎單車去台大": "A place, or a sentence: bike to NTU",
+  "麥克風目前無法使用，請直接打字。": "The microphone isn't available right now. Please type instead.",
+  "沒有辨識到內容，請再說一次，或直接打字。": "Nothing was recognised. Try again, or type instead.",
+  "沒有聽到聲音，請再說一次，或直接打字。": "Didn't hear anything. Try again, or type instead."
 }
