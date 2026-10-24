@@ -110,18 +110,19 @@ final class AIUITests: XCTestCase {
         XCTAssertTrue(app.buttons["voice-close"].exists)
         XCTAssertFalse(app.keyboards.firstMatch.exists, "The voice screen replaces the keyboard")
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "Voice screen asks for the microphone"; shot.lifetime = .keepAlways; add(shot)
+        shot.name = "Edge glow asks for the microphone"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["voice-type"].tap()
         // The route panel opens with the typing sheet.
         let input = app.textFields["ai-request"].exists ? app.textFields["ai-request"] : app.textViews["ai-request"]
         XCTAssertTrue(input.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["voice-allow"].exists)
     }
-    func testSearchVoiceCardOpensAndClosesTheVoiceScreen() {
+    func testSearchVoiceCardOpensAndClosesTheFullScreenStyle() {
         continueAfterFailure = false
         let app = XCUIApplication(bundleIdentifier: "com.example.TaipeiBus")
+        // Settings › 語音助理樣式 › 全螢幕; the home mic test covers the default edge glow.
         app.launchArguments = ["-AppleLanguages", "(zh-Hant)", "-AppleLocale", "zh_TW", "--test-language", "zh-Hant",
-            "--usability-fixture", "--test-ai-ui", "--test-ai-review"]
+            "--usability-fixture", "--test-ai-ui", "--test-ai-review", "-voiceStyle.v1", "fullScreen"]
         app.launch()
         XCTAssertTrue(app.buttons["home-destination-search"].waitForExistence(timeout: 60))
         app.buttons["home-destination-search"].tap()
@@ -131,6 +132,8 @@ final class AIUITests: XCTestCase {
         let close = app.buttons["voice-close"]
         XCTAssertTrue(close.waitForExistence(timeout: 10))
         XCTAssertFalse(app.keyboards.firstMatch.exists, "The voice screen replaces the keyboard")
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = "Full-screen voice style"; shot.lifetime = .keepAlways; add(shot)
         close.tap()
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: close)
         XCTAssertEqual(XCTWaiter.wait(for: [gone], timeout: 5), .completed)

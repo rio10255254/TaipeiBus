@@ -993,5 +993,9 @@
   "允許並開始說話": "Allow and start speaking",
   "打開設定": "Open Settings",
   "打字": "Type",
-  "重說": "Again"
+  "重說": "Again",
+  "邊框光暈": "Edge glow",
+  "全螢幕": "Full screen",
+  "語音助理樣式": "Voice assistant style",
+  "邊框光暈：螢幕邊緣發光，一邊看地圖一邊說，下方小卡片即時顯示聽到的話。全螢幕：專心說話的獨立畫面。": "Edge glow: the screen edge lights up so you can keep looking at the map while you speak, with a small card showing what is heard. Full screen: a separate screen just for speaking."
 }

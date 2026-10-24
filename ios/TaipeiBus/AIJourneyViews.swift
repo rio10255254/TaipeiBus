@@ -29,6 +29,8 @@ final class JourneyAssistantSession: ObservableObject {
     @Published var presented = false
     /// The voice assistant screen: from the tap until the routes appear.
     @Published private(set) var voiceActive = false
+    /// How the voice assistant looks this time, read from Settings when it opens.
+    @Published private(set) var voiceStyle = VoiceStyle.current
     /// The voice screen is fading out; it closes a moment later.
     @Published private(set) var voiceClosing = false
     /// The short ✓ moment before the voice screen gives way to the routes.
@@ -282,8 +284,13 @@ final class JourneyAssistantSession: ObservableObject {
     private var voiceRound = 0
     /// The voice screen comes and goes without the sliding sheet animation; it fades itself.
     private func setVoice(_ active: Bool) {
+        if active { voiceStyle = VoiceStyle.current }
         var transaction = Transaction(); transaction.disablesAnimations = true
         withTransaction(transaction) { voiceActive = active }
+        // The edge glow lives in its own window above the app, so the map stays in view and usable.
+        if voiceStyle == .glow {
+            if active { VoiceGlowOverlay.shared.show(self) } else { VoiceGlowOverlay.shared.hide() }
+        }
     }
     /// Fades the voice screen out, closes it, then runs `then` once nothing is being presented.
     private func closeVoice(then action: (() -> Void)? = nil) {
@@ -1030,6 +1037,82 @@ struct ChipFlow: Layout {
 
 // MARK: - Voice assistant
 
+enum VoicePhase: Equatable { case permission, blocked, preparing, listening, understanding, consent, done, problem }
+
+/// Settings › 語音助理樣式: a glow around the screen edge over the app, or a full screen of its own.
+enum VoiceStyle: String, CaseIterable, Identifiable {
+    case glow, fullScreen
+    static let key = "voiceStyle.v1"
+    static var current: VoiceStyle { VoiceStyle(rawValue: UserDefaults.standard.string(forKey: key) ?? "") ?? .glow }
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .glow: AppText.text("邊框光暈")
+        case .fullScreen: AppText.text("全螢幕")
+        }
+    }
+}
+
+/// What the voice screens show, shared by the full screen and the edge glow.
+extension JourneyAssistantSession {
+    var voicePhase: VoicePhase {
+        if celebrating { return .done }
+        if askingConsent { return .consent }
+        if busy { return .understanding }
+        if voicePermissionStep { return .permission }
+        if speech.listening { return .listening }
+        if speech.preparing { return .preparing }
+        if speech.blocked { return .blocked }
+        if speech.problem != nil || message != nil { return .problem }
+        return .preparing
+    }
+    var voiceMood: VoiceOrb.Mood {
+        switch voicePhase {
+        case .permission, .preparing, .consent: .calm
+        case .listening: .listening
+        case .understanding: .thinking
+        case .done: .done
+        case .blocked, .problem: .warning
+        }
+    }
+
+    var voiceStatus: String {
+        switch voicePhase {
+        case .permission: AppText.text("需要你的允許")
+        case .blocked: AppText.text("麥克風沒有開啟")
+        case .preparing: AppText.text("正在開啟麥克風…")
+        case .listening: AppText.text("正在聆聽")
+        case .understanding: AppText.text("正在理解")
+        case .consent: AppText.text("線上理解")
+        case .done: AppText.text("完成")
+        case .problem: AppText.text("沒有聽清楚")
+        }
+    }
+
+    var voiceTitle: String {
+        switch voicePhase {
+        case .permission: AppText.text("用說的，比打字更快")
+        case .blocked: AppText.text("麥克風或語音辨識沒有開啟")
+        case .preparing: AppText.text("請說出要去哪裡")
+        case .listening: speech.transcript.isEmpty ? AppText.text("請說出要去哪裡") : speech.transcript
+        case .understanding, .consent: "「" + source + "」"
+        case .done: AppText.text("好了，路線來了")
+        case .problem: speech.problem ?? message ?? AppText.text("沒有聽到聲音，請再說一次，或直接打字。")
+        }
+    }
+    var voiceDetail: String {
+        switch voicePhase {
+        case .permission: AppText.text("按下「允許並開始說話」後，iPhone 會詢問麥克風與語音辨識權限。聲音只用來把這一句話轉成文字。")
+        case .blocked: AppText.text("到「設定」開啟麥克風與語音辨識後回到 App，就會直接開始聆聽。")
+        case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
+        case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
+        case .understanding: activity
+        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
+        case .done, .problem: ""
+        }
+    }
+}
+
 /// Shows the voice screen over whatever presents it. It appears without the sliding sheet
 /// animation and fades and scales in by itself, so the tap is answered at once.
 struct VoiceAssistantPresenter: ViewModifier {
@@ -1037,7 +1120,7 @@ struct VoiceAssistantPresenter: ViewModifier {
     var enabled = true
     func body(content: Content) -> some View {
         content.fullScreenCover(isPresented: Binding(
-            get: { enabled && session.voiceActive },
+            get: { enabled && session.voiceActive && session.voiceStyle == .fullScreen },
             set: { if !$0, session.voiceActive { session.dismissVoice() } })) {
             VoiceAssistantView(session: session).presentationBackground(.clear)
         }
@@ -1080,28 +1163,11 @@ struct VoiceAssistantView: View {
     @Environment(\.openURL) private var openURL
     @State private var shown = false
     init(session: JourneyAssistantSession) { self.session = session; speech = session.speech }
-
-    enum Phase: Equatable { case permission, blocked, preparing, listening, understanding, consent, done, problem }
-    private var phase: Phase {
-        if session.celebrating { return .done }
-        if session.askingConsent { return .consent }
-        if session.busy { return .understanding }
-        if session.voicePermissionStep { return .permission }
-        if speech.listening { return .listening }
-        if speech.preparing { return .preparing }
-        if speech.blocked { return .blocked }
-        if speech.problem != nil || session.message != nil { return .problem }
-        return .preparing
-    }
-    private var mood: VoiceOrb.Mood {
-        switch phase {
-        case .permission, .preparing, .consent: .calm
-        case .listening: .listening
-        case .understanding: .thinking
-        case .done: .done
-        case .blocked, .problem: .warning
-        }
-    }
+    private var phase: VoicePhase { session.voicePhase }
+    private var mood: VoiceOrb.Mood { session.voiceMood }
+    private var statusText: String { session.voiceStatus }
+    private var title: String { session.voiceTitle }
+    private var detail: String { session.voiceDetail }
 
     var body: some View {
         ZStack {
@@ -1199,41 +1265,7 @@ struct VoiceAssistantView: View {
         case .consent: Image(systemName: "sparkles").foregroundStyle(.tint)
         }
     }
-    private var statusText: String {
-        switch phase {
-        case .permission: AppText.text("需要你的允許")
-        case .blocked: AppText.text("麥克風沒有開啟")
-        case .preparing: AppText.text("正在開啟麥克風…")
-        case .listening: AppText.text("正在聆聽")
-        case .understanding: AppText.text("正在理解")
-        case .consent: AppText.text("線上理解")
-        case .done: AppText.text("完成")
-        case .problem: AppText.text("沒有聽清楚")
-        }
-    }
 
-    private var title: String {
-        switch phase {
-        case .permission: AppText.text("用說的，比打字更快")
-        case .blocked: AppText.text("麥克風或語音辨識沒有開啟")
-        case .preparing: AppText.text("請說出要去哪裡")
-        case .listening: speech.transcript.isEmpty ? AppText.text("請說出要去哪裡") : speech.transcript
-        case .understanding, .consent: "「" + session.source + "」"
-        case .done: AppText.text("好了，路線來了")
-        case .problem: speech.problem ?? session.message ?? AppText.text("沒有聽到聲音，請再說一次，或直接打字。")
-        }
-    }
-    private var detail: String {
-        switch phase {
-        case .permission: AppText.text("按下「允許並開始說話」後，iPhone 會詢問麥克風與語音辨識權限。聲音只用來把這一句話轉成文字。")
-        case .blocked: AppText.text("到「設定」開啟麥克風與語音辨識後回到 App，就會直接開始聆聽。")
-        case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
-        case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
-        case .understanding: session.activity
-        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
-        case .done, .problem: ""
-        }
-    }
     private var message: some View {
         VStack(spacing: 10) {
             Text(title)
@@ -1346,7 +1378,7 @@ struct VoiceAssistantView: View {
         default: break
         }
     }
-    private func feedback(from old: Phase, to new: Phase) {
+    private func feedback(from old: VoicePhase, to new: VoicePhase) {
         switch new {
         case .understanding where old == .listening: UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
         case .problem, .blocked: UINotificationFeedbackGenerator().notificationOccurred(.warning)
@@ -1443,7 +1475,8 @@ struct VoiceOrb: View {
     var compact = false
     @State private var smoother = LevelSmoother()
 
-    private var palette: [Color] {
+    private var palette: [Color] { Self.colors(mood) }
+    static func colors(_ mood: Mood) -> [Color] {
         switch mood {
         case .calm, .listening:
             [Color(red: 0.28, green: 0.48, blue: 1), Color(red: 0.66, green: 0.36, blue: 1),
@@ -1559,5 +1592,249 @@ struct VoiceStartCard: View {
         .buttonStyle(VoicePressStyle())
         .accessibilityLabel(AppText.text("用說的規劃"))
         .accessibilityIdentifier("journey-voice")
+    }
+}
+
+// MARK: - Edge glow
+
+/// A window above the app for the edge glow. Only the card takes touches; everything else falls
+/// through to the map and panels underneath.
+private final class VoicePassthroughWindow: UIWindow {
+    var touchableArea: CGRect = .zero
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool { touchableArea.contains(point) }
+}
+
+@MainActor
+final class VoiceGlowOverlay {
+    static let shared = VoiceGlowOverlay()
+    private var window: VoicePassthroughWindow?
+    func show(_ session: JourneyAssistantSession) {
+        guard window == nil else { return }
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
+        let window = VoicePassthroughWindow(windowScene: scene)
+        // Above the app and its sheets, below the app's own alerts.
+        window.windowLevel = UIWindow.Level(rawValue: UIWindow.Level.alert.rawValue - 1)
+        window.backgroundColor = .clear
+        let host = UIHostingController(rootView: VoiceGlowView(session: session) { [weak window] area in
+            window?.touchableArea = area
+        })
+        host.view.backgroundColor = .clear
+        window.rootViewController = host
+        // Shown without becoming the key window, so the app keeps its focus and status bar.
+        window.isHidden = false
+        self.window = window
+    }
+    func hide() {
+        window?.isHidden = true
+        window = nil
+    }
+}
+
+/// The glow around the screen edge, Apple Intelligence style: colours circle the edge, swell
+/// with the voice, race while thinking and turn green when done.
+struct EdgeGlow: View {
+    let mood: VoiceOrb.Mood
+    var level: Double = 0
+    var reduceMotion = false
+    @State private var smoother = LevelSmoother()
+    var body: some View {
+        GeometryReader { box in
+            // Rounded like the display on Face ID iPhones; the blur hides small differences.
+            let corner: CGFloat = box.safeAreaInsets.bottom > 0 ? 54 : 0
+            TimelineView(.animation(paused: reduceMotion)) { timeline in
+                let time = timeline.date.timeIntervalSinceReferenceDate
+                let energy = smoother.next(target(at: time))
+                let colors = VoiceOrb.colors(mood)
+                let gradient = AngularGradient(colors: colors + [colors[0]], center: .center,
+                                               angle: .degrees(reduceMotion ? 0 : time * (mood == .thinking ? 200 : 70)))
+                let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
+                ZStack {
+                    shape.strokeBorder(gradient, lineWidth: 34 + 34 * energy).blur(radius: 36).opacity(0.75)
+                    shape.strokeBorder(gradient, lineWidth: 12 + 16 * energy).blur(radius: 12)
+                    shape.strokeBorder(gradient, lineWidth: 3 + 4 * energy)
+                }
+            }
+            .frame(width: box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing,
+                   height: box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom)
+            .offset(x: -box.safeAreaInsets.leading, y: -box.safeAreaInsets.top)
+        }
+        .allowsHitTesting(false)
+        .animation(.easeInOut(duration: 0.5), value: mood)
+    }
+    private func target(at time: Double) -> Double {
+        switch mood {
+        case .listening: return 0.15 + 0.85 * level
+        case .thinking: return reduceMotion ? 0.45 : 0.45 + 0.2 * sin(time * 5)
+        case .done: return 0.7
+        case .warning: return 0.35
+        case .calm: return 0.2
+        }
+    }
+}
+
+/// The edge-glow assistant: the glow, and one floating card with what was heard and the buttons.
+/// The map stays visible and can still be moved while speaking.
+struct VoiceGlowView: View {
+    @ObservedObject var session: JourneyAssistantSession
+    @ObservedObject private var speech: SpeechInput
+    let reportCard: (CGRect) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
+    @State private var shown = false
+    init(session: JourneyAssistantSession, reportCard: @escaping (CGRect) -> Void) {
+        self.session = session; speech = session.speech; self.reportCard = reportCard
+    }
+    private var phase: VoicePhase { session.voicePhase }
+
+    var body: some View {
+        ZStack(alignment: .bottom) {
+            EdgeGlow(mood: session.voiceMood, level: speech.level, reduceMotion: reduceMotion)
+                .opacity(shown ? 1 : 0)
+                .scaleEffect(shown || reduceMotion ? 1 : 1.04)
+            card
+                .background(GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { reportCard(proxy.frame(in: .global)) }
+                        .onChange(of: proxy.frame(in: .global)) { _, frame in reportCard(frame) }
+                })
+                .padding(.horizontal, 12).padding(.bottom, 6)
+                .offset(y: shown ? 0 : 220)
+                .opacity(shown ? 1 : 0)
+        }
+        .onAppear { reveal(true) }
+        .onChange(of: session.voiceClosing) { _, closing in reveal(!closing) }
+        .onChange(of: phase) { old, new in
+            switch new {
+            case .understanding where old == .listening: UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
+            case .problem, .blocked: UINotificationFeedbackGenerator().notificationOccurred(.warning)
+            case .consent: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            default: break
+            }
+        }
+        .onChange(of: speech.transcript.isEmpty) { _, empty in if !empty { UISelectionFeedbackGenerator().selectionChanged() } }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            // Back from Settings with both permissions on: start listening right away.
+            if phase == .blocked, SpeechInput.permission == .granted { session.listen() }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("voice-assistant")
+    }
+
+    private func reveal(_ visible: Bool) {
+        let animation: Animation = reduceMotion ? .easeOut(duration: 0.2)
+            : visible ? .spring(response: 0.45, dampingFraction: 0.8) : .easeIn(duration: 0.24)
+        withAnimation(animation) { shown = visible }
+    }
+
+    private struct Choice {
+        let primary: String, id: String, action: () -> Void
+        var secondary: String? = nil
+        var secondaryID = "voice-type"
+        let other: () -> Void
+    }
+    private var choices: Choice? {
+        let session = session
+        let typing: () -> Void = { session.typeInstead() }
+        switch phase {
+        case .permission:
+            return Choice(primary: AppText.text("允許並開始說話"), id: "voice-allow", action: { session.allowVoice() }, other: typing)
+        case .blocked:
+            let openURL = openURL
+            return Choice(primary: AppText.text("打開設定"), id: "voice-settings", action: {
+                if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+            }, other: typing)
+        case .consent:
+            return Choice(primary: AppText.text("使用線上理解"), id: "voice-consent-yes", action: { session.answerConsent(true) },
+                          secondary: AppText.text("只在手機上理解"), secondaryID: "voice-consent-no", other: { session.answerConsent(false) })
+        case .problem:
+            return Choice(primary: AppText.text("再說一次"), id: "voice-retry", action: { session.listen() }, other: typing)
+        default:
+            return nil
+        }
+    }
+
+    private var card: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                VoiceOrb(mood: session.voiceMood, level: speech.level, reduceMotion: reduceMotion, compact: true)
+                    .frame(width: 46, height: 46)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(session.voiceStatus).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        .contentTransition(.opacity).accessibilityIdentifier("voice-status")
+                    Text(session.voiceTitle)
+                        .font(.body.weight(phase == .listening && !speech.transcript.isEmpty ? .semibold : .regular))
+                        .foregroundStyle(phase == .preparing || (phase == .listening && speech.transcript.isEmpty) ? .secondary : .primary)
+                        .lineLimit(4).fixedSize(horizontal: false, vertical: true)
+                        .modifier(Shimmer(active: phase == .understanding && !reduceMotion))
+                        .contentTransition(.opacity)
+                        .animation(.easeOut(duration: 0.18), value: session.voiceTitle)
+                        .accessibilityIdentifier("voice-headline")
+                }
+                Spacer(minLength: 0)
+                trailing
+            }
+            if choices != nil || [.understanding, .consent].contains(phase), !session.voiceDetail.isEmpty {
+                Text(session.voiceDetail).font(.footnote).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.opacity)
+            }
+            if let choices {
+                HStack(spacing: 10) {
+                    Button(action: choices.other) {
+                        Text(choices.secondary ?? AppText.text("改用打字")).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                            .background(.thinMaterial, in: Capsule())
+                    }
+                    .buttonStyle(VoicePressStyle()).foregroundStyle(.primary).accessibilityIdentifier(choices.secondaryID)
+                    Button(action: choices.action) {
+                        Text(choices.primary).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Color.accentColor, in: Capsule()).foregroundStyle(.white)
+                    }
+                    .buttonStyle(VoicePressStyle()).accessibilityIdentifier(choices.id)
+                }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
+            }
+        }
+        .padding(14)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: phase)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        HStack(spacing: 8) {
+            if phase == .listening || phase == .preparing {
+                Button { session.typeInstead() } label: {
+                    Image(systemName: "keyboard").font(.system(size: 15, weight: .semibold))
+                        .frame(width: 38, height: 38).background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(VoicePressStyle()).foregroundStyle(.primary)
+                .accessibilityLabel(AppText.text("改用打字")).accessibilityIdentifier("voice-type")
+                Button {
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    speech.finish()
+                } label: {
+                    ZStack {
+                        Circle().fill(Color.accentColor).frame(width: 42, height: 42)
+                        Image(systemName: "checkmark").font(.system(size: 17, weight: .bold)).foregroundStyle(.white)
+                        SilenceRing(since: speech.silenceSince, length: speech.silenceLength).frame(width: 50, height: 50)
+                    }
+                    .frame(width: 50, height: 50)
+                }
+                .buttonStyle(VoicePressStyle())
+                .disabled(phase != .listening)
+                .accessibilityLabel(AppText.text("說完了")).accessibilityIdentifier("voice-done")
+            }
+            if phase != .done {
+                Button { session.dismissVoice() } label: {
+                    Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
+                        .frame(width: 30, height: 30).background(.thinMaterial, in: Circle())
+                }
+                .buttonStyle(VoicePressStyle()).foregroundStyle(.secondary)
+                .accessibilityLabel(AppText.text("關閉")).accessibilityIdentifier("voice-close")
+            }
+        }
     }
 }

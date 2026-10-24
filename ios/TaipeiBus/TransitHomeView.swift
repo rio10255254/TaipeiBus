@@ -1608,6 +1608,7 @@ private struct AppInformationView: View {
                 }
                 CommuteHabitSettings(habits: model.commuteHabits)
                 if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
+                if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil { VoiceStyleSettings() }
                 Section(AppText.text("即時資料")) {
                     Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
                     Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
@@ -1747,6 +1748,27 @@ private struct DebugZoomPerformanceControls: View {
 #endif
 
 /// 線上理解: asked once before the first sentence goes online; changed here at any time.
+/// How the voice assistant looks: a glow around the edge over the map, or a full screen.
+private struct VoiceStyleSettings: View {
+    @AppStorage(VoiceStyle.key) private var style = VoiceStyle.glow.rawValue
+    var body: some View {
+        Section {
+            Picker(AppText.text("語音助理樣式"), selection: $style) {
+                ForEach(VoiceStyle.allCases) { option in
+                    Text(option.title).tag(option.rawValue)
+                }
+            }
+            .pickerStyle(.inline)
+            .labelsHidden()
+            .accessibilityIdentifier("voice-style-picker")
+        } header: {
+            Text(AppText.text("語音助理樣式"))
+        } footer: {
+            Text(AppText.text("邊框光暈：螢幕邊緣發光，一邊看地圖一邊說，下方小卡片即時顯示聽到的話。全螢幕：專心說話的獨立畫面。"))
+        }
+    }
+}
+
 private struct OnlineUnderstandingSettings: View {
     @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
     var body: some View {
