@@ -1524,11 +1524,11 @@ struct VoiceOrb: View {
                 // Glass core.
                 Circle().fill(.white.opacity(0.16))
                     .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: compact ? 0.5 : 1))
-                    .frame(width: side * 0.34, height: side * 0.34)
+                    .frame(width: side * (compact ? 0.5 : 0.34), height: side * (compact ? 0.5 : 0.34))
                     .scaleEffect(1 + (mood == .listening ? 0.14 * level : 0))
                     .animation(.spring(response: 0.18, dampingFraction: 0.6), value: level)
                 Image(systemName: symbol)
-                    .font(.system(size: side * 0.13, weight: .semibold))
+                    .font(.system(size: side * (compact ? 0.24 : 0.13), weight: .semibold))
                     .foregroundStyle(.white)
                     .symbolEffect(.variableColor.iterative, options: .repeating, isActive: mood == .listening && !reduceMotion)
                     .symbolEffect(.pulse, options: .repeating, isActive: mood == .thinking && !reduceMotion)
@@ -1543,7 +1543,7 @@ struct VoiceOrb: View {
     private func draw(in context: inout GraphicsContext, size: CGSize, time: Double, energy: Double) {
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
         // Kept well inside the canvas so the blur never shows a square edge.
-        let radius = min(size.width, size.height) / 2 * 0.56
+        let radius = min(size.width, size.height) / 2 * (compact ? 0.72 : 0.56)
         let speed = mood == .thinking ? 2.6 : mood == .listening ? 0.8 + 1.6 * energy : 0.4
         let spread = radius * (mood == .thinking ? 0.32 : 0.12 + 0.24 * energy)
         let breathe = reduceMotion ? 0 : sin(time * 1.6)

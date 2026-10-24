@@ -112,8 +112,8 @@ final class AIUITests: XCTestCase {
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = "Edge glow asks for the microphone"; shot.lifetime = .keepAlways; add(shot)
         app.buttons["voice-type"].tap()
-        // The route panel opens with the typing sheet.
-        let input = app.textFields["ai-request"].exists ? app.textFields["ai-request"] : app.textViews["ai-request"]
+        // The route panel opens with the typing sheet (a text field or a text view).
+        let input = app.descendants(matching: .any).matching(identifier: "ai-request").firstMatch
         XCTAssertTrue(input.waitForExistence(timeout: 15))
         XCTAssertFalse(app.buttons["voice-allow"].exists)
     }
