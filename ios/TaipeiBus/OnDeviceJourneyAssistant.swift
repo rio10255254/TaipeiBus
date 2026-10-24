@@ -573,9 +573,6 @@ enum ContextWindowRetry {
     }
 }
 
-#if canImport(FoundationModels)
-@available(iOS 26.0, *)
-@MainActor
 /// The rules answer what they are sure of at once; the on-device model reads the rest. Without a
 /// model, the rules' best reading is planned and the route screen is where it is corrected.
 @MainActor
@@ -611,6 +608,9 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }
 }
 
+#if canImport(FoundationModels)
+@available(iOS 26.0, *)
+@MainActor
 private final class FoundationJourneyConversation: JourneyAssistantConversation {
     private var session = FoundationJourneyConversation.session()
     private let context: JourneyAssistantContext
