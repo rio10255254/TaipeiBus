@@ -1648,12 +1648,15 @@ struct EdgeGlow: View {
     let mood: VoiceOrb.Mood
     var level: VoiceLevel = .silent
     var reduceMotion = false
+    /// For the small preview in Settings: its own corner and thinner, tighter glow.
+    var corner: CGFloat?
+    var scale: CGFloat = 1
     @State private var spin = false
     @State private var pulse = false
     var body: some View {
         GeometryReader { box in
             // Rounded like the display on Face ID iPhones; the blur hides small differences.
-            let corner: CGFloat = box.safeAreaInsets.bottom > 0 ? 54 : 0
+            let corner: CGFloat = self.corner ?? (box.safeAreaInsets.bottom > 0 ? 54 : 0)
             let width = box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing
             let height = box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom
             let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
@@ -1665,13 +1668,13 @@ struct EdgeGlow: View {
                 .frame(width: width, height: height)
             ZStack {
                 // Wide soft glow: follows the voice.
-                wheel.mask { shape.strokeBorder(lineWidth: 56).blur(radius: 34).drawingGroup() }
+                wheel.mask { shape.strokeBorder(lineWidth: 56 * scale).blur(radius: 34 * scale).drawingGroup() }
                     .modifier(GlowLevel(level: level, mood: mood))
                 // Middle glow: breathes while thinking.
-                wheel.mask { shape.strokeBorder(lineWidth: 18).blur(radius: 10).drawingGroup() }
+                wheel.mask { shape.strokeBorder(lineWidth: 18 * scale).blur(radius: 10 * scale).drawingGroup() }
                     .opacity(mood == .thinking ? (pulse ? 1 : 0.55) : 0.9)
                 // Crisp edge.
-                wheel.mask { shape.strokeBorder(lineWidth: 3) }
+                wheel.mask { shape.strokeBorder(lineWidth: max(1.5, 3 * scale)) }
             }
             .compositingGroup()
             .frame(width: width, height: height)
@@ -1866,6 +1869,113 @@ struct VoiceGlowView: View {
                 .buttonStyle(VoicePressStyle()).foregroundStyle(.secondary)
                 .accessibilityLabel(AppText.text("關閉")).accessibilityIdentifier("voice-close")
             }
+        }
+    }
+}
+
+/// Settings › 語音與 AI: the two styles as live miniature phones, side by side. Tap one to use it.
+struct VoiceStylePicker: View {
+    @Binding var selection: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        HStack(spacing: Metrics.gap) {
+            ForEach(VoiceStyle.allCases) { style in
+                option(style)
+            }
+        }
+        .padding(.vertical, Metrics.tight)
+    }
+    private func option(_ style: VoiceStyle) -> some View {
+        let chosen = selection == style.rawValue
+        return Button {
+            guard !chosen else { return }
+            UISelectionFeedbackGenerator().selectionChanged()
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
+        } label: {
+            VStack(spacing: 10) {
+                preview(style)
+                    .frame(height: 190)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .strokeBorder(chosen ? Color.accentColor : Color.primary.opacity(0.12), lineWidth: chosen ? 2.5 : 1)
+                    )
+                    .scaleEffect(chosen ? 1 : 0.96)
+                    .opacity(chosen ? 1 : 0.75)
+                HStack(spacing: 6) {
+                    Image(systemName: chosen ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                        .contentTransition(.symbolEffect(.replace))
+                    Text(style.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
+                }
+                Text(style.detail).font(.caption).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+        .accessibilityIdentifier("voice-style-" + style.rawValue)
+    }
+
+    /// A small phone: a calm map, then the style drawn on top of it.
+    @ViewBuilder private func preview(_ style: VoiceStyle) -> some View {
+        let phone = RoundedRectangle(cornerRadius: 22, style: .continuous)
+        ZStack {
+            MiniMap()
+            switch style {
+            case .glow:
+                EdgeGlow(mood: .listening, reduceMotion: reduceMotion, corner: 22, scale: 0.28)
+                VStack {
+                    Spacer()
+                    HStack(spacing: 6) {
+                        VoiceOrb(mood: .listening, reduceMotion: reduceMotion, compact: true).frame(width: 18, height: 18)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Capsule().fill(Color.primary.opacity(0.35)).frame(width: 34, height: 4)
+                            Capsule().fill(Color.primary.opacity(0.6)).frame(width: 52, height: 5)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(7)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .padding(8)
+                }
+            case .fullScreen:
+                Rectangle().fill(.ultraThinMaterial)
+                Color(uiColor: .systemBackground).opacity(0.45)
+                VStack(spacing: 10) {
+                    Spacer()
+                    VoiceOrb(mood: .listening, reduceMotion: reduceMotion, compact: true).frame(width: 52, height: 52)
+                    Capsule().fill(Color.primary.opacity(0.6)).frame(width: 58, height: 5)
+                    Capsule().fill(Color.primary.opacity(0.3)).frame(width: 40, height: 4)
+                    Spacer()
+                    Capsule().fill(Color.accentColor).frame(width: 64, height: 12)
+                        .padding(.bottom, 14)
+                }
+            }
+        }
+        .clipShape(phone)
+        .compositingGroup()
+    }
+}
+
+/// A few quiet streets and a park, so the previews look like the map screen.
+private struct MiniMap: View {
+    var body: some View {
+        ZStack {
+            Color(uiColor: .secondarySystemBackground)
+            RoundedRectangle(cornerRadius: 10).fill(Color.green.opacity(0.18))
+                .frame(width: 46, height: 38).offset(x: -18, y: -30)
+            Path { path in
+                path.move(to: CGPoint(x: -10, y: 40)); path.addLine(to: CGPoint(x: 200, y: 110))
+                path.move(to: CGPoint(x: 60, y: -10)); path.addLine(to: CGPoint(x: 30, y: 220))
+                path.move(to: CGPoint(x: -10, y: 150)); path.addLine(to: CGPoint(x: 200, y: 130))
+            }
+            .stroke(Color.primary.opacity(0.12), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+            Circle().fill(Color.blue).frame(width: 7, height: 7)
+                .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                .offset(x: 6, y: 4)
         }
     }
 }

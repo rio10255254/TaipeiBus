@@ -1841,17 +1841,9 @@ private struct VoiceStyleSettings: View {
     @AppStorage(VoiceStyle.key) private var style = VoiceStyle.glow.rawValue
     var body: some View {
         Section {
-            Picker(AppText.text("語音助理樣式"), selection: $style) {
-                ForEach(VoiceStyle.allCases) { option in
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(option.title)
-                        Text(option.detail).font(.caption).foregroundStyle(.secondary)
-                    }.tag(option.rawValue)
-                }
-            }
-            .pickerStyle(.inline)
-            .labelsHidden()
-            .accessibilityIdentifier("voice-style-picker")
+            VoiceStylePicker(selection: $style)
+                .listRowInsets(EdgeInsets(top: 8, leading: Metrics.margin, bottom: 12, trailing: Metrics.margin))
+                .accessibilityIdentifier("voice-style-picker")
         } header: {
             Text(AppText.text("語音助理樣式"))
         }
