@@ -259,6 +259,8 @@ import TransitCore
         let empty = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": #"{"destination":""}"#]]]])
         XCTAssertNil(try? OnlineJourneyReader.parse(empty), "No destination is not a reading")
         XCTAssertFalse(OnlineJourneyReader.configured, "Tests carry no key")
+        let fenced = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": "```json\n" + content + "\n```"]]]])
+        XCTAssertEqual(try OnlineJourneyReader.parse(fenced).destination, "國立臺灣大學", "A fenced reply is still read")
     }
     func testOnlineReadingIsCompletedByTheRules() {
         var online = JourneyReading(destination: "國立臺灣大學", destinationKind: .place, origin: "台北車站", originKind: .place)

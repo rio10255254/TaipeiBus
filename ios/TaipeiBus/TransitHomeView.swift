@@ -1714,7 +1714,7 @@ private struct OnlineUnderstandingSettings: View {
         } header: {
             Text(AppText.text("用一句話規劃"))
         } footer: {
-            Text(AppText.text("開啟時，你說或打的那一句話和今天日期會先傳給 Groq 上的開源模型（Meta Llama）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。",
+            Text(AppText.text("開啟時，你說或打的那一句話和今天日期會先傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。",
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
     }

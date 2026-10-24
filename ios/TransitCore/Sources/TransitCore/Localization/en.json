@@ -946,10 +946,10 @@
   "使用線上 AI 理解？": "Use online AI understanding?",
   "使用線上理解": "Use online understanding",
   "只在手機上理解": "Only on this phone",
-  "為了更準確，你說或打的那一句話和今天日期會傳給 Groq 上的開源模型（Meta Llama）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。": "For better accuracy, the sentence you say or type and today's date are sent to an open model (Meta Llama) on Groq. No location, saved trips or account is included, and the app keeps nothing. Without a connection, your phone understands it instead. You can change this in Info & Settings.",
+  "為了更準確，你說或打的那一句話和今天日期會傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不包含位置、常用行程或帳號，App 不保存。沒有網路時改用手機上的理解。之後可在資訊與設定更改。": "For better accuracy, the sentence you say or type and today's date are sent to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account is included, and the app keeps nothing. Without a connection, your phone understands it instead. You can change this in Info & Settings.",
   "使用線上 AI 理解": "Use online AI understanding",
   "同意使用線上 AI 理解後，行程那一句話和日期會傳給 Groq 上的開源模型讀懂；未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "If you allow online AI understanding, the trip sentence and the date are sent to an open model on Groq; otherwise, or without a connection, it is understood on your phone. Place keywords and route endpoints are handled by Apple Maps.",
-  "開啟時，你說或打的那一句話和今天日期會先傳給 Groq 上的開源模型（Meta Llama）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "When on, the sentence you say or type and today's date are first sent to an open model (Meta Llama) on Groq. No location, saved trips or account is sent; without a connection or once the allowance is used, the phone's model or rules are used. Free: %@ a day. Pro: %@ a day with a larger model.",
+  "開啟時，你說或打的那一句話和今天日期會先傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "When on, the sentence you say or type and today's date are first sent to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account is sent; without a connection or once the allowance is used, the phone's model or rules are used. Free: %@ a day. Pro: %@ a day with a larger model.",
   "更聰明的一句話規劃": "Smarter one-sentence planning",
   "用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。": "A larger online model reads your trip, more accurate with complex wording, and more uses each day.",
   "接著去%@": "Then to %@"

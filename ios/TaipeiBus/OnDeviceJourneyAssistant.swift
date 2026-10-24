@@ -608,7 +608,9 @@ enum OnlineJourneyReader {
     static func dailyLimit(pro: Bool) -> Int { pro ? 100 : 20 }
     /// Pro reads with the larger model, and the smaller one when its allowance is used up;
     /// everyone else with the smaller model, then the phone's own model.
-    static func models(pro: Bool) -> [String] { pro ? ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] : ["llama-3.1-8b-instant"] }
+    /// Groq retires models often (both Llama models ended on the free plan in August 2026 and answered
+    /// 404), so a missing model moves on to the next instead of giving up.
+    static func models(pro: Bool) -> [String] { pro ? ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] : ["openai/gpt-oss-20b"] }
     enum Failure: Error { case notConfigured, limit, http(Int), invalid }
 
     private static var key: String {
@@ -647,16 +649,30 @@ enum OnlineJourneyReader {
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
         var lastError: Error = Failure.invalid
+        let began = Date()
         for model in models(pro: pro) {
-            do { return try await read(text, at: formatter.string(from: now), model: model, session: session) }
-            catch Failure.http(let status) where [429, 498, 503].contains(status) || status >= 500 { lastError = Failure.http(status) }
+            do {
+                let reading = try await read(text, at: formatter.string(from: now), model: model, session: session)
+                JourneyDiagnostics.shared.record(String(format: "ai-online ok model=%@ %.1fs", model, Date().timeIntervalSince(began)))
+                return reading
+            } catch Failure.http(let status) where [400, 404, 413, 429, 498].contains(status) || status >= 500 {
+                // A retired model (404), a refused option (400) or a used-up allowance (429): try the next.
+                JourneyDiagnostics.shared.record("ai-online \(model) http(\(status))")
+                lastError = Failure.http(status)
+            } catch Failure.invalid {
+                JourneyDiagnostics.shared.record("ai-online \(model) invalid")
+                lastError = Failure.invalid
+            }
         }
         throw lastError
     }
 
     private static func read(_ text: String, at clock: String, model: String, session: URLSession) async throws -> JourneyReading {
         let body: [String: Any] = [
-            "model": model, "temperature": 0, "max_tokens": 160,
+            // gpt-oss reasons before answering; a little reasoning, kept out of the reply, is enough here,
+            // and the limit leaves room for it on top of the short JSON answer.
+            "model": model, "temperature": 0, "max_completion_tokens": 700,
+            "reasoning_effort": "low", "include_reasoning": false,
             "response_format": ["type": "json_object"],
             "messages": [["role": "system", "content": instructions],
                          ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)"]],
@@ -674,11 +690,14 @@ enum OnlineJourneyReader {
 
     /// The chat reply's content as a reading; anything unexpected is rejected rather than guessed.
     static func parse(_ data: Data) throws -> JourneyReading {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = root["choices"] as? [[String: Any]],
               let message = choices.first?["message"] as? [String: Any],
-              let content = (message["content"] as? String)?.data(using: .utf8),
-              let value = try JSONSerialization.jsonObject(with: content) as? [String: Any] else { throw Failure.invalid }
+              let reply = message["content"] as? String,
+              // Only the JSON object, even if a model wraps it in text or a code fence.
+              let open = reply.firstIndex(of: "{"), let close = reply.lastIndex(of: "}"), open < close,
+              let content = String(reply[open...close]).data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: content) as? [String: Any] else { throw Failure.invalid }
         func text(_ key: String) -> String {
             String(((value[key] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines).prefix(60))
         }
