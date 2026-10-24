@@ -30,12 +30,13 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
-      - name: Verify toolchain and offline core behavior
+      # TransitCore tests and the signed device build already run in every TestFlight
+      # upload, so this workflow only covers what is unique to it: the simulator AI tests.
+      - name: Verify toolchain and release copy
         run: |
           set -euo pipefail
           uname -m
           xcodebuild -version
-          swift test --package-path ios/TransitCore -j 3 2>&1 | tee "$RUNNER_TEMP/ai-core.log"
           python3 ios/release-check.py
           python3 ios/localization-check.py
       - uses: actions/cache@v4
@@ -101,7 +102,6 @@ jobs:
         with:
           name: ai-native-${{ github.sha }}
           path: |
-            ${{ runner.temp }}/ai-core.log
             ${{ runner.temp }}/ai-build.log
             ${{ runner.temp }}/ai-simulator.png
             ${{ runner.temp }}/ai-simulator.log
@@ -109,34 +109,5 @@ jobs:
             ${{ runner.temp }}/TaipeiBusAIUITests.log
             ${{ runner.temp }}/*.xcresult
             ${{ runner.temp }}/*-screenshots/
-          if-no-files-found: warn
-          retention-days: 14
-
-  device:
-    # Keep optimized device compilation independent of simulator lifecycle and
-    # expose each job's logs as soon as its own validation completes.
-    runs-on: macos-15-intel
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
-          key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
-      - name: Compile unsigned device release
-        run: |
-          set -euo pipefail
-          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
-            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
-            -derivedDataPath "$RUNNER_TEMP/ai-device-build" \
-            -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
-            CODE_SIGNING_ALLOWED=NO build 2>&1 | tee "$RUNNER_TEMP/ai-device-build.log"
-          python3 ios/ai/check-weak-link.py "$RUNNER_TEMP/ai-device-build/Build/Products/Release-iphoneos/TaipeiBus.app/TaipeiBus" | tee -a "$RUNNER_TEMP/ai-device-build.log"
-      - name: Preserve device validation evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-device-${{ github.sha }}
-          path: ${{ runner.temp }}/ai-device-build.log
           if-no-files-found: warn
           retention-days: 14

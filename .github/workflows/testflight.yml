@@ -255,6 +255,7 @@ jobs:
             BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" BUS_WIDGET_PROFILE_UUID="$BUS_WIDGET_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
+          python3 ios/ai/check-weak-link.py "$RUNNER_TEMP/TaipeiBus.xcarchive/Products/Applications/TaipeiBus.app/TaipeiBus"
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/TaipeiBus.xcarchive/dSYMs" "$RUNNER_TEMP/testflight-dSYMs.zip"
       - name: Upload archive to App Store Connect
