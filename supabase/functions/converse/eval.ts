@@ -46,7 +46,7 @@ const cases: Case[] = [
   { name: '查不到', state: map, utterance: '299 幾分到？', expect: 'lookup' },
   { name: '多站行程', state: map, utterance: '明天下午去西門町再去淡水', expect: 'plan_trip', time: '明天', then: '淡水' },
   { name: '記得時間與下一站', state: tomorrow, utterance: '改成少走路的', history: earlier, expect: 'plan_trip', time: '明天', then: '淡水' },
-  { name: '省錢', state: map, utterance: '從忠孝復興到淡水，車資最便宜要怎麼搭？', avoid: 'web_search', noAmounts: true },
+  { name: '省錢', state: map, utterance: '從忠孝復興到淡水，車資最便宜要怎麼搭？', expect: 'plan_trip', avoid: 'web_search', noAmounts: true },
   { name: '營業時間', state: map, utterance: '故宮開到幾點？', expect: 'show_place', avoid: 'web_search' },
   { name: '要上網', state: map, utterance: '今天淡水有什麼活動？', expect: 'web_search' },
   { name: '網路用完', state: map, utterance: '今天淡水有什麼活動？', web: '今天已用完，直接用你知道的回答', avoid: 'web_search', noAmounts: true },
