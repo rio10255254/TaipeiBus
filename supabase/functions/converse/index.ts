@@ -49,7 +49,7 @@ Deno.serve(async (request) => {
   }
   // Only the streamed turn can follow up with a web lookup.
   const message = userMessage(input, NO_WEB);
-  const claude = anthropicKey ? await askClaude(anthropicKey, message, false) : { failure: 'not configured' };
+  const claude = anthropicKey ? await askClaude(anthropicKey, message) : { failure: 'not configured' };
   if ('reply' in claude) {
     return Response.json({ ...claude, provider: 'anthropic', used, limit: DAILY_TURNS }, { headers: { ...headers, 'X-Assistant-Provider': 'anthropic' } });
   }
@@ -62,7 +62,7 @@ Deno.serve(async (request) => {
   return Response.json({ error: 'unavailable' }, { status: 502, headers: { ...headers, 'X-Assistant-Fallback': headerText(`${claude.failure}; ${groq.failure}`) } });
 });
 
-const NO_WEB = '今天已用完，直接用你知道的回答';
+const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
 
 async function webAllowanceLeft(admin: SupabaseClient, userId: string): Promise<number> {
   const { data } = await admin.from('assistant_web_usage').select('count').eq('user_id', userId).eq('day', taipeiDay()).maybeSingle();
@@ -115,7 +115,7 @@ function streamed(turn: Turn): Response {
         if (said) send({ said: true });
       };
       const message = userMessage(input, webLeft > 0 ? `今天還能用 ${webLeft} 次` : NO_WEB);
-      const claude = anthropicKey ? await streamClaude(anthropicKey, message, speak, webLeft > 0) : { failure: 'not configured', spoke: false };
+      const claude = anthropicKey ? await streamClaude(anthropicKey, message, speak) : { failure: 'not configured', spoke: false };
       if ('reply' in claude) {
         const search = claude.reply.actions.find((action) => action.type === 'web_search');
         if (!search) {
@@ -166,7 +166,7 @@ async function followUp(turn: Turn, first: Reply, model: string, query: string, 
     console.error('web lookup failed', found.failure);
   }
   // No lookup left, or it failed: answer from what Claude knows.
-  const known = await streamClaude(key, userMessage(turn.input, NO_WEB), speak, false);
+  const known = await streamClaude(key, userMessage(turn.input, NO_WEB), speak);
   if ('reply' in known) {
     const more = known.reply.actions.filter((action) => action.type !== 'web_search');
     return { reply: { ...known.reply, actions: [...actions, ...more].slice(0, 3), say: `${first.say}${known.reply.say}` }, model: known.model, provider: 'anthropic' };

@@ -1,6 +1,6 @@
 // Who answers a turn: Claude with the reply schema enforced, or Groq in JSON mode when Claude cannot.
 import { Anthropic, claudeClient, claudeModel, describe } from '../_shared/claude.ts';
-import { OFFLINE_REPLY_SCHEMA, readReply, REPLY_SCHEMA, type Reply, SYSTEM_PROMPT, WEB_PROMPT } from './reply.ts';
+import { readReply, REPLY_SCHEMA, type Reply, SYSTEM_PROMPT, WEB_PROMPT } from './reply.ts';
 import { SayReader } from './say.ts';
 
 /// The phone waits about eight seconds for a turn; Claude gets most of it, leaving time for Groq.
@@ -15,8 +15,7 @@ const STREAM_TIMEOUT_MS = 8000;
 
 export type Answer = { reply: Reply; model: string } | { failure: string };
 
-/// `web` false leaves web_search out of the actions Claude can choose.
-function request(message: string, web = true) {
+function request(message: string) {
   return {
     model: claudeModel(),
     max_tokens: 600,
@@ -26,7 +25,7 @@ function request(message: string, web = true) {
     // A short spoken answer inside the phone's wait: no extended thinking, low effort, and the
     // reply schema enforced so nothing but the reply comes back.
     thinking: { type: 'disabled' as const },
-    output_config: { effort: 'low' as const, format: { type: 'json_schema' as const, schema: web ? REPLY_SCHEMA : OFFLINE_REPLY_SCHEMA } },
+    output_config: { effort: 'low' as const, format: { type: 'json_schema' as const, schema: REPLY_SCHEMA } },
   };
 }
 
@@ -37,9 +36,9 @@ function answer(response: Anthropic.Message): Answer {
   return reply ? { reply, model: response.model } : { failure: 'unusable reply' };
 }
 
-export async function askClaude(apiKey: string, message: string, web = true): Promise<Answer> {
+export async function askClaude(apiKey: string, message: string): Promise<Answer> {
   try {
-    return answer(await claudeClient(apiKey, CLAUDE_TIMEOUT_MS).messages.create(request(message, web)));
+    return answer(await claudeClient(apiKey, CLAUDE_TIMEOUT_MS).messages.create(request(message)));
   } catch (error) {
     const failure = describe(error);
     console.error('claude failed', failure);
@@ -50,13 +49,12 @@ export async function askClaude(apiKey: string, message: string, web = true): Pr
 /// The same turn, streamed: `onSay` gets the words of `say` as Claude writes them, and `complete` once
 /// they are all there, before the actions are written. `spoke` tells the caller whether any words went
 /// out before a failure, when a second brain can no longer take over.
-export async function streamClaude(apiKey: string, message: string, onSay: (words: string, complete: boolean) => void,
-  web = true): Promise<Answer & { spoke: boolean }> {
+export async function streamClaude(apiKey: string, message: string, onSay: (words: string, complete: boolean) => void): Promise<Answer & { spoke: boolean }> {
   const controller = new AbortController();
   let spoke = false;
   const quiet = setTimeout(() => { if (!spoke) controller.abort(); }, FIRST_WORDS_MS);
   try {
-    const stream = claudeClient(apiKey, STREAM_TIMEOUT_MS).messages.stream(request(message, web), { signal: controller.signal });
+    const stream = claudeClient(apiKey, STREAM_TIMEOUT_MS).messages.stream(request(message), { signal: controller.signal });
     const say = new SayReader();
     let complete = false;
     for await (const event of stream) {
