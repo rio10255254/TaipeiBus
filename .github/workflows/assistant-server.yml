@@ -73,3 +73,27 @@ jobs:
             echo "Assistant secrets updated."
           fi
           supabase functions deploy understand --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Smoke test as a phone would
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          url="$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]')"; key="$(printf '%s' "$SUPABASE_PUBLISHABLE_KEY" | tr -d '[:space:]')"
+          # Anonymous sign-in, exactly like the app's first launch.
+          signup=$(curl -sS -X POST "$url/auth/v1/signup" -H "apikey: $key" -H 'Content-Type: application/json' -d '{"data":{}}')
+          token=$(printf '%s' "$signup" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
+          if [ -z "$token" ]; then echo "::error::Anonymous sign-in failed: $(printf '%s' "$signup" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("msg") or d.get("error_description") or d.get("message") or d)')"; exit 1; fi
+          echo "Anonymous sign-in works."
+          body='{"request":{"model":"openai/gpt-oss-20b","max_completion_tokens":300,"messages":[{"role":"system","content":"只輸出 JSON {\"destination\":\"\"}"},{"role":"user","content":"去台北車站"}]}}'
+          code=$(curl -sS -o "$RUNNER_TEMP/reply.json" -w '%{http_code}' -X POST "$url/functions/v1/understand" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$body")
+          echo "understand → HTTP $code"
+          python3 - "$RUNNER_TEMP/reply.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+          print("reply:", content[:200] if content else data)
+          PY
+          [ "$code" = "200" ]
