@@ -75,7 +75,8 @@ public struct VoiceReply: Equatable, Sendable {
     /// The server checks the same rules; the app checks again because the reply came from a model.
     public init?(json: [String: Any]) {
         let say = ((json["say"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !say.isEmpty, say.count <= 240 else { return nil }
+        // A web answer joins two replies' words; each sentence is still held to the spoken limit.
+        guard !say.isEmpty, say.count <= 800 else { return nil }
         var confirm = (json["confirm"] as? [String: Any]).flatMap(VoiceAction.init(json:))
         if confirm?.needsConfirmation == false { confirm = nil }
         var actions: [VoiceAction] = []
@@ -216,12 +217,20 @@ public struct SpokenSentences: Sendable {
     private static let stops: Set<Character> = ["。", "！", "？", "!", "?", "\n"]
     private static let closers: Set<Character> = ["」", "』", "）", ")", "\""]
 
-    /// Just past the first full stop and its closing quotes, once there is a sentence there.
+    /// Just past the first full stop and its closing quotes, once there is a sentence there. An English
+    /// full stop ends a sentence only once a space follows, so 3.5 km stays whole.
     private static func end(in text: String) -> String.Index? {
-        guard var index = text.firstIndex(where: { stops.contains($0) }) else { return nil }
-        index = text.index(after: index)
-        while index < text.endIndex, closers.contains(text[index]) { index = text.index(after: index) }
-        return index
+        var index = text.startIndex
+        while index < text.endIndex {
+            let character = text[index]
+            index = text.index(after: index)
+            guard stops.contains(character) || character == "." else { continue }
+            var end = index
+            while end < text.endIndex, closers.contains(text[end]) { end = text.index(after: end) }
+            if character != "." { return end }
+            if end < text.endIndex, text[end].isWhitespace { return end }
+        }
+        return nil
     }
 }
 
@@ -400,19 +409,24 @@ public enum VoiceConfirmation: Equatable, Sendable {
     private static let englishNo: Set<String> = ["no", "nope", "cancel", "not", "don't", "dont", "stop", "wait", "later"]
     private static let englishYes: Set<String> = ["yes", "yeah", "yep", "ok", "okay", "sure", "go", "start", "please", "alright", "right", "correct"]
 
+    /// A question is never a yes: 「是哪一站？」 and "where do I go" go to the server.
+    private static let questionWords = ["嗎", "哪", "幾", "什麼", "怎", "誰", "呢", "為何"]
+    private static let englishQuestions: Set<String> = ["what", "where", "when", "which", "who", "why", "how"]
+
     /// Only short answers count; anything longer is a new request for the server. English is read
     /// word by word, so "now" is not taken for "no".
     public static func read(_ text: String) -> VoiceConfirmation {
+        if text.contains("?") || text.contains("？") { return .unclear }
         let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
         if lowered.unicodeScalars.contains(where: { $0.properties.isAlphabetic && $0.isASCII }) {
             let words = lowered.split(whereSeparator: { !$0.isLetter && $0 != "'" }).map(String.init)
-            guard !words.isEmpty, words.count <= 4 else { return .unclear }
+            guard !words.isEmpty, words.count <= 4, !words.contains(where: englishQuestions.contains) else { return .unclear }
             if words.contains(where: englishNo.contains) { return .no }
             if words.contains(where: englishYes.contains) { return .yes }
             return .unclear
         }
         let plain = lowered.replacingOccurrences(of: " ", with: "")
-        guard !plain.isEmpty, plain.count <= 8 else { return .unclear }
+        guard !plain.isEmpty, plain.count <= 8, !questionWords.contains(where: plain.contains) else { return .unclear }
         if noWords.contains(where: plain.contains) { return .no }
         if plain.contains("不") { return .unclear }
         if yesWords.contains(where: plain.contains) { return .yes }

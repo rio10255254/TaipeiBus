@@ -33,7 +33,8 @@ Deno.serve(async (request) => {
   const input = readInput(body);
   if (!input) return reply({ error: 'invalid' }, 400);
 
-  const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined);
+  const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined,
+    typeof body.renewal === 'string' ? body.renewal : undefined);
   if (tier !== 'pro') return reply({ error: 'pro_required' }, 403);
   const { data: used, error: allowanceError } = await admin.rpc('take_voice_allowance', {
     p_user: userId, p_day: taipeiDay(), p_limit: DAILY_TURNS,
@@ -61,7 +62,7 @@ Deno.serve(async (request) => {
   return Response.json({ error: 'unavailable' }, { status: 502, headers: { ...headers, 'X-Assistant-Fallback': headerText(`${claude.failure}; ${groq.failure}`) } });
 });
 
-const NO_WEB = '今天已用完，直接用你知道的回答';
+const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
 
 async function webAllowanceLeft(admin: SupabaseClient, userId: string): Promise<number> {
   const { data } = await admin.from('assistant_web_usage').select('count').eq('user_id', userId).eq('day', taipeiDay()).maybeSingle();
@@ -86,13 +87,14 @@ type Turn = {
 ///
 /// A reply asking for web_search goes on in the same stream: its 「我上網查一下」 is said first, then the
 /// answer from the search, and the last event adds `sources` and the passages they quoted (`quoted`).
-/// Comments keep the connection alive while the search runs. Past the day's lookups, Claude is asked
+/// Comments keep the connection alive from the first byte, through the search. Past the day's lookups, Claude is asked
 /// again to answer from what it knows.
 function streamed(turn: Turn): Response {
   const { input, webLeft, used, anthropicKey, groqKey, headers } = turn;
   const encoder = new TextEncoder();
   // The rider cut in and the phone hung up: the rest of the turn is written to no one.
   let gone = false;
+  let keepAlive: ReturnType<typeof setInterval> | undefined;
   const body = new ReadableStream<Uint8Array>({
     async start(controller) {
       const write = (text: string) => {
@@ -104,6 +106,10 @@ function streamed(turn: Turn): Response {
         }
       };
       const send = (line: unknown) => write(`data: ${JSON.stringify(line)}\n\n`);
+      // Bytes from the start and every few seconds, so the phone's idle timeout never fires while
+      // Claude, then Groq, or a web search is still working.
+      write(': ok\n\n');
+      keepAlive = setInterval(() => write(': working\n\n'), 3000);
       const speak = (say: string, said: boolean) => {
         if (say) send({ say });
         if (said) send({ said: true });
@@ -115,7 +121,7 @@ function streamed(turn: Turn): Response {
         if (!search) {
           send({ reply: claude.reply, model: claude.model, provider: 'anthropic', used, limit: DAILY_TURNS });
         } else {
-          send({ ...await followUp(turn, claude.reply, claude.model, search.query, speak, write), used, limit: DAILY_TURNS });
+          send({ ...await followUp(turn, claude.reply, claude.model, search.query, speak, () => gone), used, limit: DAILY_TURNS });
         }
       } else if (claude.spoke) {
         send({ error: 'interrupted' });
@@ -129,10 +135,12 @@ function streamed(turn: Turn): Response {
           send({ error: 'unavailable' });
         }
       }
+      clearInterval(keepAlive);
       if (!gone) controller.close();
     },
     cancel() {
       gone = true;
+      clearInterval(keepAlive);
     },
   });
   return new Response(body, { headers: { ...headers, 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-store' } });
@@ -141,13 +149,13 @@ function streamed(turn: Turn): Response {
 /// The rest of a turn that asked for the web: the answer from a search while lookups remain, otherwise
 /// Claude's own knowledge. Returns the last event, with the reply's words and actions joined up.
 async function followUp(turn: Turn, first: Reply, model: string, query: string, speak: (say: string, said: boolean) => void,
-  write: (text: string) => void): Promise<Record<string, unknown>> {
+  hungUp: () => boolean): Promise<Record<string, unknown>> {
   const actions = first.actions.filter((action) => action.type !== 'web_search');
   const key = turn.anthropicKey!;
+  // The rider cut in during 「我上網查一下」: no lookup is spent on an answer no one will hear.
+  if (hungUp()) return { reply: { ...first, actions }, model, provider: 'anthropic' };
   if (turn.webLeft > 0 && await turn.takeWeb() !== null) {
-    const keepAlive = setInterval(() => write(': searching\n\n'), 3000);
-    const found = await searchWeb(key, webQuestion(turn.input, query), (words) => speak(words, false))
-      .finally(() => clearInterval(keepAlive));
+    const found = await searchWeb(key, webQuestion(turn.input, query), (words) => speak(words, false));
     if ('say' in found) {
       speak('', true);
       return {

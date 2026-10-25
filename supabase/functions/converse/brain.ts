@@ -9,8 +9,8 @@ const GROQ_TIMEOUT_MS = 3000;
 const GROQ_MODEL = 'openai/gpt-oss-120b';
 
 /// The phone speaks the first sentence as soon as it arrives; if Claude has said nothing by then, Groq
-/// still has time to answer.
-const FIRST_WORDS_MS = 4500;
+/// answers instead. The stream keeps the phone's connection alive meanwhile.
+const FIRST_WORDS_MS = 5500;
 const STREAM_TIMEOUT_MS = 8000;
 
 export type Answer = { reply: Reply; model: string } | { failure: string };

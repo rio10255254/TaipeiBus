@@ -21,8 +21,9 @@ struct VoiceChatHost: ViewModifier {
             .onChange(of: chat.active && !chat.askingConsent) { _, visible in
                 if visible { VoiceChatOverlay.shared.show(chat) } else { VoiceChatOverlay.shared.hide() }
             }
-            // The microphone and voice stop with the app; the next tap starts a new conversation.
-            .onChange(of: scenePhase) { _, phase in if phase != .active, chat.active { chat.end() } }
+            // The microphone and voice stop when the app leaves the screen; the next tap starts a new
+            // conversation. Inactive is not enough: iOS's permission prompts and Control Center pass through it.
+            .onChange(of: scenePhase) { _, phase in if phase == .background, chat.active { chat.end() } }
             .alert(AppText.text("開啟語音對話？"), isPresented: Binding(
                 get: { chat.askingConsent },
                 set: { if !$0, chat.askingConsent { chat.answerConsent(false) } })) {

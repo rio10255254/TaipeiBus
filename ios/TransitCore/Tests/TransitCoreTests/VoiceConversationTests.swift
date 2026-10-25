@@ -62,7 +62,7 @@ final class VoiceConversationTests: XCTestCase {
 
     func testNothingOrTooMuchToSayIsUnusable() {
         XCTAssertNil(VoiceReply(json: ["say": "  "]))
-        XCTAssertNil(VoiceReply(json: ["say": String(repeating: "很", count: 241)]))
+        XCTAssertNil(VoiceReply(json: ["say": String(repeating: "很", count: 801)]))
     }
 
     // MARK: Spoken answer
@@ -146,6 +146,12 @@ final class VoiceConversationTests: XCTestCase {
         for text in ["How long now", "Take me to Taipei 101 please"] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
     }
 
+    func testAQuestionIsNotAYes() {
+        for text in ["是哪一站下車？", "是哪一站下車", "可以走路去嗎", "對嗎", "好，幾點到", "是什麼車", "Where do I go", "OK?", "Which one is right"] {
+            XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text)
+        }
+    }
+
     func testHistoryKeepsTheLastEightTurns() {
         var history = VoiceHistory()
         for turn in 1...10 { history.append(user: "u\(turn)", said: "s\(turn)") }
@@ -169,6 +175,14 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertEqual(sentences.push("1}。671 "), ["307 往板橋，{r1}。"])
         XCTAssertEqual(sentences.push("{r2}。要跟車嗎？"), ["671 {r2}。", "要跟車嗎？"])
         XCTAssertEqual(sentences.finish(), "")
+    }
+
+    func testAnEnglishSentenceEndsAtAFullStopAndASpace() {
+        var sentences = SpokenSentences()
+        XCTAssertEqual(sentences.push("Bus 307 is {r1}."), [])
+        XCTAssertEqual(sentences.push(" It is 3.5 km"), ["Bus 307 is {r1}."])
+        XCTAssertEqual(sentences.push(" away. Want to \"follow it.\" Then"), ["It is 3.5 km away.", "Want to \"follow it.\""])
+        XCTAssertEqual(sentences.finish(), "Then")
     }
 
     func testTheLastSentenceWithoutAStopComesOutAtTheEnd() {

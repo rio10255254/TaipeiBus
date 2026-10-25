@@ -97,6 +97,8 @@ final class ProPurchases: ObservableObject {
         var signed: String?
         var renewal: Product.SubscriptionInfo.RenewalInfo?
         var grace = false
+        /// The signed renewal info in billing grace: the server's proof that Pro goes on past the period.
+        var signedRenewal: String?
         for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let transaction) = result, recognizes(transaction),
                   transaction.revocationDate == nil, !transaction.isUpgraded else { continue }
@@ -107,7 +109,7 @@ final class ProPurchases: ObservableObject {
         // snapshot. If Apple's status query is temporarily unavailable, retain
         // the verified current entitlement (including offline/grace access).
         if let info = products.values.first?.subscription, let statuses = try? await info.status {
-            current = nil; signed = nil
+            current = nil; signed = nil; signedRenewal = nil
             for status in statuses {
                 guard status.state == .subscribed || status.state == .inGracePeriod,
                       case .verified(let value) = status.transaction,
@@ -116,6 +118,7 @@ final class ProPurchases: ObservableObject {
                 if current == nil || value.purchaseDate > current!.purchaseDate {
                     current = value; signed = status.transaction.jwsRepresentation
                     renewal = details; grace = status.state == .inGracePeriod
+                    signedRenewal = grace ? status.renewalInfo.jwsRepresentation : nil
                 }
             }
         }
@@ -123,6 +126,7 @@ final class ProPurchases: ObservableObject {
         activePlan = current.flatMap { item in ProPlan.allCases.first { $0.productID == item.productID } }
         hasPro = current != nil; checkingAccess = false
         AssistantServer.proof.value = current == nil ? nil : signed
+        AssistantServer.renewal.value = current == nil ? nil : signedRenewal
         if hasPro && awaitingApproval { awaitingApproval = false; message = nil }
         isInTrial = false
         if let current, current.offerType == .introductory {

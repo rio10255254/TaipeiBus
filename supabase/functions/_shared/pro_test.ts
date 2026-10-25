@@ -3,6 +3,7 @@ import { crypto } from 'jsr:@std/crypto@1';
 import { encodeHex } from 'jsr:@std/encoding@1/hex';
 import { APPLE_ROOT_CA, APPLE_ROOT_CA_G2, APPLE_ROOT_CA_G3 } from './apple_roots.ts';
 import { X509Certificate } from 'node:crypto';
+import * as x509 from '@peculiar/x509';
 import { verifyTransaction } from './pro.ts';
 
 // Sandbox transactions for Pro monthly, valid until 2099, signed by test chains shaped like Apple's (the
@@ -140,4 +141,56 @@ Deno.test('a changed transaction is not Pro', async () => {
   const forged = btoa(JSON.stringify({ ...claims, productId: 'com.rio10255254.TaipeiBus.pro.yearly' }))
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
   assertEquals(await verifyTransaction(`${header}.${forged}.${signature}`, [APPLE_SHAPED_ROOT]), null);
+});
+
+// Billing grace: a chain made here, its transaction already past its period and its renewal info
+// saying when grace ends.
+const ES256 = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' };
+const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const encodeUrl = (bytes: Uint8Array) => encode(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+async function graceChain() {
+  const notBefore = new Date(Date.now() - 86_400_000), notAfter = new Date(Date.now() + 86_400_000);
+  const marker = (oid: string) => new x509.Extension(oid, false, new Uint8Array([5, 0]));
+  const rootKeys = await crypto.subtle.generateKey(ES256, true, ['sign', 'verify']) as CryptoKeyPair;
+  const root = await x509.X509CertificateGenerator.createSelfSigned({
+    serialNumber: '01', name: 'CN=TaipeiBus Grace Root', notBefore, notAfter, keys: rootKeys, signingAlgorithm: ES256,
+    extensions: [new x509.BasicConstraintsExtension(true, undefined, true)],
+  });
+  const middleKeys = await crypto.subtle.generateKey(ES256, true, ['sign', 'verify']) as CryptoKeyPair;
+  const middle = await x509.X509CertificateGenerator.create({
+    serialNumber: '02', subject: 'CN=TaipeiBus Grace WWDR', issuer: root.subject, notBefore, notAfter,
+    publicKey: middleKeys.publicKey, signingKey: rootKeys.privateKey, signingAlgorithm: ES256,
+    extensions: [new x509.BasicConstraintsExtension(true, undefined, true), marker('1.2.840.113635.100.6.2.1')],
+  });
+  const leafKeys = await crypto.subtle.generateKey(ES256, true, ['sign', 'verify']) as CryptoKeyPair;
+  const leaf = await x509.X509CertificateGenerator.create({
+    serialNumber: '03', subject: 'CN=TaipeiBus Grace Leaf', issuer: middle.subject, notBefore, notAfter,
+    publicKey: leafKeys.publicKey, signingKey: middleKeys.privateKey, signingAlgorithm: ES256,
+    extensions: [new x509.BasicConstraintsExtension(false, undefined, true), marker('1.2.840.113635.100.6.11.1')],
+  });
+  const x5c = [leaf, middle, root].map((certificate) => encode(new Uint8Array(certificate.rawData)));
+  const sign = async (claims: Record<string, unknown>) => {
+    const text = (value: unknown) => encodeUrl(new TextEncoder().encode(JSON.stringify(value)));
+    const signed = `${text({ alg: 'ES256', x5c })}.${text({ signedDate: Date.now(), ...claims })}`;
+    const signature = await crypto.subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, leafKeys.privateKey, new TextEncoder().encode(signed));
+    return `${signed}.${encodeUrl(new Uint8Array(signature))}`;
+  };
+  return { root: x5c[2], sign };
+}
+
+Deno.test('a subscription in billing grace stays Pro until grace ends', async () => {
+  const { root, sign } = await graceChain();
+  const lapsed = await sign({
+    originalTransactionId: '2000000000000009', bundleId: 'com.rio10255254.TaipeiBus', environment: 'Sandbox',
+    productId: 'com.rio10255254.TaipeiBus.pro.monthly', expiresDate: Date.now() - 3_600_000,
+  });
+  const graceEnds = Date.now() + 6 * 86_400_000;
+  const renewal = await sign({ originalTransactionId: '2000000000000009', environment: 'Sandbox', gracePeriodExpiresDate: graceEnds });
+  assertEquals(await verifyTransaction(lapsed, [root]), null, 'past its period without renewal info');
+  assertEquals(await verifyTransaction(lapsed, [root], renewal), { originalTransactionId: '2000000000000009', expiresDate: graceEnds });
+  const ended = await sign({ originalTransactionId: '2000000000000009', environment: 'Sandbox', gracePeriodExpiresDate: Date.now() - 1 });
+  assertEquals(await verifyTransaction(lapsed, [root], ended), null, 'grace over');
+  const another = await sign({ originalTransactionId: '2000000000000010', environment: 'Sandbox', gracePeriodExpiresDate: graceEnds });
+  assertEquals(await verifyTransaction(lapsed, [root], another), null, 'another subscription\'s renewal');
 });

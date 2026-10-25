@@ -838,6 +838,9 @@ enum AssistantServer {
     /// A signed App Store transaction for an active Pro subscription; the server checks it with Apple's
     /// certificates before allowing Pro's larger model and allowance.
     static let proof = Shared()
+    /// The signed renewal info while the subscription is in billing grace, so the server keeps Pro
+    /// past the transaction's period until grace ends.
+    static let renewal = Shared()
     /// A string shared across threads.
     final class Shared: @unchecked Sendable {
         private let lock = NSLock()
@@ -919,6 +922,7 @@ enum AssistantServer {
         guard let base = baseURL, let url = URL(string: base + "/functions/v1/" + function) else { throw OnlineJourneyReader.Failure.notConfigured }
         var body = body
         if let jws = proof.value { body["proof"] = jws }
+        if let jws = renewal.value { body["renewal"] = jws }
         return (url, try JSONSerialization.data(withJSONObject: body))
     }
 

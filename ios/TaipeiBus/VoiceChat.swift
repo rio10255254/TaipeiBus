@@ -62,12 +62,24 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         if !announcement.isEmpty {
             let text = announcement
             announcement = ""
+            // Until VoiceOver says it has finished, so listening does not start over it; a long
+            // pause covers an announcement that never reports back.
+            let finished = NotificationCenter.default.notifications(named: UIAccessibility.announcementDidFinishNotification)
             UIAccessibility.post(notification: .announcement, argument: text)
-            try? await Task.sleep(for: .seconds(min(8, 0.6 + Double(text.count) * 0.2)))
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask { for await _ in finished { return } }
+                group.addTask { try? await Task.sleep(for: .seconds(min(30, 2 + Double(text.count) * 0.35))) }
+                await group.next()
+                group.cancelAll()
+            }
             return
         }
         guard !queued.isEmpty else { return }
-        await withCheckedContinuation { continuation in done = continuation }
+        await withCheckedContinuation { continuation in
+            // Only one wait at a time: an earlier one is let go rather than left hanging.
+            done?.resume()
+            done = continuation
+        }
     }
 
     func stop() {
@@ -148,12 +160,16 @@ final class VoiceConversation: ObservableObject {
     /// keeps the one-sentence planner.
     var handlesMicrophone: Bool { Self.available && model.purchases.hasPro && Self.consent != false }
 
-    private static let goodbyes = ["謝謝", "沒事了", "沒有了", "不用了", "結束", "掰掰", "再見", "好了"]
+    private static let goodbyes = ["謝謝", "沒事了", "沒有了", "不用了", "掰掰", "再見", "好了"]
+    /// 「結束」 alone ends the conversation; 「結束導航」 is a request about the trip.
+    private static let endings: Set<String> = ["結束", "結束吧", "結束對話", "結束了"]
     private static let englishGoodbyes = ["thanks", "thank you", "bye", "that's all", "that is all", "never mind", "nothing else"]
 
     private func isGoodbye(_ text: String) -> Bool {
         let lowered = text.lowercased()
         if lowered.count <= 20, Self.englishGoodbyes.contains(where: lowered.contains) { return true }
+        let plain = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if Self.endings.contains(plain) { return true }
         return text.count <= 6 && Self.goodbyes.contains(where: text.contains)
     }
 
@@ -220,8 +236,11 @@ final class VoiceConversation: ObservableObject {
         let hints = VoiceStateBuilder(model: model).hints
         Task {
             await speech.start(language: language, hints: hints, unheard: { [weak self] in
-                // Silence after an answer simply ends the conversation.
-                self?.end()
+                guard let self else { return }
+                // Silence after an answer simply ends the conversation; a microphone or recognition
+                // problem is said first, so the panel does not just vanish.
+                guard self.speech.failed, let problem = self.speech.problem else { return self.end() }
+                self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
                 let corrected = self.names?.correct(text) ?? text
@@ -233,6 +252,9 @@ final class VoiceConversation: ObservableObject {
 
     private func handle(_ text: String) {
         guard active else { return }
+        // A tapped choice can arrive while the last answer is still being spoken; that answer's wait
+        // must not go on to open the microphone over this one.
+        work?.cancel(); work = nil
         heard = text
         if let pending {
             switch VoiceConfirmation.read(text) {
@@ -517,8 +539,9 @@ struct VoiceStateBuilder {
             screen = "地圖"
         }
 
-        // Arrivals at the station on screen: the same times its card shows.
-        if !planner.started, let station = model.mapLabelStation {
+        // Arrivals at the station on screen: the same times its card shows, during a trip too, for a
+        // station the rider looked up.
+        if let station = model.mapLabelStation {
             names.append(station.localizedName)
             for row in StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: now).prefix(6) {
                 guard let route = row.route else { continue }

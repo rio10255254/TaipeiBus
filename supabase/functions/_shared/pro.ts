@@ -18,23 +18,24 @@ const APPLE_WWDR_INTERMEDIATE = '1.2.840.113635.100.6.2.1';
 
 export type Tier = 'pro' | 'free';
 
-/// Pro when the phone sent a signed App Store transaction for an active Pro subscription. A check is
-/// remembered until that subscription period ends, so most requests skip it.
+/// Pro when the phone sent a signed App Store transaction for an active Pro subscription, or one in
+/// billing grace with its signed renewal info. A check is remembered until that subscription period
+/// (or grace) ends, so most requests skip it.
 /// A failed check never fails the request: the phone is simply served as free this time.
-export async function tierOf(admin: SupabaseClient, userId: string, proof?: string): Promise<Tier> {
+export async function tierOf(admin: SupabaseClient, userId: string, proof?: string, renewal?: string): Promise<Tier> {
   try {
-    return await checkTier(admin, userId, proof);
+    return await checkTier(admin, userId, proof, renewal);
   } catch (error) {
     console.error('pro check failed', error instanceof Error ? error.message : String(error));
     return 'free';
   }
 }
 
-async function checkTier(admin: SupabaseClient, userId: string, proof?: string): Promise<Tier> {
+async function checkTier(admin: SupabaseClient, userId: string, proof?: string, renewal?: string): Promise<Tier> {
   const { data: cached } = await admin.from('assistant_pro').select('expires_at').eq('user_id', userId).maybeSingle();
   if (cached && new Date(cached.expires_at).getTime() > Date.now()) return 'pro';
   if (!proof || proof.length > 20000) return 'free';
-  const transaction = await verifyTransaction(proof);
+  const transaction = await verifyTransaction(proof, APPLE_ROOTS, renewal && renewal.length <= 20000 ? renewal : undefined);
   if (!transaction) return 'free';
   await admin.from('assistant_pro').upsert({
     user_id: userId,
@@ -50,15 +51,23 @@ export type Pro = { originalTransactionId: string; expiresDate: number };
 /// The active Pro subscription a signed App Store transaction proves, or null. The checks follow
 /// Apple's App Store Server Library: a three-certificate chain from one of `roots` to an intermediate
 /// and leaf carrying Apple's markers, every certificate valid when Apple signed the transaction, and
-/// the leaf's ES256 signature over it.
-export async function verifyTransaction(jws: string, roots: string[] = APPLE_ROOTS): Promise<Pro | null> {
+/// the leaf's ES256 signature over it. A subscription past its period still counts during billing grace,
+/// until the `gracePeriodExpiresDate` of its renewal info, signed the same way.
+export async function verifyTransaction(jws: string, roots: string[] = APPLE_ROOTS, renewal?: string): Promise<Pro | null> {
   try {
     const [header, payload] = await verifiedJWS(jws, roots);
     if (header.alg !== 'ES256') throw new Error(`alg ${header.alg}`);
     if (payload.bundleId !== BUNDLE_ID || !ENVIRONMENTS.has(payload.environment)) throw new Error(`app ${payload.bundleId} ${payload.environment}`);
     if (!PRO_PRODUCTS.has(payload.productId)) return null;
-    if (payload.revocationDate || !payload.expiresDate || payload.expiresDate <= Date.now()) return null;
-    return { originalTransactionId: String(payload.originalTransactionId ?? ''), expiresDate: payload.expiresDate };
+    if (payload.revocationDate || !payload.expiresDate) return null;
+    const originalTransactionId = String(payload.originalTransactionId ?? '');
+    if (payload.expiresDate > Date.now()) return { originalTransactionId, expiresDate: payload.expiresDate };
+    if (!renewal) return null;
+    const [renewalHeader, info] = await verifiedJWS(renewal, roots);
+    if (renewalHeader.alg !== 'ES256' || String(info.originalTransactionId ?? '') !== originalTransactionId ||
+      info.environment !== payload.environment) throw new Error('renewal info of another subscription');
+    const grace = Number(info.gracePeriodExpiresDate) || 0;
+    return grace > Date.now() ? { originalTransactionId, expiresDate: grace } : null;
   } catch (error) {
     console.warn('transaction not verified', error instanceof Error ? error.message : String(error));
     return null;
