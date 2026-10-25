@@ -313,3 +313,71 @@ struct TileLabelStyle: LabelStyle {
 extension LabelStyle where Self == TileLabelStyle {
     static var tile: TileLabelStyle { TileLabelStyle() }
 }
+
+/// A list or search with nothing to show: a symbol, what happened and what to try next,
+/// in the manner of ContentUnavailableView but following the app's text scale. Callers
+/// pass text that is already localized.
+struct EmptyStateView<Actions: View>: View {
+    @Environment(\.liveSettings) private var live
+    private let symbol: String
+    private let title: String?
+    private let message: String
+    private let actions: Actions
+    init(symbol: String, title: String? = nil, message: String, @ViewBuilder actions: () -> Actions) {
+        self.symbol = symbol; self.title = title; self.message = message; self.actions = actions()
+    }
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).liveFont(.title, weight: .medium).foregroundStyle(MapChrome.secondaryText)
+                .padding(.bottom, 4).accessibilityHidden(true)
+            if let title {
+                Text(title).liveFont(.headline).multilineTextAlignment(.center).lineLimit(2)
+            }
+            Text(message).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            actions.padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
+    }
+}
+extension EmptyStateView where Actions == EmptyView {
+    init(symbol: String, title: String? = nil, message: String) {
+        self.init(symbol: symbol, title: title, message: message) { EmptyView() }
+    }
+}
+
+/// Grey rows in the shape of the list that is loading, so the layout is already in place
+/// and nothing jumps when the content arrives. They pulse gently unless Reduce Motion is on.
+struct LoadingRows: View {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    var count = 3
+    /// Spoken in place of the placeholder rows, already localized.
+    let label: String
+    @State private var dimmed = false
+    var body: some View {
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<count, id: \.self) { index in
+                HStack(spacing: 12) {
+                    live.shape(.badge).frame(width: 46, height: 28)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Capsule().frame(width: index.isMultiple(of: 2) ? 148 : 116, height: 11)
+                        Capsule().frame(width: index.isMultiple(of: 2) ? 92 : 128, height: 9)
+                    }
+                    Spacer(minLength: 0)
+                    Capsule().frame(width: 38, height: 11)
+                }
+                .padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
+                if index < count - 1 { Divider() }
+            }
+        }
+        .foregroundStyle(Color(uiColor: .systemFill))
+        .opacity(dimmed ? 0.5 : 1)
+        .animation(reduced ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dimmed)
+        .onAppear { dimmed = !reduced }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+}

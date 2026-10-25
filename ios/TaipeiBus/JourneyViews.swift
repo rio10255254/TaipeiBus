@@ -952,23 +952,31 @@ struct JourneyOptionsView: View {
         }
         .onChange(of: planner.selectedID, initial: true) { _, _ in planner.retainVisiblePreview() }
     }
-    private func content(at date: Date) -> some View {
+    @ViewBuilder private func content(at date: Date) -> some View {
+        // Before the first option arrives, placeholder rows hold the space the options will
+        // fill; once some are listed, a further search shows only the small progress row.
+        let awaitingFirst = planner.options.isEmpty && planner.message == nil
+            && (planner.planning || model.loading || planner.checkingWalks)
+        let noOptions = planner.emptyOptionsMessage != nil && !model.loading
         VStack(alignment: .leading, spacing: 0) {
-            if planner.planning || model.loading {
+            if awaitingFirst {
+                LoadingRows(count: compact ? 2 : 3, label: live.text("查詢中"))
+                    .accessibilityIdentifier("journey-options-loading")
+            } else if planner.planning || model.loading {
                 HStack(spacing: 10) { ProgressView(); Text(live.text("查詢中")).liveFont(.subheadline) }.padding(.vertical, 8)
             }
             if let message = planner.message ?? (model.loading ? nil : planner.emptyOptionsMessage) {
-                Text(live.text(message)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText)
-                    .accessibilityIdentifier("journey-empty-options-message")
-            }
-            if planner.emptyOptionsMessage != nil, !model.loading {
-                Button { planner.plan(metadata:model.metadata) } label: {
-                    Label(AppText.text("重新查詢"),systemImage:"arrow.clockwise").frame(minHeight:44)
-                }.buttonStyle(.bordered).accessibilityIdentifier("journey-retry-search")
-                Button { planner.openAppleTransit() } label: {
-                    Label(AppText.text("其他交通方式"), systemImage: "arrow.up.right.square").frame(minHeight:44)
-                }.buttonStyle(.bordered).padding(.top, 8)
-                    .accessibilityIdentifier("journey-empty-other-transport")
+                if noOptions {
+                    EmptyStateView(symbol: "bus", message: live.text(message)) {
+                        ViewThatFits {
+                            HStack(spacing: 10) { emptyOptionActions }
+                            VStack(spacing: 8) { emptyOptionActions }
+                        }.liveFont(.subheadline, weight: .semibold)
+                    }.accessibilityElement(children: .contain).accessibilityIdentifier("journey-empty-options-message")
+                } else {
+                    Text(live.text(message)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText)
+                        .accessibilityIdentifier("journey-empty-options-message")
+                }
             }
             if compact, !planner.options.isEmpty {
                 if spacious, let option = planner.selected ?? planner.featuredOptions.first {
@@ -1061,6 +1069,14 @@ struct JourneyOptionsView: View {
                 }.accessibilityIdentifier("journey-refresh-options")
             }
         }
+    }
+    @ViewBuilder private var emptyOptionActions: some View {
+        Button { planner.plan(metadata:model.metadata) } label: {
+            Label(AppText.text("重新查詢"),systemImage:"arrow.clockwise").frame(minHeight:44)
+        }.buttonStyle(.bordered).accessibilityIdentifier("journey-retry-search")
+        Button { planner.openAppleTransit() } label: {
+            Label(AppText.text("其他交通方式"), systemImage: "arrow.up.right.square").frame(minHeight:44)
+        }.buttonStyle(.bordered).accessibilityIdentifier("journey-empty-other-transport")
     }
     private func usable(_ option: JourneyOption) -> Bool {
         planner.canUse(option)

@@ -888,14 +888,16 @@ private struct TransitPanel: View {
                 browseHeader
             }
             if model.loading {
-                VStack(spacing: 12) {
-                    ProgressView(); Text(live.text("取得站牌與路線中")).liveFont(.subheadline).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                LoadingRows(count: 5, label: live.text("取得站牌與路線中"))
+                    .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if model.loadError != nil, model.metadata.routes.isEmpty {
-                VStack(spacing:12) {
-                    Text(live.text("更新中")).liveFont(.subheadline).foregroundStyle(.secondary)
+                // Without route data nothing works, so say so plainly instead of "updating".
+                EmptyStateView(symbol: "wifi.exclamationmark", title: live.text("暫時無法取得站牌與路線"),
+                               message: live.text("請確認網路連線後重新整理。")) {
                     Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
-                }.frame(maxWidth:.infinity,maxHeight:.infinity)
+                        .accessibilityIdentifier("browse-load-retry")
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1048,8 +1050,10 @@ private struct TransitPanel: View {
 
     @ViewBuilder private var browseResults: some View {
         if model.mode == .stops {
-            let stations = stationResultQuery == model.query ? stationResults : []
-            if stations.isEmpty { emptyResult }
+            let current = stationResultQuery == model.query
+            let stations = current ? stationResults : []
+            // A search still running for the latest text is not an empty result.
+            if stations.isEmpty, current { emptyResult }
             ForEach(stations) { station in
                 if model.query.isEmpty, let first = stations.first(where: { !model.recentStationIDs.contains($0.id) && !model.favorites.contains($0.id) }), first.id == station.id {
                     Text(AppText.text("地圖附近")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 12)
@@ -1102,9 +1106,15 @@ private struct TransitPanel: View {
         }
     }
 
-    private var emptyResult: some View {
-        Text(live.text(model.mode == .stops && model.query.isEmpty ? "這附近沒有站牌，試著移動地圖" : "找不到符合的資料，試試其他名稱"))
-            .liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
+    @ViewBuilder private var emptyResult: some View {
+        if model.mode == .stops, model.query.isEmpty {
+            EmptyStateView(symbol: "mappin.slash", title: live.text("這附近沒有站牌"), message: live.text("移動地圖看看其他區域。"))
+                .accessibilityElement(children: .combine).accessibilityIdentifier("browse-empty-nearby")
+        } else {
+            EmptyStateView(symbol: "magnifyingglass", title: model.query.isEmpty ? live.text("沒有符合的結果") : AppText.text("找不到「%@」", model.query),
+                           message: live.text(model.mode == .stops ? "試試站名、地址或英文站名。" : "試試路線號碼、起訖站或支線名稱。"))
+                .accessibilityElement(children: .combine).accessibilityIdentifier("browse-empty-results")
+        }
     }
 }
 
