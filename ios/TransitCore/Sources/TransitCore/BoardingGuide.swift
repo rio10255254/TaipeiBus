@@ -32,16 +32,20 @@ public struct BoardingGuide: Sendable {
     /// The official feed times a next bus that has no live position to list yet.
     public var nextBusWithoutPosition: Bool { approaches.isEmpty && (estimateSeconds ?? -1) >= 0 }
 
+    /// The official estimate puts the next bus within a minute of the boarding stop,
+    /// where the labels switch to "arriving".
+    public var arrivingSoon: Bool { estimateSeconds.map { (0...60).contains($0) } ?? false }
+
     public var arrivalLabel: String {
         guard let seconds = estimateSeconds else { return AppText.text("目前沒有到站預估") }
         if seconds < 0 { return EstimateFeed.label(seconds) }
-        return seconds <= 60 ? AppText.text("即將到上車站") : AppText.text("約 %@ 分鐘到上車站", max(1, seconds / 60))
+        return arrivingSoon ? AppText.text("即將到上車站") : AppText.text("約 %@ 分鐘到上車站", max(1, seconds / 60))
     }
 
     public var arrivalShortLabel: String {
         guard let seconds = estimateSeconds else { return "—" }
         if seconds < 0 { return EstimateFeed.label(seconds) }
-        return seconds <= 60 ? AppText.text("即將到站") : AppText.minutes(max(1, seconds / 60))
+        return arrivingSoon ? AppText.text("即將到站") : AppText.minutes(max(1, seconds / 60))
     }
 
     public static func vehicles(ride: TransitRide, metadata: TransitMetadata, snapshot: TransitSnapshot,

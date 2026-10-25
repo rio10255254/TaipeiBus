@@ -3,6 +3,7 @@ import StoreKit
 import TransitCore
 
 struct ProPurchaseView: View {
+    @Environment(\.liveSettings) private var live
     @ObservedObject var purchases: ProPurchases
     @Environment(\.dismiss) private var dismiss
     /// The annual plan is the better value, so it is shown selected unless another plan is active.
@@ -35,7 +36,7 @@ struct ProPurchaseView: View {
                             Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8) }
                                 icon: { Image(systemName:item.symbol).foregroundStyle(.blue) }
                                 .frame(maxWidth:.infinity,minHeight:40,alignment:.leading).padding(.horizontal,12)
-                                .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:12))
+                                .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.row))
                         }
                     }.accessibilityIdentifier("pro-benefit-grid")
                     if purchases.hasPro {
@@ -72,8 +73,8 @@ struct ProPurchaseView: View {
                                         }
                                     } else { Text(AppText.text("準備中")).foregroundStyle(.secondary) }
                                 }.padding(16).frame(maxWidth:.infinity,minHeight:70)
-                                    .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:18))
-                                    .overlay { RoundedRectangle(cornerRadius:18).stroke(selected == plan ? Color.blue : Color.clear,lineWidth:1.5) }
+                                    .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.panel))
+                                    .overlay { live.shape(.panel).stroke(selected == plan ? Color.blue : Color.clear,lineWidth:1.5) }
                             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                                 .accessibilityIdentifier("pro-plan-"+plan.rawValue)
                         }
@@ -342,7 +343,7 @@ struct ProNoteBanner: View {
                     .liveFont(.subheadline, weight: .semibold).accessibilityIdentifier("pro-note-open")
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .phoneGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .phoneGlass(in: live.shape(.panel))
             .transition(.move(edge: .top).combined(with: .opacity))
             .task(id: note) {
                 try? await Task.sleep(for: .seconds(5))

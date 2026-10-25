@@ -1958,7 +1958,7 @@ struct NativeBusMap: UIViewRepresentable {
             let place = MapPlaceSelection(name: name, englishName: english, kind: kind,
                 coordinate: Coordinate(latitude: feature.coordinate.latitude, longitude: feature.coordinate.longitude))
             model.tappedPlace = model.tappedPlace == place ? nil : place
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.selection()
         }
         static let placeLayerIDs: Set<String> = ["poi", "poi_dense", "poi_dense_street", "poi_landmark"]
         static func placeCategory(_ kind: String) -> (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {

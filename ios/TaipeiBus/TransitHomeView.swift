@@ -27,6 +27,7 @@ struct TransitHomeView: View {
     @State private var journeyPanelHeight: CGFloat = 510
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
+    @State private var sunDown = false
     @State private var stationWalkReturnSearch = false
     @State private var bottomControlsHeight: CGFloat = 210
     @State private var bannerHeight: CGFloat = 0
@@ -159,7 +160,7 @@ struct TransitHomeView: View {
                 if model.metadata.routes.isEmpty, model.loadError != nil {
                     // Without any route data the app cannot plan; say it plainly instead of "updating".
                     Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
+                        .background(.regularMaterial, in: live.shape(.label))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
             }.onChange(of: geometry.size.height, initial: true) { _, height in
@@ -294,7 +295,7 @@ struct TransitHomeView: View {
                         }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale))
                             .frame(maxWidth: .infinity, minHeight: 52)
                     }
-                    .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: live.shape(.panel))
                     .accessibilityIdentifier("nearby-station-" + station.id)
                     .accessibilityLabel(AppText.text("附近站牌 %@ %@，直線距離 %@", station.localizedName, station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
                 }
@@ -423,8 +424,29 @@ struct TransitHomeView: View {
         }
     }
 
+    /// Between sunset and sunrise a trip on the map switches to dark colours and the dark
+    /// basemap, so the screen does not glare on a night bus. The rider can turn this off.
+    private var nightDark: Bool {
+        model.nightNavigation && sunDown && (planner.started || stationWalk.isActive) && NightNavigation.allowed
+    }
+
     var body: some View {
         presentedMap
+        // Set on the windows rather than with preferredColorScheme, whose return to the system
+        // appearance is unreliable once it has forced dark; this covers sheets as well.
+        .onChange(of: nightDark, initial: true) { _, dark in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { window.overrideUserInterfaceStyle = dark ? .dark : .unspecified }
+            }
+        }
+        .task(id: planner.started || stationWalk.isActive) {
+            // Checked once a minute while navigating, so a trip that runs past sunset darkens.
+            guard planner.started || stationWalk.isActive else { sunDown = false; return }
+            while !Task.isCancelled {
+                sunDown = Daylight.isNight(at: Date(), coordinate: location.usableCoordinate ?? .taipei)
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
         .onChange(of: journeyPreviewDetent) { before, after in
             if journeyDetent == before { journeyDetent = after }
         }
@@ -759,7 +781,7 @@ private struct MapPlaceCard: View {
             }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
         }
         .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
-        .phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .phoneGlass(in: live.shape(.panel))
         .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
     }
     static let categoryNames: [String: String] = [
@@ -828,7 +850,7 @@ private struct HomeSearchRow: View {
                 if let bus = model.selectedVehicle {
                     Button {
                         model.following.toggle()
-                        UISelectionFeedbackGenerator().selectionChanged()
+                        Haptics.selection()
                         if model.following { model.focusMap(.vehicle(bus.id)) }
                     } label: {
                         circle(model.following ? "scope" : "bus.fill")
@@ -948,14 +970,16 @@ private struct TransitPanel: View {
                 browseHeader
             }
             if model.loading {
-                VStack(spacing: 12) {
-                    ProgressView(); Text(live.text("取得站牌與路線中")).liveFont(.subheadline).foregroundStyle(.secondary)
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                LoadingRows(count: 5, label: live.text("取得站牌與路線中"))
+                    .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if model.loadError != nil, model.metadata.routes.isEmpty {
-                VStack(spacing:12) {
-                    Text(live.text("更新中")).liveFont(.subheadline).foregroundStyle(.secondary)
+                // Without route data nothing works, so say so plainly instead of "updating".
+                EmptyStateView(symbol: "wifi.exclamationmark", title: live.text("暫時無法取得站牌與路線"),
+                               message: live.text("請確認網路連線後重新整理。")) {
                     Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
-                }.frame(maxWidth:.infinity,maxHeight:.infinity)
+                        .accessibilityIdentifier("browse-load-retry")
+                }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
@@ -1075,7 +1099,7 @@ private struct TransitPanel: View {
                 }
             }
             .padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13 * CGFloat(live.appearance.cornerScale)))
+            .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
             Picker(AppText.text("查詢類型"), selection: $model.mode) {
                 ForEach(BrowseMode.allCases) { Text(live.text($0.rawValue)).tag($0) }
             }.pickerStyle(.segmented)
@@ -1108,8 +1132,10 @@ private struct TransitPanel: View {
 
     @ViewBuilder private var browseResults: some View {
         if model.mode == .stops {
-            let stations = stationResultQuery == model.query ? stationResults : []
-            if stations.isEmpty { emptyResult }
+            let current = stationResultQuery == model.query
+            let stations = current ? stationResults : []
+            // A search still running for the latest text is not an empty result.
+            if stations.isEmpty, current { emptyResult }
             ForEach(stations) { station in
                 if model.query.isEmpty, let first = stations.first(where: { !model.recentStationIDs.contains($0.id) && !model.favorites.contains($0.id) }), first.id == station.id {
                     Text(AppText.text("地圖附近")).liveFont(.caption, weight: .semibold).foregroundStyle(.secondary).padding(.top, 12)
@@ -1162,13 +1188,20 @@ private struct TransitPanel: View {
         }
     }
 
-    private var emptyResult: some View {
-        Text(live.text(model.mode == .stops && model.query.isEmpty ? "這附近沒有站牌，試著移動地圖" : "找不到符合的資料，試試其他名稱"))
-            .liveFont(.subheadline).foregroundStyle(.secondary).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
+    @ViewBuilder private var emptyResult: some View {
+        if model.mode == .stops, model.query.isEmpty {
+            EmptyStateView(symbol: "mappin.slash", title: live.text("這附近沒有站牌"), message: live.text("移動地圖看看其他區域。"))
+                .accessibilityElement(children: .combine).accessibilityIdentifier("browse-empty-nearby")
+        } else {
+            EmptyStateView(symbol: "magnifyingglass", title: model.query.isEmpty ? live.text("沒有符合的結果") : AppText.text("找不到「%@」", model.query),
+                           message: live.text(model.mode == .stops ? "試試站名、地址或英文站名。" : "試試路線號碼、起訖站或支線名稱。"))
+                .accessibilityElement(children: .combine).accessibilityIdentifier("browse-empty-results")
+        }
     }
 }
 
 private struct RouteSearchKeypad: View {
+    @Environment(\.liveSettings) private var live
     @Binding var query: String
     let useKeyboard: () -> Void
     private let keys = [["紅", "藍", "1", "2", "3"], ["棕", "綠", "4", "5", "6"],
@@ -1183,7 +1216,7 @@ private struct RouteSearchKeypad: View {
             query = AppText.text(key) + query.filter(\.isNumber)
         } else if key.count > 1 { query = AppText.text(key) }
         else { query += key }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     var body: some View {
         VStack(spacing: 7) {
@@ -1206,7 +1239,7 @@ private struct RouteSearchKeypad: View {
                                 if key == "⌫" { Image(systemName: "delete.left") }
                                 else { Text(AppText.text(key)).lineLimit(1).minimumScaleFactor(0.6) }
                             }.liveFont(.title3, weight: .medium).frame(maxWidth: .infinity, minHeight: 48)
-                                .foregroundStyle(color(key)).background(color(key).opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
+                                .foregroundStyle(color(key)).background(color(key).opacity(0.075), in: live.shape(.badge))
                                 .contentShape(Rectangle())
                         }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-key-" + key)
                             .accessibilityLabel(key == "⌫" ? AppText.text("刪除一字") : AppText.text(key))
@@ -1260,9 +1293,10 @@ private struct StationDetails: View {
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
-                                        model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date))
-                                    .liveFont(.body, weight: .semibold).monospacedDigit()
+                                let wait = row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
+                                    model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date)
+                                Text(wait)
+                                    .liveFont(.body, weight: .semibold).monospacedDigit().liveNumericText(wait, countsDown: true)
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
@@ -1329,7 +1363,7 @@ private struct RouteDetails: View {
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down").liveFont(.caption, weight: .semibold)
                     }.padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13 * CGFloat(live.appearance.cornerScale)))
+                        .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
                 }.accessibilityLabel(live.text("選擇路線走法"))
             }
             if model.routeDirections.count > 1 {
@@ -1359,8 +1393,9 @@ private struct RouteDetails: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(AppText.text("官方下一班")).liveFont(.subheadline).foregroundStyle(.secondary)
                             Spacer()
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: clock.date)))
-                                .liveFont(.title2, weight: .bold).monospacedDigit()
+                            let next = EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: clock.date))
+                            Text(next)
+                                .liveFont(.title2, weight: .bold).monospacedDigit().liveNumericText(next, countsDown: true)
                         }.accessibilityElement(children: .combine).accessibilityIdentifier("route-stop-official-arrival")
                     }
                     if group.approaching.isEmpty {
@@ -1451,7 +1486,8 @@ private struct RouteDetails: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(display.prediction != nil ? display.label : AppText.text("時間待確認")).liveFont(.subheadline, weight: .medium).monospacedDigit()
+                    let arrival = display.prediction != nil ? display.label : AppText.text("時間待確認")
+                    Text(arrival).liveFont(.subheadline, weight: .medium).monospacedDigit().liveNumericText(arrival, countsDown: true)
                     Text(AppText.text("追蹤")).liveFont(.caption).foregroundStyle(Color.accentColor)
                 }
                 Image(systemName: "scope").foregroundStyle(Color.accentColor)
@@ -1484,8 +1520,10 @@ private struct VehicleDetails: View {
                             BilingualName(next.stop).liveFont(.subheadline, weight: .semibold).lineLimit(2)
                         }
                         Spacer(minLength: 4)
-                        Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: next.stop.id, at: timeline.date)))
+                        let arrival = EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: next.stop.id, at: timeline.date))
+                        Text(arrival)
                             .liveFont(.title, weight: .semibold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.75)
+                            .liveNumericText(arrival, countsDown: true)
                             .accessibilityIdentifier("browse-hero-official-arrival")
                     }
                 }
@@ -1593,7 +1631,7 @@ struct RouteBadge: View {
             .padding(.horizontal, (compact ? 7 : 10) * CGFloat(live.appearance.spacingScale))
             .padding(.vertical, (compact ? 3 : 6) * CGFloat(live.appearance.spacingScale)).frame(minWidth: compact ? 34 : 52)
             .foregroundStyle(RouteTint.signInk(for: tintName ?? name))
-            .background(RouteTint.color(for: tintName ?? name), in: RoundedRectangle(cornerRadius: (compact ? 7 : 10) * CGFloat(live.appearance.cornerScale), style: .continuous))
+            .background(RouteTint.color(for: tintName ?? name), in: live.shape(compact ? .badgeCompact : .badge))
     }
 }
 
@@ -1704,6 +1742,12 @@ private struct MapSettingsView: View {
                 }
             } footer: {
                 if live.display.bikeStations { Text(live.text("放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。")) }
+            }
+            Section {
+                Toggle(AppText.text("夜間導航使用深色"), isOn: $model.nightNavigation)
+                    .accessibilityIdentifier("night-navigation-toggle")
+            } footer: {
+                Text(live.text("日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。"))
             }
         }
         .navigationTitle(AppText.text("地圖")).navigationBarTitleDisplayMode(.inline)
@@ -1871,4 +1915,18 @@ private struct OnlineUnderstandingSettings: View {
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
     }
+}
+
+enum NightNavigation {
+    /// UI tests capture fixed light and dark appearances whatever the hour, so automation
+    /// leaves the system appearance alone unless a test asks for the night switch.
+    static let allowed: Bool = {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments.dropFirst()
+        if arguments.contains("--test-night-navigation") { return true }
+        return !arguments.contains { $0.hasPrefix("--") }
+#else
+        return true
+#endif
+    }()
 }

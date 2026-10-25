@@ -1007,5 +1007,15 @@
   "第 %@ 站：%@": "Stop %@: %@",
   "為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂。不包含位置、常用行程或帳號，句子不保存；伺服器只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。": "To understand you better, the sentence you say or type, today's date and, when needed, the names and addresses of places found are sent through TaipeiBus's own server to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account are included and sentences are not kept; the server only counts daily use under an anonymous ID. Without a connection, understanding happens on the phone. You can change this in Info & Settings.",
   "同意使用線上 AI 理解後，行程那一句話和日期會經由台北公車的伺服器傳給 Groq 上的開源模型讀懂；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數，Groq 的金鑰只存在伺服器、不在 App 裡。未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。": "With online AI understanding on, the trip sentence and date go through TaipeiBus's own server to an open model on Groq. The server does not keep sentences and only counts daily use under each phone's anonymous ID; the Groq key lives on the server, not in the app. Without consent or a connection, understanding happens on the phone only. Confirmed place keywords and route endpoints are still handled by Apple Maps.",
-  "開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由台北公車的伺服器傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號，句子不保存；伺服器只用每支手機的匿名代號記錄每天次數並確認 Pro，Groq 的金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "When on, the sentence you say or type and today's date, and when needed the names and addresses of places found, are first sent through TaipeiBus's own server to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account is sent; without a connection or once the allowance is used, the phone's model or rules are used. Free: %@ a day. Pro: %@ a day with a larger model."
+  "開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由台北公車的伺服器傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂，不傳送位置、常用行程或帳號，句子不保存；伺服器只用每支手機的匿名代號記錄每天次數並確認 Pro，Groq 的金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次並使用更大的模型。": "When on, the sentence you say or type and today's date, and when needed the names and addresses of places found, are first sent through TaipeiBus's own server to an open model (OpenAI gpt-oss) on Groq. No location, saved trips or account is sent; without a connection or once the allowance is used, the phone's model or rules are used. Free: %@ a day. Pro: %@ a day with a larger model.",
+  "這附近沒有站牌": "No stops nearby",
+  "移動地圖看看其他區域。": "Move the map to look elsewhere.",
+  "沒有符合的結果": "No results",
+  "找不到「%@」": "No results for “%@”",
+  "試試站名、地址或英文站名。": "Try a stop name, address or English name.",
+  "試試路線號碼、起訖站或支線名稱。": "Try a route number, terminal or branch name.",
+  "暫時無法取得站牌與路線": "Can’t load stops and routes",
+  "請確認網路連線後重新整理。": "Check your connection, then refresh.",
+  "夜間導航使用深色": "Dark appearance for night navigation",
+  "日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。": "Between sunset and sunrise, navigation switches the screen and map to dark to reduce glare."
 }

@@ -104,19 +104,37 @@ private struct SmoothChange<Value: Equatable>: ViewModifier {
 }
 extension View {
     func smoothChanges<Value: Equatable>(_ value: Value) -> some View { modifier(SmoothChange(value: value)) }
-    func liveNumericText(countsDown: Bool = false) -> some View { modifier(LiveNumericText(countsDown: countsDown)) }
+    /// Rolls the digits when `value` changes. A content transition alone does nothing for
+    /// data updates that arrive outside an animation, so this supplies the animation too.
+    func liveNumericText<Value: Equatable>(_ value: Value, countsDown: Bool = false) -> some View {
+        modifier(LiveNumericText(value: value, countsDown: countsDown))
+    }
     func secondaryAction() -> some View {
         modifier(NativeActionSurface(prominent: false)).buttonBorderShape(.capsule).controlSize(.small)
     }
     func primaryAction() -> some View { modifier(NativeActionSurface(prominent: true)).buttonBorderShape(.capsule) }
     func readableMapSurface() -> some View { modifier(ReadableMapSurface()) }
 }
-private struct LiveNumericText: ViewModifier {
+private struct LiveNumericText<Value: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let value: Value
     let countsDown: Bool
     func body(content: Content) -> some View {
-        content.contentTransition(InterfaceMotion.reduced(systemReduceMotion) ? .identity : .numericText(countsDown: countsDown))
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        content.contentTransition(reduced ? .identity : .numericText(countsDown: countsDown))
+            .animation(reduced ? nil : .smooth(duration: 0.35), value: value)
     }
+}
+
+/// The app's haptic vocabulary. Browsing stays a light selection tick so the firmer
+/// patterns keep their meaning during a trip.
+enum Haptics {
+    /// Picking a stop, route, bus, key or map mode.
+    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+    /// The trip moves to its next stage: start, board, alight or a changed station.
+    static func stage() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+    /// The rider reached the destination.
+    static func arrived() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
 }
 
 private struct NativeActionSurface: ViewModifier {
@@ -134,11 +152,12 @@ private struct NativeActionSurface: ViewModifier {
 }
 
 private struct ReadableMapSurface: ViewModifier {
+    @Environment(\.liveSettings) private var live
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
         content.foregroundStyle(.primary)
-            .background(Color(uiColor: .secondarySystemBackground).opacity(0.97), in: RoundedRectangle(cornerRadius: 19))
-            .overlay { RoundedRectangle(cornerRadius: 19).stroke(Color.primary.opacity(scheme == .dark ? 0.18 : 0.09), lineWidth: 0.7) }
+            .background(Color(uiColor: .secondarySystemBackground).opacity(0.97), in: live.shape(.label))
+            .overlay { live.shape(.label).stroke(Color.primary.opacity(scheme == .dark ? 0.18 : 0.09), lineWidth: 0.7) }
             .shadow(color: .black.opacity(scheme == .dark ? 0.3 : 0.12), radius: 9, y: 3)
     }
 }
@@ -206,7 +225,21 @@ enum RouteTint {
 
 /// Shared measurements for the Apple Maps style cards, banners and controls.
 enum MapChrome {
-    static let cardRadius: CGFloat = 26
+    /// Corner radii, largest to smallest. A surface nested in another takes a
+    /// smaller step so the two curves stay close to concentric across the padding.
+    enum Corner: CGFloat {
+        /// Floating trip cards and banners.
+        case card = 26
+        /// Glass bars, place cards and grouped blocks in a sheet.
+        case panel = 22
+        /// Callouts and notices that sit on the map itself.
+        case label = 18
+        /// Search fields, list groups, rows and tiles inside a card or sheet.
+        case row = 14
+        /// Route badges, keys and icon tiles.
+        case badge = 10
+        case badgeCompact = 7
+    }
     static let controlSize: CGFloat = 48
     static let walkingLight = "#1F6FD1"
     static let walkingDark = "#5AA2FF"
@@ -217,6 +250,13 @@ enum MapChrome {
     /// Apple Maps' green Go action, dark enough for white text.
     static let go = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#23813F") : UIColor(liveHex: "#1E7F3C") })
     static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
+}
+
+extension LiveSettings {
+    /// The continuous rounded shape for `corner`, scaled by the remote corner setting.
+    func shape(_ corner: MapChrome.Corner) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: corner.rawValue * CGFloat(appearance.cornerScale), style: .continuous)
+    }
 }
 
 /// Filled or tinted capsule actions used by the trip cards, matching the
@@ -248,7 +288,7 @@ struct MapTileStyle: ButtonStyle {
     var tint: Color? = nil
     func makeBody(configuration: Configuration) -> some View {
         let accent = tint ?? Color(liveHex: live.appearance.accentColor)
-        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+        let shape = live.shape(.row)
         let reduced = InterfaceMotion.reduced(systemReduceMotion)
         return configuration.label
             .labelStyle(.tile)
@@ -272,4 +312,72 @@ struct TileLabelStyle: LabelStyle {
 }
 extension LabelStyle where Self == TileLabelStyle {
     static var tile: TileLabelStyle { TileLabelStyle() }
+}
+
+/// A list or search with nothing to show: a symbol, what happened and what to try next,
+/// in the manner of ContentUnavailableView but following the app's text scale. Callers
+/// pass text that is already localized.
+struct EmptyStateView<Actions: View>: View {
+    @Environment(\.liveSettings) private var live
+    private let symbol: String
+    private let title: String?
+    private let message: String
+    private let actions: Actions
+    init(symbol: String, title: String? = nil, message: String, @ViewBuilder actions: () -> Actions) {
+        self.symbol = symbol; self.title = title; self.message = message; self.actions = actions()
+    }
+    var body: some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol).liveFont(.title, weight: .medium).foregroundStyle(MapChrome.secondaryText)
+                .padding(.bottom, 4).accessibilityHidden(true)
+            if let title {
+                Text(title).liveFont(.headline).multilineTextAlignment(.center).lineLimit(2)
+            }
+            Text(message).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText)
+                .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            actions.padding(.top, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 12).padding(.vertical, 24 * CGFloat(live.appearance.spacingScale))
+    }
+}
+extension EmptyStateView where Actions == EmptyView {
+    init(symbol: String, title: String? = nil, message: String) {
+        self.init(symbol: symbol, title: title, message: message) { EmptyView() }
+    }
+}
+
+/// Grey rows in the shape of the list that is loading, so the layout is already in place
+/// and nothing jumps when the content arrives. They pulse gently unless Reduce Motion is on.
+struct LoadingRows: View {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    var count = 3
+    /// Spoken in place of the placeholder rows, already localized.
+    let label: String
+    @State private var dimmed = false
+    var body: some View {
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(0..<count, id: \.self) { index in
+                HStack(spacing: 12) {
+                    live.shape(.badge).frame(width: 46, height: 28)
+                    VStack(alignment: .leading, spacing: 7) {
+                        Capsule().frame(width: index.isMultiple(of: 2) ? 148 : 116, height: 11)
+                        Capsule().frame(width: index.isMultiple(of: 2) ? 92 : 128, height: 9)
+                    }
+                    Spacer(minLength: 0)
+                    Capsule().frame(width: 38, height: 11)
+                }
+                .padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
+                if index < count - 1 { Divider() }
+            }
+        }
+        .foregroundStyle(Color(uiColor: .systemFill))
+        .opacity(dimmed ? 0.5 : 1)
+        .animation(reduced ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dimmed)
+        .onAppear { dimmed = !reduced }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
 }

@@ -1133,7 +1133,7 @@ final class JourneyPlannerModel: ObservableObject {
             }
             self.endWalkingGuidance()
             self.walkingRevision += 1; self.walkingRouteRevision += 1; self.mapRevision += 1
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.stage()
         }
     }
     /// The ride a saved trip would start with now, for the Home Screen widget. Walks are the
@@ -1669,7 +1669,7 @@ final class JourneyPlannerModel: ObservableObject {
         defer { onNavigationChange?() }
         cancelRequests()
         started = true; stepIndex = 0; mapRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.stage()
     }
     /// A separate planner may evaluate the remaining journey without changing the active
     /// planner's selection, map, walking progress or boarded vehicle.
@@ -1715,7 +1715,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard started, stepIndex < steps.count else { return }
         defer { onNavigationChange?() }
         stepIndex += 1; mapRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        if arrived { Haptics.arrived() } else { Haptics.stage() }
     }
     func boardCurrentRide() {
         guard let index = boardingRideIndex,
@@ -1723,7 +1723,7 @@ final class JourneyPlannerModel: ObservableObject {
         defer { onNavigationChange?() }
         cancelRequests()
         started = true; stepIndex = target; mapRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.stage()
     }
     func returnToWaiting() {
         guard case .ride(let index) = currentStep,
