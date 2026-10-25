@@ -141,6 +141,9 @@ final class VoiceConversationTests: XCTestCase {
         for text in ["好", "好啊", "可以", "對", "嗯嗯", "開始吧", "OK", "好！"] { XCTAssertEqual(VoiceConfirmation.read(text), .yes, text) }
         for text in ["不要", "不用了", "取消", "算了", "先不要", "不好"] { XCTAssertEqual(VoiceConfirmation.read(text), .no, text) }
         for text in ["好啊那回程呢要搭哪一班", "不知道", "307 還要多久", ""] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
+        for text in ["Yes", "OK, go", "Sure!", "yes please", "Let's go"] { XCTAssertEqual(VoiceConfirmation.read(text), .yes, text) }
+        for text in ["No", "Not now", "Cancel", "No thanks", "Wait"] { XCTAssertEqual(VoiceConfirmation.read(text), .no, text) }
+        for text in ["How long now", "Take me to Taipei 101 please"] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
     }
 
     func testHistoryKeepsTheLastEightTurns() {

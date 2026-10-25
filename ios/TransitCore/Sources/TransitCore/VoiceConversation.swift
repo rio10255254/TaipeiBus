@@ -395,13 +395,23 @@ public enum SpokenAnswer {
 public enum VoiceConfirmation: Equatable, Sendable {
     case yes, no, unclear
 
-    private static let noWords = ["不要", "不用", "取消", "算了", "先不", "不是", "等一下", "不好", "no", "nope", "cancel"]
-    private static let yesWords = ["好", "可以", "對", "是", "嗯", "開始", "出發", "確定", "沒問題", "走吧", "ok", "okay", "yes", "sure"]
+    private static let noWords = ["不要", "不用", "取消", "算了", "先不", "不是", "等一下", "不好"]
+    private static let yesWords = ["好", "可以", "對", "是", "嗯", "開始", "出發", "確定", "沒問題", "走吧"]
+    private static let englishNo: Set<String> = ["no", "nope", "cancel", "not", "don't", "dont", "stop", "wait", "later"]
+    private static let englishYes: Set<String> = ["yes", "yeah", "yep", "ok", "okay", "sure", "go", "start", "please", "alright", "right", "correct"]
 
-    /// Only short answers count; anything longer is a new request for the server.
+    /// Only short answers count; anything longer is a new request for the server. English is read
+    /// word by word, so "now" is not taken for "no".
     public static func read(_ text: String) -> VoiceConfirmation {
-        let plain = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
-            .replacingOccurrences(of: " ", with: "")
+        let lowered = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if lowered.unicodeScalars.contains(where: { $0.properties.isAlphabetic && $0.isASCII }) {
+            let words = lowered.split(whereSeparator: { !$0.isLetter && $0 != "'" }).map(String.init)
+            guard !words.isEmpty, words.count <= 4 else { return .unclear }
+            if words.contains(where: englishNo.contains) { return .no }
+            if words.contains(where: englishYes.contains) { return .yes }
+            return .unclear
+        }
+        let plain = lowered.replacingOccurrences(of: " ", with: "")
         guard !plain.isEmpty, plain.count <= 8 else { return .unclear }
         if noWords.contains(where: plain.contains) { return .no }
         if plain.contains("不") { return .unclear }
@@ -410,7 +420,6 @@ public enum VoiceConfirmation: Equatable, Sendable {
     }
 }
 
-/// The last eight turns, sent back each time so 「那回程呢」 and a time said a while ago still count.
 public struct VoiceHistory: Equatable, Sendable {
     public struct Turn: Equatable, Sendable {
         public let user: String

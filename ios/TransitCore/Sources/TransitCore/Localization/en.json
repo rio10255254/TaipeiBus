@@ -1041,5 +1041,19 @@
   "語音對話": "Voice conversation",
   "語音對話（Pro）": "Voice conversation (Pro)",
   "開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。": "When on, the microphone opens a back-and-forth conversation: ask about arrivals, plan routes, say you have boarded while navigating, or ask general questions such as fares and places to visit. What you say, the trip on screen and nearby stop names go through TaipeiBus's own server to Anthropic's Claude (with an open model on Groq as backup), which searches the web for current information up to 3 times a day; the server does not keep the conversation. When off, the microphone plans from one sentence.",
-  "來源：%@": "Source: %@"
+  "來源：%@": "Source: %@",
+  "好，先不要。": "OK, not now.",
+  "好，有需要再叫我。": "OK, call me when you need me.",
+  "語音對話是 Pro 功能，可以在方案頁開啟。": "Voice chat is a Pro feature; you can get it on the plans page.",
+  "今天的語音對話次數用完了，明天再聊，或改用打字搜尋。": "That's all the voice chat for today. Talk tomorrow, or search by typing.",
+  "我現在連不上，請稍後再試一次。": "I can't connect right now. Please try again in a moment.",
+  "連線不穩，請再說一次。": "The connection dropped. Please say that again.",
+  "這個我現在查不到，可以換個方式問嗎？": "I can't find that right now. Could you ask another way?",
+  "結果在畫面上，請看一下。": "The result is on the screen.",
+  "好，開始導航。": "OK, starting navigation.",
+  "目前沒有可以開始的路線。": "There's no route to start yet.",
+  "好，已上車，我會提醒你下車。": "OK, you're on board. I'll tell you when to get off.",
+  "好，已下車。": "OK, you've got off.",
+  "好，行程結束。": "OK, trip ended.",
+  "好。": "OK."
 }

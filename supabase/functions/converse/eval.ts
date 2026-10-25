@@ -13,6 +13,8 @@ type Case = {
   web?: string; avoid?: string;
   /// Amounts of money must not come from memory.
   noAmounts?: boolean;
+  /// Asked in English, so answered in English.
+  english?: boolean;
 };
 
 const now = '現在：2026-10-25 19:40 星期日（台北）';
@@ -31,6 +33,7 @@ const earlier = [
 
 const cases: Case[] = [
   { name: '到站', state: station, utterance: '307 還要多久？' },
+  { name: '英文', state: station, utterance: 'How long until the 307 comes?', english: true },
   { name: '追問', state: station, utterance: '那 671 呢', history: [{ user: '307 還要多久？', say: '307 約 4 分鐘到。' }] },
   { name: '規劃', state: map, utterance: '我要去台北101', expect: 'plan_trip' },
   { name: '規劃含時間', state: map, utterance: '明天早上九點前從公司到北車', expect: 'plan_trip' },
@@ -77,6 +80,7 @@ function check(test: Case, reply: Reply): string[] {
   if (test.expect && !reply.actions.some((action) => action.type === test.expect)) problems.push(`缺少動作 ${test.expect}`);
   if (test.confirm && reply.confirm.type !== test.confirm) problems.push(`應該問 ${test.confirm}，卻是 ${reply.confirm.type}`);
   if (test.avoid && reply.actions.some((action) => action.type === test.avoid)) problems.push(`不該用 ${test.avoid}`);
+  if (test.english && (reply.say.match(/[A-Za-z]+/g) ?? []).length < 3) problems.push('沒有用英文回答');
   if (test.noAmounts && /[0-9０-９]+\s*(元|塊)/.test(reply.say)) problems.push('憑記憶說了金額');
   const plan = reply.actions.find((action) => action.type === 'plan_trip');
   if (plan && test.time && !plan.time.includes(test.time)) problems.push(`時間沒有沿用（${plan.time || '空'}）`);
