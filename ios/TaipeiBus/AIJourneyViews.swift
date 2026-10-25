@@ -1566,11 +1566,14 @@ struct VoiceOrb: View {
                 // Two layers of blurred colour turning opposite ways read as moving liquid.
                 Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
                     .frame(width: side * 0.78, height: side * 0.78)
+                    // Room for the blur inside the flattened layer, or its edges show as a square.
+                    .padding(side * 0.25)
                     .blur(radius: side * (compact ? 0.08 : 0.12))
                     .drawingGroup()
                     .rotationEffect(.degrees(spin ? 360 : 0))
                 Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))
                     .frame(width: side * 0.6, height: side * 0.6)
+                    .padding(side * 0.2)
                     .blur(radius: side * (compact ? 0.06 : 0.1))
                     .drawingGroup()
                     .rotationEffect(.degrees(spin ? -540 : 0))
