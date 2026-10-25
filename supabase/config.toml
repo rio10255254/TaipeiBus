@@ -1,5 +1,5 @@
-# TaipeiBus assistant server: holds the Groq key, counts each phone's daily allowance and checks
-# Pro, so the app carries only the public project URL and publishable key.
+# TaipeiBus assistant server: holds the Claude and Groq keys, counts each phone's daily allowance and
+# checks Pro, so the app carries only the public project URL and publishable key.
 project_id = "taipeibus-assistant"
 
 [auth]

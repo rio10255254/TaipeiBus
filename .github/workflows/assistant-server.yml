@@ -1,8 +1,8 @@
 name: Assistant server
 
-# Deploys the online-understanding server to the TaipeiBus Supabase project. The Groq key goes from
-# this repository's GROQ_API_KEY secret straight into the project's secrets; it is never printed
-# and never built into the app.
+# Deploys the online-understanding server to the TaipeiBus Supabase project. The Anthropic and Groq
+# keys go from this repository's ANTHROPIC_API_KEY and GROQ_API_KEY secrets straight into the
+# project's secrets; they are never printed and never built into the app.
 on:
   push:
     branches: [ai, main]
@@ -25,6 +25,9 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
       APP_APPLE_ID: ${{ vars.APP_APPLE_ID }}
     steps:
       - uses: actions/checkout@v4
@@ -33,6 +36,8 @@ jobs:
           deno-version: v2.x
       - name: Type-check the function
         run: deno check --config supabase/functions/understand/deno.json --no-lock supabase/functions/understand/index.ts
+      - name: Test the Claude request against a local stand-in
+        run: deno test --config supabase/functions/understand/deno.json --no-lock --allow-env --allow-net supabase/functions/understand/
       - name: Stop here until the project is set up
         id: ready
         run: |
@@ -55,6 +60,9 @@ jobs:
           SUPABASE_ACCESS_TOKEN="$(trim "$SUPABASE_ACCESS_TOKEN")"; export SUPABASE_ACCESS_TOKEN
           SUPABASE_PROJECT_REF="$(trim "$SUPABASE_PROJECT_REF")"
           GROQ_API_KEY="$(trim "$GROQ_API_KEY")"
+          ANTHROPIC_API_KEY="$(trim "$ANTHROPIC_API_KEY")"
+          ANTHROPIC_MODEL="$(trim "$ANTHROPIC_MODEL")"
+          ANTHROPIC_WORKSPACE_ID="$(trim "$ANTHROPIC_WORKSPACE_ID")"
           # A password may contain spaces in the middle; only a trailing line break is removed.
           SUPABASE_DB_PASSWORD="$(printf '%s' "$SUPABASE_DB_PASSWORD" | tr -d '\r\n')"; export SUPABASE_DB_PASSWORD
           case "$SUPABASE_ACCESS_TOKEN" in
@@ -64,14 +72,18 @@ jobs:
           supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
           supabase config push --project-ref "$SUPABASE_PROJECT_REF" --yes || echo "::warning::Auth settings not pushed; enable anonymous sign-ins in the dashboard."
-          if [ -n "$GROQ_API_KEY" ]; then
-            # Read from a file so the value never appears on a command line or in the log.
-            umask 077; printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY" > "$RUNNER_TEMP/assistant.env"
-            if [ -n "$APP_APPLE_ID" ]; then printf 'APP_APPLE_ID=%s\n' "$APP_APPLE_ID" >> "$RUNNER_TEMP/assistant.env"; fi
+          # Read from a file so the values never appear on a command line or in the log.
+          umask 077; : > "$RUNNER_TEMP/assistant.env"
+          if [ -n "$GROQ_API_KEY" ]; then printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$ANTHROPIC_MODEL" ]; then printf 'ANTHROPIC_MODEL=%s\n' "$ANTHROPIC_MODEL" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$ANTHROPIC_WORKSPACE_ID" ]; then printf 'ANTHROPIC_WORKSPACE_ID=%s\n' "$ANTHROPIC_WORKSPACE_ID" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$APP_APPLE_ID" ]; then printf 'APP_APPLE_ID=%s\n' "$APP_APPLE_ID" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -s "$RUNNER_TEMP/assistant.env" ]; then
             supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$RUNNER_TEMP/assistant.env" > /dev/null
-            rm -f "$RUNNER_TEMP/assistant.env"
             echo "Assistant secrets updated."
           fi
+          rm -f "$RUNNER_TEMP/assistant.env"
           supabase functions deploy understand --project-ref "$SUPABASE_PROJECT_REF"
       - name: Smoke test as a phone would
         if: steps.ready.outputs.ready == 'true'
@@ -103,3 +115,13 @@ jobs:
             -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$proofbody")
           echo "understand with an unverifiable Pro proof → HTTP $code"; head -c 300 "$RUNNER_TEMP/reply2.json"; echo
           [ "$code" = "200" ]
+          # A build whose consent names Claude: Claude answers when its key is set, otherwise Groq.
+          claudebody='{"consent":2,"request":{"model":"openai/gpt-oss-20b","max_completion_tokens":300,"messages":[{"role":"system","content":"只輸出 JSON {\"destination\":\"\"}"},{"role":"user","content":"去台北101"}]}}'
+          code=$(curl -sS -D "$RUNNER_TEMP/headers3.txt" -o "$RUNNER_TEMP/reply3.json" -w '%{http_code}' -X POST "$url/functions/v1/understand" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$claudebody")
+          provider=$(grep -i '^x-assistant-provider:' "$RUNNER_TEMP/headers3.txt" | cut -d: -f2 | tr -d '[:space:]' || true)
+          echo "understand with Claude consent → HTTP $code from ${provider:-?}"; head -c 300 "$RUNNER_TEMP/reply3.json"; echo
+          [ "$code" = "200" ]
+          # No fallback header when Claude answered; grep finding nothing must not end the step.
+          reason=$(grep -i '^x-assistant-fallback:' "$RUNNER_TEMP/headers3.txt" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ "$provider" != "anthropic" ]; then echo "::warning::Claude is configured but Groq answered: ${reason:-no reason given}"; fi
