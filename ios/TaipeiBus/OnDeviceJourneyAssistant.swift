@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import TransitCore
 #if canImport(FoundationModels)
 import FoundationModels
@@ -803,6 +804,113 @@ enum ContextWindowRetry {
 /// (or it failed), the sentence and today's date, and nothing else, are read by an open model on
 /// Groq. The reading then goes through the same place search and checks as every other reading.
 @MainActor
+/// The app's own server for online understanding (a Supabase project). It holds the Groq key,
+/// counts each phone's daily allowance and checks Pro; the app carries only the public project URL
+/// and publishable key, and signs in anonymously once (no account, email or name).
+enum AssistantServer {
+    static var baseURL: String? {
+        let value = ((Bundle.main.object(forInfoDictionaryKey: "BusAssistantURL") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.hasPrefix("https://"), URL(string: value) != nil else { return nil }
+        return value.hasSuffix("/") ? String(value.dropLast()) : value
+    }
+    static var publicKey: String {
+        ((Bundle.main.object(forInfoDictionaryKey: "BusAssistantKey") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    static var configured: Bool { baseURL != nil && !publicKey.isEmpty }
+    /// A signed App Store transaction for an active Pro subscription; the server checks it with Apple's
+    /// certificates before allowing Pro's larger model and allowance.
+    static let proof = Proof()
+    final class Proof: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: String?
+        var jws: String? {
+            get { lock.lock(); defer { lock.unlock() }; return value }
+            set { lock.lock(); value = newValue; lock.unlock() }
+        }
+    }
+    private static let account = Account()
+
+    /// One chat request through the server; the reply body and HTTP status. 429 means today's
+    /// allowance is used up.
+    static func send(_ chat: [String: Any], timeout: TimeInterval, session: URLSession) async throws -> (Data, Int) {
+        guard let base = baseURL, let url = URL(string: base + "/functions/v1/understand") else { throw OnlineJourneyReader.Failure.notConfigured }
+        var body: [String: Any] = ["request": chat]
+        if let jws = proof.jws { body["proof"] = jws }
+        let payload = try JSONSerialization.data(withJSONObject: body)
+        var token = try await account.token(session: session)
+        for attempt in 0..<2 {
+            var request = URLRequest(url: url, timeoutInterval: timeout)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            request.setValue(publicKey, forHTTPHeaderField: "apikey")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = payload
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            // An expired or revoked identity: sign in again once.
+            if status == 401, attempt == 0 { token = try await account.token(session: session, renew: true); continue }
+            return (data, status)
+        }
+        throw OnlineJourneyReader.Failure.http(401)
+    }
+
+    /// The anonymous identity: a short-lived access token, renewed with a refresh token kept in the
+    /// Keychain on this phone only.
+    actor Account {
+        private var access: String?
+        private var expires = Date.distantPast
+        func token(session: URLSession, renew: Bool = false) async throws -> String {
+            if !renew, let access, expires > Date().addingTimeInterval(60) { return access }
+            if let refresh = Keychain.refreshToken,
+               let value = try? await exchange(["refresh_token": refresh], path: "/auth/v1/token?grant_type=refresh_token", session: session) {
+                return value
+            }
+            return try await exchange(["data": [String: String]()], path: "/auth/v1/signup", session: session)
+        }
+        private func exchange(_ body: [String: Any], path: String, session: URLSession) async throws -> String {
+            guard let base = AssistantServer.baseURL, let url = URL(string: base + path) else { throw OnlineJourneyReader.Failure.notConfigured }
+            var request = URLRequest(url: url, timeoutInterval: 6)
+            request.httpMethod = "POST"
+            request.setValue(AssistantServer.publicKey, forHTTPHeaderField: "apikey")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (data, response) = try await session.data(for: request)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            guard status == 200, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let token = root["access_token"] as? String else {
+                JourneyDiagnostics.shared.record("ai-online sign-in http(\(status))")
+                throw OnlineJourneyReader.Failure.http(status)
+            }
+            access = token
+            expires = Date().addingTimeInterval((root["expires_in"] as? Double) ?? 3000)
+            if let refresh = root["refresh_token"] as? String { Keychain.refreshToken = refresh }
+            return token
+        }
+    }
+
+    private enum Keychain {
+        private static let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+                                                   kSecAttrService as String: "TaipeiBusAssistant",
+                                                   kSecAttrAccount as String: "refresh"]
+        static var refreshToken: String? {
+            get {
+                var item: CFTypeRef?
+                var search = query; search[kSecReturnData as String] = true; search[kSecMatchLimit as String] = kSecMatchLimitOne
+                guard SecItemCopyMatching(search as CFDictionary, &item) == errSecSuccess, let data = item as? Data else { return nil }
+                return String(data: data, encoding: .utf8)
+            }
+            set {
+                SecItemDelete(query as CFDictionary)
+                guard let newValue, let data = newValue.data(using: .utf8) else { return }
+                var add = query
+                add[kSecValueData as String] = data
+                add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+                SecItemAdd(add as CFDictionary, nil)
+            }
+        }
+    }
+}
+
 enum OnlineJourneyReader {
     static let enabledKey = "assistantOnline.v1"
     private static let countKey = "assistantOnlineCount.v1"
@@ -815,11 +923,8 @@ enum OnlineJourneyReader {
     static func models(pro: Bool) -> [String] { pro ? ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] : ["openai/gpt-oss-20b"] }
     enum Failure: Error { case notConfigured, limit, http(Int), invalid }
 
-    private static var key: String {
-        ((Bundle.main.object(forInfoDictionaryKey: "BusGroqKey") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    /// The build carries a key (TestFlight builds from the repository secret).
-    static var configured: Bool { key.hasPrefix("gsk_") }
+    /// The build knows the app's own server; no key to another company's service ships in the app.
+    static var configured: Bool { AssistantServer.configured }
     /// The rider's answer to the one-time question; nil until asked.
     static var consent: Bool? { UserDefaults.standard.object(forKey: enabledKey) as? Bool }
     static var enabled: Bool { configured && consent == true }
@@ -880,13 +985,7 @@ enum OnlineJourneyReader {
             "messages": [["role": "system", "content": instructions],
                          ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)"]],
         ]
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 6)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await AssistantServer.send(body, timeout: 6, session: session)
         guard status == 200 else { throw Failure.http(status) }
         return try parse(data)
     }
@@ -917,13 +1016,7 @@ enum OnlineJourneyReader {
             "response_format": ["type": "json_object"],
             "messages": [["role": "system", "content": system], ["role": "user", "content": user]],
         ]
-        var request = URLRequest(url: URL(string: "https://api.groq.com/openai/v1/chat/completions")!, timeoutInterval: 5)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await session.data(for: request)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let (data, status) = try await AssistantServer.send(body, timeout: 5, session: session)
         guard status == 200 else { throw Failure.http(status) }
         guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let choices = root["choices"] as? [[String: Any]],

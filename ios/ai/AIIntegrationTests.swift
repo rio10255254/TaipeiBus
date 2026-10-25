@@ -258,7 +258,7 @@ import TransitCore
         XCTAssertFalse(reading.departureTime)
         let empty = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": #"{"destination":""}"#]]]])
         XCTAssertNil(try? OnlineJourneyReader.parse(empty), "No destination is not a reading")
-        XCTAssertFalse(OnlineJourneyReader.configured, "Tests carry no key")
+        XCTAssertFalse(OnlineJourneyReader.configured, "Tests have no assistant server")
         let fenced = try JSONSerialization.data(withJSONObject: ["choices": [["message": ["content": "```json\n" + content + "\n```"]]]])
         XCTAssertEqual(try OnlineJourneyReader.parse(fenced).destination, "國立臺灣大學", "A fenced reply is still read")
     }

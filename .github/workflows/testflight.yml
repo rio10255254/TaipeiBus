@@ -72,7 +72,9 @@ jobs:
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
       BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'beta-audit' && inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      # Public values of the assistant server; the Groq key stays on that server.
+      BUS_ASSISTANT_URL: ${{ vars.SUPABASE_URL }}
+      BUS_ASSISTANT_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
       BUS_UPDATE_BETA_METADATA: ${{ inputs.operation == 'beta-metadata' }}
       BUS_PREPARE_BILLING: ${{ inputs.operation == 'billing-prepare' }}
@@ -238,10 +240,14 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           swift test --package-path ios/TransitCore
-          # Optional online understanding: the key goes into the built Info.plist only, never into logs.
-          if [ -n "${GROQ_API_KEY:-}" ]; then
-            /usr/libexec/PlistBuddy -c "Set :BusGroqKey ${GROQ_API_KEY}" ios/TaipeiBus/Info.plist > /dev/null
-            echo "Online understanding key added to this build."
+          # Online understanding goes through the app's own server: only its public URL and
+          # publishable key are built in. No secret is ever written into the app.
+          if [ -n "${BUS_ASSISTANT_URL:-}" ] && [ -n "${BUS_ASSISTANT_KEY:-}" ]; then
+            /usr/libexec/PlistBuddy -c "Set :BusAssistantURL ${BUS_ASSISTANT_URL}" ios/TaipeiBus/Info.plist
+            /usr/libexec/PlistBuddy -c "Set :BusAssistantKey ${BUS_ASSISTANT_KEY}" ios/TaipeiBus/Info.plist
+            echo "Assistant server: ${BUS_ASSISTANT_URL}"
+          else
+            echo "::notice::No assistant server configured; this build understands sentences on the phone only."
           fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
