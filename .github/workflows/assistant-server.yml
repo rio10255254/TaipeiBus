@@ -34,10 +34,14 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
-      - name: Type-check the function
-        run: deno check --config supabase/functions/understand/deno.json --no-lock supabase/functions/understand/index.ts
-      - name: Test the Claude request against a local stand-in
-        run: deno test --config supabase/functions/understand/deno.json --no-lock --allow-env --allow-net supabase/functions/understand/
+      - name: Type-check the functions
+        run: |
+          deno check --config supabase/functions/understand/deno.json --no-lock supabase/functions/understand/index.ts
+          deno check --config supabase/functions/converse/deno.json --no-lock supabase/functions/converse/index.ts
+      - name: Test the Claude requests against a local stand-in
+        run: |
+          deno test --config supabase/functions/understand/deno.json --no-lock --allow-env --allow-net supabase/functions/understand/
+          deno test --config supabase/functions/converse/deno.json --no-lock --allow-env --allow-net supabase/functions/converse/
       - name: Stop here until the project is set up
         id: ready
         run: |
@@ -84,7 +88,7 @@ jobs:
             echo "Assistant secrets updated."
           fi
           rm -f "$RUNNER_TEMP/assistant.env"
-          supabase functions deploy understand --project-ref "$SUPABASE_PROJECT_REF"
+          supabase functions deploy understand converse --project-ref "$SUPABASE_PROJECT_REF"
       - name: Smoke test as a phone would
         if: steps.ready.outputs.ready == 'true'
         env:
@@ -125,3 +129,10 @@ jobs:
           # No fallback header when Claude answered; grep finding nothing must not end the step.
           reason=$(grep -i '^x-assistant-fallback:' "$RUNNER_TEMP/headers3.txt" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//' || true)
           if [ -n "$ANTHROPIC_API_KEY" ] && [ "$provider" != "anthropic" ]; then echo "::warning::Claude is configured but Groq answered: ${reason:-no reason given}"; fi
+          # The voice conversation is Pro only: a phone without a verified subscription is turned away
+          # before any allowance is taken or any model is asked.
+          voicebody='{"consent":1,"utterance":"307 還要多久","state":"畫面：地圖","history":[]}'
+          code=$(curl -sS -o "$RUNNER_TEMP/voice.json" -w '%{http_code}' -X POST "$url/functions/v1/converse" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$voicebody")
+          echo "converse without Pro → HTTP $code $(head -c 200 "$RUNNER_TEMP/voice.json")"
+          [ "$code" = "403" ]

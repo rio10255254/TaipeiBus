@@ -10,6 +10,11 @@ Online understanding goes through this Supabase project instead of a key built i
   request to Groq instead. Builds before the consent that names Claude (1.8.20 and earlier) send no
   `consent` version and stay on Groq. Both keys exist only in this project's secrets. Sentences are
   not stored.
+- `functions/converse` is the voice conversation, Pro only (40 turns a day, counted apart in
+  `assistant_voice_usage`). Each request is one turn: what the rider just said, the app's state in
+  words and the last two turns. Claude answers with the reply schema enforced (Groq in JSON mode when
+  Claude cannot); the reply's numbers are slots such as `{r1}` that the app fills from its own data.
+  Nothing is stored. The two functions share `_shared/` (caller, Pro check, Claude client).
 - Pro is checked from the signed App Store transaction the app sends, verified with Apple's root
   certificates (`@apple/app-store-server-library`), and remembered until that period ends.
 - Only the function (service role) can read `assistant_usage` and `assistant_pro`; row level
