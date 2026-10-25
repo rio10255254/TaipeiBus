@@ -113,6 +113,8 @@ final class VoiceConversation: ObservableObject {
     @Published private(set) var heard = ""
     /// What the assistant said last, as written.
     @Published private(set) var caption = ""
+    /// The page an answer from the web came from, shown in small print under it.
+    @Published private(set) var source: String?
     @Published private(set) var choices: [String] = []
     /// Asked and waiting for a yes: shown as a button as well.
     @Published private(set) var pending: VoiceAction?
@@ -230,7 +232,7 @@ final class VoiceConversation: ObservableObject {
     }
 
     private func turn(_ text: String, lookups: Int) async {
-        phase = .thinking; choices = []
+        phase = .thinking; choices = []; source = nil
         let context = VoiceStateBuilder(model: model).context(pending: pending)
         let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true]
@@ -272,12 +274,15 @@ final class VoiceConversation: ObservableObject {
             for action in reply.actions { run(action) }
             pending = reply.confirm
             choices = reply.choices
-            answer.finish(choices: reply.choices).forEach(speak)
+            // An answer from the web: its times may be checked against what its sources said.
+            let quoted = (final["quoted"] as? [String]) ?? []
+            source = ((final["sources"] as? [[String: Any]])?.first?["title"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+            answer.finish(choices: reply.choices, quoted: quoted).forEach(speak)
             var said = answer.spoken.joined()
-            if let failure = answer.refused {
-                JourneyDiagnostics.shared.record("voice refused \(failure)")
-                // A number the app cannot vouch for is never read out; a slot it never offered means
-                // the model had nothing to go on.
+            if let failure = answer.refused { JourneyDiagnostics.shared.record("voice left out \(failure)") }
+            // A sentence with a live figure the app cannot vouch for was left out; only when nothing at
+            // all could be said is the rider told so.
+            if let failure = answer.refused, answer.spoken.isEmpty {
                 let fallback: String
                 if case .unknownSlot = failure { fallback = "這個我現在查不到，可以換個方式問嗎？" }
                 else { fallback = "結果在畫面上，請看一下。" }

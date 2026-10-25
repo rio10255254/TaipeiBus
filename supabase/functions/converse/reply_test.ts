@@ -48,7 +48,7 @@ Deno.test('choices are trimmed, unique and at most three', () => {
 
 Deno.test('nothing to say or too much to say is unusable', () => {
   assertEquals(readReply({ say: '  ', actions: [], confirm: none, choices: [], followUp: false }), null);
-  assertEquals(readReply({ say: '很'.repeat(161), actions: [], confirm: none, choices: [], followUp: false }), null);
+  assertEquals(readReply({ say: '很'.repeat(241), actions: [], confirm: none, choices: [], followUp: false }), null);
   assertEquals(readReply('not an object'), null);
 });
 

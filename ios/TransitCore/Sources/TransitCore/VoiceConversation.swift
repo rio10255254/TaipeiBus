@@ -70,7 +70,7 @@ public struct VoiceReply: Equatable, Sendable {
     /// The server checks the same rules; the app checks again because the reply came from a model.
     public init?(json: [String: Any]) {
         let say = ((json["say"] as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !say.isEmpty, say.count <= 160 else { return nil }
+        guard !say.isEmpty, say.count <= 240 else { return nil }
         var confirm = (json["confirm"] as? [String: Any]).flatMap(VoiceAction.init(json:))
         if confirm?.needsConfirmation == false { confirm = nil }
         var actions: [VoiceAction] = []
@@ -221,16 +221,17 @@ public struct SpokenSentences: Sendable {
 
 /// One answer as it streams in. Each finished sentence is filled and checked like a whole answer and
 /// handed out to be spoken as soon as it passes. One that cannot pass yet (its number may be one of the
-/// choices that come with the end of the reply) holds back itself and everything after it, so the
-/// answer is never spoken out of order, and is checked once more at the end.
+/// choices or quoted sources that come with the end of the reply) holds back itself and everything after
+/// it, so the answer is never spoken out of order. At the end each held sentence is checked once more;
+/// one that still fails is left out and the rest are spoken.
 public struct SpokenTurn: Sendable {
     private let values: [String: String]
     private let known: [String]
     private var sentences = SpokenSentences()
-    private var held = ""
+    private var held: [String] = []
     /// The sentences handed out, as filled in.
     public private(set) var spoken: [String] = []
-    /// Why what was held back could not be spoken in the end.
+    /// Why a held sentence was left out in the end.
     public private(set) var refused: SpokenAnswer.Failure?
 
     public init(context: VoiceContext, heard: String) {
@@ -247,15 +248,17 @@ public struct SpokenTurn: Sendable {
         return rest.isEmpty ? [] : offer([rest])
     }
 
-    /// The reply is complete: anything still unspoken, checked against its choices too.
-    public mutating func finish(choices: [String]) -> [String] {
+    /// The reply is complete: what was held back, checked against its choices and the passages its
+    /// sources quoted too.
+    public mutating func finish(choices: [String], quoted: [String] = []) -> [String] {
         var lines = finishWords()
-        let rest = held
-        held = ""
-        guard !rest.isEmpty else { return lines }
-        switch SpokenAnswer.render(rest, values: values, known: known + choices) {
-        case .success(let line): spoken.append(line); lines.append(line)
-        case .failure(let failure): refused = failure
+        let waiting = held
+        held = []
+        for sentence in waiting {
+            switch SpokenAnswer.render(sentence, values: values, known: known + choices + quoted) {
+            case .success(let line): spoken.append(line); lines.append(line)
+            case .failure(let failure): refused = failure
+            }
         }
         return lines
     }
@@ -266,7 +269,7 @@ public struct SpokenTurn: Sendable {
             if held.isEmpty, case .success(let line) = SpokenAnswer.render(sentence, values: values, known: known) {
                 spoken.append(line); lines.append(line)
             } else {
-                held += sentence
+                held.append(sentence)
             }
         }
         return lines
@@ -302,7 +305,7 @@ public enum SpokenAnswer {
         }
         var sentence = texts[0]
         for (index, value) in filled.enumerated() { sentence += value + texts[index + 1] }
-        guard sentence.count <= 160 else { return .failure(.tooLong) }
+        guard sentence.count <= 240 else { return .failure(.tooLong) }
         return .success(sentence)
     }
 
@@ -331,15 +334,17 @@ public enum SpokenAnswer {
         return text
     }
 
-    /// The first number in the model's own words that the rider has not seen or said.
+    /// The first live figure in the model's own words that the rider has not seen or said: minutes,
+    /// stops, buses, bikes and docks, which only the app can know. Fares, opening hours, years and route
+    /// numbers are general knowledge the model may speak.
     static func unsupportedNumber(in text: String, known: [String]) -> String? {
         let haystack = known.map(normalized).joined(separator: "\n")
         let plain = normalized(text)
         let patterns = [
-            "[0-9]+",
-            // 三分鐘, 兩站, 十點: Chinese numbers with a unit. 快一點, 早一點 and the like ask for more of
-            // something, and 哪一班, 下一站, 這一班 name one rather than count.
-            "(?<![快慢早晚多少好差])(?:(?<![哪下上這那同每某])一|[零〇二兩三四五六七八九十百])[零〇一二兩三四五六七八九十百]*(分鐘|分|站|點|號|班|次|公里|公尺|秒|輛|格|元)",
+            "[0-9]+(?=\\s*(?:分鐘|分|站|班|輛|台|格|秒))",
+            // 三分鐘, 兩站: Chinese numbers with a unit. 快一點 and the like ask for more of something,
+            // 哪一班, 下一站, 這一班 name one rather than count, and 十分 alone means "very".
+            "(?<![快慢早晚多少好差])(?:(?<![哪下上這那同每某])一|[零〇二兩三四五六七八九十百])[零〇一二兩三四五六七八九十百]*(分鐘|站|班|輛|格|秒)",
         ]
         for pattern in patterns {
             let expression = try! NSRegularExpression(pattern: pattern)

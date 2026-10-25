@@ -1,6 +1,6 @@
 // Who answers a turn: Claude with the reply schema enforced, or Groq in JSON mode when Claude cannot.
 import { Anthropic, claudeClient, claudeModel, describe } from '../_shared/claude.ts';
-import { readReply, REPLY_SCHEMA, type Reply, SYSTEM_PROMPT } from './reply.ts';
+import { readReply, REPLY_SCHEMA, type Reply, SYSTEM_PROMPT, WEB_PROMPT } from './reply.ts';
 import { SayReader } from './say.ts';
 
 /// The phone waits about eight seconds for a turn; Claude gets most of it, leaving time for Groq.
@@ -73,6 +73,62 @@ export async function streamClaude(apiKey: string, message: string, onSay: (word
     return { failure, spoke };
   } finally {
     clearTimeout(quiet);
+  }
+}
+
+/// What a web lookup found: the spoken answer, the pages it came from, and the passages it quoted
+/// (the phone checks the answer's times against them).
+export type WebAnswer = { say: string; sources: { title: string; url: string }[]; quoted: string[]; model: string } | { failure: string };
+
+const WEB_TIMEOUT_MS = 15000;
+
+/// Answers one question with Claude's web search, at most two searches. `onWords` gets the answer as it
+/// is written; anything Claude writes before the results arrive is not part of the answer.
+export async function searchWeb(apiKey: string, question: string, onWords: (words: string) => void): Promise<WebAnswer> {
+  try {
+    const stream = claudeClient(apiKey, WEB_TIMEOUT_MS).messages.stream({
+      model: claudeModel(),
+      max_tokens: 800,
+      system: [{ type: 'text', text: WEB_PROMPT, cache_control: { type: 'ephemeral' } }],
+      messages: [{ role: 'user', content: question }],
+      thinking: { type: 'disabled' },
+      output_config: { effort: 'low' },
+      tools: [{
+        type: 'web_search_20250305', name: 'web_search', max_uses: 2,
+        user_location: { type: 'approximate', city: 'Taipei', region: 'Taipei', country: 'TW', timezone: 'Asia/Taipei' },
+      }],
+    });
+    let searched = false;
+    for await (const event of stream) {
+      if (event.type === 'content_block_start' && event.content_block.type === 'web_search_tool_result') searched = true;
+      if (searched && event.type === 'content_block_delta' && event.delta.type === 'text_delta') onWords(event.delta.text);
+    }
+    const message = await stream.finalMessage();
+    if (stopped(message.stop_reason)) return { failure: `stopped ${message.stop_reason}` };
+    const sources = new Map<string, string>();
+    const quoted: string[] = [];
+    let say = '';
+    let after = false;
+    for (const block of message.content) {
+      if (block.type === 'web_search_tool_result') after = true;
+      if (block.type !== 'text' || !after) continue;
+      say += block.text;
+      for (const citation of block.citations ?? []) {
+        if (citation.type !== 'web_search_result_location') continue;
+        sources.set(citation.url, citation.title ?? citation.url);
+        if (citation.cited_text) quoted.push(citation.cited_text.slice(0, 500));
+      }
+    }
+    say = say.trim();
+    if (!after || !say) return { failure: 'no answer from the web' };
+    return {
+      say, model: message.model, quoted: quoted.slice(0, 8),
+      sources: [...sources].slice(0, 3).map(([url, title]) => ({ title: title.slice(0, 80), url })),
+    };
+  } catch (error) {
+    const failure = describe(error);
+    console.error('web search failed', failure);
+    return { failure };
   }
 }
 

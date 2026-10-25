@@ -26,7 +26,7 @@ struct VoiceChatHost: ViewModifier {
                 Button(AppText.text("開始對話")) { chat.answerConsent(true) }
                 Button(AppText.text("不要"), role: .cancel) { chat.answerConsent(false) }
             } message: {
-                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
+                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
             }
             .onChange(of: chat.panelRequest) { _, request in
                 guard let request else { return }
@@ -148,6 +148,9 @@ struct VoiceChatPanel: View {
                 Text(chat.caption).font(.body).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("voice-chat-caption")
             }
+            if let source = chat.source {
+                Label(AppText.text("來源：%@", source), systemImage: "globe").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
             if !chat.choices.isEmpty {
                 ChipFlow(spacing: 8) {
                     ForEach(chat.choices, id: \.self) { choice in
@@ -204,7 +207,7 @@ struct VoiceChatSettings: View {
         } header: {
             Text(AppText.text("語音對話（Pro）"))
         } footer: {
-            Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
         }
     }
 }

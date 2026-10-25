@@ -1030,7 +1030,7 @@
   "開啟語音對話？": "Turn on voice conversation?",
   "開始對話": "Start talking",
   "不要": "Not now",
-  "你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。": "What you say, the trip on screen and the names of nearby stops (no location coordinates) go through TaipeiBus's own server to Anthropic's Claude, which understands and answers; when Claude is unavailable, an open model on Groq is used instead. Your iPhone reads the answer aloud and the server does not keep the conversation. Pro includes 40 questions a day. You can turn this off in Info & Settings.",
+  "你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。": "What you say, the trip on screen and the names of nearby stops (no location coordinates) go through TaipeiBus's own server to Anthropic's Claude, which understands and answers; for current information, Claude searches the web (up to 3 times a day). When Claude is unavailable, an open model on Groq is used instead. Your iPhone reads the answer aloud and the server does not keep the conversation. Pro includes 40 questions a day. You can turn this off in Info & Settings.",
   "請說": "Listening",
   "想一下…": "Thinking…",
   "回答中": "Answering",
@@ -1040,5 +1040,6 @@
   "問一下": "Ask",
   "語音對話": "Voice conversation",
   "語音對話（Pro）": "Voice conversation (Pro)",
-  "開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），伺服器不保存對話。關閉時，麥克風改回用一句話規劃。": "When on, the microphone opens a back-and-forth conversation: ask about arrivals, plan routes, or say you have boarded while navigating. What you say, the trip on screen and nearby stop names go through TaipeiBus's own server to Anthropic's Claude (with an open model on Groq as backup); the server does not keep the conversation. When off, the microphone plans from one sentence."
+  "開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。": "When on, the microphone opens a back-and-forth conversation: ask about arrivals, plan routes, say you have boarded while navigating, or ask general questions such as fares and places to visit. What you say, the trip on screen and nearby stop names go through TaipeiBus's own server to Anthropic's Claude (with an open model on Groq as backup), which searches the web for current information up to 3 times a day; the server does not keep the conversation. When off, the microphone plans from one sentence.",
+  "來源：%@": "Source: %@"
 }
