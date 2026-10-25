@@ -74,7 +74,7 @@ struct RideIslandNoticePolicy {
     func update(_ content: ActivityContent<RideActivityAttributes.ContentState>, notice: RideIslandNotice?) async {
         let alert = notice.map { item in
             AlertConfiguration(title: LocalizedStringResource("\(item.title)"), body: LocalizedStringResource("\(item.body)"),
-                sound: item.kind == .alighting ? .default : .named("NavigationQuiet.wav"))
+                sound: .named(item.kind == .alighting ? "AlightChime.wav" : "NavigationQuiet.wav"))
         }
         await value.update(content, alertConfiguration: alert)
     }

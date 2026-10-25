@@ -630,6 +630,13 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var bikeNetwork = BikeNetwork.empty
     @Published private(set) var bikeAvailability: BikeAvailability?
     /// Docks are drawn at street zoom; the preference and the remote switch can both hide them.
+    /// Dark colours and the dark map while navigating between sunset and sunrise.
+    @Published var nightNavigation: Bool = UserDefaults.standard.object(forKey: "nightNavigation") as? Bool ?? true {
+        didSet {
+            guard nightNavigation != oldValue else { return }
+            UserDefaults.standard.set(nightNavigation, forKey: "nightNavigation")
+        }
+    }
     @Published var bikeStationsOn: Bool = UserDefaults.standard.object(forKey: "bikeStationsOn") as? Bool ?? true {
         didSet {
             guard bikeStationsOn != oldValue else { return }

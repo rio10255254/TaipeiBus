@@ -274,7 +274,8 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = AppText.text("準備下車")
         content.body = AppText.text("快到「%@」了，準備下車。", stopName)
-        content.sound = .default
+        // A soft two-note chime of its own, so the reminder is told apart from other alerts.
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("AlightChime.wav"))
         content.userInfo = ["navigation": "journey"]
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])

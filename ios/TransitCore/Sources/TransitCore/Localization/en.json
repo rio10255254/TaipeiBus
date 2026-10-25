@@ -795,5 +795,7 @@
   "試試站名、地址或英文站名。": "Try a stop name, address or English name.",
   "試試路線號碼、起訖站或支線名稱。": "Try a route number, terminal or branch name.",
   "暫時無法取得站牌與路線": "Can’t load stops and routes",
-  "請確認網路連線後重新整理。": "Check your connection, then refresh."
+  "請確認網路連線後重新整理。": "Check your connection, then refresh.",
+  "夜間導航使用深色": "Dark appearance for night navigation",
+  "日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。": "Between sunset and sunrise, navigation switches the screen and map to dark to reduce glare."
 }

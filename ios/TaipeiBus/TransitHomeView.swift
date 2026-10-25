@@ -27,6 +27,7 @@ struct TransitHomeView: View {
     @State private var journeyPanelHeight: CGFloat = 510
     @State private var pendingJourneyDetail = false
     @State private var stationWalkReturnDetails = false
+    @State private var sunDown = false
     @State private var stationWalkReturnSearch = false
     @State private var bottomControlsHeight: CGFloat = 210
     @State private var bannerHeight: CGFloat = 0
@@ -413,8 +414,29 @@ struct TransitHomeView: View {
         }
     }
 
+    /// Between sunset and sunrise a trip on the map switches to dark colours and the dark
+    /// basemap, so the screen does not glare on a night bus. The rider can turn this off.
+    private var nightDark: Bool {
+        model.nightNavigation && sunDown && (planner.started || stationWalk.isActive) && NightNavigation.allowed
+    }
+
     var body: some View {
         presentedMap
+        // Set on the windows rather than with preferredColorScheme, whose return to the system
+        // appearance is unreliable once it has forced dark; this covers sheets as well.
+        .onChange(of: nightDark, initial: true) { _, dark in
+            for scene in UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }) {
+                for window in scene.windows { window.overrideUserInterfaceStyle = dark ? .dark : .unspecified }
+            }
+        }
+        .task(id: planner.started || stationWalk.isActive) {
+            // Checked once a minute while navigating, so a trip that runs past sunset darkens.
+            guard planner.started || stationWalk.isActive else { sunDown = false; return }
+            while !Task.isCancelled {
+                sunDown = Daylight.isNight(at: Date(), coordinate: location.usableCoordinate ?? .taipei)
+                try? await Task.sleep(for: .seconds(60))
+            }
+        }
         .onChange(of: journeyPreviewDetent) { before, after in
             if journeyDetent == before { journeyDetent = after }
         }
@@ -1590,6 +1612,9 @@ private struct AppInformationView: View {
                 }
                 Section(AppText.text("地圖")) {
                     Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
+                    Toggle(AppText.text("夜間導航使用深色"), isOn: $model.nightNavigation)
+                        .accessibilityIdentifier("night-navigation-toggle")
+                    Text(live.text("日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。"))
                     if live.display.bikeStations {
                         Toggle(AppText.text("顯示 YouBike 站點"), isOn: $model.bikeStationsOn)
                             .accessibilityIdentifier("bike-stations-toggle")
@@ -1690,3 +1715,17 @@ private struct DebugZoomPerformanceControls: View {
     }
 }
 #endif
+
+enum NightNavigation {
+    /// UI tests capture fixed light and dark appearances whatever the hour, so automation
+    /// leaves the system appearance alone unless a test asks for the night switch.
+    static let allowed: Bool = {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments.dropFirst()
+        if arguments.contains("--test-night-navigation") { return true }
+        return !arguments.contains { $0.hasPrefix("--") }
+#else
+        return true
+#endif
+    }()
+}
