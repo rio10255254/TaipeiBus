@@ -135,10 +135,10 @@ final class JourneyAssistantSession: ObservableObject {
         let now = Date()
         operation = Task { @MainActor in
             let rules = AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
-            var change = rules, reader = "rules"
+            var change = rules, reader = "rules", credit = AssistantCredit.rules
             if OnlineJourneyReader.enabled,
                let online = try? await OnlineJourneyReader.refine(value, trip: Self.describe(trip), now: now, pro: pro) {
-                change = online.filled(from: rules); reader = "online"
+                change = online.filled(from: rules); reader = "online"; credit = AssistantCredit.online
             }
             guard !Task.isCancelled else { return }
             busy = false
@@ -148,9 +148,9 @@ final class JourneyAssistantSession: ObservableObject {
                 run(value); return
             }
             if !change.destination.isEmpty || !change.origin.isEmpty {
-                await replace(trip, with: change, request: value)
+                await replace(trip, with: change, request: value, credit: credit)
             } else {
-                model.applyAssistantChange(change, request: value)
+                model.applyAssistantChange(change, request: value, answeredBy: credit)
                 Haptics.success()
                 finishVoice()
             }
@@ -159,7 +159,7 @@ final class JourneyAssistantSession: ObservableObject {
     private var waitingToRefine = false
 
     /// A new destination or start keeps everything else the rider already set.
-    private func replace(_ trip: TransitAppModel.AssistantTrip, with change: AssistantChange, request: String) async {
+    private func replace(_ trip: TransitAppModel.AssistantTrip, with change: AssistantChange, request: String, credit: String) async {
         func place(_ words: String, near: Coordinate?) async -> TravelPlace? {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(near)
@@ -185,7 +185,7 @@ final class JourneyAssistantSession: ObservableObject {
         model.previewAssistantJourney(request: request, origin: origin, destination: destination, preference: preference,
                                       mode: change.mode ?? trip.mode, departure: departure, arriveBy: arriveBy,
                                       nextStop: change.next.isEmpty ? trip.nextStop : change.next,
-                                      constraints: change.constraints ?? trip.constraints)
+                                      constraints: change.constraints ?? trip.constraints, answeredBy: credit)
         Haptics.success()
         plannedCount += 1; finishVoice()
     }
@@ -469,7 +469,7 @@ final class JourneyAssistantSession: ObservableObject {
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
-                                      nextStop: turn.nextStop, constraints: turn.avoid)
+                                      nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: conversation?.credit)
         if !turn.nextStop.isEmpty { findStop(1, words: turn.nextStop, near: target) }
         Haptics.success()
         conversation = nil; clarification = nil; problem = nil; message = nil
@@ -738,7 +738,7 @@ struct TripConditionsBar: View {
     @State private var editing = false
     @State private var change = ""
     @FocusState private var changeFocused: Bool
-    @State private var comparison: String?
+    @State private var comparison: (text: String, credit: String?)?
     @State private var comparing = false
 
     static func label(_ date: Date, now: Date = Date()) -> String {
@@ -804,7 +804,10 @@ struct TripConditionsBar: View {
             if let comparison {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "sparkles").font(.caption).foregroundStyle(.tint)
-                    Text(comparison).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(comparison.text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+                        if let credit = comparison.credit { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
+                    }
                     Spacer(minLength: 0)
                     Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
                         .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
@@ -814,6 +817,10 @@ struct TripConditionsBar: View {
             }
             if let trip, trip.stops.count > 1 { stopStrip(trip) }
             footnotes(trip)
+            if let credit = trip?.answeredBy {
+                ModelCredit(text: AppText.text("由 %@ 理解", credit)).frame(maxWidth: .infinity, alignment: .trailing)
+                    .accessibilityIdentifier("assistant-trip-credit")
+            }
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(trip == nil ? "journey-conditions" : "assistant-trip")
@@ -946,8 +953,8 @@ struct TripConditionsBar: View {
             comparing = true
             let summaries = routeSummaries(), request = trip?.request ?? "", pro = model.purchases.hasPro
             Task { @MainActor in
-                comparison = await OnlineJourneyReader.compare(summaries, request: request, pro: pro)
-                    ?? AppText.text("暫時無法比較，請直接看下方路線。")
+                let result = await OnlineJourneyReader.compare(summaries, request: request, pro: pro)
+                comparison = (text: result?.text ?? AppText.text("暫時無法比較，請直接看下方路線。"), credit: result?.credit)
                 comparing = false
             }
         } label: {
@@ -1041,6 +1048,15 @@ struct TripConditionsBar: View {
     }
 }
 
+/// Which model answered, in small print out of the way: Claude Haiku 5.5, Groq gpt-oss-120b, the phone's
+/// model or the app's rules.
+struct ModelCredit: View {
+    let text: String
+    var body: some View {
+        Text(text).font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+    }
+}
+
 /// The one-time question before a sentence is first sent to the online model.
 struct OnlineConsentAlert: ViewModifier {
     @ObservedObject var session: JourneyAssistantSession
@@ -1054,7 +1070,7 @@ struct OnlineConsentAlert: ViewModifier {
             Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
-            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂。不包含位置、常用行程或帳號，句子不保存；伺服器只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；台北公車的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
         }
     }
 }
@@ -1168,7 +1184,7 @@ extension JourneyAssistantSession {
         case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
         case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
         case .understanding: activity
-        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Groq 上的開源模型（OpenAI gpt-oss）讀懂。不包含位置、常用行程或帳號，句子不保存；伺服器只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
+        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；台北公車的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
         case .done, .problem: ""
         }
     }

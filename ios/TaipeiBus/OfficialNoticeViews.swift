@@ -93,6 +93,7 @@ struct OfficialNoticesView: View {
 private struct OfficialNoticeDetail: View {
     let notice: OfficialNotice
     @State private var excerpts: [String] = []
+    @State private var credit: String?
     @State private var busy = false
     @State private var failed = false
     @State private var operation: Task<Void, Never>?
@@ -114,7 +115,7 @@ private struct OfficialNoticeDetail: View {
                         operation = Task { @MainActor in
                             do {
                                 let result = try await OnDeviceJourneyAssistant.excerpt(document, language: .traditionalChinese)
-                                try Task.checkCancellation(); excerpts = result
+                                try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit
                             } catch { if !Task.isCancelled { failed = true } }
                             busy = false
                         }
@@ -123,8 +124,9 @@ private struct OfficialNoticeDetail: View {
                 if busy { ProgressView() }
                 if failed { Text(AppText.text("暫時無法擷取重點，請閱讀下方原文。")) }
                 ForEach(Array(excerpts.enumerated()), id: \.offset) { Text($0.element) }
+                if let credit, !excerpts.isEmpty { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
             } header: { Text(AppText.text("原文重點摘錄")) }
-            footer: { Text(AppText.text("模型僅選取原文段落（同意線上理解時由 Groq 上的開源模型，否則在手機上），可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。")) }
+            footer: { Text(AppText.text("模型僅選取原文段落（同意線上理解時由 Anthropic 的 Claude 或 Groq 上的開源模型，否則在手機上），可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。")) }
             Section(AppText.text("公告全文")) { Text(notice.body).textSelection(.enabled) }
         }.navigationTitle(AppText.text("交通公告")).navigationBarTitleDisplayMode(.inline)
             .onDisappear { operation?.cancel() }

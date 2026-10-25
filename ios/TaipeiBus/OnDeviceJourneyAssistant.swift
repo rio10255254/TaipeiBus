@@ -78,11 +78,12 @@ enum OnDeviceJourneyAssistant {
     }
 
     /// The result is verbatim excerpts, always displayed alongside the full notice.
-    static func excerpt(_ document: NoticeExcerpt, language: AppLanguage = .current, pro: Bool = false) async throws -> [String] {
+    static func excerpt(_ document: NoticeExcerpt, language: AppLanguage = .current, pro: Bool = false) async throws
+        -> (paragraphs: [String], credit: String) {
         // Online first when the rider agreed (the notice is public text); the phone's model otherwise.
         if document.canSummarize, let indices = await OnlineJourneyReader.noticeIndices(document.paragraphs, pro: pro),
            let picked = try? document.selecting(indices) {
-            return picked
+            return (paragraphs: picked, credit: AssistantCredit.online)
         }
         guard document.canSummarize, unavailableReason(language: language) == nil else { throw Failure.unavailable }
 #if canImport(FoundationModels)
@@ -98,7 +99,7 @@ enum OnDeviceJourneyAssistant {
             let response = try await session.respond(to: source, generating: GeneratedNoticeSelection.self,
                 options: GenerationOptions(temperature: 0))
             try Task.checkCancellation()
-            return try document.selecting(response.content.indices)
+            return (paragraphs: try document.selecting(response.content.indices), credit: AssistantCredit.onDevice)
         }
 #endif
         throw Failure.unavailable
@@ -128,8 +129,20 @@ protocol JourneyAssistantConversation: AnyObject {
     func answer(option: Int) async throws -> AssistantJourneyTurn
     /// Loads the model before the first request, so the first answer does not wait for it.
     func prewarm()
+    /// Who read the sentence, e.g. Claude Haiku 5.5, for the small credit under the routes.
+    var credit: String? { get }
 }
-extension JourneyAssistantConversation { func prewarm() {} }
+extension JourneyAssistantConversation {
+    func prewarm() {}
+    var credit: String? { nil }
+}
+
+/// Names for the small credit under an assistant result.
+enum AssistantCredit {
+    static var onDevice: String { AppText.text("Apple 裝置端模型") }
+    static var rules: String { AppText.text("App 內建規則") }
+    static var online: String { AssistantServer.answeredBy ?? AppText.text("線上模型") }
+}
 
 /// What the on-device model read from one sentence: words and their kind, never resolved places.
 /// Everything after this (saved journeys, place search, follow-up questions) is decided by the app,
@@ -807,7 +820,7 @@ enum ContextWindowRetry {
     }
 }
 
-/// The app's own server for online understanding (a Supabase project). It holds the Groq key,
+/// The app's own server for online understanding (a Supabase project). It holds the Claude and Groq keys,
 /// counts each phone's daily allowance and checks Pro; the app carries only the public project URL
 /// and publishable key, and signs in anonymously once (no account, email or name).
 enum AssistantServer {
@@ -820,6 +833,8 @@ enum AssistantServer {
         ((Bundle.main.object(forInfoDictionaryKey: "BusAssistantKey") as? String) ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
     }
     static var configured: Bool { baseURL != nil && !publicKey.isEmpty }
+    /// The consent shown in this build names Claude and Groq; the server uses Claude only from version 2.
+    static let consentVersion = 2
     /// A signed App Store transaction for an active Pro subscription; the server checks it with Apple's
     /// certificates before allowing Pro's larger model and allowance.
     static let proof = Shared()
@@ -834,16 +849,29 @@ enum AssistantServer {
     }
     private static let account = Account()
     /// What the server actually used for the last reply, for the troubleshooting history: the model
-    /// Groq answered with and the tier the server granted (a phone whose Pro could not be verified is
+    /// that answered and the tier the server granted (a phone whose Pro could not be verified is
     /// served the smaller model as free).
     static var served: String { lastServed.value ?? "served=? tier=?" }
     private static let lastServed = Shared()
+    /// The model that gave the last successful reply, named for the small credit under a result.
+    static var answeredBy: String? { lastModel.value.map(modelName) }
+    private static let lastModel = Shared()
+    /// claude-haiku-5-5 → Claude Haiku 5.5; openai/gpt-oss-120b → Groq gpt-oss-120b.
+    static func modelName(_ id: String) -> String {
+        guard id.hasPrefix("claude-") else { return "Groq " + (id.split(separator: "/").last.map(String.init) ?? id) }
+        let parts = id.dropFirst("claude-".count).split(separator: "-")
+        let family = parts.first.map { String($0.prefix(1)).uppercased() + String($0.dropFirst()) } ?? ""
+        // A dated snapshot ends in eight digits; only the short version numbers are kept.
+        let version = parts.dropFirst().filter { $0.count <= 2 && $0.allSatisfy(\.isNumber) }.joined(separator: ".")
+        return ["Claude", family, version].filter { !$0.isEmpty }.joined(separator: " ")
+    }
 
     /// One chat request through the server; the reply body and HTTP status. 429 means today's
     /// allowance is used up.
     static func send(_ chat: [String: Any], timeout: TimeInterval, session: URLSession) async throws -> (Data, Int) {
         guard let base = baseURL, let url = URL(string: base + "/functions/v1/understand") else { throw OnlineJourneyReader.Failure.notConfigured }
-        var body: [String: Any] = ["request": chat]
+        // Tells the server which consent this rider gave, so a build that only named Groq stays on Groq.
+        var body: [String: Any] = ["request": chat, "consent": consentVersion]
         if let jws = proof.value { body["proof"] = jws }
         let payload = try JSONSerialization.data(withJSONObject: body)
         var token = try await account.token(session: session)
@@ -861,6 +889,7 @@ enum AssistantServer {
             let tier = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Assistant-Tier") ?? "?"
             let model = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["model"] as? String ?? "?"
             lastServed.value = "served=\(model) tier=\(tier)"
+            if status == 200, model != "?" { lastModel.value = model }
             return (data, status)
         }
         throw OnlineJourneyReader.Failure.http(401)
@@ -924,25 +953,33 @@ enum AssistantServer {
 }
 
 /// 線上理解 (opt-in, off by default): when the rules are unsure and the phone has no on-device model
-/// (or it failed), the sentence and today's date, and nothing else, are read by an open model on
-/// Groq. The reading then goes through the same place search and checks as every other reading.
+/// (or it failed), the sentence and today's date, and nothing else, are read by Claude, or by an open
+/// model on Groq when Claude is unavailable. The reading then goes through the same place search and
+/// checks as every other reading.
 @MainActor
 enum OnlineJourneyReader {
-    static let enabledKey = "assistantOnline.v1"
+    /// The consent now names Claude as well as Groq, so a rider who agreed to Groq alone is asked again.
+    static let enabledKey = "assistantOnline.v2"
+    private static let groqOnlyKey = "assistantOnline.v1"
     private static let countKey = "assistantOnlineCount.v1"
-    /// Requests per phone per day; the Groq allowance is shared by every rider.
+    /// Requests per phone per day, also counted by the server.
     static func dailyLimit(pro: Bool) -> Int { pro ? 100 : 20 }
-    /// Pro reads with the larger model, and the smaller one when its allowance is used up;
-    /// everyone else with the smaller model, then the phone's own model.
-    /// Groq retires models often (both Llama models ended on the free plan in August 2026 and answered
-    /// 404), so a missing model moves on to the next instead of giving up.
+    /// The server answers with Claude and uses these only when it falls back to Groq: Pro reads with the
+    /// larger model, and the smaller one when its allowance is used up; everyone else with the smaller
+    /// model, then the phone's own model. Groq retires models often (both Llama models ended on the free
+    /// plan in August 2026 and answered 404), so a missing model moves on to the next instead of giving up.
     static func models(pro: Bool) -> [String] { pro ? ["openai/gpt-oss-120b", "openai/gpt-oss-20b"] : ["openai/gpt-oss-20b"] }
     enum Failure: Error { case notConfigured, limit, http(Int), invalid }
 
     /// The build knows the app's own server; no key to another company's service ships in the app.
     static var configured: Bool { AssistantServer.configured }
-    /// The rider's answer to the one-time question; nil until asked.
-    static var consent: Bool? { UserDefaults.standard.object(forKey: enabledKey) as? Bool }
+    /// The rider's answer to the one-time question; nil until asked. A rider who declined the
+    /// Groq-only question is not asked again.
+    static var consent: Bool? {
+        let defaults = UserDefaults.standard
+        if let answer = defaults.object(forKey: enabledKey) as? Bool { return answer }
+        return (defaults.object(forKey: groqOnlyKey) as? Bool) == false ? false : nil
+    }
     static var enabled: Bool { configured && consent == true }
     /// Apple asks apps to get permission before sending what a person types to another company's AI.
     static var needsConsent: Bool { configured && consent == nil }
@@ -1059,7 +1096,7 @@ enum OnlineJourneyReader {
     }
 
     /// One or two plain sentences comparing the routes on screen, from their summaries only.
-    static func compare(_ routes: [String], request: String, pro: Bool, session: URLSession = .shared) async -> String? {
+    static func compare(_ routes: [String], request: String, pro: Bool, session: URLSession = .shared) async -> (text: String, credit: String)? {
         guard enabled, routes.count >= 2 else { return nil }
         let system = "你是台北大眾運輸助理。用繁體中文、最多兩句（60字內）比較這幾條路線，說明各自的取捨並建議一條。用路線名稱（例如「BR→673」）稱呼，不要用編號。只根據提供的數字；總時間不明的路線不能說它最快或最慢，全部都不明時直接說時間無法確認、建議改時間。不要編造。只輸出 JSON {\"text\":\"...\"}。"
         let user = (request.isEmpty ? "" : "使用者的需求：\(request)\n") + "路線：\n" + routes.joined(separator: "\n")
@@ -1069,7 +1106,7 @@ enum OnlineJourneyReader {
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let text = (value["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
             JourneyDiagnostics.shared.record("ai-online compare model=\(model)")
-            return String(text.prefix(120))
+            return (text: String(text.prefix(120)), credit: AssistantCredit.online)
         }
         return nil
     }
@@ -1205,6 +1242,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     private let pro: Bool
     /// How the last request was read, for the troubleshooting history: online, model, rules or rules-guess.
     private(set) var reader = ""
+    private(set) var credit: String?
     init(context: JourneyAssistantContext, model: (any JourneyAssistantConversation)?, useRules: Bool = true, pro: Bool = false) {
         self.context = context; self.model = model; self.useRules = useRules; self.pro = pro
     }
@@ -1215,7 +1253,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         if OnlineJourneyReader.enabled {
             do {
                 let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now, pro: pro), rules: rules, source: text)
-                reader = pro ? "online-pro" : "online"; context.note(reader: reader)
+                reader = pro ? "online-pro" : "online"; context.note(reader: reader); credit = AssistantCredit.online
                 return try await context.resolve(reading, source: text, now: now)
             } catch {
                 guard !Task.isCancelled else { throw error }
@@ -1225,7 +1263,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         // 2. The on-device model, for a sentence the rules are not sure of.
         if let model, !(rules?.confident ?? false) {
             do {
-                reader = "model"; context.note(reader: reader)
+                reader = "model"; context.note(reader: reader); credit = AssistantCredit.onDevice
                 return try await model.begin(text, at: now)
             } catch {
                 guard !Task.isCancelled, rules?.reading.destination.isEmpty == false else { throw error }
@@ -1235,7 +1273,7 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         guard let rules, !rules.reading.destination.isEmpty else {
             throw model == nil ? OnDeviceJourneyAssistant.Failure.unavailable : AssistantIntentDraft.ValidationError.input
         }
-        reader = rules.confident ? "rules" : "rules-guess"; context.note(reader: reader)
+        reader = rules.confident ? "rules" : "rules-guess"; context.note(reader: reader); credit = AssistantCredit.rules
         return try await context.resolve(rules.reading, source: text, now: now)
     }
     func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }

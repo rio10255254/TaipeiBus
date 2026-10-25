@@ -1,9 +1,11 @@
 // Online understanding for 台北公車. The app sends one chat request; this function checks who is
-// asking, takes one sentence from that phone's daily allowance (20, or 100 with Pro), and forwards
-// the request to Groq with a key that never leaves the server. Sentences are not stored.
+// asking, takes one sentence from that phone's daily allowance (20, or 100 with Pro), and asks
+// Anthropic's Claude, or Groq when Claude cannot answer. Keys never leave the server and sentences
+// are not stored.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { Environment, SignedDataVerifier } from '@apple/app-store-server-library';
 import { Buffer } from 'node:buffer';
+import { askClaude } from './claude.ts';
 
 const BUNDLE_ID = 'com.rio10255254.TaipeiBus';
 const PRO_PRODUCTS = new Set(['com.rio10255254.TaipeiBus.pro.monthly', 'com.rio10255254.TaipeiBus.pro.yearly']);
@@ -11,6 +13,8 @@ const MODELS = { pro: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'], free: ['ope
 const LIMITS = { pro: 100, free: 20 };
 const MAX_INPUT = 6000;
 const MAX_OUTPUT = 800;
+/// Builds whose consent names Claude send this version; older builds agreed to Groq only and stay there.
+const CLAUDE_CONSENT = 2;
 
 type Tier = 'pro' | 'free';
 
@@ -20,8 +24,9 @@ Deno.serve(async (request) => {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY');
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
   const groqKey = Deno.env.get('GROQ_API_KEY');
+  const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
   const authorization = request.headers.get('Authorization');
-  if (!supabaseUrl || !anonKey || !serviceKey || !groqKey) return reply({ error: 'not_configured' }, 503);
+  if (!supabaseUrl || !anonKey || !serviceKey || (!groqKey && !anthropicKey)) return reply({ error: 'not_configured' }, 503);
   if (!authorization?.startsWith('Bearer ')) return reply({ error: 'unauthorized' }, 401);
 
   // The gateway already verified the token (verify_jwt); this reads whose it is.
@@ -33,7 +38,7 @@ Deno.serve(async (request) => {
   if (identityError || !identity.user) return reply({ error: 'unauthorized' }, 401);
   const userId = identity.user.id;
 
-  let body: { request?: Record<string, unknown>; proof?: string };
+  let body: { request?: Record<string, unknown>; proof?: string; consent?: number };
   try {
     body = await request.json();
   } catch {
@@ -54,6 +59,13 @@ Deno.serve(async (request) => {
   });
   if (allowanceError) return reply({ error: 'allowance' }, 500);
   if (used === null) return reply({ error: 'daily_limit', tier, limit: LIMITS[tier] }, 429);
+  const headers = { 'Content-Type': 'application/json', 'X-Assistant-Tier': tier, 'X-Assistant-Used': String(used) };
+
+  if (anthropicKey && Number(body.consent) >= CLAUDE_CONSENT) {
+    const answer = await askClaude(anthropicKey, chat);
+    if (answer) return new Response(JSON.stringify(answer), { headers: { ...headers, 'X-Assistant-Provider': 'anthropic' } });
+  }
+  if (!groqKey) return reply({ error: 'unavailable' }, 503);
 
   const upstream = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
@@ -61,13 +73,10 @@ Deno.serve(async (request) => {
     body: JSON.stringify({ ...chat, model }),
   });
   const text = await upstream.text();
-  return new Response(text, {
-    status: upstream.status,
-    headers: { 'Content-Type': 'application/json', 'X-Assistant-Tier': tier, 'X-Assistant-Used': String(used) },
-  });
+  return new Response(text, { status: upstream.status, headers: { ...headers, 'X-Assistant-Provider': 'groq' } });
 });
 
-/// Only the fields the app uses, with bounded sizes; nothing else reaches Groq.
+/// Only the fields the app uses, with bounded sizes; nothing else reaches Claude or Groq.
 function sanitize(input: Record<string, unknown> | undefined): Record<string, unknown> | null {
   if (!input || !Array.isArray(input.messages) || input.messages.length === 0 || input.messages.length > 3) return null;
   let total = 0;
