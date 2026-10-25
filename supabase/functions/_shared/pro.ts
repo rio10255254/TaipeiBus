@@ -1,8 +1,9 @@
 // Pro access, shared by the assistant functions: verified from the signed App Store transaction the
 // app sends and remembered until that subscription period ends.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { Environment, SignedDataVerifier } from '@apple/app-store-server-library';
+import { Environment, SignedDataVerifier, VerificationException, VerificationStatus } from '@apple/app-store-server-library';
 import { Buffer } from 'node:buffer';
+import { X509Certificate } from 'node:crypto';
 import { APPLE_ROOTS } from './apple_roots.ts';
 
 const BUNDLE_ID = 'com.rio10255254.TaipeiBus';
@@ -50,7 +51,7 @@ export async function verifyTransaction(jws: string, list = verifiers ??= makeVe
       return { originalTransactionId: String(payload.originalTransactionId ?? ''), expiresDate: payload.expiresDate };
     } catch (error) {
       // Signed for the other environment (TestFlight is Sandbox), or not Apple's: try the next.
-      console.warn('transaction not verified', error instanceof Error ? error.message : String(error));
+      console.warn('transaction not verified', failure(error), chainProbe(jws));
     }
   }
   return null;
@@ -65,4 +66,39 @@ export function makeVerifiers(roots: string[] = APPLE_ROOTS): SignedDataVerifier
     new SignedDataVerifier(certificates, false, Environment.PRODUCTION, BUNDLE_ID, appId),
     new SignedDataVerifier(certificates, false, Environment.SANDBOX, BUNDLE_ID),
   ];
+}
+
+/// Why Apple's library refused a transaction: its status name and the underlying error, if any.
+function failure(error: unknown): string {
+  if (error instanceof VerificationException) {
+    const cause = error.cause instanceof Error ? `${error.cause.constructor.name}: ${error.cause.message}` : '';
+    return [VerificationStatus[error.status] ?? String(error.status), cause].filter(Boolean).join(' ');
+  }
+  return error instanceof Error ? `${error.constructor.name}: ${error.message}` : String(error);
+}
+
+/// Each check the library makes on the transaction's certificate chain, from Apple's public
+/// certificates only: which one fails on this runtime.
+function chainProbe(jws: string): string {
+  try {
+    const header = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(jws.split('.')[0].replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))));
+    const chain: string[] = header.x5c ?? [];
+    const [leaf, intermediate] = chain.slice(0, 2).map((cert) => new X509Certificate(Buffer.from(cert, 'base64')));
+    const roots = APPLE_ROOTS.map((root) => new X509Certificate(Buffer.from(root, 'base64')));
+    const parts = [
+      `alg=${header.alg} chain=${chain.length}`,
+      `intermediate=${intermediate.subject.replace(/\n/g, ',')} issuer=${intermediate.issuer.replace(/\n/g, ',')}`,
+      ...roots.map((root, index) => {
+        let verified: string;
+        try { verified = String(intermediate.verify(root.publicKey)); } catch (error) { verified = `throws ${error instanceof Error ? error.message : error}`; }
+        return `root${index} subject=${root.subject.replace(/\n/g, ',')} issuerMatch=${intermediate.issuer === root.subject} verify=${verified}`;
+      }),
+      (() => { try { return `leafVerify=${leaf.verify(intermediate.publicKey)}`; } catch (error) { return `leafVerify throws ${error instanceof Error ? error.message : error}`; } })(),
+      `leafIssuerMatch=${leaf.issuer === intermediate.subject} intermediateCa=${intermediate.ca}`,
+      `leafValid=${leaf.validFrom}..${leaf.validTo}`,
+    ];
+    return parts.join(' | ');
+  } catch (error) {
+    return `probe failed ${error instanceof Error ? error.message : String(error)}`;
+  }
 }
