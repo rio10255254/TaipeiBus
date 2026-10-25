@@ -45,6 +45,11 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced", then: "")])
     }
 
+    func testAPlaceCardNamesItsPlace() {
+        let decoded = VoiceReply(json: ["say": "營業時間在卡片上。", "actions": [action("show_place", ["destination": "國立故宮博物院"]), action("show_place")]])
+        XCTAssertEqual(decoded?.actions, [.showPlace("國立故宮博物院")], "A card with no place is dropped")
+    }
+
     func testPlanTripKeepsTheLaterStops() {
         let decoded = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "西門町", "time": "明天下午", "then": "淡水"])]])
         XCTAssertEqual(decoded?.actions, [.planTrip(destination: "西門町", origin: "", time: "明天下午", mode: "any", preference: "balanced", then: "淡水")])

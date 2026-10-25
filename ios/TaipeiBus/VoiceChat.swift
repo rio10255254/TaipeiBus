@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import MapKit
 import UIKit
 import TransitCore
 
@@ -105,7 +106,7 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
 final class VoiceConversation: ObservableObject {
     enum Phase: Equatable { case idle, listening, thinking, speaking }
     /// What the home screen should open for the result.
-    enum PanelRequest: Equatable { case routes, navigation }
+    enum PanelRequest: Equatable { case routes, navigation, place(MKMapItem) }
 
     @Published private(set) var active = false
     @Published private(set) var phase = Phase.idle
@@ -358,6 +359,11 @@ final class VoiceConversation: ObservableObject {
             }
         case .showBike(let near):
             if let station = VoiceStateBuilder(model: model).nearestBikeStation(near: near) { model.selectBikeStation(station.id) }
+        case .showPlace(let name):
+            Task {
+                guard let place = await Self.place(named: name) else { return }
+                panelRequest = .place(place)
+            }
         case .planTrip(let destination, let origin, let time, let mode, let preference, let then):
             // The ordinary one-sentence planner takes it from here: places, times, later stops and questions.
             var sentence = time
@@ -389,6 +395,16 @@ final class VoiceConversation: ObservableObject {
         case .lookup:
             break
         }
+    }
+
+    /// The Apple Maps place for a name said in Taipei, for its card.
+    private static func place(named name: String) async -> MKMapItem? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = name
+        request.resultTypes = .pointOfInterest
+        request.region = MKCoordinateRegion(center: CLLocationCoordinate2D(latitude: 25.05, longitude: 121.55),
+                                            span: MKCoordinateSpan(latitudeDelta: 0.6, longitudeDelta: 0.6))
+        return try? await MKLocalSearch(request: request).start().mapItems.first
     }
 
     /// Puts what the rider asked about on screen so the next state includes it. False when nothing matched.

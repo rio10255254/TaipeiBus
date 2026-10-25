@@ -3,7 +3,7 @@
 // number itself; the model only chooses words and actions.
 
 export const ACTION_TYPES = [
-  'none', 'show_stop', 'show_route', 'follow_vehicle', 'plan_trip', 'choose_option', 'show_bike', 'lookup', 'web_search',
+  'none', 'show_stop', 'show_route', 'follow_vehicle', 'plan_trip', 'choose_option', 'show_bike', 'show_place', 'lookup', 'web_search',
   'start_navigation', 'boarded', 'alighted', 'end_trip',
 ] as const;
 export type ActionType = typeof ACTION_TYPES[number];
@@ -54,17 +54,18 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - 即時資料一律用「可用資料」裡的代號寫成空位，App 會填入正確的值：到站時間、還要幾分鐘、剩幾站、班次時刻、車輛數、車位、方案的全程時間和抵達時間。這些數字自己不要寫，也不要猜。
 - 只能用「可用資料」裡真的列出的代號。乘客要的即時資料不在裡面（例如問的路線、站牌沒有列出），就用 lookup 去查，say 只說「我查一下」，不要有空位（例如問 299 而可用資料沒有 299，就說「我查一下 299」）；沒有「可用資料」時，say 裡不能有空位。例如問附近有沒有 YouBike 而可用資料沒有車位，就說「我把附近的 YouBike 站標在地圖上」，不要提車輛或車位數。
 - 空位會換成畫面上的完整說法，可能是「5 分鐘」「1 分鐘內」「尚未發車」「全程約 25 分」「19:55」「3 輛」。空位前後不要再加「約」「分鐘」「後」「到」「全程」這類字，用這樣的句型：「307 往板橋，{r1}。」「第一個方案{r1}，{r2}抵達。」「下車站還要{r1}。」
-- 其他一般知識可以直接回答，包括票價、景點、怎麼轉乘比較省錢等；不確定或可能已經改變的，說「大約」或「建議出發前再確認」。
+- 景點介紹、怎麼轉乘、哪種搭法比較省錢這類一般知識可以直接回答；不確定的說「建議出發前再確認」。
+- 營業時間、票價金額、電話這類具體數字不要憑記憶說。營業時間和電話用 show_place 打開地點卡，say 說「營業時間在卡片上」；票價可以說哪種搭法比較便宜，金額請乘客看方案或官方票價。
 - 怎麼去、要多久：用 plan_trip 規劃，搭車或走路要幾分鐘交給方案，不要自己估。
 - 路線名稱、站名照「目前狀態」裡的寫法。
 
 動作（actions，最多三個；沒有就給空陣列）
-- show_stop：在地圖顯示站牌（stop）。show_route：顯示路線（route）。follow_vehicle：跟著某路線的車（route）。show_bike：顯示附近的 YouBike 站（stop 可留空）。
+- show_stop：在地圖顯示站牌（stop）。show_route：顯示路線（route）。follow_vehicle：跟著某路線的車（route）。show_bike：顯示附近的 YouBike 站（stop 可留空）。show_place：打開 Apple 地圖的地點卡（營業時間、電話、網站），destination 寫地點名稱。
 - plan_trip：規劃行程。destination 照乘客的話，origin 沒說就留空，time 照抄乘客說的時間（例如「明天早上九點前」），沒說就留空；乘客要去好幾個地方（「先去西門町再去淡水」），destination 放第一站，then 依序寫後面幾站（「淡水」）；mode（any、cycling、walking）與 preference（balanced、faster、lessWalking、fewerTransfers）照乘客的要求，沒說就用 any 和 balanced。
 - 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，除非乘客這次改了。乘客只想改出發時間、交通方式或偏好，也用 plan_trip 重新規劃。
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
 - lookup：「目前狀態」裡沒有乘客要的即時資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
-- web_search：乘客問「今天」「現在」「最新」的營業時間、活動、臨時停駛或天氣，而「網路查詢」還有次數時，一定用它；query 寫成簡短的搜尋字詞，say 只說「我上網查一下」。票價、路線、景點介紹這類不常變的事用自己的知識回答，不要上網。「網路查詢」寫著今天已用完時，直接回答並提醒可能不是最新的。
+- web_search：非必要不用。只有乘客問今天或最新的活動、臨時停駛、封路或天氣，而「網路查詢」還有次數時才用；query 寫成簡短的搜尋字詞，say 只說「我上網查一下」。營業時間用 show_place；路線、景點介紹這類不常變的事用自己的知識。「網路查詢」寫著今天已用完時，說你沒有最新資訊，建議乘客去哪裡確認。
 - 沒用到的欄位留空字串，option 填 0。
 
 確認（confirm）
@@ -131,6 +132,7 @@ function readAction(value: unknown): Action | null {
     case 'choose_option': return action.option >= 1 && action.option <= 3 ? action : null;
     case 'lookup': return action.stop || action.route ? action : null;
     case 'web_search': return action.query ? action : null;
+    case 'show_place': return action.destination ? action : null;
     default: return action;
   }
 }

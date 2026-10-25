@@ -1,5 +1,6 @@
 import SwiftUI
 import AppIntents
+import MapKit
 import TransitCore
 
 /// The voice conversation over the map: a glow at the screen edge and one glass panel with the
@@ -8,6 +9,8 @@ import TransitCore
 struct VoiceChatHost: ViewModifier {
     @ObservedObject var chat: VoiceConversation
     @Environment(\.scenePhase) private var scenePhase
+    /// A place whose Apple Maps card the rider asked for.
+    @State private var place: MKMapItem?
     /// The route panel, for planned routes.
     let openRoutes: () -> Void
     /// The navigation screen, once a trip has started.
@@ -34,8 +37,27 @@ struct VoiceChatHost: ViewModifier {
                 switch request {
                 case .routes: openRoutes()
                 case .navigation: showNavigation()
+                case .place(let item): place = item
                 }
             }
+            .modifier(PlaceCard(item: $place))
+    }
+}
+
+/// Apple Maps' own card for a place: opening hours, phone and website, from Apple. Before iOS 18 the
+/// place opens in Apple Maps instead.
+private struct PlaceCard: ViewModifier {
+    @Binding var item: MKMapItem?
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.mapItemDetailSheet(item: $item)
+        } else {
+            content.onChange(of: item) { _, place in
+                guard let place else { return }
+                place.openInMaps()
+                item = nil
+            }
+        }
     }
 }
 

@@ -7,6 +7,8 @@ public enum VoiceAction: Equatable, Sendable {
     case showRoute(String)
     case followVehicle(route: String)
     case showBike(near: String)
+    /// A place's Apple Maps card, with its opening hours, phone and website.
+    case showPlace(String)
     /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words.
     case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String)
     /// The first, second or third option on screen.
@@ -34,6 +36,9 @@ public enum VoiceAction: Equatable, Sendable {
         case "show_route": guard !text("route").isEmpty else { return nil }; self = .showRoute(text("route"))
         case "follow_vehicle": guard !text("route").isEmpty else { return nil }; self = .followVehicle(route: text("route"))
         case "show_bike": self = .showBike(near: text("stop"))
+        case "show_place":
+            guard !text("destination").isEmpty else { return nil }
+            self = .showPlace(text("destination"))
         case "plan_trip":
             guard !text("destination").isEmpty else { return nil }
             self = .planTrip(destination: text("destination"), origin: text("origin"), time: text("time", limit: 40),
@@ -155,6 +160,7 @@ extension VoiceAction {
         case .showStop(let stop): "顯示 \(stop)"
         case .showRoute(let route), .followVehicle(let route): "顯示 \(route)"
         case .showBike: "顯示 YouBike"
+        case .showPlace(let place): "顯示 \(place)"
         case .planTrip(let destination, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
         case .lookup: "查詢"
