@@ -258,7 +258,8 @@ C 和 D 的差別只在伺服器呼叫哪一家。**第一版的伺服器要做�
 | 項目 | 狀態 |
 | --- | --- |
 | App Store 小型企業計畫 | **已加入**：Apple 抽成 15%；符合 iOS 27 PCC 資格的第一個條件，仍需申請 entitlement |
-| Groq 付費 | 可以升級，費用見第 10 節；**升級後先看後台 Limits 頁面的實際上限** |
+| Groq 付費 | 2026-10-25 Groq 後台顯示「Developer tier upgrades are temporarily unavailable due to high demand」，**目前無法升級**；維持免費方案，只當備援 |
+| 主力大腦 | **改為 Claude Haiku 5.5**（第 10.4 節） |
 | Anthropic、Azure 帳號 | 會申請；金鑰放 Supabase 密鑰設定，不進 App |
 | 額度單位 | 對使用者以「回合」計算，token 只作伺服器內部保護（第 10 節） |
 
@@ -314,9 +315,15 @@ Groq 文件把下列數字標為開發者方案的基本上限，**以組織為�
 
 照這個數字，一回合約 2,500 token，全體每分鐘只能跑約 3 回合、每天約 80 回合，連 10 位 Pro 同時使用都不夠。頁面同時寫著升級開發者方案可以提高上限，兩段說法互相矛盾。因此：
 
-1. 升級後到 Groq 後台 Settings › Limits 看實際數字。
-2. 若每分鐘 token 仍在萬級，Groq 只適合做備援，**主力改用 Claude Haiku 5.5**；Anthropic 的上限隨付費等級提高，也要在後台確認。
-3. iOS 27 且開啟 Apple Intelligence 的手機，先用 PCC：我們不付費，也不佔 Groq 或 Anthropic 的額度。回合格式相同，用 `@Generable` 產生同一份 JSON。
+2026-10-25 Groq 開發者方案暫停升級，所以決定如下。
+
+1. **主力：Claude Haiku 5.5。** Anthropic 依組織分級，Start 等級的 Haiku 5.5 上限為每分鐘 1,000 次請求、200 萬輸入 token、40 萬輸出 token，每月花費上限 US$500【已查證】[Rate limits](https://platform.claude.com/docs/en/api/rate-limits.md)。
+   - 快取讀取的輸入 token 不計入每分鐘上限，系統提示與 schema 固定放前面可以快取。
+   - 新組織可能先在 Evaluation 等級，上限較低，會隨使用紀錄自動提高；實際數字看 Console 的 Rate limits 頁面。
+   - 在 Console 的 Billing 自訂每月花費上限，例如先訂 US$30，超過時 API 會拒絕，App 改用備援。
+2. **備援：Groq 免費方案**。Claude 失敗或達到花費上限時使用；仍受上表的共用上限限制。
+3. **iOS 27 且開啟 Apple Intelligence 的手機先用 PCC**：已加入小型企業計畫，申請 entitlement 後我們不付費，也不佔額度。回合格式相同，用 `@Generable` 產生同一份 JSON。
+4. 現有「用一句話規劃」同樣走 Groq 免費方案，使用者變多時會先撞到每天 1,000 次的共用上限（App 會退回手機上的模型與規則，不會壞掉）。`understand` 可以只改伺服器、把請求轉給 Claude，不必更新 App，列為另一個工作。
 
 ### 10.5 用次數還是 token 限制
 
