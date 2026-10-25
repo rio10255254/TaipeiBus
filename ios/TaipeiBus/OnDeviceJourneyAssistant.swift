@@ -800,10 +800,6 @@ enum ContextWindowRetry {
     }
 }
 
-/// 線上理解 (opt-in, off by default): when the rules are unsure and the phone has no on-device model
-/// (or it failed), the sentence and today's date, and nothing else, are read by an open model on
-/// Groq. The reading then goes through the same place search and checks as every other reading.
-@MainActor
 /// The app's own server for online understanding (a Supabase project). It holds the Groq key,
 /// counts each phone's daily allowance and checks Pro; the app carries only the public project URL
 /// and publishable key, and signs in anonymously once (no account, email or name).
@@ -878,7 +874,7 @@ enum AssistantServer {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             guard status == 200, let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let token = root["access_token"] as? String else {
-                JourneyDiagnostics.shared.record("ai-online sign-in http(\(status))")
+                await JourneyDiagnostics.shared.record("ai-online sign-in http(\(status))")
                 throw OnlineJourneyReader.Failure.http(status)
             }
             access = token
@@ -911,6 +907,10 @@ enum AssistantServer {
     }
 }
 
+/// 線上理解 (opt-in, off by default): when the rules are unsure and the phone has no on-device model
+/// (or it failed), the sentence and today's date, and nothing else, are read by an open model on
+/// Groq. The reading then goes through the same place search and checks as every other reading.
+@MainActor
 enum OnlineJourneyReader {
     static let enabledKey = "assistantOnline.v1"
     private static let countKey = "assistantOnlineCount.v1"
