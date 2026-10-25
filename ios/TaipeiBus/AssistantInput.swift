@@ -70,11 +70,21 @@ final class SpeechInput: ObservableObject {
     private var task: SFSpeechRecognitionTask?
     private var silence: Task<Void, Never>?
     private var finished: ((String) -> Void)?
+    /// Called instead of `finished` when listening ends without words: silence, an error or no permission.
+    private var unheard: (() -> Void)?
+    /// How long a pause after words ends listening. A conversation answers sooner than a request.
+    var pauseAfterWords = 1.3
+    /// How long to wait for the first word before giving up.
+    var waitForWords = 6.0
+    /// Stop, route and place names the recogniser should expect.
+    private var hints: [String] = []
     /// Bumped by every start and stop, so a late callback from an earlier attempt is ignored.
     private var attempt = 0
 
-    func start(language: AppLanguage = .current, finished: @escaping (String) -> Void) async {
+    func start(language: AppLanguage = .current, hints: [String] = [], unheard: (() -> Void)? = nil,
+               finished: @escaping (String) -> Void) async {
         stop()
+        self.hints = Array(hints.prefix(100)); self.unheard = unheard
         transcript = ""; problem = nil; blocked = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
@@ -85,6 +95,7 @@ final class SpeechInput: ObservableObject {
             JourneyDiagnostics.shared.record("speech denied")
             blocked = true
             problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
+            takeUnheard()?()
             return
         }
         let locale = language == .english ? Locale(identifier: "en-US") : Locale(identifier: "zh-TW")
@@ -92,6 +103,7 @@ final class SpeechInput: ObservableObject {
             preparing = false
             JourneyDiagnostics.shared.record("speech unavailable")
             problem = AppText.text("語音辨識目前無法使用，請直接打字。")
+            takeUnheard()?()
             return
         }
         self.finished = finished
@@ -104,6 +116,7 @@ final class SpeechInput: ObservableObject {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = onDevice
+        request.contextualStrings = hints
         do {
             let session = AVAudioSession.sharedInstance()
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
@@ -121,7 +134,8 @@ final class SpeechInput: ObservableObject {
         } catch {
             JourneyDiagnostics.shared.record("speech audio-error \((error as NSError).domain) \((error as NSError).code)")
             problem = AppText.text("麥克風目前無法使用，請直接打字。")
-            stop(); return
+            let unheard = takeUnheard()
+            stop(); unheard?(); return
         }
         self.request = request
         preparing = false; listening = true
@@ -133,20 +147,21 @@ final class SpeechInput: ObservableObject {
             Task { @MainActor in self?.receive(text: text, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice) }
         })
         // Nothing said at all: stop instead of listening forever, and say so.
-        waitForSilence(6)
+        waitForSilence(waitForWords)
     }
     private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
-        if let text, !text.isEmpty { transcript = text; waitForSilence(1.3, counting: true) }
+        if let text, !text.isEmpty { transcript = text; waitForSilence(pauseAfterWords, counting: true) }
         if let code, transcript.isEmpty {
             JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
-            let finished = self.finished
+            let finished = self.finished, unheard = self.unheard
             stop()
             if onDevice, let finished {
-                self.finished = finished
+                self.finished = finished; self.unheard = unheard
                 begin(recognizer, onDevice: false)
             } else {
                 problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。")
+                unheard?()
             }
             return
         }
@@ -157,10 +172,10 @@ final class SpeechInput: ObservableObject {
     func finish() {
         guard listening else { return }
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        let done = finished
+        let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
-        if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。") }
+        if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。"); unheard?() }
         else { done?(text) }
     }
 
@@ -173,8 +188,13 @@ final class SpeechInput: ObservableObject {
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
-        request = nil; task = nil; listening = false; preparing = false; finished = nil; meter.value = 0; silenceSince = nil
+        request = nil; task = nil; listening = false; preparing = false; finished = nil; unheard = nil; meter.value = 0; silenceSince = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    }
+
+    private func takeUnheard() -> (() -> Void)? {
+        defer { unheard = nil }
+        return unheard
     }
 
     /// `counting` shows the countdown: words were heard and the pause is being timed.
@@ -279,5 +299,10 @@ struct TaipeiBusShortcuts: AppShortcutsProvider {
             "用\(.applicationName)規劃路線",
             "\(.applicationName)帶我去",
         ], shortTitle: "規劃行程", systemImageName: "sparkles")
+        AppShortcut(intent: AskTaipeiBusIntent(), phrases: [
+            "問\(.applicationName)",
+            "用\(.applicationName)問問題",
+            "打開\(.applicationName)語音對話",
+        ], shortTitle: "問台北公車", systemImageName: "waveform")
     }
 }

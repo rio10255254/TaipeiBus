@@ -260,6 +260,7 @@ struct TransitHomeView: View {
                 JourneyAlternativePrompt(model: model, suggestion: suggestion)
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
+            VoiceChatButton(chat: model.voiceChat)
             JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
         }
         }
@@ -321,7 +322,10 @@ struct TransitHomeView: View {
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse,
-                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? { model.assistant.listen() } : nil)
+                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? {
+                              // Pro riders talk it through; everyone else says one sentence to plan.
+                              if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() }
+                          } : nil)
         }
     }
     }
@@ -410,6 +414,17 @@ struct TransitHomeView: View {
             showJourney = true
         })
         .onAppear { takeAssistantLaunch() }
+        // The voice conversation: opened by the Pro microphone, 問一下 while navigating, or Siri.
+        .modifier(VoiceChatHost(chat: model.voiceChat, openRoutes: {
+            showInformation = false; showDetails = false; showSearch = false
+            showJourneyItinerary = false; journeyDetent = planner.destination == nil ? .large : journeyPreviewDetent; showJourney = true
+        }, showNavigation: {
+            showJourney = false; showDetails = false; showSearch = false
+        }))
+        .onReceive(NotificationCenter.default.publisher(for: VoiceChatLaunch.notification)) { _ in
+            if VoiceChatLaunch.take() { showInformation = false; model.voiceChat.start() }
+        }
+        .onAppear { if VoiceChatLaunch.take() { model.voiceChat.start() } }
         .onChange(of: model.showSavedJourneyRequested) { _, requested in
             guard requested else { return }
             model.showSavedJourneyRequested = false
@@ -1723,6 +1738,7 @@ private struct AssistantSettingsView: View {
         List {
             VoiceStyleSettings()
             if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
+            if VoiceConversation.available { VoiceChatSettings() }
         }
         .navigationTitle(AppText.text("語音與 AI")).navigationBarTitleDisplayMode(.inline)
     }
