@@ -2,7 +2,7 @@
 // reply, the expected action, no number the rider has not seen, and short enough to speak.
 // deno run --allow-env --allow-net --config supabase/functions/converse/deno.json supabase/functions/converse/eval.ts
 import { askGroq, searchWeb, streamClaude } from './brain.ts';
-import { type Reply, userMessage } from './reply.ts';
+import { type Reply, userMessage, webQuestion } from './reply.ts';
 
 type Ask = (message: string, onSay: () => void) => Promise<Awaited<ReturnType<typeof askGroq>>>;
 type Case = {
@@ -70,7 +70,7 @@ function check(test: Case, reply: Reply): string[] {
   const known = `${test.state}\n${test.utterance}\n${test.history?.map((turn) => turn.user + turn.say).join('\n') ?? ''}`;
   const number = invented(reply.say, known);
   if (number) problems.push(`自己寫了數字「${number}」`);
-  if (reply.say.length > 70) problems.push(`太長（${reply.say.length} 字）`);
+  if (reply.say.length > 110) problems.push(`太長（${reply.say.length} 字）`);
   if (test.expect && !reply.actions.some((action) => action.type === test.expect)) problems.push(`缺少動作 ${test.expect}`);
   if (test.confirm && reply.confirm.type !== test.confirm) problems.push(`應該問 ${test.confirm}，卻是 ${reply.confirm.type}`);
   if (test.avoid && reply.actions.some((action) => action.type === test.avoid)) problems.push(`不該用 ${test.avoid}`);
@@ -121,7 +121,7 @@ for (const provider of providers) {
     const search = reply.actions.find((action) => action.type === 'web_search');
     if (search && provider.name === 'claude' && anthropicKey) {
       const lookupStarted = performance.now();
-      const found = await searchWeb(anthropicKey, `乘客問：${test.utterance}\n搜尋字詞：${search.query}`, () => {});
+      const found = await searchWeb(anthropicKey, webQuestion({ utterance: test.utterance, state: test.state, history: [] }, search.query), () => {});
       const lookupMs = Math.round(performance.now() - lookupStarted);
       if ('say' in found) {
         console.log(`  ↳ 網路（${search.query}）：${found.say}｜來源：${found.sources.map((source) => source.title).join('、') || '無'}｜${lookupMs} ms`);

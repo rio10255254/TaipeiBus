@@ -109,8 +109,13 @@ export async function searchWeb(apiKey: string, question: string, onWords: (word
     const quoted: string[] = [];
     let say = '';
     let after = false;
+    // Pages the search returned, in order: the sources when the answer cites none itself.
+    const results: { title: string; url: string }[] = [];
     for (const block of message.content) {
-      if (block.type === 'web_search_tool_result') after = true;
+      if (block.type === 'web_search_tool_result') {
+        after = true;
+        if (Array.isArray(block.content)) for (const result of block.content) results.push({ title: result.title, url: result.url });
+      }
       if (block.type !== 'text' || !after) continue;
       say += block.text;
       for (const citation of block.citations ?? []) {
@@ -123,7 +128,8 @@ export async function searchWeb(apiKey: string, question: string, onWords: (word
     if (!after || !say) return { failure: 'no answer from the web' };
     return {
       say, model: message.model, quoted: quoted.slice(0, 8),
-      sources: [...sources].slice(0, 3).map(([url, title]) => ({ title: title.slice(0, 80), url })),
+      sources: (sources.size ? [...sources].map(([url, title]) => ({ title, url })) : results)
+        .slice(0, 3).map((source) => ({ title: (source.title || source.url).slice(0, 80), url: source.url })),
     };
   } catch (error) {
     const failure = describe(error);

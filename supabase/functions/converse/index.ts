@@ -6,7 +6,7 @@ import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
-import { type Reply, readInput, type TurnInput, userMessage } from './reply.ts';
+import { type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
 const DAILY_TURNS = 40;
 /// Web lookups a day; past them the model answers from what it knows.
@@ -145,9 +145,8 @@ async function followUp(turn: Turn, first: Reply, model: string, query: string, 
   const actions = first.actions.filter((action) => action.type !== 'web_search');
   const key = turn.anthropicKey!;
   if (turn.webLeft > 0 && await turn.takeWeb() !== null) {
-    const now = turn.input.state.split('\n').find((line) => line.startsWith('現在：')) ?? '';
     const keepAlive = setInterval(() => write(': searching\n\n'), 3000);
-    const found = await searchWeb(key, `${now}\n乘客問：${turn.input.utterance}\n搜尋字詞：${query}`, (words) => speak(words, false))
+    const found = await searchWeb(key, webQuestion(turn.input, query), (words) => speak(words, false))
       .finally(() => clearInterval(keepAlive));
     if ('say' in found) {
       speak('', true);
