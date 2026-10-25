@@ -1,0 +1,56 @@
+name: Assistant logs
+
+# Temporary diagnosis on a feature branch, never merged: prints the assistant functions' own error
+# lines from the last hours. Only messages the functions write themselves are printed; no user IDs,
+# requests or keys.
+on:
+  push:
+    branches: [claude/dreamy-ramanujan-qzvqf5]
+    paths: ['.github/workflows/assistant-logs.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Read recent function error lines
+        run: |
+          start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
+          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          sql="select timestamp, event_message from function_logs where timestamp > '$start' order by timestamp desc limit 300"
+          curl -sS -G "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/analytics/endpoints/logs.all" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
+            -o logs.json -w 'HTTP %{http_code}\n'
+          python3 - <<'EOF'
+          import json, re
+          data = json.load(open('logs.json'))
+          if 'result' not in data:
+              print('no result:', str(data)[:300])
+          keep = re.compile(r'^(pro check failed|transaction not verified|apple roots unavailable|claude failed|claude stream failed|no answer)')
+          rows = [row for row in data.get('result') or [] if keep.match(str(row.get('event_message', '')).strip())]
+          print(len(data.get('result') or []), 'lines,', len(rows), 'matching')
+          for row in rows[:80]:
+              message = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', str(row['event_message']))
+              print(row['timestamp'], message[:300])
+          EOF
+      - name: Read recent function responses
+        run: |
+          start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
+          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          sql="select timestamp, response.status_code, request.method, request.pathname from function_edge_logs cross join unnest(metadata) as m cross join unnest(m.response) as response cross join unnest(m.request) as request where timestamp > '$start' order by timestamp desc limit 60"
+          curl -sS -G "https://api.supabase.com/v1/projects/$SUPABASE_PROJECT_REF/analytics/endpoints/logs.all" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
+            -o edge.json -w 'HTTP %{http_code}\n'
+          python3 -c "
+          import json; d=json.load(open('edge.json'))
+          print(str(d)[:200] if 'result' not in d else '')
+          for r in (d.get('result') or [])[:60]: print(r.get('timestamp'), r.get('status_code'), r.get('method'), r.get('pathname'))
+          "
