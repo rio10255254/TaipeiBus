@@ -647,7 +647,7 @@ final class TransitAppModel: ObservableObject {
         tappedPlace = nil
         selectedBikeStationReturning = returning ?? planner.selected?.walks.contains(where: { $0.bike?.dropoff.id == id }) ?? false
         selectedBikeStationID = id
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
         pollBikesInBackground()
     }
     /// The feed is a single city-wide file, so it runs on its own task at its own pace:
@@ -906,7 +906,7 @@ final class TransitAppModel: ObservableObject {
     func chooseRouteBoardingStop(_ stop: BusStop) {
         routeBoardingStopID = stop.id
         focusMap(.station(stop.stationID))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
 
     func setActive(_ active: Bool) {
@@ -1172,7 +1172,7 @@ final class TransitAppModel: ObservableObject {
         following = false; walkingMapIndex = nil
         userMapMode = next
         location.request(); focusMap(.userLocation)
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func beginStationBrowsing() {
         stationBrowsing = true
@@ -1221,7 +1221,7 @@ final class TransitAppModel: ObservableObject {
         selectedRouteID = nil; routeBoardingStopID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
         focusMap(.station(station.id)); sheetDetent = .height(330)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
         selectedTrainID = nil; followingTrain = false
@@ -1244,7 +1244,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; selectedVehicleID = nil; following = false; query = ""
         focusMap(.route(route.id)); sheetDetent = .height(520)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func selectVehicle(_ vehicle: BusVehicle) {
         if selectedVehicleID == nil, let routeID = selectedRouteID {
@@ -1255,7 +1255,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction; following = hasProAccess; query = ""
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func toggleCityFleet() {
         if cityFleetMode {
@@ -1264,7 +1264,7 @@ final class TransitAppModel: ObservableObject {
             clearSelection(); stationBrowsing = false; cityFleetMode = true
             focusMap(.cityOverview)
         }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func leaveCityForJourney() { cityFleetMode = false }
     var cityVehicles: [BusVehicle] {
@@ -1279,7 +1279,7 @@ final class TransitAppModel: ObservableObject {
         if !available.contains(direction) { direction = available.first ?? "0" }
         selectedVehicleID = nil; following = false
         focusMap(.route(route.id))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func clearSelection() {
         selectedTrainID = nil; followingTrain = false
@@ -1295,7 +1295,7 @@ final class TransitAppModel: ObservableObject {
     func toggleFavorite(_ station: Station) {
         if favorites.contains(station.id) { favorites.remove(station.id) } else { favorites.insert(station.id) }
         defaults.set(Array(favorites), forKey: "favoriteStations")
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
 
     func stations(query: String) -> [Station] {
@@ -1885,7 +1885,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction
         following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func routes(query: String) -> [RouteSearchResult] {
         var seen = Set<String>()

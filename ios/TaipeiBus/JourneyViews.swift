@@ -241,7 +241,7 @@ struct JourneyPlanningView: View {
             }.accessibilityIdentifier("journey-edit-destination")
         }.liveFont(.subheadline, weight: .medium).foregroundStyle(.primary).buttonStyle(PhonePressStyle())
             .padding(.horizontal, 12).padding(.vertical, 4)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 18))
+            .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
     }
     private var originButton: some View {
         HStack(spacing: 10) {
@@ -256,8 +256,8 @@ struct JourneyPlanningView: View {
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: "chevron.down").liveFont(.caption, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
-                }.padding(10).frame(minHeight: 44).contentShape(RoundedRectangle(cornerRadius: 12))
-                    .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+                }.padding(10).frame(minHeight: 44).contentShape(live.shape(.row))
+                    .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
             }.buttonStyle(PhonePressStyle())
             Button {
                 planner.useLocation(location.usableCoordinate, metadata: model.metadata); location.request()
@@ -277,7 +277,7 @@ struct JourneyPlanningView: View {
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
             }.padding(14).frame(minHeight: 52)
-                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 15 * CGFloat(live.appearance.cornerScale)))
+                .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
             if !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 Button { resolve(text: query) } label: {
@@ -453,7 +453,7 @@ private struct JourneyBoardingContent: View {
             }
             if guide.nextBusWithoutPosition {
                 NextBusRow(guide: guide)
-                    .background(Color(uiColor: .systemBackground).opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .background(Color(uiColor: .systemBackground).opacity(0.72), in: live.shape(.row))
             } else if guide.approaches.isEmpty { Text(live.text(guide.emptyPositionLabel)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)) }
             else {
                 VStack(spacing: 0) {
@@ -462,7 +462,7 @@ private struct JourneyBoardingContent: View {
                         if approach.id != guide.approaches.prefix(3).last?.id { Divider().padding(.leading, 14) }
                     }
                 }
-                .background(Color(uiColor: .systemBackground).opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .background(Color(uiColor: .systemBackground).opacity(0.72), in: live.shape(.row))
             }
             if let bus = model.selectedVehicle, model.metadata.canServe(ride, vehicle: bus),
                !guide.approaches.contains(where: { $0.id == bus.id }) {
@@ -490,7 +490,7 @@ private struct NextBusRow: View {
             }
             Spacer(minLength: 8)
             Text(guide.arrivalShortLabel).liveFont(.body, weight: .bold).monospacedDigit()
-                .liveNumericText()
+                .liveNumericText(guide.arrivalShortLabel, countsDown: true)
         }
         .padding(.horizontal, 14).padding(.vertical, 12)
         .accessibilityElement(children: .combine).accessibilityIdentifier("boarding-next-bus-without-position")
@@ -508,7 +508,7 @@ struct VehicleArrivalsView: View {
                 let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: timeline.date)
                 List {
                     Section {
-                        HStack { BilingualName(ride.boarding); Spacer(); Text(guide.arrivalShortLabel).bold().monospacedDigit() }
+                        HStack { BilingualName(ride.boarding); Spacer(); Text(guide.arrivalShortLabel).bold().monospacedDigit().liveNumericText(guide.arrivalShortLabel, countsDown: true) }
                         Text(AppText.text("往 ") + ride.route.localizedDestination(direction: ride.direction)).foregroundStyle(MapChrome.secondaryText)
                     } header: { Text(AppText.text("官方下一班")) }
                     Section {
@@ -558,8 +558,10 @@ private struct BoardingVehicleRow: View {
                     if selected { Text(nextStop.map { AppText.text("前方 · ") + $0 } ?? AppText.text("位置待確認")).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).lineLimit(1) }
                 }
                 Spacer(minLength: 4)
-                Text(model.arrivalDisplay(approach.vehicle, stopID: ride.boarding.id, at: date).label)
+                let arrival = model.arrivalDisplay(approach.vehicle, stopID: ride.boarding.id, at: date).label
+                Text(arrival)
                     .liveFont(.subheadline, weight: .semibold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
+                    .liveNumericText(arrival, countsDown: true)
                 Label(tracking ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold)
                     .foregroundStyle(tracking ? Color.white : Color(liveHex: live.appearance.accentColor))
                     .padding(.horizontal, 10).frame(minHeight: 30)
@@ -593,7 +595,8 @@ private struct OnboardSummary: View {
                     Spacer()
                     if let next {
                         VStack(alignment: .trailing, spacing: 2) {
-                            Text(model.onboardStopTimeLabel(ride, stopID: next.id, at: date)).lineLimit(2).minimumScaleFactor(0.75)
+                            let nextTime = model.onboardStopTimeLabel(ride, stopID: next.id, at: date)
+                            Text(nextTime).lineLimit(2).minimumScaleFactor(0.75).liveNumericText(nextTime, countsDown: true)
                             Text(AppText.remainingStops(1)).liveFont(.caption)
                         }.monospacedDigit().frame(width: live.language == .english ? 115 : 110, alignment: .trailing)
                     }
@@ -607,8 +610,10 @@ private struct OnboardSummary: View {
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(model.onboardStopTimeLabel(ride, stopID: ride.alighting.id, at: date))
+                        let alighting = model.onboardStopTimeLabel(ride, stopID: ride.alighting.id, at: date)
+                        Text(alighting)
                             .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.75)
+                            .liveNumericText(alighting, countsDown: true)
                             .frame(maxWidth: live.language == .english ? 115 : 110, alignment: .trailing)
                         if let count = model.onboardStops(for: ride, at: date).firstIndex(where: { $0.id == ride.alighting.id }) {
                             Text(AppText.remainingStops(count + 1)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
@@ -747,10 +752,11 @@ private struct JourneyDockHeader: View {
                 if let option = planner.selected {
                     TimelineView(.periodic(from: .now, by: 15)) { timeline in
                         if let duration = model.journeyDuration(option, at: timeline.date) {
-                            Text(summary(duration))
+                            let label = summary(duration)
+                            Text(label)
                                 .liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit().lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
                                 .accessibilityIdentifier("journey-total-duration")
-                                .liveNumericText()
+                                .liveNumericText(label)
                         }
                     }
                 }
@@ -779,7 +785,7 @@ private struct JourneyDockSurface: ViewModifier {
     @Environment(\.colorScheme) private var scheme
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: MapChrome.cardRadius * CGFloat(live.appearance.cornerScale), style: .continuous)
+        let shape = live.shape(.card)
         content.padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 14)
             .padding(.bottom, 16)
             .background {
@@ -790,7 +796,7 @@ private struct JourneyDockSurface: ViewModifier {
             .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.14), radius: 18, y: 6)
     }
 }
-private extension View {
+extension View {
     func journeyDockSurface() -> some View { modifier(JourneyDockSurface()) }
 }
 
@@ -972,7 +978,7 @@ struct JourneyOptionsView: View {
                             stepsButton(option).frame(maxWidth: .infinity)
                             goButton(option).frame(maxWidth: .infinity)
                         }
-                    }.padding(16).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22))
+                    }.padding(16).background(Color(uiColor: .tertiarySystemFill), in: live.shape(.panel))
                 } else {
                 // Keep the actions outside the paging collection. Its gesture handling and
                 // recycled pages must never swallow a Steps/Go tap during a clock update.
@@ -990,7 +996,7 @@ struct JourneyOptionsView: View {
                 }
                 .frame(height: previewHeight * CGFloat(max(1, live.appearance.textScale)) + (live.language == .english ? 22 : 0))
                 .padding(14)
-                .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.panel))
                 .padding(.horizontal, 1)
                 }
                 if !comparisons.isEmpty {
@@ -1113,8 +1119,8 @@ struct JourneyOptionsView: View {
                 }.liveFont(.caption).lineLimit(spacious ? nil : 1)
             }.fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(Color(uiColor: .tertiarySystemFill).opacity(0.7), in: RoundedRectangle(cornerRadius: 13))
-                .contentShape(RoundedRectangle(cornerRadius: 13))
+                .background(Color(uiColor: .tertiarySystemFill).opacity(0.7), in: live.shape(.row))
+                .contentShape(live.shape(.row))
         }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
             .accessibilityElement(children: .combine)
             .accessibilityHint(AppText.text("預覽此路線"))
@@ -1396,6 +1402,11 @@ struct BikeStationAlert: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     var body: some View {
+        // Tap when the station the rider is heading to stops being usable, not when an
+        // existing alert is shown again.
+        content.sensoryFeedback(.warning, trigger: planner.bikeAlert?.station.id) { _, new in new != nil }
+    }
+    @ViewBuilder private var content: some View {
         if let alert = planner.bikeAlert {
             let renting = alert.renting, station = alert.station, replacement = alert.replacement
             VStack(alignment: .leading, spacing: 6) {
@@ -1443,7 +1454,7 @@ private struct JourneyRideStep: View {
             // The route's own sign colour, as on its badge and map line.
             Image(systemName: ride.route.mode == .bus ? "bus.fill" : "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: 34, height: 34)
-                .background(RouteTint.color(for: ride.route.name), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                .background(RouteTint.color(for: ride.route.name), in: live.shape(.badge))
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1530,6 +1541,7 @@ struct JourneyArrivalView: View {
 }
 
 struct JourneyAlternativePrompt: View {
+    @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     let suggestion: TransitAppModel.JourneySuggestion
     var body: some View {
@@ -1570,7 +1582,7 @@ struct JourneyAlternativePrompt: View {
                 .accessibilityLabel(AppText.text("保留目前路線"))
                 .accessibilityIdentifier("journey-alternative-dismiss")
         }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
-            .phoneGlass(in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+            .phoneGlass(in: live.shape(.panel))
     }
 }
 
@@ -1721,7 +1733,7 @@ struct JourneyInstructionBanner: View {
 struct InstructionBannerSurface: ViewModifier {
     @Environment(\.liveSettings) private var live
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: MapChrome.cardRadius * CGFloat(live.appearance.cornerScale), style: .continuous)
+        let shape = live.shape(.card)
         content.foregroundStyle(.white)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(shape.fill(Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(white: 0.17, alpha: 0.97) : UIColor(white: 0.11, alpha: 0.95) })))
@@ -1748,6 +1760,9 @@ private struct WaitingBannerContent: View {
     @ObservedObject var model: TransitAppModel
     let ride: TransitRide
     let date: Date
+    /// The ride whose bus already announced itself, so an estimate that dips under a
+    /// minute, refreshes back over it and dips again taps only once.
+    @State private var announcedRide: String?
     var body: some View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
         let boarding = model.boardingInformation(ride, at: date)
@@ -1769,9 +1784,10 @@ private struct WaitingBannerContent: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(ride.route.mode == .bus ? boarding.label : model.metroWaitLabel(ride, at: date)).liveFont(.title, weight: .bold, design: .rounded)
+                    let wait = ride.route.mode == .bus ? boarding.label : model.metroWaitLabel(ride, at: date)
+                    Text(wait).liveFont(.title, weight: .bold, design: .rounded)
                         .monospacedDigit().lineLimit(1).minimumScaleFactor(0.55)
-                        .liveNumericText()
+                        .liveNumericText(wait, countsDown: true)
                         .accessibilityIdentifier("boarding-official-arrival")
                     Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : boarding.source)
                         .liveFont(.caption, weight: .semibold).lineLimit(2).minimumScaleFactor(0.9)
@@ -1788,6 +1804,10 @@ private struct WaitingBannerContent: View {
                 Text(AppText.text("搭乘 %@ 站 · 約 %@ 分鐘", ride.stopCount, max(1, Int(ceil(model.plannedRideTime(ride, at: date).seconds / 60)))))
                     .monospacedDigit().lineLimit(1).minimumScaleFactor(0.75)
             }
+        }
+        .sensoryFeedback(.impact(weight: .heavy), trigger: announcedRide) { _, new in new != nil }
+        .onChange(of: ride.route.mode == .bus && guide.arrivingSoon) { _, soon in
+            if soon { announcedRide = ride.id }
         }
     }
 }
@@ -1820,7 +1840,9 @@ private struct RidingBannerContent: View {
                     }
                     Spacer(minLength: 4)
                     VStack(alignment: .trailing, spacing: 2) {
-                        Text(AppText.minutes(max(0,Int(ceil(remaining.seconds / 60))))).liveFont(.title, weight: .bold).monospacedDigit()
+                        let minutes = max(0, Int(ceil(remaining.seconds / 60)))
+                        Text(AppText.minutes(minutes)).liveFont(.title, weight: .bold).monospacedDigit()
+                            .liveNumericText(minutes, countsDown: true)
                         Text(AppText.remainingStops(remaining.stops.count)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                     }
                 }.padding(.horizontal, 16).padding(.vertical, 13)
@@ -1850,12 +1872,13 @@ private struct RidingBannerContent: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(model.onboardStopTimeLabel(ride, stopID:ride.alighting.id,at:date))
+                    let alighting = model.onboardStopTimeLabel(ride, stopID:ride.alighting.id,at:date)
+                    Text(alighting)
                         .liveFont(.title3, weight: .bold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.7)
-                        .multilineTextAlignment(.trailing).liveNumericText()
+                        .multilineTextAlignment(.trailing).liveNumericText(alighting, countsDown: true)
                     if let count = stops.firstIndex(where: { $0.id == ride.alighting.id }) {
                         Text(AppText.remainingStops(count+1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
-                            .liveNumericText()
+                            .liveNumericText(count, countsDown: true)
                     }
                 }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)
             }
@@ -1909,7 +1932,8 @@ struct MetroBoardingRows: View {
                     Image(systemName: "tram.fill").foregroundStyle(MapChrome.secondaryText)
                     Text(AppText.text("下班列車")).liveFont(.subheadline, weight: .semibold)
                     Spacer()
-                    Text(model.metroWaitLabel(ride, at: date)).liveFont(.subheadline, weight: .bold).monospacedDigit()
+                    let wait = model.metroWaitLabel(ride, at: date)
+                    Text(wait).liveFont(.subheadline, weight: .bold).monospacedDigit().liveNumericText(wait, countsDown: true)
                     if let tracked = model.nextTrackedTrain(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
                                                             alightingStationID: ride.alighting.stationID, at: date) {
                         Button { model.toggleTrainTracking(tracked.train.id) } label: {
@@ -1925,7 +1949,8 @@ struct MetroBoardingRows: View {
                     HStack {
                         Text(index == 0 ? AppText.text("下班列車") : AppText.text("後續班次")).liveFont(.subheadline)
                         Spacer()
-                        Text(MetroCountdown.label(arrival.remaining(at: date))).liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                        let countdown = MetroCountdown.label(arrival.remaining(at: date))
+                        Text(countdown).liveFont(.subheadline, weight: .semibold).monospacedDigit().liveNumericText(countdown, countsDown: true)
                         if let id = arrival.trainID, model.metroTrain(id) != nil {
                             Button { model.toggleTrainTracking(id) } label: {
                                 Label(model.selectedTrainID == id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
@@ -1953,7 +1978,9 @@ private struct MetroOnboardSummary: View {
             if !compact { HStack {
                 Text(AppText.text("在「%@」下車", ride.alighting.localizedName)).liveFont(.title3, weight: .bold)
                 Spacer()
-                Text(AppText.minutes(max(0,Int(ceil(remaining.seconds / 60))))).liveFont(.title3, weight: .bold).monospacedDigit()
+                let minutes = max(0, Int(ceil(remaining.seconds / 60)))
+                Text(AppText.minutes(minutes)).liveFont(.title3, weight: .bold).monospacedDigit()
+                    .liveNumericText(minutes, countsDown: true)
             } }
             HStack {
                 Text(remaining.stops.first.map { AppText.text("下一站 · ") + $0.localizedName } ?? AppText.text("準備下車"))

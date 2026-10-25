@@ -159,7 +159,7 @@ struct TransitHomeView: View {
                 if model.metadata.routes.isEmpty, model.loadError != nil {
                     // Without any route data the app cannot plan; say it plainly instead of "updating".
                     Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14 * CGFloat(live.appearance.cornerScale)))
+                        .background(.regularMaterial, in: live.shape(.label))
                         .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                 }
             }.onChange(of: geometry.size.height, initial: true) { _, height in
@@ -294,7 +294,7 @@ struct TransitHomeView: View {
                         }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale))
                             .frame(maxWidth: .infinity, minHeight: 52)
                     }
-                    .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .buttonStyle(PhonePressStyle()).foregroundStyle(.primary).phoneGlass(in: live.shape(.panel))
                     .accessibilityIdentifier("nearby-station-" + station.id)
                     .accessibilityLabel(AppText.text("附近站牌 %@ %@，直線距離 %@", station.localizedName, station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
                 }
@@ -716,7 +716,7 @@ private struct MapPlaceCard: View {
             }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
         }
         .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
-        .phoneGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .phoneGlass(in: live.shape(.panel))
         .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
     }
     static let categoryNames: [String: String] = [
@@ -768,7 +768,7 @@ private struct HomeSearchRow: View {
                 if let bus = model.selectedVehicle {
                     Button {
                         model.following.toggle()
-                        UISelectionFeedbackGenerator().selectionChanged()
+                        Haptics.selection()
                         if model.following { model.focusMap(.vehicle(bus.id)) }
                     } label: {
                         circle(model.following ? "scope" : "bus.fill")
@@ -1015,7 +1015,7 @@ private struct TransitPanel: View {
                 }
             }
             .padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13 * CGFloat(live.appearance.cornerScale)))
+            .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
             Picker(AppText.text("查詢類型"), selection: $model.mode) {
                 ForEach(BrowseMode.allCases) { Text(live.text($0.rawValue)).tag($0) }
             }.pickerStyle(.segmented)
@@ -1109,6 +1109,7 @@ private struct TransitPanel: View {
 }
 
 private struct RouteSearchKeypad: View {
+    @Environment(\.liveSettings) private var live
     @Binding var query: String
     let useKeyboard: () -> Void
     private let keys = [["紅", "藍", "1", "2", "3"], ["棕", "綠", "4", "5", "6"],
@@ -1123,7 +1124,7 @@ private struct RouteSearchKeypad: View {
             query = AppText.text(key) + query.filter(\.isNumber)
         } else if key.count > 1 { query = AppText.text(key) }
         else { query += key }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     var body: some View {
         VStack(spacing: 7) {
@@ -1146,7 +1147,7 @@ private struct RouteSearchKeypad: View {
                                 if key == "⌫" { Image(systemName: "delete.left") }
                                 else { Text(AppText.text(key)).lineLimit(1).minimumScaleFactor(0.6) }
                             }.liveFont(.title3, weight: .medium).frame(maxWidth: .infinity, minHeight: 48)
-                                .foregroundStyle(color(key)).background(color(key).opacity(0.075), in: RoundedRectangle(cornerRadius: 10))
+                                .foregroundStyle(color(key)).background(color(key).opacity(0.075), in: live.shape(.badge))
                                 .contentShape(Rectangle())
                         }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-key-" + key)
                             .accessibilityLabel(key == "⌫" ? AppText.text("刪除一字") : AppText.text(key))
@@ -1200,9 +1201,10 @@ private struct StationDetails: View {
                                 Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
-                                Text(row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
-                                        model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date))
-                                    .liveFont(.body, weight: .semibold).monospacedDigit()
+                                let wait = row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
+                                    model.metroStationWaitLabel(serviceID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID, at: timeline.date)
+                                Text(wait)
+                                    .liveFont(.body, weight: .semibold).monospacedDigit().liveNumericText(wait, countsDown: true)
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                             }.contentShape(Rectangle())
@@ -1269,7 +1271,7 @@ private struct RouteDetails: View {
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.up.chevron.down").liveFont(.caption, weight: .semibold)
                     }.padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
-                        .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 13 * CGFloat(live.appearance.cornerScale)))
+                        .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
                 }.accessibilityLabel(live.text("選擇路線走法"))
             }
             if model.routeDirections.count > 1 {
@@ -1299,8 +1301,9 @@ private struct RouteDetails: View {
                         HStack(alignment: .firstTextBaseline) {
                             Text(AppText.text("官方下一班")).liveFont(.subheadline).foregroundStyle(.secondary)
                             Spacer()
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: clock.date)))
-                                .liveFont(.title2, weight: .bold).monospacedDigit()
+                            let next = EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: clock.date))
+                            Text(next)
+                                .liveFont(.title2, weight: .bold).monospacedDigit().liveNumericText(next, countsDown: true)
                         }.accessibilityElement(children: .combine).accessibilityIdentifier("route-stop-official-arrival")
                     }
                     if group.approaching.isEmpty {
@@ -1391,7 +1394,8 @@ private struct RouteDetails: View {
                 }
                 Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(display.prediction != nil ? display.label : AppText.text("時間待確認")).liveFont(.subheadline, weight: .medium).monospacedDigit()
+                    let arrival = display.prediction != nil ? display.label : AppText.text("時間待確認")
+                    Text(arrival).liveFont(.subheadline, weight: .medium).monospacedDigit().liveNumericText(arrival, countsDown: true)
                     Text(AppText.text("追蹤")).liveFont(.caption).foregroundStyle(Color.accentColor)
                 }
                 Image(systemName: "scope").foregroundStyle(Color.accentColor)
@@ -1424,8 +1428,10 @@ private struct VehicleDetails: View {
                             BilingualName(next.stop).liveFont(.subheadline, weight: .semibold).lineLimit(2)
                         }
                         Spacer(minLength: 4)
-                        Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: next.stop.id, at: timeline.date)))
+                        let arrival = EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: next.stop.id, at: timeline.date))
+                        Text(arrival)
                             .liveFont(.title, weight: .semibold).monospacedDigit().lineLimit(2).minimumScaleFactor(0.75)
+                            .liveNumericText(arrival, countsDown: true)
                             .accessibilityIdentifier("browse-hero-official-arrival")
                     }
                 }
@@ -1533,7 +1539,7 @@ struct RouteBadge: View {
             .padding(.horizontal, (compact ? 7 : 10) * CGFloat(live.appearance.spacingScale))
             .padding(.vertical, (compact ? 3 : 6) * CGFloat(live.appearance.spacingScale)).frame(minWidth: compact ? 34 : 52)
             .foregroundStyle(RouteTint.signInk(for: tintName ?? name))
-            .background(RouteTint.color(for: tintName ?? name), in: RoundedRectangle(cornerRadius: (compact ? 7 : 10) * CGFloat(live.appearance.cornerScale), style: .continuous))
+            .background(RouteTint.color(for: tintName ?? name), in: live.shape(compact ? .badgeCompact : .badge))
     }
 }
 
