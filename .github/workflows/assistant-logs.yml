@@ -1,0 +1,42 @@
+name: Assistant logs
+
+# Temporary diagnosis on a feature branch, never merged: prints the assistant functions' own Pro
+# check lines from the last hour. Only messages the functions write themselves are printed; no
+# user IDs, requests or keys.
+on:
+  push:
+    branches: [claude/dreamy-ramanujan-qzvqf5]
+    paths: ['.github/workflows/assistant-logs.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  logs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - name: Read recent Pro check lines
+        run: |
+          ref=$(printf %s "$SUPABASE_PROJECT_REF" | tr -d '\r\n ')
+          start=$(date -u -d '-1 hours' +%Y-%m-%dT%H:%M:%SZ)
+          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          curl -sS -G "https://api.supabase.com/v1/projects/$ref/analytics/endpoints/logs" \
+            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            --data-urlencode "sql=SELECT timestamp, event_message FROM logs WHERE source = 'function_logs' AND (event_message LIKE '%transaction not verified%' OR event_message LIKE '%pro check failed%') ORDER BY timestamp DESC LIMIT 6" \
+            --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
+            -o errors.json -w "HTTP %{http_code}\n"
+          python3 - <<'EOF'
+          import json, re
+          data = json.load(open('errors.json'))
+          if 'result' not in data or data.get('error'):
+              print('error:', str(data)[:300])
+          for row in data.get('result') or []:
+              message = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', str(row['event_message']))
+              print(row['timestamp'])
+              for part in message.split(' | '):
+                  print('   ', part[:300])
+          EOF
