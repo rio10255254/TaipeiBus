@@ -1,0 +1,28 @@
+name: Voice conversation evaluation
+
+# Asks the real models a fixed set of conversation turns with the server's own prompt and checks each
+# answer the way the app would. Runs when the conversation prompt or its checks change.
+on:
+  pull_request:
+    paths: ['supabase/functions/converse/**', 'supabase/functions/_shared/**', '.github/workflows/voice-eval.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Ask and check
+        run: deno run --allow-env --allow-net --no-lock --config supabase/functions/converse/deno.json supabase/functions/converse/eval.ts
