@@ -3,8 +3,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { Environment, SignedDataVerifier } from '@apple/app-store-server-library';
 import { Buffer } from 'node:buffer';
+import { APPLE_ROOTS } from './apple_roots.ts';
 
 const BUNDLE_ID = 'com.rio10255254.TaipeiBus';
+const APP_APPLE_ID = 6818475740;
 const PRO_PRODUCTS = new Set(['com.rio10255254.TaipeiBus.pro.monthly', 'com.rio10255254.TaipeiBus.pro.yearly']);
 
 export type Tier = 'pro' | 'free';
@@ -38,16 +40,9 @@ async function checkTier(admin: SupabaseClient, userId: string, proof?: string):
 
 let verifiers: SignedDataVerifier[] | null = null;
 
-async function verifyTransaction(jws: string): Promise<{ originalTransactionId: string; expiresDate: number } | null> {
-  if (!verifiers) {
-    try {
-      verifiers = await makeVerifiers();
-    } catch (error) {
-      console.error('apple roots unavailable', error instanceof Error ? error.message : String(error));
-      return null;
-    }
-  }
-  for (const verifier of verifiers) {
+/// The active Pro subscription a signed transaction proves, or null.
+export async function verifyTransaction(jws: string, list = verifiers ??= makeVerifiers()): Promise<{ originalTransactionId: string; expiresDate: number } | null> {
+  for (const verifier of list) {
     try {
       const payload = await verifier.verifyAndDecodeTransaction(jws);
       if (!payload.productId || !PRO_PRODUCTS.has(payload.productId)) return null;
@@ -61,16 +56,13 @@ async function verifyTransaction(jws: string): Promise<{ originalTransactionId: 
   return null;
 }
 
-async function makeVerifiers(): Promise<SignedDataVerifier[]> {
-  const names = ['AppleRootCA-G3.cer', 'AppleRootCA-G2.cer', 'AppleIncRootCertificate.cer'];
-  const roots = await Promise.all(names.map(async (name) => {
-    const response = await fetch(`https://www.apple.com/certificateauthority/${name}`);
-    if (!response.ok) throw new Error(`${name}: HTTP ${response.status}`);
-    return Buffer.from(new Uint8Array(await response.arrayBuffer()));
-  }));
-  const appId = Number(Deno.env.get('APP_APPLE_ID')) || undefined;
-  const list = [new SignedDataVerifier(roots, false, Environment.SANDBOX, BUNDLE_ID)];
-  // Production transactions need the app's numeric App Store ID.
-  if (appId) list.unshift(new SignedDataVerifier(roots, false, Environment.PRODUCTION, BUNDLE_ID, appId));
-  return list;
+/// App Store purchases are Production; TestFlight purchases are Sandbox.
+export function makeVerifiers(roots: string[] = APPLE_ROOTS): SignedDataVerifier[] {
+  const certificates = roots.map((root) => Buffer.from(root, 'base64'));
+  // Production transactions need the app's numeric App Store ID (public: apps.apple.com/tw/app/id6818475740).
+  const appId = Number(Deno.env.get('APP_APPLE_ID')) || APP_APPLE_ID;
+  return [
+    new SignedDataVerifier(certificates, false, Environment.PRODUCTION, BUNDLE_ID, appId),
+    new SignedDataVerifier(certificates, false, Environment.SANDBOX, BUNDLE_ID),
+  ];
 }
