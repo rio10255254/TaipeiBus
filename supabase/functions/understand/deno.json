@@ -3,6 +3,6 @@
   "imports": {
     "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@1",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.108.2",
-    "@apple/app-store-server-library": "npm:@apple/app-store-server-library@1"
+    "@peculiar/x509": "npm:@peculiar/x509@1"
   }
 }
