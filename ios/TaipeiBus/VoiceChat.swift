@@ -230,7 +230,10 @@ final class VoiceConversation: ObservableObject {
             case .success(let sentence): spoken = sentence
             case .failure(let failure):
                 JourneyDiagnostics.shared.record("voice refused \(failure)")
-                spoken = "結果在畫面上，請看一下。"
+                // A number the app cannot vouch for is never read out; a slot it never offered means
+                // the model had nothing to go on.
+                if case .unknownSlot = failure { spoken = "這個我現在查不到，可以換個方式問嗎？" }
+                else { spoken = "結果在畫面上，請看一下。" }
             }
             history.append(user: text, said: spoken)
             respond(spoken, followUp: true, routes: context.names)

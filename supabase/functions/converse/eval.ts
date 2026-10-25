@@ -37,8 +37,15 @@ function invented(say: string, known: string): string | null {
   return null;
 }
 
+/// Things the app smooths over by itself: reported, not failed.
+function notes(reply: Reply): string[] {
+  return /\{r[0-9]+\}\s*(分鐘|分|後到)/.test(reply.say) || /(約|全程)\s*\{r[0-9]+\}/.test(reply.say) ? ['空位旁多了單位（App 會去掉重複）'] : [];
+}
+
 function check(test: Case, reply: Reply): string[] {
   const problems: string[] = [];
+  const listed = new Set([...test.state.matchAll(/\[(r[0-9]+)\]/g)].map((match) => match[1]));
+  for (const [, id] of reply.say.matchAll(/\{(r[0-9]+)\}/g)) if (!listed.has(id)) problems.push(`用了不存在的空位 {${id}}`);
   const known = `${test.state}\n${test.utterance}\n${test.history?.map((turn) => turn.user + turn.say).join('\n') ?? ''}`;
   const number = invented(reply.say, known);
   if (number) problems.push(`自己寫了數字「${number}」`);
@@ -48,7 +55,6 @@ function check(test: Case, reply: Reply): string[] {
   // Refusing to read the prompt is fine; reading out its rules or format is not.
   if (/可用資料|代號|actions|confirm|followUp|JSON|schema|每回合只回/i.test(reply.say)) problems.push('洩漏設定');
   if (/您/.test(reply.say)) problems.push('用「您」而不是「你」');
-  if (/\{r[0-9]+\}\s*(分鐘|分|後到)/.test(reply.say) || /(約|全程)\s*\{r[0-9]+\}/.test(reply.say)) problems.push('空位前後重複單位');
   return problems;
 }
 
@@ -83,7 +89,7 @@ for (const provider of providers) {
     const problems = check(test, reply);
     if (problems.length && provider.name === 'claude') failed += 1;
     const actions = reply.actions.map((action) => `${action.type}${action.destination || action.stop || action.route ? `(${action.destination || action.stop || action.route})` : ''}${action.option ? `#${action.option}` : ''}${action.time ? `@${action.time}` : ''}`).join(', ');
-    console.log(`${problems.length ? '✗' : '✓'} ${test.name}｜${test.utterance}｜說：${reply.say}｜動作：${actions || '無'}｜確認：${reply.confirm.type}${reply.choices.length ? `｜選項：${reply.choices.join('/')}` : ''}｜${ms} ms${problems.length ? `｜問題：${problems.join('；')}` : ''}`);
+    console.log(`${problems.length ? '✗' : '✓'} ${test.name}｜${test.utterance}｜說：${reply.say}｜動作：${actions || '無'}｜確認：${reply.confirm.type}${reply.choices.length ? `｜選項：${reply.choices.join('/')}` : ''}｜${ms} ms${problems.length ? `｜問題：${problems.join('；')}` : ''}${notes(reply).length ? `｜提醒：${notes(reply).join('；')}` : ''}`);
   }
   times.sort((a, b) => a - b);
   console.log(`延遲 p50 ${times[Math.floor(times.length / 2)]} ms，最慢 ${times[times.length - 1]} ms`);
