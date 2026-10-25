@@ -24,7 +24,7 @@ jobs:
           start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
           end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           sql="select timestamp, event_message from function_logs where timestamp > '$start' order by timestamp desc limit 300"
-          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs.all" \
+          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs" \
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
             --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
             -o logs.json -w 'HTTP %{http_code}\n'
@@ -45,7 +45,7 @@ jobs:
           start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
           end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           sql="select timestamp, response.status_code, request.method, request.pathname from function_edge_logs cross join unnest(metadata) as m cross join unnest(m.response) as response cross join unnest(m.request) as request where timestamp > '$start' order by timestamp desc limit 60"
-          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs.all" \
+          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs" \
             -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
             --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
             -o edge.json -w 'HTTP %{http_code}\n'
