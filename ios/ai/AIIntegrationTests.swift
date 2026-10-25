@@ -306,6 +306,21 @@ import TransitCore
         let unsure = try await none.resolve(reading("台大機械館"), source: "去台大機械館", now: now)
         XCTAssertTrue(unsure.destinationCandidates.isEmpty, "No match: the rider picks instead of a guess")
     }
+    func testAKindOfPlaceAroundAnAreaListsThePlacesThere() async throws {
+        // 「西門町的網咖」 offered a hotel and a market and asked the rider to search again.
+        XCTAssertEqual(NearbyQuery("西門町的網咖").map { [$0.area, $0.what] }, ["西門町", "網咖"])
+        XCTAssertEqual(NearbyQuery("公館附近的咖啡廳").map { [$0.area, $0.what] }, ["公館", "咖啡廳"])
+        XCTAssertEqual(NearbyQuery("附近的藥局").map { [$0.area, $0.what] }, ["", "藥局"])
+        XCTAssertNil(NearbyQuery("台大的機械館"), "One building, not a kind of place")
+        XCTAssertNil(NearbyQuery("西門町附近"), "An area alone is a place")
+        XCTAssertNil(NearbyQuery("台北車站"))
+        let context = JourneyAssistantContext(journeys: [], matches: JourneyAssistantSession.matches) { _ in
+            [self.place("艾珂電競館"), self.place("戰略高手網咖", 25.041)]
+        }
+        context.choose = { _, _, _ in XCTFail("Any of them is a fair answer"); return -1 }
+        let turn = try await context.resolve(reading("西門町的網咖"), source: "去西門町的網咖", now: now)
+        XCTAssertEqual(turn.destinationCandidates.map(\.name), ["艾珂電競館", "戰略高手網咖"])
+    }
     func testTheOnlineModelPicksAmongSearchResults() async throws {
         // Names alone could not tell which result 台大機械館 means; the model picks the second.
         let context = JourneyAssistantContext(journeys: [], matches: { _, _ in false }) { _ in

@@ -122,7 +122,7 @@ final class ProPurchases: ObservableObject {
         guard token == generation, !Task.isCancelled else { return }
         activePlan = current.flatMap { item in ProPlan.allCases.first { $0.productID == item.productID } }
         hasPro = current != nil; checkingAccess = false
-        AssistantServer.proof.jws = current == nil ? nil : signed
+        AssistantServer.proof.value = current == nil ? nil : signed
         if hasPro && awaitingApproval { awaitingApproval = false; message = nil }
         isInTrial = false
         if let current, current.offerType == .introductory {

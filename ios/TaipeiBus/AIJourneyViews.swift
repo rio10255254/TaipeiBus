@@ -478,7 +478,7 @@ final class JourneyAssistantSession: ObservableObject {
     /// Whether a found place is what the words named (台大機械館 matches 機械工程學系館, not 圖書館).
     static func matches(_ place: TravelPlace, _ words: String) -> Bool {
         let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty, JourneyAssistantContext.category(of: text) == nil else { return true }
+        guard !text.isEmpty, JourneyAssistantContext.category(of: text) == nil, NearbyQuery(text) == nil else { return true }
         return StationSearch.placeRank(name: place.name, address: place.address, query: text) != nil
     }
 

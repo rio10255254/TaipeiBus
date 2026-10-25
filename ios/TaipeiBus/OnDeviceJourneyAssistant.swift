@@ -553,6 +553,13 @@ final class JourneyAssistantContext {
             // An exact name match goes first so it is the obvious choice.
             var ordered = found.filter { Self.normalized($0.name) == key } + found.filter { Self.normalized($0.name) != key }
             let named = ordered.filter { matches($0, text) }
+            // 「西門町的網咖」 lists the 網咖 there, nearest first: any of them is a fair answer, and the
+            // others stay one tap away on the route screen.
+            if NearbyQuery(text) != nil {
+                toolCalls.append("nearby: \(places.count)")
+                for place in places { picked.insert(place.id) }
+                return Array(places.prefix(5))
+            }
             // Names settle it when exactly the first result matches; otherwise the online model picks.
             if let choose, let first = ordered.first, Self.normalized(first.name) != key,
                !(named.count == 1 && named[0].id == first.id) {
@@ -815,23 +822,29 @@ enum AssistantServer {
     static var configured: Bool { baseURL != nil && !publicKey.isEmpty }
     /// A signed App Store transaction for an active Pro subscription; the server checks it with Apple's
     /// certificates before allowing Pro's larger model and allowance.
-    static let proof = Proof()
-    final class Proof: @unchecked Sendable {
+    static let proof = Shared()
+    /// A string shared across threads.
+    final class Shared: @unchecked Sendable {
         private let lock = NSLock()
-        private var value: String?
-        var jws: String? {
-            get { lock.lock(); defer { lock.unlock() }; return value }
-            set { lock.lock(); value = newValue; lock.unlock() }
+        private var stored: String?
+        var value: String? {
+            get { lock.lock(); defer { lock.unlock() }; return stored }
+            set { lock.lock(); stored = newValue; lock.unlock() }
         }
     }
     private static let account = Account()
+    /// What the server actually used for the last reply, for the troubleshooting history: the model
+    /// Groq answered with and the tier the server granted (a phone whose Pro could not be verified is
+    /// served the smaller model as free).
+    static var served: String { lastServed.value ?? "served=? tier=?" }
+    private static let lastServed = Shared()
 
     /// One chat request through the server; the reply body and HTTP status. 429 means today's
     /// allowance is used up.
     static func send(_ chat: [String: Any], timeout: TimeInterval, session: URLSession) async throws -> (Data, Int) {
         guard let base = baseURL, let url = URL(string: base + "/functions/v1/understand") else { throw OnlineJourneyReader.Failure.notConfigured }
         var body: [String: Any] = ["request": chat]
-        if let jws = proof.jws { body["proof"] = jws }
+        if let jws = proof.value { body["proof"] = jws }
         let payload = try JSONSerialization.data(withJSONObject: body)
         var token = try await account.token(session: session)
         for attempt in 0..<2 {
@@ -845,6 +858,9 @@ enum AssistantServer {
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             // An expired or revoked identity: sign in again once.
             if status == 401, attempt == 0 { token = try await account.token(session: session, renew: true); continue }
+            let tier = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Assistant-Tier") ?? "?"
+            let model = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["model"] as? String ?? "?"
+            lastServed.value = "served=\(model) tier=\(tier)"
             return (data, status)
         }
         throw OnlineJourneyReader.Failure.http(401)
@@ -946,7 +962,7 @@ enum OnlineJourneyReader {
     "preference":"balanced|faster|lessWalking|fewerTransfers|conflicting","travelMode":"any|cycling|walking",\
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
-    目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
+    目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；地區加店家種類寫成「西門町附近的網咖」；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
     說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
     """
 
@@ -961,7 +977,7 @@ enum OnlineJourneyReader {
         for model in models(pro: pro) {
             do {
                 let reading = try await read(text, at: formatter.string(from: now), model: model, session: session)
-                JourneyDiagnostics.shared.record(String(format: "ai-online ok model=%@ %.1fs", model, Date().timeIntervalSince(began)))
+                JourneyDiagnostics.shared.record(String(format: "ai-online ok model=%@ %@ %.1fs", model, AssistantServer.served, Date().timeIntervalSince(began)))
                 return reading
             } catch Failure.http(let status) where [400, 404, 413, 429, 498].contains(status) || status >= 500 {
                 // A retired model (404), a refused option (400) or a used-up allowance (429): try the next.
@@ -1001,7 +1017,7 @@ enum OnlineJourneyReader {
                                                    model: model, limit: 300, session: session) else { continue }
             if let data = content.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let index = value["index"] as? Int {
-                JourneyDiagnostics.shared.record("ai-online choose model=\(model) index=\(index)")
+                JourneyDiagnostics.shared.record("ai-online choose model=\(model) \(AssistantServer.served) index=\(index)")
                 return index
             }
         }
@@ -1068,7 +1084,7 @@ enum OnlineJourneyReader {
                   let data = content.data(using: .utf8),
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             let queries = ((value["queries"] as? [String]) ?? []).map { String($0.prefix(40)) }.filter { !$0.isEmpty }
-            JourneyDiagnostics.shared.record("ai-online rewrite model=\(model) count=\(queries.count)")
+            JourneyDiagnostics.shared.record("ai-online rewrite model=\(model) \(AssistantServer.served) count=\(queries.count)")
             return Array(queries.prefix(2))
         }
         return []
