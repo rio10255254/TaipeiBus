@@ -53,6 +53,8 @@ private actor StationLookup {
 final class TransitAppModel: ObservableObject {
     let purchases = ProPurchases()
     let commutes = CommuteLibrary()
+    let commuteHabits = CommuteHabitStore()
+    private var recordedCommuteStart = false
 
     // MARK: Pro features and free daily trials
     /// Free uses of Pro features today (three per Taipei day; the same bus again costs nothing).
@@ -166,6 +168,15 @@ final class TransitAppModel: ObservableObject {
         guard !synchronizingNavigation else { return }
         synchronizingNavigation = true
         defer { synchronizingNavigation = false }
+        if !planner.started { recordedCommuteStart = false }
+        if planner.started, !recordedCommuteStart {
+            recordedCommuteStart = true
+            if let id = activeSavedJourneyID, let saved = commutes.journeys.first(where: { $0.id == id }),
+               planner.destination?.coordinate == saved.destination.coordinate,
+               saved.origin == nil || planner.origin?.coordinate == saved.origin?.coordinate {
+                commuteHabits.record(id, available: Set(commutes.journeys.map(\.id)))
+            }
+        }
         let readiness = NavigationReadiness(hasPro: purchases.hasPro, checkingPro: purchases.checkingAccess,
             notifications: alightReminder.permission, location: location.navigationPermission,
             liveActivitiesAllowed: rideActivity.isAllowed)
@@ -194,6 +205,7 @@ final class TransitAppModel: ObservableObject {
     }
     func updateLiveSurfaces() {
         synchronizeNavigationState()
+        commuteHabits.prune(available: Set(commutes.journeys.map(\.id)))
         // Until StoreKit answers, leave both as they are rather than ending a subscriber's trip.
         guard !purchases.checkingAccess else { return }
         let now = Date()
@@ -563,6 +575,167 @@ final class TransitAppModel: ObservableObject {
         guard purchases.hasPro else { return }
         tripPreference = value; applyPersonalPreferences()
     }
+    /// What 用一句話規劃 understood, shown above the routes it started so the rider can see and change it.
+    struct AssistantTrip {
+        var request: String
+        var destination: TravelPlace
+        /// Other search results for the same words, offered as 「不是這裡？」.
+        var alternatives: [TravelPlace]
+        /// nil means the current location.
+        var origin: TravelPlace?
+        var mode: AssistantTravelMode
+        var preference: RoutePreference
+        /// nil means leaving now.
+        var departure: Date? = nil
+        /// An arrival time, worked back to a departure by the planner.
+        var arriveBy: Date? = nil
+        /// Set when a requested preference could not be applied, e.g. without Pro.
+        var note: String?
+        /// The second stop of 「先去…然後再去…」, offered as 接著去 once this leg is planned.
+        var nextStop: String? = nil
+        var constraints = TripConstraints()
+        /// Every stop of 「先去 A 再去 B」 in order. The routes show one leg at a time; the map numbers
+        /// each stop once its place is known.
+        var stops: [Stop] = []
+        var leg = 0
+        /// The first leg's start (nil = current location) and time, to show it again later.
+        var start: TravelPlace?
+        var startDeparture: Date?
+        var startArriveBy: Date?
+        /// When each later leg leaves: when the one before it is expected to arrive, plus a little.
+        var legDepartures: [Int: Date] = [:]
+        struct Stop { var name: String; var place: TravelPlace? }
+    }
+    /// Bumped when a stop's place is found, so the map redraws its numbers.
+    @Published private(set) var assistantStopsRevision = 0
+    /// Numbered pins for the map: every known stop of a trip with several stops.
+    var assistantStopPins: [(number: Int, place: TravelPlace)] {
+        guard let trip = assistantTrip, trip.stops.count > 1 else { return [] }
+        return trip.stops.enumerated().compactMap { index, stop in stop.place.map { (index + 1, $0) } }
+    }
+    func resolveAssistantStop(_ index: Int, place: TravelPlace) {
+        guard assistantTrip?.stops.indices.contains(index) == true else { return }
+        assistantTrip?.stops[index].place = place
+        assistantStopsRevision += 1
+    }
+    /// Shows one leg of a trip with several stops. A later leg leaves when the leg before it is
+    /// expected to arrive (it used to restart at 現在出發).
+    func showAssistantLeg(_ index: Int) {
+        guard var trip = assistantTrip, trip.stops.indices.contains(index), index != trip.leg,
+              let destination = trip.stops[index].place, !planner.started else { return }
+        let origin = index == 0 ? trip.start : trip.stops[index - 1].place
+        var departure: Date?, arriveBy: Date?
+        if index == 0 {
+            departure = trip.startDeparture; arriveBy = trip.startArriveBy
+        } else if index == trip.leg + 1, let arrival = planner.expectedArrival ?? planner.scheduledDeparture?.addingTimeInterval(45 * 60) {
+            // No timing for the leg before (待確認): a typical trip length rather than 現在.
+            departure = arrival.addingTimeInterval(5 * 60); trip.legDepartures[index] = departure
+        } else {
+            departure = trip.legDepartures[index]
+        }
+        planner.finish(); clearWalkingMap(); clearSelection()
+        planner.preferredMode = trip.mode; planner.schedule(departure, arriveBy: arriveBy); planner.constraints = trip.constraints
+        trip.leg = index; trip.origin = origin; trip.destination = destination; trip.alternatives = []
+        trip.departure = planner.scheduledDeparture; trip.arriveBy = planner.arrivalDeadline
+        assistantTrip = trip
+        if let origin { planner.setOrigin(origin, metadata: metadata) }
+        else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
+        assistantStopsRevision += 1
+    }
+    @Published private(set) var assistantTrip: AssistantTrip?
+    /// 用一句話規劃 for the whole app: the route panel, Siri and the sheet share one request.
+    private(set) lazy var assistant = JourneyAssistantSession(model: self)
+    /// Keep the routes, drop what was understood (the banner's ✕).
+    func forgetAssistantTrip() {
+        assistantTrip = nil
+        planner.preferredMode = .any
+        if !planner.started { planner.plan(metadata: metadata) }
+    }
+    /// A sentence from Siri waiting for the route panel to open.
+    @Published var pendingAssistantRequest: String?
+    /// The understanding only describes the trip it started; another destination hides it.
+    var currentAssistantTrip: AssistantTrip? {
+        guard let trip = assistantTrip, let destination = planner.destination, destination.id == trip.destination.id else { return nil }
+        return trip
+    }
+
+    /// Plans what 用一句話規劃 understood. No origin means the current location. Without Pro a requested
+    /// preference falls back to the recommendation, and the note says so.
+    func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
+                                 preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil, arriveBy: Date? = nil,
+                                 nextStop: String? = nil, constraints: TripConstraints = TripConstraints()) {
+        guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
+        planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
+        planner.preferredMode = mode; planner.schedule(departure, arriveBy: arriveBy); planner.constraints = constraints
+        tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
+        let note = preference != .balanced && !purchases.hasPro
+            ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
+        let next = nextStop.flatMap { $0.isEmpty ? nil : $0 }
+        assistantTrip = AssistantTrip(request: request, destination: destination,
+            alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
+            preference: preference, departure: planner.scheduledDeparture,
+            arriveBy: planner.arrivalDeadline, note: note, nextStop: next,
+            constraints: constraints,
+            stops: next.map { [AssistantTrip.Stop(name: destination.localizedName, place: destination), AssistantTrip.Stop(name: $0, place: nil)] } ?? [],
+            start: origin, startDeparture: planner.scheduledDeparture, startArriveBy: planner.arrivalDeadline)
+        assistantStopsRevision += 1
+        if let origin { planner.setOrigin(origin, metadata: metadata) }
+        else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
+        planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
+    }
+    /// 「不是這裡？」: plan the same request to another of its search results.
+    func switchAssistantDestination(_ place: TravelPlace) {
+        guard let trip = assistantTrip else { return }
+        previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
+            alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode,
+            departure: trip.departure, arriveBy: trip.arriveBy, nextStop: trip.nextStop, constraints: trip.constraints)
+    }
+    /// Applies a change said on the route screen (「改騎車」, 「晚一點」, 「不要搭公車」) in one new plan.
+    func applyAssistantChange(_ change: AssistantChange, request: String) {
+        guard var trip = assistantTrip, !planner.started else { return }
+        if let mode = change.mode { trip.mode = mode; planner.preferredMode = mode }
+        if let raw = change.preference, let preference = RoutePreference(rawValue: raw.rawValue) {
+            trip.preference = preference
+            tripPreference = purchases.hasPro ? preference : nil; applyPersonalPreferences()
+            trip.note = preference != .balanced && !purchases.hasPro ? AppText.text("「%@」需要 Pro，這次使用推薦路線。", preference.title) : nil
+        }
+        if let constraints = change.constraints { trip.constraints = constraints; planner.constraints = constraints }
+        switch change.time {
+        case .now?: planner.schedule(nil)
+        case .depart(let date)?: planner.schedule(date)
+        case .arrive(let date)?: planner.schedule(nil, arriveBy: date)
+        case nil: break
+        }
+        trip.departure = planner.scheduledDeparture; trip.arriveBy = planner.arrivalDeadline
+        if !change.next.isEmpty { trip.nextStop = change.next }
+        trip.request = request
+        assistantTrip = trip
+        planner.plan(metadata: metadata)
+    }
+    /// 「幾點出發」: nil plans for now with live buses; a later time plans on that day's timetables and headways.
+    /// An arrival time (「三點前到」) is worked back to the latest sensible departure.
+    func setJourneyDeparture(_ departure: Date?, arriveBy: Date? = nil) {
+        guard !planner.started else { return }
+        planner.schedule(departure, arriveBy: arriveBy)
+        if assistantTrip != nil {
+            assistantTrip?.departure = planner.scheduledDeparture; assistantTrip?.arriveBy = planner.arrivalDeadline
+        }
+        planner.plan(metadata: metadata)
+    }
+    /// The way-of-travelling chip, for any trip: a planned-from-a-sentence trip keeps it too.
+    func setTravelMode(_ mode: AssistantTravelMode) {
+        guard !planner.started else { return }
+        if assistantTrip != nil { assistantTrip?.mode = mode }
+        planner.preferredMode = mode
+        planner.plan(metadata: metadata)
+    }
+    func setAssistantMode(_ mode: AssistantTravelMode) {
+        guard assistantTrip != nil, !planner.started else { return }
+        assistantTrip?.mode = mode
+        planner.preferredMode = mode
+        planner.plan(metadata: metadata)
+    }
     /// Opening a saved trip stays free after Pro ends; its saved route preference only applies with Pro.
     func previewSavedJourney(_ saved: SavedJourney) {
         guard saved.valid else { return }
@@ -630,6 +803,13 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var bikeNetwork = BikeNetwork.empty
     @Published private(set) var bikeAvailability: BikeAvailability?
     /// Docks are drawn at street zoom; the preference and the remote switch can both hide them.
+    /// Dark colours and the dark map while navigating between sunset and sunrise.
+    @Published var nightNavigation: Bool = UserDefaults.standard.object(forKey: "nightNavigation") as? Bool ?? true {
+        didSet {
+            guard nightNavigation != oldValue else { return }
+            UserDefaults.standard.set(nightNavigation, forKey: "nightNavigation")
+        }
+    }
     @Published var bikeStationsOn: Bool = UserDefaults.standard.object(forKey: "bikeStationsOn") as? Bool ?? true {
         didSet {
             guard bikeStationsOn != oldValue else { return }
@@ -647,7 +827,7 @@ final class TransitAppModel: ObservableObject {
         tappedPlace = nil
         selectedBikeStationReturning = returning ?? planner.selected?.walks.contains(where: { $0.bike?.dropoff.id == id }) ?? false
         selectedBikeStationID = id
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
         pollBikesInBackground()
     }
     /// The feed is a single city-wide file, so it runs on its own task at its own pace:
@@ -906,7 +1086,7 @@ final class TransitAppModel: ObservableObject {
     func chooseRouteBoardingStop(_ stop: BusStop) {
         routeBoardingStopID = stop.id
         focusMap(.station(stop.stationID))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
 
     func setActive(_ active: Bool) {
@@ -974,6 +1154,15 @@ final class TransitAppModel: ObservableObject {
                 openPendingSavedJourney()
                 metadataNotice = await service.metadataNotice
                 loading = false; loadError = nil
+#if DEBUG
+                // AI interface checks use the real bundled route catalog and the
+                // existing explicitly labelled fixtures, without waiting for a live poll.
+                if ProcessInfo.processInfo.arguments.contains("--test-ai-ui") {
+                    previewNotice = "介面驗證用資料 · 非即時車輛"
+                    applyPreviewSelection()
+                    return
+                }
+#endif
                 while !Task.isCancelled {
                     location.requestIfAuthorized()
                     let requestStartedAt = ProcessInfo.processInfo.systemUptime
@@ -1172,7 +1361,7 @@ final class TransitAppModel: ObservableObject {
         following = false; walkingMapIndex = nil
         userMapMode = next
         location.request(); focusMap(.userLocation)
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func beginStationBrowsing() {
         stationBrowsing = true
@@ -1221,7 +1410,7 @@ final class TransitAppModel: ObservableObject {
         selectedRouteID = nil; routeBoardingStopID = nil; allRouteVariants = true; selectedVehicleID = nil; following = false; query = ""
         focusMap(.station(station.id)); sheetDetent = .height(330)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func selectRoute(_ route: BusRoute, direction: String = "0", variantOnly: Bool = false, boardingStopID: String? = nil) {
         selectedTrainID = nil; followingTrain = false
@@ -1244,7 +1433,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; selectedVehicleID = nil; following = false; query = ""
         focusMap(.route(route.id)); sheetDetent = .height(520)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func selectVehicle(_ vehicle: BusVehicle) {
         if selectedVehicleID == nil, let routeID = selectedRouteID {
@@ -1255,7 +1444,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction; following = hasProAccess; query = ""
         focusMap(.vehicle(vehicle.id)); sheetDetent = .height(330)
         selectionRevision += 1
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func toggleCityFleet() {
         if cityFleetMode {
@@ -1264,7 +1453,7 @@ final class TransitAppModel: ObservableObject {
             clearSelection(); stationBrowsing = false; cityFleetMode = true
             focusMap(.cityOverview)
         }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func leaveCityForJourney() { cityFleetMode = false }
     var cityVehicles: [BusVehicle] {
@@ -1279,7 +1468,7 @@ final class TransitAppModel: ObservableObject {
         if !available.contains(direction) { direction = available.first ?? "0" }
         selectedVehicleID = nil; following = false
         focusMap(.route(route.id))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func clearSelection() {
         selectedTrainID = nil; followingTrain = false
@@ -1295,7 +1484,7 @@ final class TransitAppModel: ObservableObject {
     func toggleFavorite(_ station: Station) {
         if favorites.contains(station.id) { favorites.remove(station.id) } else { favorites.insert(station.id) }
         defaults.set(Array(favorites), forKey: "favoriteStations")
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
 
     func stations(query: String) -> [Station] {
@@ -1885,7 +2074,7 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction
         following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
     }
     func routes(query: String) -> [RouteSearchResult] {
         var seen = Set<String>()
@@ -2337,6 +2526,8 @@ final class TransitAppModel: ObservableObject {
             planningMetadata.rebuildRouteCatalog()
         }
         let source = planningMetadata
+        let planningDate = ProcessInfo.processInfo.arguments.contains("--test-ai-ui")
+            ? ISO8601DateFormatter().date(from: "2026-10-08T04:00:00Z")! : Date()
         let chosen = await Task.detached(priority: .userInitiated) {
             let metadata = source
         let network = TripPlanner(metadata: metadata)
@@ -2345,7 +2536,7 @@ final class TransitAppModel: ObservableObject {
             let destinations = [Coordinate(latitude: 25.0838, longitude: 121.5942),
                 Coordinate(latitude: 25.0478, longitude: 121.5172), Coordinate(latitude: 25.1362, longitude: 121.4598)]
             for destination in destinations {
-                chosen = network.plan(from: .taipei, to: destination, maximumWalk: 800, limit: 80).first { trip in
+                chosen = network.plan(from: .taipei, to: destination, maximumWalk: 800, limit: 80, at: planningDate).first { trip in
                     guard trip.rides.count == 2, let ride = trip.rides.first,
                           let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
                           let boarding = pattern.anchors.first(where: { $0.stop.id == ride.boarding.id }) else { return false }
@@ -2358,7 +2549,7 @@ final class TransitAppModel: ObservableObject {
             guard let journey = metadata.journey(routeID: route.id, direction: cooperated ? "1" : "0"), journey.anchors.count > 10 else { continue }
             let middle = journey.anchors.count / 2
             let trips = network.plan(from: journey.anchors[middle].stop.coordinate,
-                to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20)
+                to: journey.anchors[min(middle + 4, journey.anchors.count - 1)].stop.coordinate, maximumWalk: 20, at: planningDate)
             chosen = trips.first { trip in
                 guard trip.rides.count == 1, let ride = trip.rides.first,
                       let pattern = metadata.journey(routeID: ride.route.id, direction: ride.direction),
@@ -2435,6 +2626,9 @@ final class TransitAppModel: ObservableObject {
         let estimates = EstimateFeed(seconds: Dictionary(uniqueKeysWithValues: trip.rides.map {
             ("\($0.route.parentID):\($0.boarding.id)", integrity ? 750 : 120)
         }), updatedAt: date)
+        // The fixture itself must land even when --test-ai-ui already marked the session as a fixture,
+        // which otherwise makes applySnapshot ignore every snapshot.
+        previewNotice = nil
         applySnapshot(TransitSnapshot(vehicles: result.vehicles, sourceUpdatedAt: date, receivedAt: date,
                                       estimates: estimates, revision: snapshot.revision + 1))
         previewNotice = "介面驗證用資料 · 非即時車輛"

@@ -1,0 +1,14 @@
+# TaipeiBus assistant server: holds the Groq key, counts each phone's daily allowance and checks
+# Pro, so the app carries only the public project URL and publishable key.
+project_id = "taipeibus-assistant"
+
+[auth]
+# Every phone signs in anonymously once; no account, email or name is collected.
+enable_anonymous_sign_ins = true
+
+[auth.rate_limit]
+# New anonymous identities per hour per IP, so the allowance cannot be refreshed by signing up again.
+anonymous_users = 10
+
+[functions.understand]
+verify_jwt = true

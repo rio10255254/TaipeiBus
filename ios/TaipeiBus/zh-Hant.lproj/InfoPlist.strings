@@ -1,3 +1,7 @@
 "CFBundleDisplayName" = "台北公車";
 "NSLocationWhenInUseUsageDescription" = "從目前位置規劃公車行程，尋找附近上車站牌與步行路線；導航進行中也會在背景更新下車提醒與即時動態。";
 "Navigation" = "導航時需要精確位置，才能跟著步行路線提示轉彎、計算剩餘距離，並在下車前提醒你。";
+
+"NSCameraUsageDescription" = "在手機上辨識公車車牌，協助選擇附近車輛；不儲存或上傳影像，也可手動選車。";
+"NSMicrophoneUsageDescription" = "按下麥克風說出要去哪裡時使用；聲音只用來轉成文字，不儲存或上傳。";
+"NSSpeechRecognitionUsageDescription" = "把你說的行程轉成文字並規劃路線；支援時在手機上辨識，不儲存錄音。";

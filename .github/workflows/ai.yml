@@ -1,0 +1,113 @@
+name: AI branch native validation
+
+on:
+  push:
+    branches: [ai]
+    paths: ['ios/**', '.github/workflows/ai.yml']
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: Standard runner for simulator validation
+        type: choice
+        options: [macos-15, macos-15-intel]
+        default: macos-15
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-native-${{ github.ref }}-${{ inputs.runner || 'macos-15' }}
+  cancel-in-progress: true
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  native:
+    # Prefer Apple Silicon for iOS execution; keep the standard Intel pool
+    # available for explicit comparisons. Both supply Xcode 26.3 / iOS 26.
+    runs-on: ${{ inputs.runner || 'macos-15' }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      # TransitCore tests and the signed device build already run in every TestFlight
+      # upload, so this workflow only covers what is unique to it: the simulator AI tests.
+      - name: Verify toolchain and release copy
+        run: |
+          set -euo pipefail
+          uname -m
+          xcodebuild -version
+          python3 ios/release-check.py
+          python3 ios/localization-check.py
+      - uses: actions/cache@v4
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData/SourcePackages
+          key: ai-spm-${{ runner.os }}-${{ hashFiles('ios/TaipeiBus.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+      - name: Prepare simulator and native test targets
+        run: |
+          set -euo pipefail
+          python3 ios/ai/simulator.py prepare
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
+          export GEM_PATH="$GEM_HOME:$(ruby -e 'print Gem.path.join(":")')"
+          ruby ios/ai/setup.rb
+      - name: Compile native app and test bundles before boot
+        id: simulator_build
+        run: |
+          set -euo pipefail
+          for scheme in TaipeiBusAITests TaipeiBusAIUITests TaipeiBusAIBenchmarkTests; do
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
+              -configuration Debug -sdk iphonesimulator -destination "platform=iOS Simulator,id=$AI_SIMULATOR" \
+              -derivedDataPath "$RUNNER_TEMP/ai-build" \
+              -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
+              -jobs 2 ONLY_ACTIVE_ARCH=YES ENABLE_ONLY_ACTIVE_RESOURCES=NO CODE_SIGNING_ALLOWED=NO \
+              build-for-testing 2>&1 | tee -a "$RUNNER_TEMP/ai-build.log"
+          done
+      - name: Boot and launch on iPhone simulator
+        timeout-minutes: 18
+        run: |
+          set -euo pipefail
+          python3 ios/ai/simulator.py launch 2>&1 | tee "$RUNNER_TEMP/ai-simulator.log"
+      - name: Exercise native AI integration and fallback UI
+        # Xcode manages simulator readiness itself; retain this independent check
+        # if a raw simctl smoke command fails after creating the test device.
+        if: ${{ !cancelled() && steps.simulator_build.outcome == 'success' && env.AI_SIMULATOR != '' }}
+        timeout-minutes: 15
+        run: |
+          set -euo pipefail
+          failed=0
+          for scheme in TaipeiBusAITests TaipeiBusAIUITests; do
+            xcodebuild -project ios/TaipeiBus.xcodeproj -scheme "$scheme" \
+              -configuration Debug -destination "platform=iOS Simulator,id=$AI_SIMULATOR" \
+              -derivedDataPath "$RUNNER_TEMP/ai-build" \
+              -clonedSourcePackagesDirPath "$HOME/Library/Developer/Xcode/DerivedData/SourcePackages" \
+              -resultBundlePath "$RUNNER_TEMP/$scheme.xcresult" \
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES ENABLE_ONLY_ACTIVE_RESOURCES=NO \
+              CODE_SIGNING_ALLOWED=NO test-without-building 2>&1 | tee "$RUNNER_TEMP/$scheme.log" || failed=1
+          done
+          exit "$failed"
+      - name: Export XCTest screenshots
+        if: always()
+        timeout-minutes: 2
+        run: |
+          for suite in TaipeiBusAITests TaipeiBusAIUITests; do
+            if [ -d "$RUNNER_TEMP/$suite.xcresult" ]; then
+              xcrun xcresulttool export attachments --path "$RUNNER_TEMP/$suite.xcresult" \
+                --output-path "$RUNNER_TEMP/$suite-screenshots"
+            fi
+          done
+      - name: Preserve native validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-native-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/ai-build.log
+            ${{ runner.temp }}/ai-simulator.png
+            ${{ runner.temp }}/ai-simulator.log
+            ${{ runner.temp }}/TaipeiBusAITests.log
+            ${{ runner.temp }}/TaipeiBusAIUITests.log
+            ${{ runner.temp }}/*.xcresult
+            ${{ runner.temp }}/*-screenshots/
+          if-no-files-found: warn
+          retention-days: 14

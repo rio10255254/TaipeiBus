@@ -3,6 +3,7 @@ import StoreKit
 import TransitCore
 
 struct ProPurchaseView: View {
+    @Environment(\.liveSettings) private var live
     @ObservedObject var purchases: ProPurchases
     @Environment(\.dismiss) private var dismiss
     /// The annual plan is the better value, so it is shown selected unless another plan is active.
@@ -35,7 +36,7 @@ struct ProPurchaseView: View {
                             Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8) }
                                 icon: { Image(systemName:item.symbol).foregroundStyle(.blue) }
                                 .frame(maxWidth:.infinity,minHeight:40,alignment:.leading).padding(.horizontal,12)
-                                .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:12))
+                                .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.row))
                         }
                     }.accessibilityIdentifier("pro-benefit-grid")
                     if purchases.hasPro {
@@ -72,8 +73,8 @@ struct ProPurchaseView: View {
                                         }
                                     } else { Text(AppText.text("準備中")).foregroundStyle(.secondary) }
                                 }.padding(16).frame(maxWidth:.infinity,minHeight:70)
-                                    .background(Color(uiColor:.secondarySystemGroupedBackground),in:RoundedRectangle(cornerRadius:18))
-                                    .overlay { RoundedRectangle(cornerRadius:18).stroke(selected == plan ? Color.blue : Color.clear,lineWidth:1.5) }
+                                    .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.panel))
+                                    .overlay { live.shape(.panel).stroke(selected == plan ? Color.blue : Color.clear,lineWidth:1.5) }
                             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                                 .accessibilityIdentifier("pro-plan-"+plan.rawValue)
                         }
@@ -136,6 +137,7 @@ struct ProPurchaseView: View {
         ("square.grid.2x2.fill","桌面小工具","常用行程的下一班車與建議出門時間，直接顯示在主畫面。"),
         ("house.fill","常用行程捷徑","把回家、上班與常去的地方存好，一點就能預覽路線。"),
         ("slider.horizontal.3","個人路線偏好","選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。"),
+        ("sparkles","更聰明的一句話規劃","用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。"),
     ]
     private func benefit(_ symbol: String,title: String,detail: String) -> some View {
         HStack(alignment:.top,spacing:14) {
@@ -341,7 +343,7 @@ struct ProNoteBanner: View {
                     .liveFont(.subheadline, weight: .semibold).accessibilityIdentifier("pro-note-open")
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
-            .phoneGlass(in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .phoneGlass(in: live.shape(.panel))
             .transition(.move(edge: .top).combined(with: .opacity))
             .task(id: note) {
                 try? await Task.sleep(for: .seconds(5))

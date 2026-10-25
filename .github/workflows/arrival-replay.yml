@@ -1,0 +1,63 @@
+name: Arrival replay
+# Replays the archived recordings through the App's own TransitCore forecast and scores it
+# against actual arrivals (tools/arrival-benchmark/README.md). Manual only; public data only.
+on:
+  workflow_dispatch:
+    inputs:
+      recordings:
+        description: 'Space-separated recording names (arrival-benchmark-<run id>); empty replays all archived ones'
+        type: string
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: arrival-replay
+  cancel-in-progress: false
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Swift toolchain
+        run: |
+          if ! command -v swift >/dev/null; then
+            curl -sSL https://download.swift.org/swift-6.2-release/ubuntu2404/swift-6.2-RELEASE/swift-6.2-RELEASE-ubuntu24.04.tar.gz | sudo tar xz -C /opt
+            echo "/opt/swift-6.2-RELEASE-ubuntu24.04/usr/bin" >> "$GITHUB_PATH"
+          fi
+      - name: Build the replay
+        run: swift build -c release --package-path tools/arrival-benchmark/replay
+      - name: Download recordings and official travel times
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/zips" "$RUNNER_TEMP/recordings"
+          if [ -n "${{ inputs.recordings }}" ]; then
+            for name in ${{ inputs.recordings }}; do
+              gh release download arrival-benchmark-data --pattern "$name.zip" --dir "$RUNNER_TEMP/zips"
+            done
+          else
+            gh release download arrival-benchmark-data --pattern '*.zip' --dir "$RUNNER_TEMP/zips"
+          fi
+          for zip in "$RUNNER_TEMP"/zips/*.zip; do
+            unzip -q "$zip" -d "$RUNNER_TEMP/recordings/$(basename "$zip" .zip)"
+            rm "$zip"
+          done
+          gh release download travel-time-data --pattern official-times.json --dir "$RUNNER_TEMP"
+      - name: Replay and score
+        run: |
+          python3 tools/arrival-benchmark/replay_all.py "$RUNNER_TEMP/recordings" \
+            --official "$RUNNER_TEMP/official-times.json" --out "$RUNNER_TEMP/results" --jobs 2
+          cat "$RUNNER_TEMP/results/report.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: arrival-replay-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/results/report.md
+            ${{ runner.temp }}/results/metrics.json
+            ${{ runner.temp }}/results/logs/
+          retention-days: 90
+          if-no-files-found: ignore

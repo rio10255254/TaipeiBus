@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(CoreGraphics)
 import CoreGraphics
+#endif
 
 /// Keep a small map label near its pin without covering controls or the pin itself.
 public enum MapLabelPlacement {

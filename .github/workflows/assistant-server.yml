@@ -1,0 +1,105 @@
+name: Assistant server
+
+# Deploys the online-understanding server to the TaipeiBus Supabase project. The Groq key goes from
+# this repository's GROQ_API_KEY secret straight into the project's secrets; it is never printed
+# and never built into the app.
+on:
+  push:
+    branches: [ai, main]
+    paths: ['supabase/**', '.github/workflows/assistant-server.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assistant-server
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      APP_APPLE_ID: ${{ vars.APP_APPLE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - name: Type-check the function
+        run: deno check --config supabase/functions/understand/deno.json --no-lock supabase/functions/understand/index.ts
+      - name: Stop here until the project is set up
+        id: ready
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$SUPABASE_PROJECT_REF" ] || [ -z "$SUPABASE_DB_PASSWORD" ]; then
+            echo "::notice::Add SUPABASE_ACCESS_TOKEN and SUPABASE_DB_PASSWORD secrets and the SUPABASE_PROJECT_REF variable to deploy."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: supabase/setup-cli@v1
+        if: steps.ready.outputs.ready == 'true'
+        with:
+          version: latest
+      - name: Link, migrate, configure and deploy
+        if: steps.ready.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          # Values pasted from a phone or web page can carry an invisible line break.
+          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+          SUPABASE_ACCESS_TOKEN="$(trim "$SUPABASE_ACCESS_TOKEN")"; export SUPABASE_ACCESS_TOKEN
+          SUPABASE_PROJECT_REF="$(trim "$SUPABASE_PROJECT_REF")"
+          GROQ_API_KEY="$(trim "$GROQ_API_KEY")"
+          # A password may contain spaces in the middle; only a trailing line break is removed.
+          SUPABASE_DB_PASSWORD="$(printf '%s' "$SUPABASE_DB_PASSWORD" | tr -d '\r\n')"; export SUPABASE_DB_PASSWORD
+          case "$SUPABASE_ACCESS_TOKEN" in
+            sbp_*) ;;
+            *) echo "::error::SUPABASE_ACCESS_TOKEN must be a personal access token starting with sbp_ (supabase.com/dashboard/account/tokens), not a project API key."; exit 1 ;;
+          esac
+          supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
+          supabase config push --project-ref "$SUPABASE_PROJECT_REF" --yes || echo "::warning::Auth settings not pushed; enable anonymous sign-ins in the dashboard."
+          if [ -n "$GROQ_API_KEY" ]; then
+            # Read from a file so the value never appears on a command line or in the log.
+            umask 077; printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY" > "$RUNNER_TEMP/assistant.env"
+            if [ -n "$APP_APPLE_ID" ]; then printf 'APP_APPLE_ID=%s\n' "$APP_APPLE_ID" >> "$RUNNER_TEMP/assistant.env"; fi
+            supabase secrets set --project-ref "$SUPABASE_PROJECT_REF" --env-file "$RUNNER_TEMP/assistant.env" > /dev/null
+            rm -f "$RUNNER_TEMP/assistant.env"
+            echo "Assistant secrets updated."
+          fi
+          supabase functions deploy understand --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Smoke test as a phone would
+        if: steps.ready.outputs.ready == 'true'
+        env:
+          SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+          url="$(printf '%s' "$SUPABASE_URL" | tr -d '[:space:]')"; key="$(printf '%s' "$SUPABASE_PUBLISHABLE_KEY" | tr -d '[:space:]')"
+          # Anonymous sign-in, exactly like the app's first launch.
+          signup=$(curl -sS -X POST "$url/auth/v1/signup" -H "apikey: $key" -H 'Content-Type: application/json' -d '{"data":{}}')
+          token=$(printf '%s' "$signup" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("access_token",""))')
+          if [ -z "$token" ]; then echo "::error::Anonymous sign-in failed: $(printf '%s' "$signup" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("msg") or d.get("error_description") or d.get("message") or d)')"; exit 1; fi
+          echo "Anonymous sign-in works."
+          body='{"request":{"model":"openai/gpt-oss-20b","max_completion_tokens":300,"messages":[{"role":"system","content":"只輸出 JSON {\"destination\":\"\"}"},{"role":"user","content":"去台北車站"}]}}'
+          code=$(curl -sS -o "$RUNNER_TEMP/reply.json" -w '%{http_code}' -X POST "$url/functions/v1/understand" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$body")
+          echo "understand → HTTP $code"
+          python3 - "$RUNNER_TEMP/reply.json" <<'PY'
+          import json, sys
+          data = json.load(open(sys.argv[1]))
+          content = (data.get("choices") or [{}])[0].get("message", {}).get("content", "")
+          print("reply:", content[:200] if content else data)
+          PY
+          [ "$code" = "200" ]
+          # A Pro phone also sends its signed subscription; a bad or unverifiable one must still be served.
+          proofbody='{"proof":"eyJhbGciOiJFUzI1NiJ9.e30.c2ln","request":{"model":"openai/gpt-oss-120b","max_completion_tokens":300,"messages":[{"role":"system","content":"只輸出 JSON {\"destination\":\"\"}"},{"role":"user","content":"去台大"}]}}'
+          code=$(curl -sS -o "$RUNNER_TEMP/reply2.json" -w '%{http_code}' -X POST "$url/functions/v1/understand" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$proofbody")
+          echo "understand with an unverifiable Pro proof → HTTP $code"; head -c 300 "$RUNNER_TEMP/reply2.json"; echo
+          [ "$code" = "200" ]

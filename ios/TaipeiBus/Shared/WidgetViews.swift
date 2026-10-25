@@ -27,15 +27,26 @@ struct CommuteEntry: TimelineEntry {
 }
 
 struct RouteSignView: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let sign: RouteSign
     var size: CGFloat = 13
     var body: some View {
-        Text(sign.text).font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
+        let shape = RoundedRectangle(cornerRadius: size * 0.42, style: .continuous)
+        let label = Text(sign.text).font(.system(size: size, weight: .bold, design: .rounded)).monospacedDigit()
             .lineLimit(1).minimumScaleFactor(0.6)
             .padding(.horizontal, size * 0.45).padding(.vertical, size * 0.18)
             .frame(minWidth: size * 2.2)
-            .foregroundStyle(sign.darkInk ? Color.black : Color.white)
-            .background(Color(signHex: sign.color), in: RoundedRectangle(cornerRadius: size * 0.42, style: .continuous))
+        if renderingMode == .fullColor {
+            label.foregroundStyle(sign.darkInk ? Color.black : Color.white)
+                .background(Color(signHex: sign.color), in: shape)
+        } else {
+            // Tinted and clear Home Screens draw everything in one tint, so a filled sign would
+            // swallow its own number; an outlined sign in the accent keeps it readable.
+            label.foregroundStyle(.primary)
+                .background(shape.fill(.primary.opacity(0.12)))
+                .overlay(shape.strokeBorder(.primary.opacity(0.55), lineWidth: 1))
+                .widgetAccentable()
+        }
     }
 }
 
@@ -87,8 +98,15 @@ struct CommuteLine {
 }
 
 struct CommuteWidgetView: View {
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    /// False in StandBy and other places that drop the widget background and show it from
+    /// across the room: the figure grows and the small print goes.
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
     let entry: CommuteEntry
     let family: WidgetFamily
+    private func adviceColor(_ urgent: Bool) -> Color {
+        urgent && renderingMode == .fullColor ? Color.orange : Color.secondary
+    }
 
     var body: some View {
         if entry.locked { locked }
@@ -147,14 +165,15 @@ struct CommuteWidgetView: View {
                 }
             }
             Spacer(minLength: 0)
-            Text(value.main).font(.system(size: 30, weight: .bold, design: .rounded)).monospacedDigit()
+            Text(value.main).font(.system(size: showsBackground ? 30 : 40, weight: .bold, design: .rounded)).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.5).contentTransition(.numericText())
-            if let ride = commute.ride {
+                .widgetAccentable()
+            if let ride = commute.ride, showsBackground {
                 Text(ride.stopName).font(.caption2).lineLimit(1).foregroundStyle(.secondary)
             }
             if let advice = value.advice {
-                Text(advice).font(.caption2.weight(.semibold)).lineLimit(1)
-                    .foregroundStyle(value.urgent ? Color.orange : Color.secondary)
+                Text(advice).font((showsBackground ? Font.caption2 : Font.footnote).weight(.semibold)).lineLimit(1)
+                    .foregroundStyle(adviceColor(value.urgent))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -174,6 +193,7 @@ struct CommuteWidgetView: View {
         return HStack(alignment: .center, spacing: 10) {
             Image(systemName: commute.symbol).font(.system(size: 15, weight: .semibold)).foregroundStyle(.tint)
                 .frame(width: 30, height: 30).background(.tint.opacity(0.14), in: Circle())
+                .widgetAccentable()
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
                     Text(commute.title).font(.subheadline.weight(.semibold)).lineLimit(1)
@@ -186,9 +206,10 @@ struct CommuteWidgetView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(value.main).font(.system(size: 20, weight: .bold, design: .rounded)).monospacedDigit()
                     .lineLimit(1).minimumScaleFactor(0.6)
+                    .widgetAccentable()
                 if let advice = value.advice {
                     Text(advice).font(.caption2.weight(.semibold)).lineLimit(1)
-                        .foregroundStyle(value.urgent ? Color.orange : Color.secondary)
+                        .foregroundStyle(adviceColor(value.urgent))
                 }
             }
         }

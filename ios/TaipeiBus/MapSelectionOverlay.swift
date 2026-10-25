@@ -230,8 +230,9 @@ private struct MapContextLabelContent: View, Equatable {
                                     .font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
                                 Spacer(minLength:4)
                                 if !state.atPlatform && !state.holding {
-                                    Text(MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))).font(.subheadline).monospacedDigit()
-                                        .liveNumericText(countsDown: true)
+                                    let countdown = MetroCountdown.label(max(0, Int(state.secondsToNext.rounded())))
+                                    Text(countdown).font(.subheadline).monospacedDigit()
+                                        .liveNumericText(countdown, countsDown: true)
                                 }
                             }
                             if AppLanguage.current == .english { Text(station.name).font(.caption).foregroundStyle(.secondary) }
@@ -248,9 +249,10 @@ private struct MapContextLabelContent: View, Equatable {
 }
 
 private struct MapLabelSurface: ViewModifier {
+    @Environment(\.liveSettings) private var live
     @Environment(\.colorScheme) private var scheme
     func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: 18, style: .continuous)
+        let shape = live.shape(.label)
         content.foregroundStyle(Color(uiColor: .label)).padding(.horizontal, 10).padding(.vertical, 6)
             .background(Color(uiColor: .secondarySystemBackground).opacity(0.92), in: shape)
             .phoneGlass(in: shape)

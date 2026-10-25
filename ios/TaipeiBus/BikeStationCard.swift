@@ -86,7 +86,7 @@ struct BikeStationCard: View {
                 }
             }
             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
-            .modifier(BikeStationSurface(embedded: embedded, radius: 22 * CGFloat(live.appearance.cornerScale)))
+            .modifier(BikeStationSurface(embedded: embedded, shape: live.shape(.panel)))
             .accessibilityElement(children: .contain).accessibilityIdentifier("bike-station-card")
             .accessibilityLabel(AppText.text("YouBike %@，可借 %@，可還 %@", station.localizedName,
                                              dock?.availableCount(returning: false, at: now).map(String.init) ?? live.text("未知"),
@@ -98,7 +98,8 @@ struct BikeStationCard: View {
         HStack(spacing: 6) {
             Circle().fill(tint(supply)).frame(width: 9, height: 9)
             Text(title).liveFont(.caption).foregroundStyle(.secondary)
-            Text(supply == .unknown || supply == .suspended ? "–" : "\(value ?? 0)").liveFont(.headline, weight: .semibold).monospacedDigit()
+            let figure = supply == .unknown || supply == .suspended ? "–" : "\(value ?? 0)"
+            Text(figure).liveFont(.headline, weight: .semibold).monospacedDigit().liveNumericText(figure)
         }
         .accessibilityElement(children: .combine)
     }
@@ -106,10 +107,10 @@ struct BikeStationCard: View {
 
 private struct BikeStationSurface: ViewModifier {
     let embedded: Bool
-    let radius: CGFloat
+    let shape: RoundedRectangle
     @ViewBuilder func body(content: Content) -> some View {
         if embedded { content }
-        else { content.phoneGlass(in: RoundedRectangle(cornerRadius: radius, style: .continuous)) }
+        else { content.phoneGlass(in: shape) }
     }
 }
 

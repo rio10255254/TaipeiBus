@@ -23,8 +23,31 @@ public struct ForecastTuning: Equatable, Sendable {
     /// Smallest arrival uncertainty as a share of the remaining time, for normal and limited evidence.
     public var minimumUncertainty = 0.12
     public var limitedUncertainty = 0.3
+    /// The shown reference range spans this many uncertainties before and after the estimate.
+    /// Buses run late more often than early, so the late side is wider.
+    public var rangeEarlyScale = 1.39
+    public var rangeLateScale = 1.74
+    /// Measured ratio of actual to estimated time, by Taipei hour (index 0 = 00:00–00:59), for
+    /// segments timed from the official hour profile or from a bus's own recent pace. Segments
+    /// timed from other buses' recent crossings already reflect current traffic and are not scaled.
+    /// Weekends and national holidays use the holiday table (tools/arrival-benchmark/fit_corrections.py).
+    public var workdayPaceFactors = ForecastTuning.measuredWorkdayFactors
+    public var holidayPaceFactors = ForecastTuning.measuredHolidayFactors
 
     public init() {}
+
+    // MEASURED-FACTORS-BEGIN
+    static let measuredWorkdayFactors: [Double] = [0.996, 0.999, 1, 1, 1.002, 1.025, 1.044, 1.089, 1.033, 1.015, 1.022, 1.03, 1.04, 1.029, 1.024, 1.037, 1.052, 1.075, 1.042, 0.997, 1.013, 1.018, 0.99, 0.978]
+    static let measuredHolidayFactors: [Double] = [0.998, 1.003, 1.001, 1, 1.002, 1.013, 1.021, 1.028, 1.032, 1.033, 1.029, 1.023, 1.028, 1.026, 1.019, 1.019, 1.027, 1.028, 1.005, 1.018, 1.018, 1.013, 0.991, 0.985]
+    // MEASURED-FACTORS-END
+
+    /// The pace factor for travel at this moment.
+    public func paceFactor(at date: Date) -> Double {
+        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        let hour = calendar.component(.hour, from: date)
+        let table = TransitServiceCalendar.isHoliday(date) ? holidayPaceFactors : workdayPaceFactors
+        return table.indices.contains(hour) ? table[hour] : 1
+    }
 
     /// Key → (minimum, maximum, path to the value). runtime/tuning.schema.json must list the same bounds.
     public static let fields: [(key: String, range: ClosedRange<Double>, path: WritableKeyPath<ForecastTuning, Double>)] = [
@@ -38,7 +61,15 @@ public struct ForecastTuning: Equatable, Sendable {
         ("typicalSpeed", 2...10, \.typicalSpeed),
         ("stopSeconds", 0...90, \.stopSeconds),
         ("minimumUncertainty", 0.03...0.5, \.minimumUncertainty),
-        ("limitedUncertainty", 0.05...0.8, \.limitedUncertainty)
+        ("limitedUncertainty", 0.05...0.8, \.limitedUncertainty),
+        ("rangeEarlyScale", 0.5...3, \.rangeEarlyScale),
+        ("rangeLateScale", 0.5...4, \.rangeLateScale)
+    ]
+
+    /// Key → (bounds of every entry, path). Each table has exactly 24 entries, one per hour.
+    public static let tables: [(key: String, range: ClosedRange<Double>, path: WritableKeyPath<ForecastTuning, [Double]>)] = [
+        ("workdayPaceFactors", 0.8...1.4, \.workdayPaceFactors),
+        ("holidayPaceFactors", 0.8...1.4, \.holidayPaceFactors)
     ]
 
     public static func decode(_ data: Data) throws -> ForecastTuning {
@@ -46,13 +77,33 @@ public struct ForecastTuning: Equatable, Sendable {
               root["schemaVersion"] as? Int == 1 else { throw SettingsError.invalid("tuning") }
         var value = ForecastTuning()
         let known = Dictionary(uniqueKeysWithValues: fields.map { ($0.key, $0) })
+        let knownTables = Dictionary(uniqueKeysWithValues: tables.map { ($0.key, $0) })
         for (key, raw) in root where key != "schemaVersion" && key != "note" {
-            guard let field = known[key], let number = raw as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
+            if let table = knownTables[key] {
+                guard let items = raw as? [Any], items.count == 24 else { throw SettingsError.invalid("tuning.\(key)") }
+                value[keyPath: table.path] = try items.map { item in
+                    guard let number = item as? NSNumber, !isBoolean(number), table.range.contains(number.doubleValue) else {
+                        throw SettingsError.invalid("tuning.\(key)")
+                    }
+                    return number.doubleValue
+                }
+                continue
+            }
+            guard let field = known[key], let number = raw as? NSNumber, !isBoolean(number),
                   field.range.contains(number.doubleValue) else { throw SettingsError.invalid("tuning.\(key)") }
             value[keyPath: field.path] = number.doubleValue
         }
         if let note = root["note"], !((note as? String).map { $0.count <= 300 } ?? false) { throw SettingsError.invalid("tuning.note") }
         return value
+    }
+
+    private static func isBoolean(_ number: NSNumber) -> Bool {
+        #if canImport(Darwin)
+        return CFGetTypeID(number) == CFBooleanGetTypeID()
+        #else
+        // swift-corelibs-foundation decodes JSON true/false as a char-typed NSNumber; JSON numbers never are.
+        return String(cString: number.objCType) == "c"
+        #endif
     }
 
     private static let lock = NSLock()

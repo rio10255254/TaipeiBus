@@ -28,11 +28,13 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
     public var label: String {
         if nearStop { return AppText.text("站牌附近") }
         guard hasUsableTime else { return AppText.text("時間待確認") }
-        return AppText.text("約 %@ 分", max(1, Int(ceil(seconds / 60))))
+        // Nearest minute: rounding up made buses look later than they were (tools/arrival-benchmark).
+        return AppText.text("約 %@ 分", max(1, Int((seconds / 60).rounded())))
     }
     public var rangeLabel: String {
-        let lower = max(1, Int(ceil((seconds - uncertaintySeconds) / 60)))
-        let upper = max(lower, Int(ceil((seconds + uncertaintySeconds) / 60)))
+        let tuning = ForecastTuning.current
+        let lower = max(1, Int(((seconds - uncertaintySeconds * tuning.rangeEarlyScale) / 60).rounded()))
+        let upper = max(lower, Int(((seconds + uncertaintySeconds * tuning.rangeLateScale) / 60).rounded()))
         return lower == upper ? AppText.text("約 %@ 分", lower) : AppText.text("參考範圍 %@–%@ 分", lower, upper)
     }
     public var evidenceLabel: String {
@@ -216,8 +218,9 @@ public struct VehicleArrivalForecast: Sendable {
               let result = prediction(approach.vehicle, stopID: ride.boarding.id, metadata: metadata, at: date),
               result.hasUsableTime else { return .unavailable }
         if result.nearStop { return .nearStop }
-        let lower = max(1, Int(ceil((result.seconds - result.uncertaintySeconds) / 60)))
-        let upper = max(lower, Int(ceil((result.seconds + result.uncertaintySeconds) / 60)))
+        // Symmetric, so the label's midpoint stays the estimate rounded to the nearest minute.
+        let lower = max(1, Int(((result.seconds - result.uncertaintySeconds) / 60).rounded()))
+        let upper = max(lower, Int(((result.seconds + result.uncertaintySeconds) / 60).rounded()))
         return .minutes(lower: lower, upper: upper)
     }
 
@@ -289,23 +292,28 @@ public struct VehicleArrivalForecast: Sendable {
                 learned += 1
             } else if let official {
                 // The official hour profile is the baseline; one or two recent crossings refine it
-                // as if the profile were worth officialProfileWeight observations.
+                // as if the profile were worth officialProfileWeight observations. The profile runs
+                // short in busy hours, so it is first scaled by the measured pace factor.
                 let weight = tuning.officialProfileWeight
-                let typical = vehicles == 0 ? official : (median(values) * Double(vehicles) + official * weight) / (Double(vehicles) + weight)
+                let profile = official * tuning.paceFactor(at: date.addingTimeInterval(seconds))
+                let typical = vehicles == 0 ? profile : (median(values) * Double(vehicles) + profile * weight) / (Double(vehicles) + weight)
                 duration = typical * fraction
                 margin = max(12, typical * tuning.officialSegmentMargin) * fraction
                 profiled += 1
             } else {
                 guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
                 let correction = applyCalibration ? timingFeedback.factor(for:segmentKey(bus.routeID,bus.direction,journey,index,metadata),at:date) : 1
-                duration = (remaining / pace + (movingHistory ? 0 : tuning.stopSeconds * fraction)) * correction
+                // The pace factor applies with or without calibration, so the session feedback
+                // learns only what remains after it.
+                duration = (remaining / pace + (movingHistory ? 0 : tuning.stopSeconds * fraction)) *
+                    tuning.paceFactor(at: date.addingTimeInterval(seconds)) * correction
                 margin = max(12, duration * speedVariation); fallback += 1
             }
             seconds += duration; variance += margin * margin
         }
         if target == 0 || along < firstAlong {
             guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
-            let leading = target == 0 ? progress.distance : firstAlong - along
+            let leading = (target == 0 ? progress.distance : firstAlong - along) * tuning.paceFactor(at: date.addingTimeInterval(seconds))
             seconds += leading / pace; variance += pow(leading / pace * speedVariation, 2); fallback += 1
         }
         guard seconds > 0 else { return nil }

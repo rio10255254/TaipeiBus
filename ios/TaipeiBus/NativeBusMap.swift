@@ -668,7 +668,8 @@ struct NativeBusMap: UIViewRepresentable {
 
         /// A teardrop pin whose tip sits at the image centre, so every symbol layer
         /// can keep its default centre anchor and existing hit testing.
-        private func pinIcon(symbol: String, color: UIColor, width: CGFloat = 30) -> UIImage {
+        /// `label` draws a number instead of a symbol: the stops of a trip with several stops.
+        private func pinIcon(symbol: String, color: UIColor, width: CGFloat = 30, label: String? = nil) -> UIImage {
             let height = width * 1.3
             return UIGraphicsImageRenderer(size: CGSize(width: width + 6, height: height * 2)).image { context in
                 let tip = CGPoint(x: 3 + width / 2, y: height)
@@ -687,6 +688,13 @@ struct NativeBusMap: UIViewRepresentable {
                 context.cgContext.setShadow(offset: .zero, blur: 0, color: nil)
                 UIColor.white.setStroke(); path.lineWidth = 1.5; path.stroke()
                 let glyphSize = radius * 1.05
+                if let label {
+                    let text = NSAttributedString(string: label, attributes: [
+                        .font: UIFont.systemFont(ofSize: radius * 1.15, weight: .heavy), .foregroundColor: UIColor.white])
+                    let size = text.size()
+                    text.draw(at: CGPoint(x: center.x - size.width / 2, y: center.y - size.height / 2))
+                    return
+                }
                 UIImage(systemName: symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: glyphSize, weight: .bold))?
                     .withTintColor(.white, renderingMode: .alwaysOriginal)
                     .draw(in: CGRect(x: center.x - glyphSize / 2, y: center.y - glyphSize / 2, width: glyphSize, height: glyphSize))
@@ -882,7 +890,7 @@ struct NativeBusMap: UIViewRepresentable {
             }
             let stationKey = "\(model.stationBrowsing):\(model.query):\(model.stationMapResults.map(\.id))"
             if stationKey != lastStationSearchKey { lastStationSearchKey = stationKey; updateNearbyStations(force: true) }
-            let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision)"
+            let routeKey = "dark\(darkMode):\(model.selectedRouteID ?? "all"):\(model.selectedRouteID == nil ? "all" : model.direction):\(model.allRouteVariants):city\(model.cityFleetMode):trip\(model.planner.mapRevision):walk\(model.walkingMapIndex.map { String($0) } ?? "all"):progress\(model.planner.walkingRevision):stationwalk\(model.stationWalk.revision):stops\(model.assistantStopsRevision)"
             let vehicleKey = "\(model.selectedRouteID ?? "all"):\(model.direction):\(model.allRouteVariants):\(model.cityFleetMode):\(model.planner.mapRevision):\(model.selectedVehicleID == nil):anchor\(model.anchorRevision)"
             updateMetro(map: map)
             updateBikes(map: map)
@@ -1044,6 +1052,24 @@ struct NativeBusMap: UIViewRepresentable {
             if let destination = model.planner.destination,
                model.planner.activeRide == nil || (!model.planner.started && (option.rides.last?.alighting.coordinate.distance(to: destination.coordinate) ?? 100) > 35) {
                 add(destination.coordinate, id: "destination", title: destination.localizedName)
+            }
+            // 「先去 A 再去 B」: every stop carries its number, the current destination included.
+            if !model.planner.started {
+                for pin in model.assistantStopPins {
+                    let icon = "journey-stop-number-\(pin.number)"
+                    if !tintedTripIcons.contains(icon), let style = map?.style {
+                        style.setImage(pinIcon(symbol: "flag.fill", color: UIColor(liveHex: darkMode ? "#FF6961" : "#D93636"), width: 26,
+                                               label: "\(pin.number)"), forName: icon)
+                        tintedTripIcons.insert(icon)
+                    }
+                    if let destination = model.planner.destination, destination.coordinate.distance(to: pin.place.coordinate) < 40 {
+                        features["destination"] = nil
+                    }
+                    let id = "stop-number-\(pin.number)"
+                    add(pin.place.coordinate, id: id, title: pin.place.localizedName)
+                    features[id]?.attributes["icon"] = icon
+                    features[id]?.attributes["waypoint"] = 2
+                }
             }
             tripStopsSource?.shape = MLNShapeCollectionFeature(shapes: features.keys.sorted().compactMap { features[$0] })
         }
@@ -1932,7 +1958,7 @@ struct NativeBusMap: UIViewRepresentable {
             let place = MapPlaceSelection(name: name, englishName: english, kind: kind,
                 coordinate: Coordinate(latitude: feature.coordinate.latitude, longitude: feature.coordinate.longitude))
             model.tappedPlace = model.tappedPlace == place ? nil : place
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.selection()
         }
         static let placeLayerIDs: Set<String> = ["poi", "poi_dense", "poi_dense_street", "poi_landmark"]
         static func placeCategory(_ kind: String) -> (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {

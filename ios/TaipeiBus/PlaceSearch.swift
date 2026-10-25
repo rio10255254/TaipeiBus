@@ -22,6 +22,36 @@ struct TravelPlace: Identifiable, Codable, Sendable {
     }
 }
 
+/// 「西門町的網咖」「公館附近的咖啡廳」「附近的藥局」: a kind of place around an area, not one place's
+/// name. Searching the whole phrase found nothing named that (a phone offered a hotel and a market),
+/// so the area is found first and the kind is searched around it.
+struct NearbyQuery: Equatable {
+    let area: String
+    let what: String
+    /// After 「的」 only these mean a kind of place (「台大的機械館」 is still one building).
+    static let kinds = ["網咖", "網吧", "咖啡廳", "咖啡店", "咖啡", "餐廳", "便利商店", "超商", "超市", "藥局", "藥妝店",
+        "醫院", "診所", "書店", "公園", "加油站", "停車場", "健身房", "電影院", "夜市", "早餐店", "銀行", "郵局", "提款機",
+        "ATM", "百貨公司", "麥當勞", "星巴克", "拉麵", "火鍋", "燒肉", "酒吧", "KTV", "飯店", "旅館", "甜點店", "飲料店",
+        "手搖飲", "小吃", "牛肉麵", "廁所", "洗手間", "自助洗衣", "髮廊", "寵物店", "文具店", "電器行", "眼鏡行"]
+    init?(_ text: String) {
+        let clean = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for marker in ["附近的", "周邊的", "周圍的", "旁邊的", "一帶的", "附近", "周邊", "周圍", "一帶"] {
+            guard let range = clean.range(of: marker) else { continue }
+            let area = clean[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
+            let what = clean[range.upperBound...].trimmingCharacters(in: .whitespaces)
+            // 「西門町附近」 alone is a place; a long remainder is a sentence, not a kind.
+            guard !what.isEmpty, what.count <= 8, area.count <= 20 else { return nil }
+            self.area = area; self.what = what
+            return
+        }
+        guard let range = clean.range(of: "的", options: .backwards) else { return nil }
+        let area = clean[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
+        let what = clean[range.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard !area.isEmpty, area.count <= 20, Self.kinds.contains(where: { what == $0 || (what.hasSuffix($0) && what.count <= 6) }) else { return nil }
+        self.area = area; self.what = what
+    }
+}
+
 @MainActor
 final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSearchCompleterDelegate {
     @Published private(set) var suggestions: [MKLocalSearchCompletion] = []
@@ -134,7 +164,11 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
     func resolve(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> TravelPlace? {
         try await find(text: text, completion: completion).first
     }
-    func find(text: String, completion: MKLocalSearchCompletion? = nil) async throws -> [TravelPlace] {
+    /// `queryLimit` and `timeout` bound one lookup; the journey assistant uses a smaller budget
+    /// because the on-device model waits for every search it makes.
+    func find(text: String, completion: MKLocalSearchCompletion? = nil, queryLimit: Int = 3, timeout: Double = 6) async throws -> [TravelPlace] {
+        // The whole phrase only finds unrelated places (a hotel, a market), so it is not searched.
+        if completion == nil, let nearby = NearbyQuery(text) { return try await find(nearby, timeout: timeout) }
         debounceTask?.cancel(); completer?.cancel(); completer = nil
         search?.cancel()
         query = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -146,13 +180,15 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
             places = cached.1; return cached.1
         }
         var matches: [TravelPlace] = []
+        /// Apple's own results that our name matching did not recognise, kept as a last resort.
+        var unmatched: [TravelPlace] = []
         var lastError: Error?
         let clean = StationSearch.cleanQuery(text)
         let addressQuery = StationSearch.isAddressQuery(clean)
         let category: MKPointOfInterestCategory? = ["咖啡": .cafe, "咖啡店": .cafe, "餐廳": .restaurant,
             "醫院": .hospital, "公園": .park, "捷運站": .publicTransport, "加油站": .gasStation][StationSearch.normalize(clean)]
         let transitQuery = StationSearch.isTransitQuery(clean)
-        let searchQueries = completion == nil ? queries(for: text) : [text]
+        let searchQueries = completion == nil ? Array(queries(for: text).prefix(max(1, queryLimit))) : [text]
         let matchers = ([text] + searchQueries).map { PlaceMatcher(query: $0, vocabulary: vocabulary) }
         for (index, query) in searchQueries.enumerated() {
             try Task.checkCancellation()
@@ -165,7 +201,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
             else if transitQuery && index == 0 { request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.publicTransport]) }
             let operation = MKLocalSearch(request: request); search = operation
             let deadline = Task { @MainActor in
-                do { try await Task.sleep(for: .seconds(6)) } catch { return }
+                do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
                 operation.cancel()
             }
             do {
@@ -181,7 +217,10 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
                     let place = TravelPlace(name: item.name ?? text, address: item.placemark.title ?? "", coordinate: coordinate,
                         isTransitPlace: item.pointOfInterestCategory == .publicTransport)
                     let relevant = matchers.contains { $0.rank(name: place.name, address: place.address) != nil }
-                    guard completion != nil || relevant || (category != nil && item.pointOfInterestCategory == category) else { continue }
+                    guard completion != nil || relevant || (category != nil && item.pointOfInterestCategory == category) else {
+                        if !unmatched.contains(where: { $0.coordinate.distance(to: place.coordinate) < 30 }) { unmatched.append(place) }
+                        continue
+                    }
                     if !matches.contains(where: { StationSearch.normalize($0.name) == StationSearch.normalize(place.name) && $0.coordinate.distance(to: place.coordinate) < 30 }) { matches.append(place) }
                 }
             } catch {
@@ -191,6 +230,11 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
                 lastError = error
             }
             if completion != nil || category != nil || matches.contains(where: { place in matchers.contains { ($0.rank(name: place.name, address: place.address) ?? 9) <= 1 } }) { break }
+        }
+        // An address written another way, or a building Apple names differently (台大機械館 / 機械工程學系館):
+        // rather than nothing, offer what Apple Maps found, after anything that matched by name.
+        if matches.isEmpty || addressQuery {
+            matches += unmatched.filter { $0.coordinate.isInServiceArea }.prefix(addressQuery ? 3 : 2)
         }
         if matches.isEmpty, let lastError { throw lastError }
         let scored = matches.map { place in (place, matchers.compactMap { $0.rank(name: place.name, address: place.address) }.min() ?? 9) }
@@ -203,6 +247,48 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         places = Array(matches.prefix(settings.resultLimit))
         if !places.isEmpty { placeCache[key] = (Date(), places) }
         if placeCache.count > 24 { placeCache.removeValue(forKey: placeCache.min { $0.value.0 < $1.value.0 }!.key) }
+        return places
+    }
+    /// Places of a kind around an area (or around the rider when no area is said), nearest first.
+    /// Empty when the area cannot be found.
+    private func find(_ nearby: NearbyQuery, timeout: Double) async throws -> [TravelPlace] {
+        var center = preferredPosition
+        if !nearby.area.isEmpty {
+            do {
+                guard let area = try await find(text: nearby.area, queryLimit: 2, timeout: timeout).first(where: { $0.coordinate.isInServiceArea }) else { return [] }
+                center = area.coordinate
+            } catch is CancellationError { throw CancellationError() } catch { return [] }
+        }
+        debounceTask?.cancel(); completer?.cancel(); completer = nil; search?.cancel()
+        generation = UUID(); let token = generation
+        searching = true
+        defer { if token == generation { searching = false } }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = nearby.what
+        request.region = MKCoordinateRegion(center: center.locationCoordinate, latitudinalMeters: 2400, longitudinalMeters: 2400)
+        request.resultTypes = [.pointOfInterest]
+        let operation = MKLocalSearch(request: request); search = operation
+        let deadline = Task { @MainActor in
+            do { try await Task.sleep(for: .seconds(timeout)) } catch { return }
+            operation.cancel()
+        }
+        defer { deadline.cancel() }
+        guard let response = try? await operation.start() else {
+            try Task.checkCancellation()
+            return []
+        }
+        try Task.checkCancellation()
+        guard token == generation else { throw CancellationError() }
+        var found: [TravelPlace] = []
+        for item in response.mapItems {
+            let coordinate = Coordinate(latitude: item.placemark.coordinate.latitude, longitude: item.placemark.coordinate.longitude)
+            // Apple widens a sparse search to the whole city; only what is really around the area counts.
+            guard coordinate.isInServiceArea, coordinate.distance(to: center) <= 1_500,
+                  !found.contains(where: { $0.coordinate.distance(to: coordinate) < 30 }) else { continue }
+            found.append(TravelPlace(name: item.name ?? nearby.what, address: item.placemark.title ?? "", coordinate: coordinate,
+                                     isTransitPlace: item.pointOfInterestCategory == .publicTransport))
+        }
+        places = Array(found.sorted { $0.coordinate.distance(to: center) < $1.coordinate.distance(to: center) }.prefix(max(settings.resultLimit, 5)))
         return places
     }
     func cancel() {

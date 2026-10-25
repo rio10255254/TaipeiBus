@@ -133,7 +133,6 @@ final class StationWalkingNavigation: ObservableObject {
 }
 
 struct StationWalkingDock: View {
-    @Environment(\.colorScheme) private var scheme
     @ObservedObject var model: TransitAppModel
     @ObservedObject var navigation: StationWalkingNavigation
     var body: some View {
@@ -183,10 +182,7 @@ struct StationWalkingDock: View {
                     }.liveFont(.body, weight: .semibold)
                 }
             }
-            .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 16)
-            .background(.thickMaterial, in: RoundedRectangle(cornerRadius: MapChrome.cardRadius, style: .continuous))
-            .overlay { RoundedRectangle(cornerRadius: MapChrome.cardRadius, style: .continuous).strokeBorder(Color.primary.opacity(scheme == .dark ? 0.16 : 0.07), lineWidth: 0.6) }
-            .shadow(color: .black.opacity(scheme == .dark ? 0.4 : 0.14), radius: 18, y: 6)
+            .journeyDockSurface()
                 .accessibilityElement(children: .contain).accessibilityIdentifier("station-walk-navigation")
         }
     }

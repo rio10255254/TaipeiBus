@@ -93,32 +93,36 @@ final class ProPurchases: ObservableObject {
     }
     private func readAccess(token: Int) async {
         var current: StoreKit.Transaction?
+        /// The signed form of `current`, for the assistant server to check Pro with Apple's certificates.
+        var signed: String?
         var renewal: Product.SubscriptionInfo.RenewalInfo?
         var grace = false
         for await result in StoreKit.Transaction.currentEntitlements {
             guard case .verified(let transaction) = result, recognizes(transaction),
                   transaction.revocationDate == nil, !transaction.isUpgraded else { continue }
-            if current == nil || transaction.purchaseDate > current!.purchaseDate { current = transaction }
+            if current == nil || transaction.purchaseDate > current!.purchaseDate { current = transaction; signed = result.jwsRepresentation }
         }
         // Subscription state describes expiry, cancellation and billing grace.
         // Use its verified current transaction rather than an older iterator
         // snapshot. If Apple's status query is temporarily unavailable, retain
         // the verified current entitlement (including offline/grace access).
         if let info = products.values.first?.subscription, let statuses = try? await info.status {
-            current = nil
+            current = nil; signed = nil
             for status in statuses {
                 guard status.state == .subscribed || status.state == .inGracePeriod,
                       case .verified(let value) = status.transaction,
                       case .verified(let details) = status.renewalInfo,
                       recognizes(value), value.revocationDate == nil, !value.isUpgraded else { continue }
                 if current == nil || value.purchaseDate > current!.purchaseDate {
-                    current = value; renewal = details; grace = status.state == .inGracePeriod
+                    current = value; signed = status.transaction.jwsRepresentation
+                    renewal = details; grace = status.state == .inGracePeriod
                 }
             }
         }
         guard token == generation, !Task.isCancelled else { return }
         activePlan = current.flatMap { item in ProPlan.allCases.first { $0.productID == item.productID } }
         hasPro = current != nil; checkingAccess = false
+        AssistantServer.proof.value = current == nil ? nil : signed
         if hasPro && awaitingApproval { awaitingApproval = false; message = nil }
         isInTrial = false
         if let current, current.offerType == .introductory {
@@ -274,7 +278,8 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
         let content = UNMutableNotificationContent()
         content.title = AppText.text("準備下車")
         content.body = AppText.text("快到「%@」了，準備下車。", stopName)
-        content.sound = .default
+        // A soft two-note chime of its own, so the reminder is told apart from other alerts.
+        content.sound = UNNotificationSound(named: UNNotificationSoundName("AlightChime.wav"))
         content.userInfo = ["navigation": "journey"]
         let center = UNUserNotificationCenter.current()
         center.removePendingNotificationRequests(withIdentifiers: [Self.identifier])

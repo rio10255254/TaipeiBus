@@ -72,6 +72,9 @@ jobs:
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
       BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'beta-audit' && inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
+      # Public values of the assistant server; the Groq key stays on that server.
+      BUS_ASSISTANT_URL: ${{ vars.SUPABASE_URL }}
+      BUS_ASSISTANT_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}
       BUS_UPDATE_BETA_METADATA: ${{ inputs.operation == 'beta-metadata' }}
       BUS_PREPARE_BILLING: ${{ inputs.operation == 'billing-prepare' }}
@@ -237,6 +240,17 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           swift test --package-path ios/TransitCore
+          # Online understanding goes through the app's own server: only its public URL and
+          # publishable key are built in. No secret is ever written into the app.
+          BUS_ASSISTANT_URL="$(printf '%s' "${BUS_ASSISTANT_URL:-}" | tr -d '[:space:]')"
+          BUS_ASSISTANT_KEY="$(printf '%s' "${BUS_ASSISTANT_KEY:-}" | tr -d '[:space:]')"
+          if [ -n "${BUS_ASSISTANT_URL:-}" ] && [ -n "${BUS_ASSISTANT_KEY:-}" ]; then
+            /usr/libexec/PlistBuddy -c "Set :BusAssistantURL ${BUS_ASSISTANT_URL}" ios/TaipeiBus/Info.plist
+            /usr/libexec/PlistBuddy -c "Set :BusAssistantKey ${BUS_ASSISTANT_KEY}" ios/TaipeiBus/Info.plist
+            echo "Assistant server: ${BUS_ASSISTANT_URL}"
+          else
+            echo "::notice::No assistant server configured; this build understands sentences on the phone only."
+          fi
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -archivePath "$RUNNER_TEMP/TaipeiBus.xcarchive" \
@@ -249,6 +263,7 @@ jobs:
             BUS_APP_PROFILE_UUID="$BUS_PROFILE_UUID" BUS_WIDGET_PROFILE_UUID="$BUS_WIDGET_PROFILE_UUID" archive | tee "$RUNNER_TEMP/testflight-archive.log"
           python3 ios/release-check.py --archive "$RUNNER_TEMP/TaipeiBus.xcarchive" \
             --bundle-id "$BUS_BUNDLE_ID" --version "$BUS_VERSION" --build-number "$BUS_BUILD_NUMBER"
+          python3 ios/ai/check-weak-link.py "$RUNNER_TEMP/TaipeiBus.xcarchive/Products/Applications/TaipeiBus.app/TaipeiBus"
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/TaipeiBus.xcarchive/dSYMs" "$RUNNER_TEMP/testflight-dSYMs.zip"
       - name: Upload archive to App Store Connect

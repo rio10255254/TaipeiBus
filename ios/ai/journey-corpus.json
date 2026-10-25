@@ -1,0 +1,1581 @@
+{
+  "schemaVersion": 1,
+  "description": "日常說法手工語料；不是收集的私人對話。固定台北時間與虛構常用行程，須由支援 Apple Intelligence 的真機執行。",
+  "cases": [
+    {
+      "id": "J001",
+      "text": "去台北車站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J002",
+      "text": "帶我去臺北車站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J003",
+      "text": "我想去北車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J004",
+      "text": "北車，快一點",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J005",
+      "text": "幫我找去台北車站最快的走法",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J006",
+      "text": "到北車，不要一直換車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "fewerTransfers",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J007",
+      "text": "去北車，我今天不想走很多路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J008",
+      "text": "從西門站到北車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J009",
+      "text": "從臺北車站到西門站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "origin": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J010",
+      "text": "從台北車站去臺北101",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J011",
+      "text": "想去台北101，快一點就好",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J012",
+      "text": "去臺北101，不要轉太多次車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "fewerTransfers",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J013",
+      "text": "去台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J014",
+      "text": "到臺大醫院，少走一點",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J015",
+      "text": "要去台大醫院看診，走路越少越好",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J016",
+      "text": "明天 9 點前到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J017",
+      "text": "明天九點前要到臺大醫院，快一點",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J018",
+      "text": "明早九點以前到台大醫院，少走路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J019",
+      "text": "明天上午 9:30 前到台北車站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T01:30:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J020",
+      "text": "明天晚上九點以前到北車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T13:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J021",
+      "text": "今天下午三點前到台北101",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-22T07:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J022",
+      "text": "今晚八點半以前抵達西門站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-22T12:30:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J023",
+      "text": "後天早上十點前到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-24T02:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J024",
+      "text": "星期五早上九點前到台北市政府",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北市政府",
+          "臺北市政府"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J025",
+      "text": "10 月 25 日下午兩點以前到台北101",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-25T06:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J026",
+      "text": "明天中午十二點前到北車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T04:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J027",
+      "text": "明天凌晨一點以前到北車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-22T17:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J028",
+      "text": "明天 0 點半以前到西門站",
+      "scenario": "standard",
+      "now": "2026-10-22T15:50:00Z",
+      "expected": {
+        "destination": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-22T16:30:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J029",
+      "text": "今天早上九點以前到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-21T16:10:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-22T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J030",
+      "text": "回家",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J031",
+      "text": "我要回家，快一點",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J032",
+      "text": "帶我回家，不想走路走太久",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J033",
+      "text": "回家不要轉那麼多次車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "fewerTransfers",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J034",
+      "text": "去公司",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J035",
+      "text": "我要去上班",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J036",
+      "text": "去公司，這次少走路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J037",
+      "text": "明天 9 點前到公司",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J038",
+      "text": "下班了，從公司回家",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J039",
+      "text": "從公司到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J040",
+      "text": "從公司到北車，快一點",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J041",
+      "text": "從家裡去公司",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          "測試住家（古亭）"
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J042",
+      "text": "從家裡去臺大醫院，少走路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          "測試住家（古亭）"
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J043",
+      "text": "從公司到西門站，少轉車",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "fewerTransfers",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J044",
+      "text": "明天九點前從家裡到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          "測試住家（古亭）"
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J045",
+      "text": "從公司回家，明天晚上七點以前要到",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T11:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J046",
+      "text": "從目前位置去公司",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J047",
+      "text": "回家，用推薦的路線就好",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J048",
+      "text": "去我存的「週末讀書」",
+      "scenario": "named",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "國立臺灣大學",
+          "國立台灣大學",
+          "臺灣大學",
+          "台灣大學",
+          "臺大",
+          "台大"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J049",
+      "text": "去公館站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "公館站",
+          "捷運公館站"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J050",
+      "text": "從公館站到國立臺灣大學",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "國立臺灣大學",
+          "國立台灣大學",
+          "臺灣大學",
+          "台灣大學",
+          "臺大",
+          "台大"
+        ],
+        "origin": [
+          "公館站",
+          "捷運公館站"
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J051",
+      "text": "到台北市政府，時間優先",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北市政府",
+          "臺北市政府"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J052",
+      "text": "去西門站，能少換車最好",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "西門站",
+          "捷運西門站",
+          "西門"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "fewerTransfers",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J053",
+      "text": "去北車，走路可以多一點但要最快",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J054",
+      "text": "去台北101，我帶長輩，請少走路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北101",
+          "臺北101",
+          "台北101購物中心",
+          "台北101大樓"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J055",
+      "text": "趕時間！快一點到台北車站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "none"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J056",
+      "text": "麻煩規劃到臺大醫院，明天下午 2 點半之前",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "2026-10-23T06:30:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J057",
+      "text": "到北車，九點以前",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false,
+      "followUp": {
+        "optionContains": [
+          "明天早上",
+          "明早",
+          "明天上午"
+        ],
+        "expected": {
+          "destination": [
+            "台北車站",
+            "臺北車站",
+            "臺北站",
+            "台北站",
+            "捷運台北車站",
+            "台北車站 (捷運)"
+          ],
+          "origin": [
+            ""
+          ],
+          "preference": "balanced",
+          "time": "2026-10-23T01:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "J058",
+      "text": "明天到台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J059",
+      "text": "明天早點到公司",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試公司（市政府）"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "faster",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J060",
+      "text": "明天九點出發去台北車站",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false,
+      "followUp": {
+        "optionContains": [
+          "現在出發"
+        ],
+        "expected": {
+          "destination": [
+            "台北車站",
+            "臺北車站",
+            "臺北站",
+            "台北站",
+            "捷運台北車站",
+            "台北車站 (捷運)"
+          ],
+          "origin": [
+            ""
+          ],
+          "preference": "balanced",
+          "time": "none"
+        }
+      }
+    },
+    {
+      "id": "J061",
+      "text": "明天下午三點從公司出發回家",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "測試住家（古亭）"
+        ],
+        "origin": [
+          "測試公司（市政府）"
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J062",
+      "text": "去台大醫院，今天九點前要到",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J063",
+      "text": "明天或後天早上九點前去台大醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "confirm"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false,
+      "followUp": {
+        "optionContains": [
+          "明天"
+        ],
+        "expected": {
+          "destination": [
+            "台大醫院",
+            "臺大醫院",
+            "國立臺灣大學醫學院附設醫院",
+            "臺大醫院總院"
+          ],
+          "origin": [
+            ""
+          ],
+          "preference": "balanced",
+          "time": "2026-10-23T01:00:00Z"
+        }
+      }
+    },
+    {
+      "id": "J064",
+      "text": "先去北車再去台北101",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false,
+      "followUp": {
+        "optionContains": [
+          "台北車站",
+          "北車"
+        ],
+        "expected": {
+          "destination": [
+            "台北車站",
+            "臺北車站",
+            "臺北站",
+            "台北站",
+            "捷運台北車站",
+            "台北車站 (捷運)"
+          ],
+          "origin": [
+            ""
+          ],
+          "preference": "balanced",
+          "time": "none"
+        }
+      }
+    },
+    {
+      "id": "J065",
+      "text": "到中山",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J066",
+      "text": "帶我去醫院",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J067",
+      "text": "回家",
+      "scenario": "none",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J068",
+      "text": "從公司到台北車站",
+      "scenario": "none",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J069",
+      "text": "回家",
+      "scenario": "twoHomes",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "balanced",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true,
+      "followUp": {
+        "optionContains": [
+          "古亭"
+        ],
+        "expected": {
+          "destination": [
+            "測試住家（古亭）"
+          ],
+          "origin": [
+            ""
+          ],
+          "preference": "balanced",
+          "time": "none"
+        }
+      }
+    },
+    {
+      "id": "J070",
+      "text": "去公司",
+      "scenario": "twoOffices",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [],
+        "origin": [
+          ""
+        ],
+        "preference": "confirm",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": true
+    },
+    {
+      "id": "J071",
+      "text": "去北車，快一點但完全不要走路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台北車站",
+          "臺北車站",
+          "臺北站",
+          "台北站",
+          "捷運台北車站",
+          "台北車站 (捷運)"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "confirm",
+        "time": "none"
+      },
+      "expectsQuestion": true,
+      "requiresSavedTool": false
+    },
+    {
+      "id": "J072",
+      "text": "明天 9 點前到台大醫院，不想走太多路",
+      "scenario": "standard",
+      "now": "2026-10-22T04:00:00Z",
+      "expected": {
+        "destination": [
+          "台大醫院",
+          "臺大醫院",
+          "國立臺灣大學醫學院附設醫院",
+          "臺大醫院總院"
+        ],
+        "origin": [
+          ""
+        ],
+        "preference": "lessWalking",
+        "time": "2026-10-23T01:00:00Z"
+      },
+      "expectsQuestion": false,
+      "requiresSavedTool": false
+    }
+  ]
+}
