@@ -353,11 +353,12 @@ final class VoiceConversation: ObservableObject {
             }
         case .showBike(let near):
             if let station = VoiceStateBuilder(model: model).nearestBikeStation(near: near) { model.selectBikeStation(station.id) }
-        case .planTrip(let destination, let origin, let time, let mode, let preference):
-            // The ordinary one-sentence planner takes it from here: places, times and questions.
+        case .planTrip(let destination, let origin, let time, let mode, let preference, let then):
+            // The ordinary one-sentence planner takes it from here: places, times, later stops and questions.
             var sentence = time
             if !origin.isEmpty { sentence += "從\(origin)" }
             sentence += (mode == "cycling" ? "騎單車" : mode == "walking" ? "走路" : "") + "去\(destination)"
+            if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
             model.assistant.run(sentence)
             panelRequest = .routes
@@ -421,6 +422,7 @@ struct VoiceStateBuilder {
 
         if planner.started, let step = planner.currentStep {
             if let destination = planner.destination { facts.append("目的地：\(destination.localizedName)"); names.append(destination.localizedName) }
+            facts += tripFacts(now: now).filter { !$0.hasPrefix("出發") }
             switch step {
             case .walk(let index):
                 let next = planner.activeRide.map { "，走到 \($0.boarding.localizedName) 上車" } ?? "，走到目的地"
@@ -443,13 +445,17 @@ struct VoiceStateBuilder {
         } else if let destination = planner.destination {
             screen = "路線方案：到 \(destination.localizedName)"
             names.append(destination.localizedName)
+            facts += tripFacts(now: now)
             for (index, option) in planner.options.prefix(3).enumerated() {
                 let label = option.walkingOnly ? "全程步行" : option.bikeOnly ? "全程 YouBike" : option.rides.map(\.route.localizedName).joined(separator: "→")
                 names += option.rides.map(\.route.localizedName)
                 facts.append("第 \(index + 1) 個方案：\(label)")
                 if let timing = model.journeyDuration(option, at: now) {
                     items.append(("第 \(index + 1) 個方案的全程時間", timing.comparisonLabel))
-                    items.append(("第 \(index + 1) 個方案的抵達時間", timing.arrivalClockLabel))
+                    // One time with its day, as it is said, rather than the screen's range.
+                    let arrival = timing.unknownWaits > 0 ? timing.arrivalClockLabel
+                        : VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
+                    items.append(("第 \(index + 1) 個方案的抵達時間", arrival))
                 }
             }
         } else if let station = model.mapLabelStation {
@@ -483,6 +489,26 @@ struct VoiceStateBuilder {
         if !nearby.isEmpty { facts.append("附近站牌：" + nearby.joined(separator: "、")); names += nearby }
         return VoiceContext(now: now, screen: screen, facts: facts, references: VoiceContext.numbered(items),
                             pending: pending, names: Array(Set(names)))
+    }
+
+    /// The trip the rider asked for, so a later turn keeps its time and stops: where from, when, and
+    /// which stops come after this leg of 「先去 A 再去 B」.
+    private func tripFacts(now: Date) -> [String] {
+        let planner = model.planner
+        var facts = ["出發地：\(planner.origin?.localizedName ?? "目前位置")"]
+        if let deadline = planner.arrivalDeadline {
+            facts.append("時間：\(VoiceClock.label(deadline, now: now)) 前抵達")
+        } else if let departure = planner.scheduledDeparture {
+            facts.append("時間：\(VoiceClock.label(departure, now: now)) 出發")
+        } else {
+            facts.append("時間：現在出發")
+        }
+        if let trip = model.assistantTrip, trip.stops.count > 1 {
+            facts.append("行程：\(trip.stops.map(\.name).joined(separator: " → "))，現在是第 \(trip.leg + 1) 段")
+            let later = trip.stops.dropFirst(trip.leg + 1).map(\.name)
+            if !later.isEmpty { facts.append("之後要去：" + later.joined(separator: "、")) }
+        }
+        return facts
     }
 
     private var nearbyStations: [Station] {

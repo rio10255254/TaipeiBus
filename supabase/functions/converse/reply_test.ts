@@ -4,9 +4,15 @@ import { askClaude } from './brain.ts';
 import { readInput, readReply, userMessage } from './reply.ts';
 
 const action = (type: string, extra: Record<string, unknown> = {}) => ({
-  type, stop: '', route: '', destination: '', origin: '', time: '', mode: 'any', preference: 'balanced', option: 0, ...extra,
+  type, stop: '', route: '', destination: '', origin: '', time: '', then: '', mode: 'any', preference: 'balanced', option: 0, ...extra,
 });
 const none = action('none');
+
+Deno.test('a trip with later stops keeps them', () => {
+  const reply = readReply({ say: '好。', actions: [action('plan_trip', { destination: '西門町', time: '明天 14:00 出發', then: '淡水' })], confirm: none, choices: [], followUp: false });
+  assertEquals(reply?.actions[0].then, '淡水');
+  assertEquals(reply?.actions[0].time, '明天 14:00 出發');
+});
 
 Deno.test('a plain answer passes with its slots untouched', () => {
   const reply = readReply({ say: '307 {r1}，在新埔站下車。', actions: [action('show_route', { route: '307' })], confirm: none, choices: [], followUp: false });
@@ -46,11 +52,12 @@ Deno.test('nothing to say or too much to say is unusable', () => {
   assertEquals(readReply('not an object'), null);
 });
 
-Deno.test('the request is bounded and keeps only the last two turns', () => {
-  const input = readInput({ utterance: ' 307 還要多久\u0007 ', state: 'x'.repeat(5000), history: [{ user: 'a', say: 'b' }, { user: 'c', say: 'd' }, { user: 'e', say: 'f' }] });
+Deno.test('the request is bounded and keeps the last eight turns', () => {
+  const history = Array.from({ length: 10 }, (_, index) => ({ user: `u${index}`, say: `s${index}` }));
+  const input = readInput({ utterance: ' 307 還要多久\u0007 ', state: 'x'.repeat(5000), history });
   assertEquals(input?.utterance, '307 還要多久');
   assertEquals(input?.state.length, 4000);
-  assertEquals(input?.history, [{ user: 'c', say: 'd' }, { user: 'e', say: 'f' }]);
+  assertEquals(input?.history, history.slice(2));
   assertEquals(readInput({ utterance: '' }), null);
   const message = userMessage(input!);
   assert(message.startsWith('目前狀態：'));
