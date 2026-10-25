@@ -13,7 +13,7 @@ const MODES = ['any', 'cycling', 'walking'] as const;
 const PREFERENCES = ['balanced', 'faster', 'lessWalking', 'fewerTransfers'] as const;
 
 export type Action = {
-  type: ActionType; stop: string; route: string; destination: string; origin: string; time: string;
+  type: ActionType; stop: string; route: string; destination: string; origin: string; time: string; then: string;
   mode: typeof MODES[number]; preference: typeof PREFERENCES[number]; option: number;
 };
 export type Reply = { say: string; actions: Action[]; confirm: Action; choices: string[]; followUp: boolean };
@@ -23,12 +23,12 @@ const ACTION_SCHEMA = {
   properties: {
     type: { type: 'string', enum: [...ACTION_TYPES] },
     stop: { type: 'string' }, route: { type: 'string' }, destination: { type: 'string' },
-    origin: { type: 'string' }, time: { type: 'string' },
+    origin: { type: 'string' }, time: { type: 'string' }, then: { type: 'string' },
     mode: { type: 'string', enum: [...MODES] },
     preference: { type: 'string', enum: [...PREFERENCES] },
     option: { type: 'integer' },
   },
-  required: ['type', 'stop', 'route', 'destination', 'origin', 'time', 'mode', 'preference', 'option'],
+  required: ['type', 'stop', 'route', 'destination', 'origin', 'time', 'then', 'mode', 'preference', 'option'],
   additionalProperties: false,
 };
 
@@ -58,7 +58,8 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 
 動作（actions，最多三個；沒有就給空陣列）
 - show_stop：在地圖顯示站牌（stop）。show_route：顯示路線（route）。follow_vehicle：跟著某路線的車（route）。show_bike：顯示附近的 YouBike 站（stop 可留空）。
-- plan_trip：規劃行程。destination 照乘客的話，origin 沒說就留空，time 照抄乘客說的時間（例如「明天早上九點前」），沒說就留空；mode 預設 any，preference 預設 balanced。
+- plan_trip：規劃行程。destination 照乘客的話，origin 沒說就留空，time 照抄乘客說的時間（例如「明天早上九點前」），沒說就留空；乘客要去好幾個地方（「先去西門町再去淡水」），destination 放第一站，then 依序寫後面幾站（「淡水」）；mode 預設 any，preference 預設 balanced。
+- 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，除非乘客這次改了。
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
 - lookup：「目前狀態」裡沒有乘客要的資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
 - 沒用到的欄位留空字串，option 填 0。
@@ -84,7 +85,7 @@ export function readInput(body: Record<string, unknown>): TurnInput | null {
     typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, limit) : '';
   const utterance = text(body.utterance, 300);
   if (!utterance) return null;
-  const history = Array.isArray(body.history) ? body.history.slice(-2) : [];
+  const history = Array.isArray(body.history) ? body.history.slice(-8) : [];
   return {
     utterance,
     state: text(body.state, 4000),
@@ -93,7 +94,7 @@ export function readInput(body: Record<string, unknown>): TurnInput | null {
   };
 }
 
-/// One user message: the state, the last two turns and what was just said. The system prompt never
+/// One user message: the state, the last eight turns and what was just said. The system prompt never
 /// changes, so it can be cached.
 export function userMessage(input: TurnInput): string {
   const history = input.history.map((turn) => `乘客：${turn.user}\n助理：${turn.say}`).join('\n');
@@ -104,7 +105,7 @@ export function userMessage(input: TurnInput): string {
   ].filter(Boolean).join('\n\n');
 }
 
-const EMPTY: Action = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', mode: 'any', preference: 'balanced', option: 0 };
+const EMPTY: Action = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', mode: 'any', preference: 'balanced', option: 0 };
 
 function readAction(value: unknown): Action | null {
   if (!value || typeof value !== 'object') return null;
@@ -113,7 +114,7 @@ function readAction(value: unknown): Action | null {
   const text = (key: string, limit = 60) => typeof raw[key] === 'string' ? (raw[key] as string).trim().slice(0, limit) : '';
   const action: Action = {
     type: raw.type as ActionType, stop: text('stop'), route: text('route'), destination: text('destination'),
-    origin: text('origin'), time: text('time', 40),
+    origin: text('origin'), time: text('time', 40), then: text('then'),
     mode: MODES.includes(raw.mode as typeof MODES[number]) ? raw.mode as Action['mode'] : 'any',
     preference: PREFERENCES.includes(raw.preference as typeof PREFERENCES[number]) ? raw.preference as Action['preference'] : 'balanced',
     option: Number.isInteger(raw.option) ? raw.option as number : 0,

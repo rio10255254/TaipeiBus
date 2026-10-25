@@ -7,7 +7,8 @@ public enum VoiceAction: Equatable, Sendable {
     case showRoute(String)
     case followVehicle(route: String)
     case showBike(near: String)
-    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String)
+    /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words.
+    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String)
     /// The first, second or third option on screen.
     case chooseOption(Int)
     /// The state had no answer: look these up and ask again.
@@ -36,7 +37,7 @@ public enum VoiceAction: Equatable, Sendable {
         case "plan_trip":
             guard !text("destination").isEmpty else { return nil }
             self = .planTrip(destination: text("destination"), origin: text("origin"), time: text("time", limit: 40),
-                             mode: text("mode"), preference: text("preference"))
+                             mode: text("mode"), preference: text("preference"), then: text("then"))
         case "choose_option":
             guard let option = json["option"] as? Int, (1...3).contains(option) else { return nil }
             self = .chooseOption(option)
@@ -154,9 +155,27 @@ extension VoiceAction {
         case .showStop(let stop): "顯示 \(stop)"
         case .showRoute(let route), .followVehicle(let route): "顯示 \(route)"
         case .showBike: "顯示 YouBike"
-        case .planTrip(let destination, _, _, _, _): "規劃到 \(destination)"
+        case .planTrip(let destination, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
         case .lookup: "查詢"
+        }
+    }
+}
+
+/// A time as it is said aloud in Taipei: 14:05 today, 明天 14:05 and 後天 14:05, otherwise 10/27 14:05.
+/// Screen labels can be ranges across midnight (23:54–10/26 00:06); one time reads far better.
+public enum VoiceClock {
+    public static func label(_ date: Date, now: Date = Date()) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
+        let time = calendar.dateComponents([.month, .day, .hour, .minute], from: date)
+        let clock = String(format: "%02d:%02d", time.hour ?? 0, time.minute ?? 0)
+        switch days {
+        case 0: return clock
+        case 1: return "明天 " + clock
+        case 2: return "後天 " + clock
+        default: return "\(time.month ?? 0)/\(time.day ?? 0) " + clock
         }
     }
 }
@@ -380,7 +399,7 @@ public enum VoiceConfirmation: Equatable, Sendable {
     }
 }
 
-/// The last two turns, sent back each time so 「那回程呢」 has something to refer to.
+/// The last eight turns, sent back each time so 「那回程呢」 and a time said a while ago still count.
 public struct VoiceHistory: Equatable, Sendable {
     public struct Turn: Equatable, Sendable {
         public let user: String
@@ -390,7 +409,8 @@ public struct VoiceHistory: Equatable, Sendable {
     public private(set) var turns: [Turn] = []
     public init() {}
     public mutating func append(user: String, said: String) {
-        turns = Array((turns + [Turn(user: String(user.prefix(300)), said: String(said.prefix(200)))]).suffix(2))
+        turns = Array((turns + [Turn(user: String(user.prefix(300)), said: String(said.prefix(200)))]).suffix(VoiceHistory.limit))
     }
+    public static let limit = 8
     public var json: [[String: String]] { turns.map { ["user": $0.user, "say": $0.said] } }
 }

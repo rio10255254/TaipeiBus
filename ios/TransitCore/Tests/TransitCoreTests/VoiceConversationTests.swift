@@ -42,7 +42,12 @@ final class VoiceConversationTests: XCTestCase {
 
     func testPlanTripKeepsTheRidersWords() {
         let decoded = VoiceReply(json: ["say": "幫你找去台大的路線。", "actions": [action("plan_trip", ["destination": "台大機械館", "time": "明天早上九點前"])]])
-        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced")])
+        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced", then: "")])
+    }
+
+    func testPlanTripKeepsTheLaterStops() {
+        let decoded = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "西門町", "time": "明天下午", "then": "淡水"])]])
+        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "西門町", origin: "", time: "明天下午", mode: "any", preference: "balanced", then: "淡水")])
     }
 
     func testChoicesAreTrimmedUniqueAndAtMostThree() {
@@ -129,10 +134,20 @@ final class VoiceConversationTests: XCTestCase {
         for text in ["好啊那回程呢要搭哪一班", "不知道", "307 還要多久", ""] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
     }
 
-    func testHistoryKeepsTheLastTwoTurns() {
+    func testHistoryKeepsTheLastEightTurns() {
         var history = VoiceHistory()
-        history.append(user: "a", said: "1"); history.append(user: "b", said: "2"); history.append(user: "c", said: "3")
-        XCTAssertEqual(history.json, [["user": "b", "say": "2"], ["user": "c", "say": "3"]])
+        for turn in 1...10 { history.append(user: "u\(turn)", said: "s\(turn)") }
+        XCTAssertEqual(history.json.count, 8)
+        XCTAssertEqual(history.json.first, ["user": "u3", "say": "s3"])
+        XCTAssertEqual(history.json.last, ["user": "u10", "say": "s10"])
+    }
+
+    func testTimesAreSaidWithTheirDay() {
+        let now = ISO8601DateFormatter().date(from: "2026-10-25T15:39:00Z")!  // 23:39 in Taipei
+        XCTAssertEqual(VoiceClock.label(now.addingTimeInterval(15 * 60), now: now), "23:54")
+        XCTAssertEqual(VoiceClock.label(now.addingTimeInterval(27 * 60), now: now), "明天 00:06")
+        XCTAssertEqual(VoiceClock.label(now.addingTimeInterval(26 * 3600), now: now), "後天 01:39")
+        XCTAssertEqual(VoiceClock.label(now.addingTimeInterval(72 * 3600), now: now), "10/28 23:39")
     }
 
     func testStreamedAnswerIsSpokenSentenceBySentence() {
