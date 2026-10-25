@@ -45,6 +45,11 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced", then: "")])
     }
 
+    func testAPlaceCardNamesItsPlace() {
+        let decoded = VoiceReply(json: ["say": "營業時間在卡片上。", "actions": [action("show_place", ["destination": "國立故宮博物院"]), action("show_place")]])
+        XCTAssertEqual(decoded?.actions, [.showPlace("國立故宮博物院")], "A card with no place is dropped")
+    }
+
     func testPlanTripKeepsTheLaterStops() {
         let decoded = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "西門町", "time": "明天下午", "then": "淡水"])]])
         XCTAssertEqual(decoded?.actions, [.planTrip(destination: "西門町", origin: "", time: "明天下午", mode: "any", preference: "balanced", then: "淡水")])
@@ -57,7 +62,7 @@ final class VoiceConversationTests: XCTestCase {
 
     func testNothingOrTooMuchToSayIsUnusable() {
         XCTAssertNil(VoiceReply(json: ["say": "  "]))
-        XCTAssertNil(VoiceReply(json: ["say": String(repeating: "很", count: 161)]))
+        XCTAssertNil(VoiceReply(json: ["say": String(repeating: "很", count: 241)]))
     }
 
     // MARK: Spoken answer
@@ -74,9 +79,13 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertEqual(SpokenAnswer.render("307 大約 4 分鐘到。", values: values, known: known), .failure(.unsupportedNumber("4")))
         XCTAssertEqual(SpokenAnswer.render("再三站就到了。", values: values, known: known), .failure(.unsupportedNumber("三站")))
         XCTAssertEqual(SpokenAnswer.render("下兩站就到了。", values: values, known: known), .failure(.unsupportedNumber("兩站")))
-        XCTAssertEqual(SpokenAnswer.render("十一點有車。", values: values, known: known), .failure(.unsupportedNumber("十一點")))
-        XCTAssertEqual(SpokenAnswer.render("搭 299 比較快。", values: values, known: known), .failure(.unsupportedNumber("299")),
-                       "A route the rider never saw may be made up")
+        XCTAssertEqual(SpokenAnswer.render("走路 12 分就到。", values: values, known: known), .failure(.unsupportedNumber("12")))
+    }
+
+    func testGeneralKnowledgeNumbersMayBeSpoken() {
+        for sentence in ["搭 299 比較快。", "故宮開到 17:00，門票 350 元。", "十一點以後班次比較少。", "捷運十分方便。", "1997 年通車。"] {
+            XCTAssertEqual(SpokenAnswer.render(sentence, values: values, known: known), .success(sentence), sentence)
+        }
     }
 
     func testNumbersTheRiderAlreadySawOrSaidMayBeSpoken() {
@@ -132,6 +141,9 @@ final class VoiceConversationTests: XCTestCase {
         for text in ["好", "好啊", "可以", "對", "嗯嗯", "開始吧", "OK", "好！"] { XCTAssertEqual(VoiceConfirmation.read(text), .yes, text) }
         for text in ["不要", "不用了", "取消", "算了", "先不要", "不好"] { XCTAssertEqual(VoiceConfirmation.read(text), .no, text) }
         for text in ["好啊那回程呢要搭哪一班", "不知道", "307 還要多久", ""] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
+        for text in ["Yes", "OK, go", "Sure!", "yes please", "Let's go"] { XCTAssertEqual(VoiceConfirmation.read(text), .yes, text) }
+        for text in ["No", "Not now", "Cancel", "No thanks", "Wait"] { XCTAssertEqual(VoiceConfirmation.read(text), .no, text) }
+        for text in ["How long now", "Take me to Taipei 101 please"] { XCTAssertEqual(VoiceConfirmation.read(text), .unclear, text) }
     }
 
     func testHistoryKeepsTheLastEightTurns() {
@@ -191,19 +203,19 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertNil(turn.refused)
     }
 
-    func testASentenceThatCannotPassYetWaitsForTheChoicesAndHoldsWhatFollows() {
-        var turn = SpokenTurn(context: station, heard: "附近有什麼車")
-        XCTAssertEqual(turn.receive("有別的車。要 299 還是 952？好"), ["有別的車。"])
+    func testASentenceThatCannotPassYetWaitsForItsSourcesAndHoldsWhatFollows() {
+        var turn = SpokenTurn(context: station, heard: "走過去要多久")
+        XCTAssertEqual(turn.receive("可以走過去。大約 12 分鐘。好"), ["可以走過去。"])
         XCTAssertEqual(turn.receive("嗎？"), [], "Nothing is spoken after a sentence that is held back")
-        XCTAssertEqual(turn.finish(choices: ["299", "952"]), ["要 299 還是 952？好嗎？"])
+        XCTAssertEqual(turn.finish(choices: [], quoted: ["步行約 12 分鐘可達"]), ["大約 12 分鐘。", "好嗎？"])
         XCTAssertNil(turn.refused)
     }
 
-    func testWhatStillFailsAtTheEndIsRefused() {
+    func testWhatStillFailsAtTheEndIsLeftOutAndTheRestSpoken() {
         var turn = SpokenTurn(context: station, heard: "307 呢")
-        XCTAssertEqual(turn.receive("307 {r1}。大約 8 分鐘就到。"), ["307 約 4 分鐘到。"])
-        XCTAssertEqual(turn.finish(choices: []), [])
+        XCTAssertEqual(turn.receive("307 {r1}。大約 8 分鐘就到。要跟車嗎？"), ["307 約 4 分鐘到。"])
+        XCTAssertEqual(turn.finish(choices: []), ["要跟車嗎？"])
         XCTAssertEqual(turn.refused, .unsupportedNumber("8"))
-        XCTAssertEqual(turn.spoken, ["307 約 4 分鐘到。"])
+        XCTAssertEqual(turn.spoken, ["307 約 4 分鐘到。", "要跟車嗎？"])
     }
 }

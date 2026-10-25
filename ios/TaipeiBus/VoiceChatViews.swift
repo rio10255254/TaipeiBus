@@ -1,5 +1,6 @@
 import SwiftUI
 import AppIntents
+import MapKit
 import TransitCore
 
 /// The voice conversation over the map: a glow at the screen edge and one glass panel with the
@@ -8,6 +9,8 @@ import TransitCore
 struct VoiceChatHost: ViewModifier {
     @ObservedObject var chat: VoiceConversation
     @Environment(\.scenePhase) private var scenePhase
+    /// A place whose Apple Maps card the rider asked for.
+    @State private var place: MKMapItem?
     /// The route panel, for planned routes.
     let openRoutes: () -> Void
     /// The navigation screen, once a trip has started.
@@ -26,7 +29,7 @@ struct VoiceChatHost: ViewModifier {
                 Button(AppText.text("開始對話")) { chat.answerConsent(true) }
                 Button(AppText.text("不要"), role: .cancel) { chat.answerConsent(false) }
             } message: {
-                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
+                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由台北公車的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
             }
             .onChange(of: chat.panelRequest) { _, request in
                 guard let request else { return }
@@ -34,8 +37,27 @@ struct VoiceChatHost: ViewModifier {
                 switch request {
                 case .routes: openRoutes()
                 case .navigation: showNavigation()
+                case .place(let item): place = item
                 }
             }
+            .modifier(PlaceCard(item: $place))
+    }
+}
+
+/// Apple Maps' own card for a place: opening hours, phone and website, from Apple. Before iOS 18 the
+/// place opens in Apple Maps instead.
+private struct PlaceCard: ViewModifier {
+    @Binding var item: MKMapItem?
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.mapItemDetailSheet(item: $item)
+        } else {
+            content.onChange(of: item) { _, place in
+                guard let place else { return }
+                place.openInMaps()
+                item = nil
+            }
+        }
     }
 }
 
@@ -148,6 +170,9 @@ struct VoiceChatPanel: View {
                 Text(chat.caption).font(.body).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("voice-chat-caption")
             }
+            if let source = chat.source {
+                Label(AppText.text("來源：%@", source), systemImage: "globe").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
             if !chat.choices.isEmpty {
                 ChipFlow(spacing: 8) {
                     ForEach(chat.choices, id: \.self) { choice in
@@ -204,7 +229,7 @@ struct VoiceChatSettings: View {
         } header: {
             Text(AppText.text("語音對話（Pro）"))
         } footer: {
-            Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
         }
     }
 }

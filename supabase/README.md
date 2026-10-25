@@ -12,9 +12,11 @@ Online understanding goes through this Supabase project instead of a key built i
   not stored.
 - `functions/converse` is the voice conversation, Pro only (40 turns a day, counted apart in
   `assistant_voice_usage`). Each request is one turn: what the rider just said, the app's state in
-  words and the last two turns. Claude answers with the reply schema enforced (Groq in JSON mode when
-  Claude cannot); the reply's numbers are slots such as `{r1}` that the app fills from its own data.
-  Nothing is stored. The two functions share `_shared/` (caller, Pro check, Claude client).
+  words and the last eight turns. Claude answers with the reply schema enforced (Groq in JSON mode when
+  Claude cannot); live figures (arrivals, minutes, stops, docks) are slots such as `{r1}` that the app
+  fills from its own data. A question that needs current information gets a `web_search` action; the
+  streamed turn then answers it with Claude's web search, 3 a day per phone (`assistant_web_usage`),
+  and past that Claude answers from what it knows. Nothing is stored. The two functions share `_shared/` (caller, Pro check, Claude client).
 - Pro is checked from the signed App Store transaction the app sends, verified against Apple's root
   certificates bundled in `_shared/apple_roots.ts`, and remembered until that period ends. The check
   uses Web Crypto (`@peculiar/x509`): Supabase's runtime does not implement node:crypto's

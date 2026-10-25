@@ -8,6 +8,11 @@ const action = (type: string, extra: Record<string, unknown> = {}) => ({
 });
 const none = action('none');
 
+Deno.test('a place card needs its place', () => {
+  const reply = readReply({ say: '營業時間在卡片上。', actions: [action('show_place', { destination: '國立故宮博物院' }), action('show_place')], confirm: none, choices: [], followUp: false });
+  assertEquals(reply?.actions.map((item) => item.destination), ['國立故宮博物院']);
+});
+
 Deno.test('a trip with later stops keeps them', () => {
   const reply = readReply({ say: '好。', actions: [action('plan_trip', { destination: '西門町', time: '明天 14:00 出發', then: '淡水' })], confirm: none, choices: [], followUp: false });
   assertEquals(reply?.actions[0].then, '淡水');
@@ -48,7 +53,7 @@ Deno.test('choices are trimmed, unique and at most three', () => {
 
 Deno.test('nothing to say or too much to say is unusable', () => {
   assertEquals(readReply({ say: '  ', actions: [], confirm: none, choices: [], followUp: false }), null);
-  assertEquals(readReply({ say: '很'.repeat(161), actions: [], confirm: none, choices: [], followUp: false }), null);
+  assertEquals(readReply({ say: '很'.repeat(241), actions: [], confirm: none, choices: [], followUp: false }), null);
   assertEquals(readReply('not an object'), null);
 });
 
