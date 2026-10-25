@@ -1,9 +1,10 @@
 // Asks the real model a fixed set of turns and checks each answer the way the app would: a usable
 // reply, the expected action, no number the rider has not seen, and short enough to speak.
 // deno run --allow-env --allow-net --config supabase/functions/converse/deno.json supabase/functions/converse/eval.ts
-import { askClaude, askGroq } from './brain.ts';
+import { askGroq, streamClaude } from './brain.ts';
 import { type Reply, userMessage } from './reply.ts';
 
+type Ask = (message: string, onSay: () => void) => Promise<Awaited<ReturnType<typeof askGroq>>>;
 type Case = { name: string; state: string; utterance: string; history?: { user: string; say: string }[]; expect?: string; confirm?: string };
 
 const now = '現在：2026-10-25 19:40 星期日（台北）';
@@ -32,7 +33,7 @@ const cases: Case[] = [
 function invented(say: string, known: string): string | null {
   const plain = say.replace(/\{[A-Za-z0-9_]+\}/g, ' ');
   for (const number of plain.match(/[0-9０-９]+/g) ?? []) if (!known.includes(number)) return number;
-  const chinese = plain.match(/(?<![快慢早晚多少好差])[零〇一二兩三四五六七八九十百]+(分鐘|分|站|點|號|班|次|公里|公尺|秒|輛|格|元)/g) ?? [];
+  const chinese = plain.match(/(?<![快慢早晚多少好差])(?:(?<![哪下上這那同每某])一|[零〇二兩三四五六七八九十百])[零〇一二兩三四五六七八九十百]*(分鐘|分|站|點|號|班|次|公里|公尺|秒|輛|格|元)/g) ?? [];
   for (const number of chinese) if (!known.includes(number)) return number;
   return null;
 }
@@ -61,8 +62,9 @@ function check(test: Case, reply: Reply): string[] {
 const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
 const groqKey = Deno.env.get('GROQ_API_KEY');
 const providers = [
-  ...(anthropicKey ? [{ name: 'claude', ask: (message: string) => askClaude(anthropicKey, message) }] : []),
-  ...(groqKey ? [{ name: 'groq', ask: (message: string) => askGroq(groqKey, message) }] : []),
+  // Claude streamed, as the phone hears it: the first words are when speaking can start.
+  ...(anthropicKey ? [{ name: 'claude', ask: ((message, onSay) => streamClaude(anthropicKey, message, onSay)) as Ask }] : []),
+  ...(groqKey ? [{ name: 'groq', ask: ((message) => askGroq(groqKey, message)) as Ask }] : []),
 ];
 if (providers.length === 0) {
   console.log('No ANTHROPIC_API_KEY or GROQ_API_KEY: nothing to evaluate.');
@@ -72,14 +74,17 @@ if (providers.length === 0) {
 let failed = 0;
 for (const provider of providers) {
   console.log(`\n## ${provider.name}`);
-  const times: number[] = [];
+  const times: number[] = [], firstWords: number[] = [];
   for (const test of cases) {
     // Groq's free tier allows a few thousand tokens a minute; space its turns out.
     if (provider.name === 'groq') await new Promise((resolve) => setTimeout(resolve, 9000));
     const started = performance.now();
-    const answer = await provider.ask(userMessage({ utterance: test.utterance, state: test.state, history: test.history ?? [] }));
+    let first = 0;
+    const answer = await provider.ask(userMessage({ utterance: test.utterance, state: test.state, history: test.history ?? [] }),
+      () => { first ||= Math.round(performance.now() - started); });
     const ms = Math.round(performance.now() - started);
     times.push(ms);
+    if (first) firstWords.push(first);
     if (!('reply' in answer)) {
       failed += provider.name === 'claude' ? 1 : 0;
       console.log(`✗ ${test.name}｜${test.utterance}｜沒有回答：${answer.failure}｜${ms} ms`);
@@ -89,10 +94,10 @@ for (const provider of providers) {
     const problems = check(test, reply);
     if (problems.length && provider.name === 'claude') failed += 1;
     const actions = reply.actions.map((action) => `${action.type}${action.destination || action.stop || action.route ? `(${action.destination || action.stop || action.route})` : ''}${action.option ? `#${action.option}` : ''}${action.time ? `@${action.time}` : ''}`).join(', ');
-    console.log(`${problems.length ? '✗' : '✓'} ${test.name}｜${test.utterance}｜說：${reply.say}｜動作：${actions || '無'}｜確認：${reply.confirm.type}${reply.choices.length ? `｜選項：${reply.choices.join('/')}` : ''}｜${ms} ms${problems.length ? `｜問題：${problems.join('；')}` : ''}${notes(reply).length ? `｜提醒：${notes(reply).join('；')}` : ''}`);
+    console.log(`${problems.length ? '✗' : '✓'} ${test.name}｜${test.utterance}｜說：${reply.say}｜動作：${actions || '無'}｜確認：${reply.confirm.type}${reply.choices.length ? `｜選項：${reply.choices.join('/')}` : ''}｜${first ? `${first}/` : ''}${ms} ms${problems.length ? `｜問題：${problems.join('；')}` : ''}${notes(reply).length ? `｜提醒：${notes(reply).join('；')}` : ''}`);
   }
-  times.sort((a, b) => a - b);
-  console.log(`延遲 p50 ${times[Math.floor(times.length / 2)]} ms，最慢 ${times[times.length - 1]} ms`);
+  const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+  console.log(`延遲 p50 ${median(times)} ms，最慢 ${Math.max(...times)} ms${firstWords.length ? `；開始說話 p50 ${median(firstWords)} ms` : ''}`);
 }
 // Claude is the brain riders hear; Groq is listed for comparison only.
 if (failed > 0) {
