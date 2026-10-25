@@ -470,7 +470,7 @@ final class JourneyAssistantSession: ObservableObject {
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
                                       nextStop: turn.nextStop, constraints: turn.avoid)
-        if let next = turn.nextStop, !next.isEmpty { findStop(1, words: next, near: target) }
+        if !turn.nextStop.isEmpty { findStop(1, words: turn.nextStop, near: target) }
         UINotificationFeedbackGenerator().notificationOccurred(.success)
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1; finishVoice()
