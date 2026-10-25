@@ -12,3 +12,6 @@ anonymous_users = 10
 
 [functions.understand]
 verify_jwt = true
+
+[functions.converse]
+verify_jwt = true

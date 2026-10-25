@@ -1,5 +1,5 @@
 // Claude for online understanding, the first choice before Groq.
-import Anthropic from '@anthropic-ai/sdk';
+import { type Anthropic, claudeClient, claudeModel, describe } from '../_shared/claude.ts';
 
 /// The app gives up after about five seconds, so Claude gets less, leaving time for Groq.
 const CLAUDE_TIMEOUT_MS = 3000;
@@ -15,14 +15,8 @@ export async function askClaude(apiKey: string, chat: Record<string, unknown>):
     .map((message): Anthropic.MessageParam => ({ role: 'user', content: message.content }));
   if (user.length === 0) return { answer: null, failure: 'no user message' };
   try {
-    // A key made outside a workspace must name one on every request.
-    const workspace = Deno.env.get('ANTHROPIC_WORKSPACE_ID');
-    const client = new Anthropic({
-      apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS,
-      defaultHeaders: workspace ? { 'anthropic-workspace-id': workspace } : undefined,
-    });
-    const message = await client.messages.create({
-      model: Deno.env.get('ANTHROPIC_MODEL') || 'claude-haiku-5-5',
+    const message = await claudeClient(apiKey, CLAUDE_TIMEOUT_MS).messages.create({
+      model: claudeModel(),
       max_tokens: Number(chat.max_completion_tokens),
       system: [...system, 'Reply with exactly one JSON object and nothing else.'].join('\n\n'),
       messages: user,
@@ -47,15 +41,4 @@ export async function askClaude(apiKey: string, chat: Record<string, unknown>):
     console.error('claude failed', failure);
     return { answer: null, failure };
   }
-}
-
-/// Status, error type and the start of Anthropic's message (for example a used-up credit balance or an
-/// unknown model). Never the key or the request.
-function describe(error: unknown): string {
-  if (error instanceof Anthropic.APIError) {
-    const body = error.error as { error?: { type?: string; message?: string } } | undefined;
-    const detail = [body?.error?.type, body?.error?.message?.slice(0, 100)].filter(Boolean).join(': ');
-    return [String(error.status ?? ''), error.constructor.name, detail].filter(Boolean).join(' ');
-  }
-  return error instanceof Error ? `${error.constructor.name}: ${error.message.slice(0, 100)}` : String(error);
 }
