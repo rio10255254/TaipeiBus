@@ -2,14 +2,14 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
 import { askClaude } from './claude.ts';
 
-type Received = { body: Record<string, unknown>; key: string | null };
+type Received = { body: Record<string, unknown>; key: string | null; workspace: string | null };
 
 async function withServer(answer: (body: Record<string, unknown>) => Response, run: (received: Received[]) => Promise<void>) {
   const received: Received[] = [];
   const server = Deno.serve({ port: 0, onListen() {} }, async (request) => {
     const body = await request.json();
     const key = request.headers.get('x-api-key') ?? request.headers.get('authorization')?.replace(/^Bearer /, '') ?? null;
-    received.push({ body, key });
+    received.push({ body, key, workspace: request.headers.get('anthropic-workspace-id') });
     return answer(body);
   });
   Deno.env.set('ANTHROPIC_BASE_URL', `http://localhost:${server.addr.port}`);
@@ -70,6 +70,18 @@ Deno.test('fails over at once when Claude errors, without retrying', async () =>
       assertEquals(failure, '529 InternalServerError overloaded_error: busy');
       assertEquals(received.length, 1);
     });
+});
+
+Deno.test('names the workspace when one is configured', async () => {
+  Deno.env.set('ANTHROPIC_WORKSPACE_ID', 'wrkspc_test');
+  try {
+    await withServer(() => message('end_turn', '{}'), async (received) => {
+      await askClaude('test-key', chat);
+      assertEquals(received[0].workspace, 'wrkspc_test');
+    });
+  } finally {
+    Deno.env.delete('ANTHROPIC_WORKSPACE_ID');
+  }
 });
 
 Deno.test('sends nothing without a user message', async () => {

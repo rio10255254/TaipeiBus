@@ -15,7 +15,12 @@ export async function askClaude(apiKey: string, chat: Record<string, unknown>):
     .map((message): Anthropic.MessageParam => ({ role: 'user', content: message.content }));
   if (user.length === 0) return { answer: null, failure: 'no user message' };
   try {
-    const client = new Anthropic({ apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS });
+    // A key made outside a workspace must name one on every request.
+    const workspace = Deno.env.get('ANTHROPIC_WORKSPACE_ID');
+    const client = new Anthropic({
+      apiKey, maxRetries: 0, timeout: CLAUDE_TIMEOUT_MS,
+      defaultHeaders: workspace ? { 'anthropic-workspace-id': workspace } : undefined,
+    });
     const message = await client.messages.create({
       model: Deno.env.get('ANTHROPIC_MODEL') || 'claude-haiku-5-5',
       max_tokens: Number(chat.max_completion_tokens),

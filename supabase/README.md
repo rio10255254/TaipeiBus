@@ -21,7 +21,9 @@ Online understanding goes through this Supabase project instead of a key built i
 2. In GitHub › Settings › Secrets and variables › Actions add:
    - secrets: `SUPABASE_ACCESS_TOKEN` (account › access tokens), `SUPABASE_DB_PASSWORD`
      (the project's database password), `ANTHROPIC_API_KEY` (console.anthropic.com › API keys).
-     `GROQ_API_KEY` is already there.
+     `GROQ_API_KEY` is already there. A key made outside a workspace also needs the variable
+     `ANTHROPIC_WORKSPACE_ID` (the `wrkspc_…` id from Console › Workspaces); a key made inside a
+     workspace does not.
    - variables: `SUPABASE_PROJECT_REF` (the id in the project URL), `SUPABASE_URL`
      (`https://<ref>.supabase.co`), `SUPABASE_PUBLISHABLE_KEY` (Project settings › API keys),
      and later `APP_APPLE_ID` (the numeric App Store id) for production Pro checks.
