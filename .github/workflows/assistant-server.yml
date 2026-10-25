@@ -55,12 +55,14 @@ jobs:
           SUPABASE_ACCESS_TOKEN="$(trim "$SUPABASE_ACCESS_TOKEN")"; export SUPABASE_ACCESS_TOKEN
           SUPABASE_PROJECT_REF="$(trim "$SUPABASE_PROJECT_REF")"
           GROQ_API_KEY="$(trim "$GROQ_API_KEY")"
+          # A password may contain spaces in the middle; only a trailing line break is removed.
+          SUPABASE_DB_PASSWORD="$(printf '%s' "$SUPABASE_DB_PASSWORD" | tr -d '\r\n')"; export SUPABASE_DB_PASSWORD
           case "$SUPABASE_ACCESS_TOKEN" in
             sbp_*) ;;
             *) echo "::error::SUPABASE_ACCESS_TOKEN must be a personal access token starting with sbp_ (supabase.com/dashboard/account/tokens), not a project API key."; exit 1 ;;
           esac
           supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-          supabase db push --password "$SUPABASE_DB_PASSWORD"
+          supabase db push --linked --password "$SUPABASE_DB_PASSWORD"
           supabase config push --project-ref "$SUPABASE_PROJECT_REF" --yes || echo "::warning::Auth settings not pushed; enable anonymous sign-ins in the dashboard."
           if [ -n "$GROQ_API_KEY" ]; then
             # Read from a file so the value never appears on a command line or in the log.
