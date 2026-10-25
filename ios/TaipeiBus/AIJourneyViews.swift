@@ -111,7 +111,7 @@ final class JourneyAssistantSession: ObservableObject {
     /// 「允許並開始說話」 on the voice screen.
     func allowVoice() {
         voicePermissionStep = false
-        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        Haptics.stage()
         startSpeech()
     }
     private func startSpeech() {
@@ -151,7 +151,7 @@ final class JourneyAssistantSession: ObservableObject {
                 await replace(trip, with: change, request: value)
             } else {
                 model.applyAssistantChange(change, request: value)
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
+                Haptics.success()
                 finishVoice()
             }
         }
@@ -186,7 +186,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       mode: change.mode ?? trip.mode, departure: departure, arriveBy: arriveBy,
                                       nextStop: change.next.isEmpty ? trip.nextStop : change.next,
                                       constraints: change.constraints ?? trip.constraints)
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Haptics.success()
         plannedCount += 1; finishVoice()
     }
     /// The trip in words for the online model: places, way of travelling, time and limits, no coordinates.
@@ -471,7 +471,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
                                       nextStop: turn.nextStop, constraints: turn.avoid)
         if !turn.nextStop.isEmpty { findStop(1, words: turn.nextStop, near: target) }
-        UINotificationFeedbackGenerator().notificationOccurred(.success)
+        Haptics.success()
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1; finishVoice()
     }
@@ -505,7 +505,7 @@ final class JourneyAssistantSession: ObservableObject {
     /// The numbered stops above the routes: show that leg, or ask which place when unsure.
     func showLeg(_ index: Int) {
         guard let trip = model.assistantTrip, trip.stops.indices.contains(index), index != trip.leg, !busy else { return }
-        UISelectionFeedbackGenerator().selectionChanged()
+        Haptics.selection()
         if trip.stops[index].place != nil {
             JourneyDiagnostics.shared.record("ai-plan leg=\(index + 1)")
             model.showAssistantLeg(index)
@@ -540,7 +540,7 @@ struct AssistantInlineStatus: View {
                 Spacer(minLength: 0)
                 Button(AppText.text("取消")) { session.cancel() }.font(.subheadline).frame(minHeight: 44)
             }
-            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
+            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: MapChrome.shape(.row))
             .accessibilityIdentifier("ai-inline-preparing")
         } else if speech.listening, !session.presented {
             HStack(spacing: 12) {
@@ -550,7 +550,7 @@ struct AssistantInlineStatus: View {
                 Spacer(minLength: 0)
                 Button(AppText.text("完成")) { speech.finish() }.font(.subheadline.weight(.semibold)).frame(minHeight: 44)
             }
-            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
+            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: MapChrome.shape(.row))
             .accessibilityElement(children: .contain).accessibilityIdentifier("ai-inline-listening")
         } else if session.busy, !session.presented {
             HStack(spacing: 12) {
@@ -565,7 +565,7 @@ struct AssistantInlineStatus: View {
                 Spacer(minLength: 0)
                 Button(AppText.text("取消")) { session.cancel() }.font(.subheadline).frame(minHeight: 44)
             }
-            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
+            .padding(12).background(Color(uiColor: .tertiarySystemFill), in: MapChrome.shape(.row))
             .accessibilityElement(children: .contain).accessibilityIdentifier("ai-inline-progress")
         } else if let issue = speech.problem, !session.presented {
             Text(issue).font(.footnote).foregroundStyle(.secondary)
@@ -809,7 +809,7 @@ struct TripConditionsBar: View {
                     Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
                         .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
                 }
-                .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: RoundedRectangle(cornerRadius: Metrics.fieldRadius, style: .continuous))
+                .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: MapChrome.shape(.row))
                 .accessibilityIdentifier("journey-comparison")
             }
             if let trip, trip.stops.count > 1 { stopStrip(trip) }
@@ -983,7 +983,7 @@ struct TripConditionsBar: View {
             }
         }
         .padding(.horizontal, 10).frame(minHeight: 40)
-        .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 10))
+        .background(Color(uiColor: .secondarySystemFill), in: MapChrome.shape(.row))
     }
     private func submitChange() {
         let text = change; change = ""; editing = false; changeFocused = false
@@ -1256,7 +1256,7 @@ struct VoiceAssistantView: View {
         .onChange(of: session.voiceClosing) { _, closing in reveal(!closing) }
         .onChange(of: phase) { old, new in feedback(from: old, to: new) }
         .onChange(of: speech.transcript.isEmpty) { _, empty in
-            if !empty { UISelectionFeedbackGenerator().selectionChanged() }   // the first words were heard
+            if !empty { Haptics.selection() }   // the first words were heard
         }
         .onChange(of: scenePhase) { _, value in
             // Back from Settings with both permissions on: start listening right away.
@@ -1406,7 +1406,7 @@ struct VoiceAssistantView: View {
     /// 說完了: a ring fills while a pause is timed, so stopping by itself is never a surprise.
     private var mainButton: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Haptics.stage()
             speech.finish()
         } label: {
             VStack(spacing: 8) {
@@ -1433,7 +1433,7 @@ struct VoiceAssistantView: View {
 
     private func orbTapped() {
         switch phase {
-        case .listening: UIImpactFeedbackGenerator(style: .medium).impactOccurred(); speech.finish()
+        case .listening: Haptics.stage(); speech.finish()
         case .permission: session.allowVoice()
         case .problem: session.listen()
         default: break
@@ -1441,9 +1441,9 @@ struct VoiceAssistantView: View {
     }
     private func feedback(from old: VoicePhase, to new: VoicePhase) {
         switch new {
-        case .understanding where old == .listening: UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
-        case .problem, .blocked: UINotificationFeedbackGenerator().notificationOccurred(.warning)
-        case .consent: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        case .understanding where old == .listening: Haptics.heard()
+        case .problem, .blocked: Haptics.warning()
+        case .consent: Haptics.prompt()
         default: break
         }
     }
@@ -1623,7 +1623,7 @@ struct VoiceStartCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button {
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            Haptics.stage()
             action()
         } label: {
             HStack(spacing: 14) {
@@ -1636,15 +1636,15 @@ struct VoiceStartCard: View {
             }
             .padding(.vertical, Metrics.gap).padding(.leading, Metrics.inset - 4).padding(.trailing, Metrics.inset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: MapChrome.shape(.panel))
             .overlay(
-                RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous)
+                MapChrome.shape(.panel)
                     .strokeBorder(LinearGradient(colors: [Color(red: 0.28, green: 0.48, blue: 1).opacity(0.6),
                                                           Color(red: 0.66, green: 0.36, blue: 1).opacity(0.5),
                                                           Color(red: 0.18, green: 0.82, blue: 0.96).opacity(0.5)],
                                                  startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
+            .contentShape(MapChrome.shape(.panel))
         }
         .buttonStyle(VoicePressStyle())
         .accessibilityLabel(AppText.text("用說的規劃"))
@@ -1788,13 +1788,13 @@ struct VoiceGlowView: View {
         .onChange(of: session.voiceClosing) { _, closing in reveal(!closing) }
         .onChange(of: phase) { old, new in
             switch new {
-            case .understanding where old == .listening: UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7)
-            case .problem, .blocked: UINotificationFeedbackGenerator().notificationOccurred(.warning)
-            case .consent: UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            case .understanding where old == .listening: Haptics.heard()
+            case .problem, .blocked: Haptics.warning()
+            case .consent: Haptics.prompt()
             default: break
             }
         }
-        .onChange(of: speech.transcript.isEmpty) { _, empty in if !empty { UISelectionFeedbackGenerator().selectionChanged() } }
+        .onChange(of: speech.transcript.isEmpty) { _, empty in if !empty { Haptics.selection() } }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
             // Back from Settings with both permissions on: start listening right away.
             if phase == .blocked, SpeechInput.permission == .granted { session.listen() }
@@ -1879,8 +1879,8 @@ struct VoiceGlowView: View {
             }
         }
         .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 28, style: .continuous).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
+        .background(.regularMaterial, in: MapChrome.shape(.card))
+        .overlay(MapChrome.shape(.card).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: phase)
     }
@@ -1895,7 +1895,7 @@ struct VoiceGlowView: View {
                 .buttonStyle(VoicePressStyle()).foregroundStyle(.primary)
                 .accessibilityLabel(AppText.text("改用打字")).accessibilityIdentifier("voice-type")
                 Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    Haptics.stage()
                     speech.finish()
                 } label: {
                     ZStack {
@@ -1937,7 +1937,7 @@ struct VoiceStylePicker: View {
         let chosen = selection == style.rawValue
         return Button {
             guard !chosen else { return }
-            UISelectionFeedbackGenerator().selectionChanged()
+            Haptics.selection()
             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
         } label: {
             VStack(spacing: 10) {

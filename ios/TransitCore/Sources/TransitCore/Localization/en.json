@@ -1017,5 +1017,9 @@
   "暫時無法取得站牌與路線": "Can’t load stops and routes",
   "請確認網路連線後重新整理。": "Check your connection, then refresh.",
   "夜間導航使用深色": "Dark appearance for night navigation",
-  "日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。": "Between sunset and sunrise, navigation switches the screen and map to dark to reduce glare."
+  "日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。": "Between sunset and sunrise, navigation switches the screen and map to dark to reduce glare.",
+  "載入公告中": "Loading notices",
+  "目前沒有交通公告": "No traffic notices right now",
+  "公運處發布新的公告後會列在這裡。": "New notices from the Public Transportation Office appear here.",
+  "試試路線號碼、站名或道路名稱。": "Try a route number, stop or road name."
 }

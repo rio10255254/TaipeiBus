@@ -61,7 +61,18 @@ struct OfficialNoticesView: View {
                 }
                 Link(AppText.text("公運處公告原文"), destination: OfficialNotices.newsURL)
             }
-            if store.loading { ProgressView() }
+            if filtered.isEmpty {
+                // The first load holds the list's shape; afterwards say why nothing is listed.
+                if store.loading {
+                    LoadingRows(count: 4, label: AppText.text("載入公告中"))
+                        .listRowSeparator(.hidden).accessibilityIdentifier("notices-loading")
+                } else if !store.failed {
+                    EmptyStateView(symbol: query.isEmpty ? "checkmark.circle" : "magnifyingglass",
+                                   title: query.isEmpty ? AppText.text("目前沒有交通公告") : AppText.text("找不到「%@」", query),
+                                   message: AppText.text(query.isEmpty ? "公運處發布新的公告後會列在這裡。" : "試試路線號碼、站名或道路名稱。"))
+                        .listRowSeparator(.hidden).accessibilityIdentifier("notices-empty")
+                }
+            } else if store.loading { ProgressView() }
             ForEach(filtered) { notice in
                 NavigationLink {
                     OfficialNoticeDetail(notice: notice)

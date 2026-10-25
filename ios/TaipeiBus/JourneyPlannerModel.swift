@@ -1715,7 +1715,7 @@ final class JourneyPlannerModel: ObservableObject {
         guard started, stepIndex < steps.count else { return }
         defer { onNavigationChange?() }
         stepIndex += 1; mapRevision += 1
-        if arrived { Haptics.arrived() } else { Haptics.stage() }
+        if arrived { Haptics.success() } else { Haptics.stage() }
     }
     func boardCurrentRide() {
         guard let index = boardingRideIndex,

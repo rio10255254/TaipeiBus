@@ -29,7 +29,7 @@ struct BoardingPlateScanner: View {
                 if authorized, message == nil {
                     PlateCamera(active: scenePhase == .active, recognized: { text = $0 }, failed: {
                         message = AppText.text("相機目前無法使用，請手動選擇車牌。")
-                    }).frame(maxHeight: 280).clipShape(RoundedRectangle(cornerRadius: 16))
+                    }).frame(maxHeight: 280).clipShape(MapChrome.shape(.row))
                         .accessibilityLabel(AppText.text("將車牌放入相機畫面"))
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
                         let candidates = matches(at: timeline.date)

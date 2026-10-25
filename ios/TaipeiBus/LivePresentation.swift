@@ -131,10 +131,19 @@ private struct LiveNumericText<Value: Equatable>: ViewModifier {
 enum Haptics {
     /// Picking a stop, route, bus, key or map mode.
     static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
-    /// The trip moves to its next stage: start, board, alight or a changed station.
+    /// A deliberate step: starting a trip, boarding, alighting, a changed station, or starting
+    /// and finishing a spoken request.
     static func stage() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
-    /// The rider reached the destination.
-    static func arrived() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    /// Something finished: the destination reached, or a spoken trip planned.
+    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+    /// Something needs attention: the assistant could not continue.
+    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+    /// The microphone opened.
+    static func listening() { UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9) }
+    /// The sentence was heard and is being understood.
+    static func heard() { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7) }
+    /// A question for the rider, such as consent to go online.
+    static func prompt() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
 }
 
 private struct NativeActionSurface: ViewModifier {
@@ -252,6 +261,13 @@ enum MapChrome {
     static let caution = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? UIColor(liveHex: "#FFB340") : UIColor(liveHex: "#B35900") })
 }
 
+extension MapChrome {
+    /// The continuous rounded shape for `corner` at its design size, for views that do not
+    /// follow the remote appearance settings (the assistant screens, sheets of system text).
+    static func shape(_ corner: Corner) -> RoundedRectangle {
+        RoundedRectangle(cornerRadius: corner.rawValue, style: .continuous)
+    }
+}
 extension LiveSettings {
     /// The continuous rounded shape for `corner`, scaled by the remote corner setting.
     func shape(_ corner: MapChrome.Corner) -> RoundedRectangle {

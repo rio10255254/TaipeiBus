@@ -672,8 +672,8 @@ enum Metrics {
     static let row: CGFloat = 56
     /// Chips and small capsules; still a comfortable tap with their padding.
     static let chip: CGFloat = 36
-    static let fieldRadius: CGFloat = 14
-    static let cardRadius: CGFloat = 20
+    static let fieldRadius = MapChrome.Corner.row.rawValue
+    static let cardRadius = MapChrome.Corner.panel.rawValue
 }
 
 struct PhonePressStyle: ButtonStyle {
@@ -829,7 +829,7 @@ private struct HomeSearchRow: View {
                 // Speaking is the first way to plan: a tinted glass button of its own, never content
                 // inside the search glass (there it rendered as a blurred glow on phones).
                 Button {
-                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                    Haptics.stage()
                     voice()
                 } label: {
                     Image(systemName: "mic.fill").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)

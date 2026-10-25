@@ -125,7 +125,7 @@ final class SpeechInput: ObservableObject {
         }
         self.request = request
         preparing = false; listening = true
-        UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9)
+        Haptics.listening()
         JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
         let current = attempt
         // Recognition results arrive on a background queue; they are handed to the main actor here.
