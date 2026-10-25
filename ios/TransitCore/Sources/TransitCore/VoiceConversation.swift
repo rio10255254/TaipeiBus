@@ -208,6 +208,25 @@ public enum SpokenAnswer {
         return nil
     }
 
+    /// The text handed to the speech voice: route numbers of three or more digits are read digit by digit,
+    /// as riders say them (307 is 三零七, not 三百零七). The caption keeps the written form.
+    public static func speakable(_ text: String, routes: [String]) -> String {
+        let expression = try! NSRegularExpression(pattern: "[0-9]{3,}")
+        let numbers = Set(routes.flatMap { route in
+            expression.matches(in: route, range: NSRange(route.startIndex..., in: route)).compactMap { Range($0.range, in: route).map { String(route[$0]) } }
+        })
+        guard !numbers.isEmpty else { return text }
+        var result = "", cursor = text.startIndex
+        for match in expression.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(match.range, in: text) else { continue }
+            let digits = String(text[range])
+            result += String(text[cursor..<range.lowerBound])
+            result += numbers.contains(digits) ? digits.map(String.init).joined(separator: " ") : digits
+            cursor = range.upperBound
+        }
+        return result + String(text[cursor...])
+    }
+
     /// Full-width digits read as ASCII, 臺 as 台, so 「３０７」 matches 307.
     static func normalized(_ text: String) -> String {
         let scalars = text.unicodeScalars.map { scalar -> Character in

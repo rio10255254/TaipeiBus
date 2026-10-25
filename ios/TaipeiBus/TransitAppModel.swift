@@ -648,6 +648,8 @@ final class TransitAppModel: ObservableObject {
     @Published private(set) var assistantTrip: AssistantTrip?
     /// 用一句話規劃 for the whole app: the route panel, Siri and the sheet share one request.
     private(set) lazy var assistant = JourneyAssistantSession(model: self)
+    /// The voice conversation (Pro).
+    private(set) lazy var voiceChat = VoiceConversation(model: self)
     /// Keep the routes, drop what was understood (the banner's ✕).
     func forgetAssistantTrip() {
         assistantTrip = nil

@@ -1717,6 +1717,10 @@ struct EdgeGlow: View {
     var scale: CGFloat = 1
     @State private var spin = false
     @State private var pulse = false
+    /// Spelled out so other files can make one; the private animation state keeps its own defaults.
+    init(mood: VoiceOrb.Mood, level: VoiceLevel = .silent, reduceMotion: Bool = false, corner: CGFloat? = nil, scale: CGFloat = 1) {
+        self.mood = mood; self.level = level; self.reduceMotion = reduceMotion; self.corner = corner; self.scale = scale
+    }
     var body: some View {
         GeometryReader { box in
             // Rounded like the display on Face ID iPhones; the blur hides small differences.

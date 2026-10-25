@@ -869,9 +869,15 @@ enum AssistantServer {
     /// One chat request through the server; the reply body and HTTP status. 429 means today's
     /// allowance is used up.
     static func send(_ chat: [String: Any], timeout: TimeInterval, session: URLSession) async throws -> (Data, Int) {
-        guard let base = baseURL, let url = URL(string: base + "/functions/v1/understand") else { throw OnlineJourneyReader.Failure.notConfigured }
         // Tells the server which consent this rider gave, so a build that only named Groq stays on Groq.
-        var body: [String: Any] = ["request": chat, "consent": consentVersion]
+        try await post("understand", body: ["request": chat, "consent": consentVersion], timeout: timeout, session: session)
+    }
+
+    /// One request to a function of the app's server, signed in as this phone's anonymous identity and
+    /// carrying the Pro proof; the reply body and HTTP status.
+    static func post(_ function: String, body: [String: Any], timeout: TimeInterval, session: URLSession = .shared) async throws -> (Data, Int) {
+        guard let base = baseURL, let url = URL(string: base + "/functions/v1/" + function) else { throw OnlineJourneyReader.Failure.notConfigured }
+        var body = body
         if let jws = proof.value { body["proof"] = jws }
         let payload = try JSONSerialization.data(withJSONObject: body)
         var token = try await account.token(session: session)

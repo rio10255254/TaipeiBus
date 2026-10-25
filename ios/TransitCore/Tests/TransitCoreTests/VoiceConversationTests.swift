@@ -80,6 +80,11 @@ final class VoiceConversationTests: XCTestCase {
                        .success("想早一點到的話可以改搭捷運。"), "早一點 is not one o'clock")
     }
 
+    func testRouteNumbersAreSpokenDigitByDigit() {
+        XCTAssertEqual(SpokenAnswer.speakable("307 約 12 分鐘到，或搭 紅25。", routes: ["307", "紅25"]), "3 0 7 約 12 分鐘到，或搭 紅25。")
+        XCTAssertEqual(SpokenAnswer.speakable("1200 公尺", routes: ["307"]), "1200 公尺", "Only route numbers")
+    }
+
     func testAnUnknownSlotIsRefused() {
         XCTAssertEqual(SpokenAnswer.render("{r9}", values: values, known: known), .failure(.unknownSlot("r9")))
         XCTAssertEqual(SpokenAnswer.render(" ", values: values, known: known), .failure(.empty))
