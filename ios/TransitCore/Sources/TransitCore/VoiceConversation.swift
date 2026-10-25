@@ -161,6 +161,99 @@ extension VoiceAction {
     }
 }
 
+/// The answer as it streams in, cut into whole sentences so the first one can be spoken while the rest
+/// is still being written. A sentence ends at 。！？ and takes any closing quote already there; a slot
+/// never holds one, so it is never cut in half.
+public struct SpokenSentences: Sendable {
+    private var text = ""
+    public init() {}
+
+    /// The sentences this piece of the answer completes, in order.
+    public mutating func push(_ piece: String) -> [String] {
+        text += piece
+        var sentences: [String] = []
+        while let end = Self.end(in: text) {
+            // A closing quote that arrived after its sentence went out is not spoken on its own.
+            let sentence = String(text[..<end]).trimmingCharacters(in: .whitespacesAndNewlines)
+                .drop(while: Self.closers.contains).trimmingCharacters(in: .whitespacesAndNewlines)
+            text = String(text[end...])
+            if !sentence.isEmpty { sentences.append(sentence) }
+        }
+        return sentences
+    }
+
+    /// Whatever is left once the answer is complete: a last sentence without its full stop.
+    public mutating func finish() -> String {
+        defer { text = "" }
+        return String(text.trimmingCharacters(in: .whitespacesAndNewlines).drop(while: Self.closers.contains))
+    }
+
+    private static let stops: Set<Character> = ["。", "！", "？", "!", "?", "\n"]
+    private static let closers: Set<Character> = ["」", "』", "）", ")", "\""]
+
+    /// Just past the first full stop and its closing quotes, once there is a sentence there.
+    private static func end(in text: String) -> String.Index? {
+        guard var index = text.firstIndex(where: { stops.contains($0) }) else { return nil }
+        index = text.index(after: index)
+        while index < text.endIndex, closers.contains(text[index]) { index = text.index(after: index) }
+        return index
+    }
+}
+
+/// One answer as it streams in. Each finished sentence is filled and checked like a whole answer and
+/// handed out to be spoken as soon as it passes. One that cannot pass yet (its number may be one of the
+/// choices that come with the end of the reply) holds back itself and everything after it, so the
+/// answer is never spoken out of order, and is checked once more at the end.
+public struct SpokenTurn: Sendable {
+    private let values: [String: String]
+    private let known: [String]
+    private var sentences = SpokenSentences()
+    private var held = ""
+    /// The sentences handed out, as filled in.
+    public private(set) var spoken: [String] = []
+    /// Why what was held back could not be spoken in the end.
+    public private(set) var refused: SpokenAnswer.Failure?
+
+    public init(context: VoiceContext, heard: String) {
+        values = context.values
+        known = context.names + [heard]
+    }
+
+    /// The sentences ready to speak after this piece of the answer.
+    public mutating func receive(_ words: String) -> [String] { offer(sentences.push(words)) }
+
+    /// All the words are in: the last sentence, even without a full stop.
+    public mutating func finishWords() -> [String] {
+        let rest = sentences.finish()
+        return rest.isEmpty ? [] : offer([rest])
+    }
+
+    /// The reply is complete: anything still unspoken, checked against its choices too.
+    public mutating func finish(choices: [String]) -> [String] {
+        var lines = finishWords()
+        let rest = held
+        held = ""
+        guard !rest.isEmpty else { return lines }
+        switch SpokenAnswer.render(rest, values: values, known: known + choices) {
+        case .success(let line): spoken.append(line); lines.append(line)
+        case .failure(let failure): refused = failure
+        }
+        return lines
+    }
+
+    private mutating func offer(_ new: [String]) -> [String] {
+        var lines: [String] = []
+        for sentence in new {
+            if held.isEmpty, case .success(let line) = SpokenAnswer.render(sentence, values: values, known: known) {
+                spoken.append(line); lines.append(line)
+            } else {
+                held += sentence
+            }
+        }
+        return lines
+    }
+}
+
 /// The sentence that is actually spoken: slots filled with the app's own values, and refused when it
 /// still holds a number the app never gave, because a route, stop or time the model made up must not
 /// reach the rider's ear.
@@ -225,8 +318,9 @@ public enum SpokenAnswer {
         let plain = normalized(text)
         let patterns = [
             "[0-9]+",
-            // 三分鐘, 兩站, 十點: Chinese numbers with a unit. 快一點, 早一點 and the like ask for more of something.
-            "(?<![快慢早晚多少好差])[零〇一二兩三四五六七八九十百]+(分鐘|分|站|點|號|班|次|公里|公尺|秒|輛|格|元)",
+            // 三分鐘, 兩站, 十點: Chinese numbers with a unit. 快一點, 早一點 and the like ask for more of
+            // something, and 哪一班, 下一站, 這一班 name one rather than count.
+            "(?<![快慢早晚多少好差])(?:(?<![哪下上這那同每某])一|[零〇二兩三四五六七八九十百])[零〇一二兩三四五六七八九十百]*(分鐘|分|站|點|號|班|次|公里|公尺|秒|輛|格|元)",
         ]
         for pattern in patterns {
             let expression = try! NSRegularExpression(pattern: pattern)

@@ -876,29 +876,60 @@ enum AssistantServer {
     /// One request to a function of the app's server, signed in as this phone's anonymous identity and
     /// carrying the Pro proof; the reply body and HTTP status.
     static func post(_ function: String, body: [String: Any], timeout: TimeInterval, session: URLSession = .shared) async throws -> (Data, Int) {
-        guard let base = baseURL, let url = URL(string: base + "/functions/v1/" + function) else { throw OnlineJourneyReader.Failure.notConfigured }
-        var body = body
-        if let jws = proof.value { body["proof"] = jws }
-        let payload = try JSONSerialization.data(withJSONObject: body)
+        let (url, payload) = try prepared(function, body: body)
         var token = try await account.token(session: session)
         for attempt in 0..<2 {
-            var request = URLRequest(url: url, timeoutInterval: timeout)
-            request.httpMethod = "POST"
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            request.setValue(publicKey, forHTTPHeaderField: "apikey")
-            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.httpBody = payload
-            let (data, response) = try await session.data(for: request)
+            let (data, response) = try await session.data(for: request(url, payload: payload, token: token, timeout: timeout))
             let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             // An expired or revoked identity: sign in again once.
             if status == 401, attempt == 0 { token = try await account.token(session: session, renew: true); continue }
-            let tier = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Assistant-Tier") ?? "?"
-            let model = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["model"] as? String ?? "?"
-            lastServed.value = "served=\(model) tier=\(tier)"
-            if status == 200, model != "?" { lastModel.value = model }
+            let model = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["model"] as? String
+            answered(by: status == 200 ? model : nil, response: response)
             return (data, status)
         }
         throw OnlineJourneyReader.Failure.http(401)
+    }
+
+    /// The same request answered as the server writes it, as server-sent events (`data: {...}` lines),
+    /// so the first sentence can be spoken before the reply is finished. The caller reports the model
+    /// the last event names.
+    static func stream(_ function: String, body: [String: Any], timeout: TimeInterval, session: URLSession = .shared) async throws -> (lines: AsyncLineSequence<URLSession.AsyncBytes>, response: URLResponse) {
+        let (url, payload) = try prepared(function, body: body)
+        var token = try await account.token(session: session)
+        for attempt in 0..<2 {
+            let (bytes, response) = try await session.bytes(for: request(url, payload: payload, token: token, timeout: timeout))
+            if (response as? HTTPURLResponse)?.statusCode == 401, attempt == 0 {
+                bytes.task.cancel()
+                token = try await account.token(session: session, renew: true)
+                continue
+            }
+            return (bytes.lines, response)
+        }
+        throw OnlineJourneyReader.Failure.http(401)
+    }
+
+    /// Records what the server used for a reply: the model, when it answered, and the tier it granted.
+    static func answered(by model: String?, response: URLResponse) {
+        let tier = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "X-Assistant-Tier") ?? "?"
+        lastServed.value = "served=\(model ?? "?") tier=\(tier)"
+        if let model { lastModel.value = model }
+    }
+
+    private static func prepared(_ function: String, body: [String: Any]) throws -> (URL, Data) {
+        guard let base = baseURL, let url = URL(string: base + "/functions/v1/" + function) else { throw OnlineJourneyReader.Failure.notConfigured }
+        var body = body
+        if let jws = proof.value { body["proof"] = jws }
+        return (url, try JSONSerialization.data(withJSONObject: body))
+    }
+
+    private static func request(_ url: URL, payload: Data, token: String, timeout: TimeInterval) -> URLRequest {
+        var request = URLRequest(url: url, timeoutInterval: timeout)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.setValue(publicKey, forHTTPHeaderField: "apikey")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = payload
+        return request
     }
 
     /// The anonymous identity: a short-lived access token, renewed with a refresh token kept in the

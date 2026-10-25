@@ -9,6 +9,13 @@ import TransitCore
 final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published private(set) var speaking = false
     private let synthesizer = AVSpeechSynthesizer()
+    /// Sentences handed to the synthesizer and not yet spoken.
+    private var queued: [AVSpeechUtterance] = []
+    /// Sentences cut off by `stop()`, kept until they report back late so that report cannot end the
+    /// next answer early.
+    private var stopped: [AVSpeechUtterance] = []
+    /// With VoiceOver on, the whole answer is announced at the end in the rider's own voice settings.
+    private var announcement = ""
     private var done: CheckedContinuation<Void, Never>?
 
     override init() {
@@ -26,28 +33,46 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     /// Returns when the sentence has been spoken or `stop()` cut it short.
     func speak(_ text: String, routes: [String] = [], language: AppLanguage = .current) async {
         stop()
+        enqueue(text, routes: routes, language: language)
+        await finishSpeaking()
+    }
+
+    /// Speaks a sentence after the ones already queued, without waiting: the first sentence of an
+    /// answer starts while the rest is still on its way.
+    func enqueue(_ text: String, routes: [String] = [], language: AppLanguage = .current) {
         guard !text.isEmpty else { return }
         // VoiceOver reads it in the rider's own voice settings instead of a second voice over it.
-        if UIAccessibility.isVoiceOverRunning {
+        if UIAccessibility.isVoiceOverRunning { announcement += text; return }
+        if queued.isEmpty {
+            let session = AVAudioSession.sharedInstance()
+            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            try? session.setActive(true)
+        }
+        let utterance = AVSpeechUtterance(string: SpokenAnswer.speakable(text, routes: routes))
+        utterance.voice = Self.voice(language: language)
+        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * 1.06)
+        queued.append(utterance)
+        speaking = true
+        synthesizer.speak(utterance)
+    }
+
+    /// Returns once everything queued has been spoken or `stop()` cut it short.
+    func finishSpeaking() async {
+        if !announcement.isEmpty {
+            let text = announcement
+            announcement = ""
             UIAccessibility.post(notification: .announcement, argument: text)
             try? await Task.sleep(for: .seconds(min(8, 0.6 + Double(text.count) * 0.2)))
             return
         }
-        let session = AVAudioSession.sharedInstance()
-        try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
-        try? session.setActive(true)
-        let utterance = AVSpeechUtterance(string: SpokenAnswer.speakable(text, routes: routes))
-        utterance.voice = Self.voice(language: language)
-        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * 1.06)
-        speaking = true
-        await withCheckedContinuation { continuation in
-            done = continuation
-            synthesizer.speak(utterance)
-        }
-        speaking = false
+        guard !queued.isEmpty else { return }
+        await withCheckedContinuation { continuation in done = continuation }
     }
 
     func stop() {
+        stopped = Array((stopped + queued).suffix(8))
+        queued = []
+        announcement = ""
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
         finish()
     }
@@ -57,11 +82,20 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         speaking = false
     }
 
+    private func spoken(_ utterance: ObjectIdentifier) {
+        if let index = stopped.firstIndex(where: { ObjectIdentifier($0) == utterance }) { stopped.remove(at: index); return }
+        guard let index = queued.firstIndex(where: { ObjectIdentifier($0) == utterance }) else { return }
+        queued.remove(at: index)
+        if queued.isEmpty { finish() }
+    }
+
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finish() }
+        let id = ObjectIdentifier(utterance)
+        Task { @MainActor in self.spoken(id) }
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
-        Task { @MainActor in self.finish() }
+        let id = ObjectIdentifier(utterance)
+        Task { @MainActor in self.spoken(id) }
     }
 }
 
@@ -199,12 +233,12 @@ final class VoiceConversation: ObservableObject {
         phase = .thinking; choices = []
         let context = VoiceStateBuilder(model: model).context(pending: pending)
         let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
-                                   "consent": Self.consentVersion]
+                                   "consent": Self.consentVersion, "stream": true]
+        var answer = SpokenTurn(context: context, heard: text)
+        func speak(_ sentence: String) { speakPart(sentence, routes: context.names) }
         do {
-            let (data, status) = try await AssistantServer.post("converse", body: body, timeout: 9)
-            try Task.checkCancellation()
-            let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
-            switch status {
+            let (lines, response) = try await AssistantServer.stream("converse", body: body, timeout: 9)
+            switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
             case 200: break
             case 403:
                 model.showingProPlans = true
@@ -212,11 +246,25 @@ final class VoiceConversation: ObservableObject {
             case 429: return respond("今天的語音對話次數用完了，明天再聊，或改用打字搜尋。", followUp: false)
             default: return respond("我現在連不上，請稍後再試一次。", followUp: false)
             }
-            if let used = root["used"] as? Int, let limit = root["limit"] as? Int { remaining = max(0, limit - used) }
-            guard let json = root["reply"] as? [String: Any], let reply = VoiceReply(json: json) else {
-                return respond("我沒聽懂，可以換個說法嗎？", followUp: true)
+            var final: [String: Any]?
+            for try await line in lines {
+                try Task.checkCancellation()
+                guard line.hasPrefix("data:"),
+                      let event = (try? JSONSerialization.jsonObject(with: Data(line.dropFirst(5).utf8))) as? [String: Any] else { continue }
+                // The first sentence is spoken while the rest of the answer is still being written.
+                if let words = event["say"] as? String { answer.receive(words).forEach(speak) }
+                if event["said"] as? Bool == true { answer.finishWords().forEach(speak) }
+                if event["reply"] != nil || event["error"] != nil { final = event; break }
             }
-            // The state had no answer: look it up, then ask once more with what was found.
+            try Task.checkCancellation()
+            guard let final, let json = final["reply"] as? [String: Any], let reply = VoiceReply(json: json) else {
+                // Cut off after some of the answer was spoken: let the rider go on from there.
+                if !answer.spoken.isEmpty { return respond(nil, followUp: true) }
+                return respond("我現在連不上，請稍後再試一次。", followUp: true)
+            }
+            AssistantServer.answered(by: final["model"] as? String, response: response)
+            if let used = final["used"] as? Int, let limit = final["limit"] as? Int { remaining = max(0, limit - used) }
+            // The state had no answer: look it up while 「我查一下」 is spoken, then ask once more.
             if lookups > 0, let lookup = reply.actions.first(where: Self.isLookup),
                await self.lookup(lookup) {
                 return await turn(text, lookups: lookups - 1)
@@ -224,23 +272,33 @@ final class VoiceConversation: ObservableObject {
             for action in reply.actions { run(action) }
             pending = reply.confirm
             choices = reply.choices
-            let known = context.names + [text] + reply.choices
-            let spoken: String
-            switch SpokenAnswer.render(reply.say, values: context.values, known: known) {
-            case .success(let sentence): spoken = sentence
-            case .failure(let failure):
+            answer.finish(choices: reply.choices).forEach(speak)
+            var said = answer.spoken.joined()
+            if let failure = answer.refused {
                 JourneyDiagnostics.shared.record("voice refused \(failure)")
                 // A number the app cannot vouch for is never read out; a slot it never offered means
                 // the model had nothing to go on.
-                if case .unknownSlot = failure { spoken = "這個我現在查不到，可以換個方式問嗎？" }
-                else { spoken = "結果在畫面上，請看一下。" }
+                let fallback: String
+                if case .unknownSlot = failure { fallback = "這個我現在查不到，可以換個方式問嗎？" }
+                else { fallback = "結果在畫面上，請看一下。" }
+                speak(fallback)
+                said += fallback
             }
-            history.append(user: text, said: spoken)
-            respond(spoken, followUp: true, routes: context.names)
+            history.append(user: text, said: said)
+            respond(nil, followUp: true)
         } catch {
             guard !Task.isCancelled else { return }
+            if !answer.spoken.isEmpty { return respond(nil, followUp: true) }
             respond("連線不穩，請再說一次。", followUp: true)
         }
+    }
+
+    /// One sentence of the answer, after any already queued; the caption grows with it.
+    private func speakPart(_ sentence: String, routes: [String]) {
+        guard !Task.isCancelled, active else { return }
+        caption = phase == .speaking ? caption + sentence : sentence
+        phase = .speaking
+        output.enqueue(sentence, routes: routes, language: .traditionalChinese)
     }
 
     private static func isLookup(_ action: VoiceAction) -> Bool {
@@ -248,11 +306,12 @@ final class VoiceConversation: ObservableObject {
         return false
     }
 
-    /// Speak, then keep listening so the rider can simply go on talking.
-    private func respond(_ sentence: String, followUp: Bool, routes: [String] = []) {
+    /// Speak, then keep listening so the rider can simply go on talking. Without a sentence, it waits
+    /// for what is already being spoken.
+    private func respond(_ sentence: String?, followUp: Bool, routes: [String] = []) {
         work?.cancel()
         work = Task {
-            await say(sentence, routes: routes)
+            if let sentence { await say(sentence, routes: routes) } else { await output.finishSpeaking() }
             guard !Task.isCancelled, active else { return }
             if followUp || pending != nil || !choices.isEmpty { listen(firstTurn: false) } else { end() }
         }
