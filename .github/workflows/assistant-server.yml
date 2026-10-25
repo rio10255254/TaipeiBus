@@ -42,6 +42,7 @@ jobs:
         run: |
           deno test --config supabase/functions/understand/deno.json --no-lock --allow-env --allow-net supabase/functions/understand/
           deno test --config supabase/functions/converse/deno.json --no-lock --allow-env --allow-net supabase/functions/converse/
+          deno test --config supabase/functions/converse/deno.json --no-lock --allow-env --allow-net supabase/functions/_shared/
       - name: Stop here until the project is set up
         id: ready
         run: |
