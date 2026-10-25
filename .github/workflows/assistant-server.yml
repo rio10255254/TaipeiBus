@@ -97,3 +97,9 @@ jobs:
           print("reply:", content[:200] if content else data)
           PY
           [ "$code" = "200" ]
+          # A Pro phone also sends its signed subscription; a bad or unverifiable one must still be served.
+          proofbody='{"proof":"eyJhbGciOiJFUzI1NiJ9.e30.c2ln","request":{"model":"openai/gpt-oss-120b","max_completion_tokens":300,"messages":[{"role":"system","content":"只輸出 JSON {\"destination\":\"\"}"},{"role":"user","content":"去台大"}]}}'
+          code=$(curl -sS -o "$RUNNER_TEMP/reply2.json" -w '%{http_code}' -X POST "$url/functions/v1/understand" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$proofbody")
+          echo "understand with an unverifiable Pro proof → HTTP $code"; head -c 300 "$RUNNER_TEMP/reply2.json"; echo
+          [ "$code" = "200" ]
