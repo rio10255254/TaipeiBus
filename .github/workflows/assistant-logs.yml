@@ -21,36 +21,25 @@ jobs:
     steps:
       - name: Read recent function error lines
         run: |
+          ref=$(printf %s "$SUPABASE_PROJECT_REF" | tr -d '\r\n ')
           start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
           end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          sql="select timestamp, event_message from function_logs where timestamp > '$start' order by timestamp desc limit 300"
-          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs" \
-            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-            --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
-            -o logs.json -w 'HTTP %{http_code}\n'
+          query() {
+            curl -sS -G "https://api.supabase.com/v1/projects/$ref/analytics/endpoints/logs" \
+              -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+              --data-urlencode "sql=$1" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
+              -o "$2" -w "HTTP %{http_code}\n"
+          }
+          query "SELECT source_name, count() AS n FROM logs GROUP BY source_name" sources.json
+          query "SELECT timestamp, source_name, event_message FROM logs WHERE event_message LIKE '%pro check failed%' OR event_message LIKE '%transaction not verified%' OR event_message LIKE '%apple roots%' OR event_message LIKE '%claude stream failed%' OR event_message LIKE '%no answer%' ORDER BY timestamp DESC LIMIT 60" errors.json
           python3 - <<'EOF'
           import json, re
-          data = json.load(open('logs.json'))
-          if 'result' not in data:
-              print('no result:', str(data)[:300])
-          keep = re.compile(r'^(pro check failed|transaction not verified|apple roots unavailable|claude failed|claude stream failed|no answer)')
-          rows = [row for row in data.get('result') or [] if keep.match(str(row.get('event_message', '')).strip())]
-          print(len(data.get('result') or []), 'lines,', len(rows), 'matching')
-          for row in rows[:80]:
-              message = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', str(row['event_message']))
-              print(row['timestamp'], message[:300])
+          for name in ('sources.json', 'errors.json'):
+              data = json.load(open(name))
+              if 'result' not in data or data.get('error'):
+                  print(name, 'error:', str(data)[:300]); continue
+              print('==', name, len(data['result']), 'rows')
+              for row in data['result'][:60]:
+                  text = re.sub(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', json.dumps(row, ensure_ascii=False))
+                  print(text[:400])
           EOF
-      - name: Read recent function responses
-        run: |
-          start=$(date -u -d '-6 hours' +%Y-%m-%dT%H:%M:%SZ)
-          end=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          sql="select timestamp, response.status_code, request.method, request.pathname from function_edge_logs cross join unnest(metadata) as m cross join unnest(m.response) as response cross join unnest(m.request) as request where timestamp > '$start' order by timestamp desc limit 60"
-          curl -sS -G "https://api.supabase.com/v1/projects/$(printf %s "$SUPABASE_PROJECT_REF" | tr -d "\r\n ")/analytics/endpoints/logs" \
-            -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
-            --data-urlencode "sql=$sql" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
-            -o edge.json -w 'HTTP %{http_code}\n'
-          python3 -c "
-          import json; d=json.load(open('edge.json'))
-          print(str(d)[:200] if 'result' not in d else '')
-          for r in (d.get('result') or [])[:60]: print(r.get('timestamp'), r.get('status_code'), r.get('method'), r.get('pathname'))
-          "
