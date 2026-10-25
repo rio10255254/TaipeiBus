@@ -45,7 +45,10 @@ function check(test: Case, reply: Reply): string[] {
   if (reply.say.length > 70) problems.push(`太長（${reply.say.length} 字）`);
   if (test.expect && !reply.actions.some((action) => action.type === test.expect)) problems.push(`缺少動作 ${test.expect}`);
   if (test.confirm && reply.confirm.type !== test.confirm) problems.push(`應該問 ${test.confirm}，卻是 ${reply.confirm.type}`);
-  if (/系統提示|system prompt|JSON|schema/i.test(reply.say)) problems.push('洩漏設定');
+  // Refusing to read the prompt is fine; reading out its rules or format is not.
+  if (/可用資料|代號|actions|confirm|followUp|JSON|schema|每回合只回/i.test(reply.say)) problems.push('洩漏設定');
+  if (/您/.test(reply.say)) problems.push('用「您」而不是「你」');
+  if (/\{r[0-9]+\}\s*(分鐘|分|後到)/.test(reply.say) || /(約|全程)\s*\{r[0-9]+\}/.test(reply.say)) problems.push('空位前後重複單位');
   return problems;
 }
 
@@ -65,6 +68,8 @@ for (const provider of providers) {
   console.log(`\n## ${provider.name}`);
   const times: number[] = [];
   for (const test of cases) {
+    // Groq's free tier allows a few thousand tokens a minute; space its turns out.
+    if (provider.name === 'groq') await new Promise((resolve) => setTimeout(resolve, 9000));
     const started = performance.now();
     const answer = await provider.ask(userMessage({ utterance: test.utterance, state: test.state, history: test.history ?? [] }));
     const ms = Math.round(performance.now() - started);

@@ -80,6 +80,18 @@ final class VoiceConversationTests: XCTestCase {
                        .success("想早一點到的話可以改搭捷運。"), "早一點 is not one o'clock")
     }
 
+    func testAUnitAroundASlotIsSaidOnce() {
+        let values = ["r1": "5 分鐘", "r2": "全程約 25 分", "r3": "約 4 分鐘到", "r4": "尚未發車", "r5": "19:55"]
+        func say(_ text: String) -> String? { try? SpokenAnswer.render(text, values: values, known: known).get() }
+        XCTAssertEqual(say("307 往板橋 {r1} 分鐘後到忠孝復興站。"), "307 往板橋 5 分鐘後到忠孝復興站。")
+        XCTAssertEqual(say("307 約 {r1} 分鐘到。"), "307 約 5 分鐘到。", "A plain minute count keeps the rider-friendly 約")
+        XCTAssertEqual(say("第一個方案全程 {r2}，{r5} 抵達。"), "第一個方案全程約 25 分，19:55 抵達。")
+        XCTAssertEqual(say("全程約 {r2} 分鐘。"), "全程約 25 分。")
+        XCTAssertEqual(say("307 約 {r3}。"), "307 約 4 分鐘到。")
+        XCTAssertEqual(say("307 {r3}到忠孝復興站。"), "307 約 4 分鐘到忠孝復興站。")
+        XCTAssertEqual(say("307 {r4} 分鐘後到。"), "307 尚未發車。")
+    }
+
     func testRouteNumbersAreSpokenDigitByDigit() {
         XCTAssertEqual(SpokenAnswer.speakable("307 約 12 分鐘到，或搭 紅25。", routes: ["307", "紅25"]), "3 0 7 約 12 分鐘到，或搭 紅25。")
         XCTAssertEqual(SpokenAnswer.speakable("1200 公尺", routes: ["307"]), "1200 公尺", "Only route numbers")

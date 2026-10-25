@@ -172,20 +172,51 @@ public enum SpokenAnswer {
         let text = say.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return .failure(.empty) }
         let slot = try! NSRegularExpression(pattern: "\\{([A-Za-z0-9_]+)\\}")
-        let whole = NSRange(text.startIndex..., in: text)
-        var filled = "", skeleton = "", cursor = text.startIndex
-        for match in slot.matches(in: text, range: whole) {
+        // Words between slots, and each slot's value: n + 1 texts around n values.
+        var texts: [String] = [], filled: [String] = [], skeleton = "", cursor = text.startIndex
+        for match in slot.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
             guard let range = Range(match.range, in: text), let key = Range(match.range(at: 1), in: text) else { continue }
             let id = String(text[key])
             guard let value = values[id] else { return .failure(.unknownSlot(id)) }
-            filled += String(text[cursor..<range.lowerBound]) + value
+            texts.append(String(text[cursor..<range.lowerBound])); filled.append(value)
             skeleton += String(text[cursor..<range.lowerBound]) + " "
             cursor = range.upperBound
         }
-        filled += String(text[cursor...]); skeleton += String(text[cursor...])
+        texts.append(String(text[cursor...])); skeleton += String(text[cursor...])
         if let number = unsupportedNumber(in: skeleton, known: known) { return .failure(.unsupportedNumber(number)) }
-        guard filled.count <= 160 else { return .failure(.tooLong) }
-        return .success(filled)
+        for (index, value) in filled.enumerated() {
+            texts[index] = withoutTrailingRepeat(texts[index], before: value)
+            texts[index + 1] = withoutLeadingRepeat(texts[index + 1], after: value)
+        }
+        var sentence = texts[0]
+        for (index, value) in filled.enumerated() { sentence += value + texts[index + 1] }
+        guard sentence.count <= 160 else { return .failure(.tooLong) }
+        return .success(sentence)
+    }
+
+    /// 「約 {r1}」 with r1 = 「約 5 分鐘」: the value already says it, so the words before it go.
+    static func withoutTrailingRepeat(_ text: String, before value: String) -> String {
+        let trimmed = text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        let approximate = ["全程約", "大約", "約"]
+        if approximate.contains(where: value.hasPrefix) || value.hasPrefix("全程") {
+            for word in ["全程約", "全程", "大約", "約", "預計約"] where trimmed.hasSuffix(word) {
+                return String(trimmed.dropLast(word.count))
+            }
+        }
+        return text
+    }
+
+    /// 「{r1} 分鐘後到」 with r1 = 「5 分鐘」: the unit is said once. A status such as 尚未發車 takes no unit at all.
+    static func withoutLeadingRepeat(_ text: String, after value: String) -> String {
+        let trimmed = text.replacingOccurrences(of: "^\\s+", with: "", options: .regularExpression)
+        if value.hasSuffix("到"), trimmed.hasPrefix("到") { return String(trimmed.dropFirst()) }
+        let timed = value.hasSuffix("分鐘") || value.hasSuffix("分")
+        let status = !value.contains(where: \.isNumber)
+        guard timed || status else { return text }
+        for unit in (status ? ["分鐘後到", "分鐘到", "分鐘後", "分鐘", "分後"] : ["分鐘", "分"]) where trimmed.hasPrefix(unit) {
+            return String(trimmed.dropFirst(unit.count))
+        }
+        return text
     }
 
     /// The first number in the model's own words that the rider has not seen or said.
