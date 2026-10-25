@@ -22,7 +22,7 @@ Deno.serve(async (request) => {
   if (who instanceof Response) return who;
   const { userId, admin } = who;
 
-  let body: { request?: Record<string, unknown>; proof?: string; consent?: number };
+  let body: { request?: Record<string, unknown>; proof?: string; renewal?: string; consent?: number };
   try {
     body = await request.json();
   } catch {
@@ -31,7 +31,7 @@ Deno.serve(async (request) => {
   const chat = sanitize(body.request);
   if (!chat) return reply({ error: 'invalid' }, 400);
 
-  const tier = await tierOf(admin, userId, body.proof);
+  const tier = await tierOf(admin, userId, body.proof, body.renewal);
 
   // Each tier may use only its own models; a free phone asking for the larger one gets the smaller.
   const allowed = MODELS[tier];

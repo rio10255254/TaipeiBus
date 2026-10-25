@@ -47,6 +47,8 @@ final class SpeechInput: ObservableObject {
     /// Tapped, waiting for permission or the microphone: shown at once so the tap is never silent.
     @Published private(set) var preparing = false
     @Published private(set) var problem: String?
+    /// The microphone or recogniser could not be used at all, as opposed to nothing being said.
+    private(set) var failed = false
     /// How loud the voice is right now, 0…1, for the listening animation.
     /// Kept in its own object so only the glow and orb redraw at the microphone's pace.
     let meter = VoiceLevel()
@@ -85,7 +87,7 @@ final class SpeechInput: ObservableObject {
                finished: @escaping (String) -> Void) async {
         stop()
         self.hints = Array(hints.prefix(100)); self.unheard = unheard
-        transcript = ""; problem = nil; blocked = false; preparing = true
+        transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
         let allowed = await Self.permissions()
@@ -93,7 +95,7 @@ final class SpeechInput: ObservableObject {
         guard allowed else {
             preparing = false
             JourneyDiagnostics.shared.record("speech denied")
-            blocked = true
+            blocked = true; failed = true
             problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
             takeUnheard()?()
             return
@@ -102,7 +104,7 @@ final class SpeechInput: ObservableObject {
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
             preparing = false
             JourneyDiagnostics.shared.record("speech unavailable")
-            problem = AppText.text("語音辨識目前無法使用，請直接打字。")
+            problem = AppText.text("語音辨識目前無法使用，請直接打字。"); failed = true
             takeUnheard()?()
             return
         }
@@ -133,7 +135,7 @@ final class SpeechInput: ObservableObject {
             try engine.start()
         } catch {
             JourneyDiagnostics.shared.record("speech audio-error \((error as NSError).domain) \((error as NSError).code)")
-            problem = AppText.text("麥克風目前無法使用，請直接打字。")
+            problem = AppText.text("麥克風目前無法使用，請直接打字。"); failed = true
             let unheard = takeUnheard()
             stop(); unheard?(); return
         }

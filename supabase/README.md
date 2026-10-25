@@ -18,7 +18,8 @@ Online understanding goes through this Supabase project instead of a key built i
   streamed turn then answers it with Claude's web search, 3 a day per phone (`assistant_web_usage`),
   and past that Claude answers from what it knows. Nothing is stored. The two functions share `_shared/` (caller, Pro check, Claude client).
 - Pro is checked from the signed App Store transaction the app sends, verified against Apple's root
-  certificates bundled in `_shared/apple_roots.ts`, and remembered until that period ends. The check
+  certificates bundled in `_shared/apple_roots.ts`, and remembered until that period ends. In billing
+  grace the app also sends the signed renewal info, and Pro lasts until its `gracePeriodExpiresDate`. The check
   uses Web Crypto (`@peculiar/x509`): Supabase's runtime does not implement node:crypto's
   `X509Certificate.verify`, which `@apple/app-store-server-library` needs.
 - Only the function (service role) can read `assistant_usage` and `assistant_pro`; row level
