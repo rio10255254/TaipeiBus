@@ -4,7 +4,7 @@
 import { askGroq, searchWeb, streamClaude } from './brain.ts';
 import { type Reply, userMessage, webQuestion } from './reply.ts';
 
-type Ask = (message: string, onSay: () => void) => Promise<Awaited<ReturnType<typeof askGroq>>>;
+type Ask = (message: string, onSay: () => void, web: boolean) => Promise<Awaited<ReturnType<typeof askGroq>>>;
 type Case = {
   name: string; state: string; utterance: string; history?: { user: string; say: string }[]; expect?: string; confirm?: string;
   /// For plan_trip: words its time must contain, and the later stop it must keep.
@@ -80,6 +80,7 @@ function check(test: Case, reply: Reply): string[] {
   if (test.expect && !reply.actions.some((action) => action.type === test.expect)) problems.push(`缺少動作 ${test.expect}`);
   if (test.confirm && reply.confirm.type !== test.confirm) problems.push(`應該問 ${test.confirm}，卻是 ${reply.confirm.type}`);
   if (test.avoid && reply.actions.some((action) => action.type === test.avoid)) problems.push(`不該用 ${test.avoid}`);
+  if (test.avoid === 'web_search' && /上網|搜尋/.test(reply.say)) problems.push('說要上網查');
   if (test.english && (reply.say.match(/[A-Za-z]+/g) ?? []).length < 3) problems.push('沒有用英文回答');
   if (test.noAmounts && /[0-9０-９]+\s*(元|塊)/.test(reply.say)) problems.push('憑記憶說了金額');
   const plan = reply.actions.find((action) => action.type === 'plan_trip');
@@ -95,7 +96,7 @@ const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
 const groqKey = Deno.env.get('GROQ_API_KEY');
 const providers = [
   // Claude streamed, as the phone hears it: the first words are when speaking can start.
-  ...(anthropicKey ? [{ name: 'claude', ask: ((message, onSay) => streamClaude(anthropicKey, message, onSay)) as Ask }] : []),
+  ...(anthropicKey ? [{ name: 'claude', ask: ((message, onSay, web) => streamClaude(anthropicKey, message, onSay, web)) as Ask }] : []),
   ...(groqKey ? [{ name: 'groq', ask: ((message) => askGroq(groqKey, message)) as Ask }] : []),
 ];
 if (providers.length === 0) {
@@ -113,7 +114,7 @@ for (const provider of providers) {
     const started = performance.now();
     let first = 0;
     const answer = await provider.ask(userMessage({ utterance: test.utterance, state: test.state, history: test.history ?? [] }, test.web ?? '今天還能用 3 次'),
-      () => { first ||= Math.round(performance.now() - started); });
+      () => { first ||= Math.round(performance.now() - started); }, test.web === undefined);
     const ms = Math.round(performance.now() - started);
     times.push(ms);
     if (first) firstWords.push(first);

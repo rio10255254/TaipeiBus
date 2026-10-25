@@ -18,10 +18,10 @@ export type Action = {
 };
 export type Reply = { say: string; actions: Action[]; confirm: Action; choices: string[]; followUp: boolean };
 
-const ACTION_SCHEMA = {
+const actionSchema = (types: readonly string[]) => ({
   type: 'object',
   properties: {
-    type: { type: 'string', enum: [...ACTION_TYPES] },
+    type: { type: 'string', enum: [...types] },
     stop: { type: 'string' }, route: { type: 'string' }, destination: { type: 'string' },
     origin: { type: 'string' }, time: { type: 'string' }, then: { type: 'string' }, query: { type: 'string' },
     mode: { type: 'string', enum: [...MODES] },
@@ -30,22 +30,26 @@ const ACTION_SCHEMA = {
   },
   required: ['type', 'stop', 'route', 'destination', 'origin', 'time', 'then', 'query', 'mode', 'preference', 'option'],
   additionalProperties: false,
-};
+});
 
-/// Every field is required (unused ones are empty) so Claude's structured output and Groq's JSON
-/// mode give the same shape.
-export const REPLY_SCHEMA = {
+const replySchema = (types: readonly string[]) => ({
   type: 'object',
   properties: {
     say: { type: 'string' },
-    actions: { type: 'array', items: ACTION_SCHEMA },
-    confirm: ACTION_SCHEMA,
+    actions: { type: 'array', items: actionSchema(types) },
+    confirm: actionSchema(types),
     choices: { type: 'array', items: { type: 'string' } },
     followUp: { type: 'boolean' },
   },
   required: ['say', 'actions', 'confirm', 'choices', 'followUp'],
   additionalProperties: false,
-};
+});
+
+/// Every field is required (unused ones are empty) so Claude's structured output and Groq's JSON
+/// mode give the same shape.
+export const REPLY_SCHEMA = replySchema(ACTION_TYPES);
+/// Once the day's web lookups are used up, Claude cannot ask for one, so it never says 「我上網查一下」.
+export const OFFLINE_REPLY_SCHEMA = replySchema(ACTION_TYPES.filter((type) => type !== 'web_search'));
 
 export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，用台灣常用的繁體中文口語和乘客說話，稱呼乘客用「你」；乘客用英文說，就用英文回答。每回合只回一個 JSON。
 
