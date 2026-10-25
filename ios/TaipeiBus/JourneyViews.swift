@@ -701,23 +701,20 @@ private struct BoardedVehiclePicker: View {
     }
 }
 
-struct JourneyArrivalDock: View {
-    @Environment(\.liveSettings) private var live
+/// The waiting stage of the trip card, below the header the card keeps for every stage.
+private struct JourneyWaitingStage: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
-    let showJourney: () -> Void
     var body: some View {
         if let option = planner.selected, let index = planner.boardingRideIndex {
             let ride = option.rides[index]
             VStack(alignment: .leading, spacing: 10) {
-                JourneyDockHeader(model: model, planner: planner, showJourney: showJourney)
                 JourneyBoardingView(model: model, ride: ride)
                 if index > 0 {
                     Text(option.walks[index].timeLabel).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
                 }
                 JourneyWaitingActions(model: model, planner: planner, index: index) { model.boardCurrentRide() }
             }
-            .journeyDockSurface()
         }
     }
 }
@@ -826,7 +823,7 @@ private struct JourneyWaitingActions: View {
                     Label(cycling ? live.text("騎到站牌") : planner.activeRide?.route.mode == .bus ? live.text("走到站牌") : live.text("走到車站"),
                           systemImage: cycling ? "bicycle" : "figure.walk")
                         .liveFont(.body, weight: .semibold).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 50)
-                }.buttonStyle(MapActionStyle(prominent: stillWalking))
+                }.buttonStyle(MapActionStyle(prominent: stillWalking)).tripStageMatch("dock-secondary")
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                     .accessibilityIdentifier("journey-walk-to-stop")
@@ -834,7 +831,7 @@ private struct JourneyWaitingActions: View {
                 Button(action: board) {
                     Text(live.text("已上車")).liveFont(.body, weight: .bold).fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: .infinity, minHeight: 50)
-                }.buttonStyle(MapActionStyle(prominent: !stillWalking))
+                }.buttonStyle(MapActionStyle(prominent: !stillWalking)).tripStageMatch("dock-primary")
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
                     .accessibilityIdentifier("journey-board")
             }
@@ -1609,17 +1606,29 @@ struct JourneyGuideCard: View {
     let showJourney: () -> Void
     @State private var showRideStops = false
     @State private var chooseVehicle = false
+    /// The step on screen before the latest change, so a step forward rises into place and
+    /// a step back ("返回等車") settles from above.
+    @State private var shownStepIndex = 0
+    @Namespace private var stageSpace
+    /// Changes only when the card moves to another stage or another route.
+    private var stageKey: String { (planner.selectedID ?? "") + ":" + String(planner.stepIndex) }
+    private var stageTransition: AnyTransition {
+        let rise: CGFloat = planner.stepIndex >= shownStepIndex ? 10 : -10
+        return .asymmetric(insertion: .opacity.combined(with: .offset(y: rise)), removal: .opacity)
+    }
     var body: some View {
         if let option = planner.selected {
-            if planner.boardingRideIndex != nil {
-                JourneyArrivalDock(model: model, planner: planner, showJourney: showJourney)
-            } else {
+            // The header stays in place for the whole trip; only the stage below it changes,
+            // and the actions shared by consecutive stages move instead of fading.
+            VStack(alignment: .leading, spacing: planner.boardingRideIndex != nil ? 10 : 12) {
+                JourneyDockHeader(model: model, planner: planner, showJourney: showJourney)
                 VStack(alignment: .leading, spacing: 12) {
-                    JourneyDockHeader(model: model, planner: planner, showJourney: showJourney)
-                    if planner.arrived {
+                    if planner.boardingRideIndex != nil {
+                        JourneyWaitingStage(model: model, planner: planner)
+                    } else if planner.arrived {
                         Button { model.finishJourney() } label: {
                             Text(live.text("完成")).liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 50)
-                        }.buttonStyle(MapActionStyle(prominent: true))
+                        }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
                         HStack(spacing: 8) {
@@ -1671,10 +1680,10 @@ struct JourneyGuideCard: View {
                         HStack(spacing: 12) {
                             Button { model.returnToWaiting() } label: {
                                 Text(live.text("返回等車")).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
-                            }.buttonStyle(MapActionStyle(tint: Color.primary))
+                            }.buttonStyle(MapActionStyle(tint: Color.primary)).tripStageMatch("dock-secondary")
                             Button { model.alight() } label: {
                                 Text(live.text("已下車")).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
-                            }.buttonStyle(MapActionStyle(prominent: true))
+                            }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
                                 .accessibilityIdentifier("journey-alight")
                         }.liveFont(.body, weight: .semibold)
                     } else {
@@ -1697,22 +1706,27 @@ struct JourneyGuideCard: View {
                                 Label(cycling ? live.text("看騎乘路線") : live.text("看步行路線"),
                                       systemImage: cycling ? "bicycle" : "figure.walk")
                                     .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
-                            }.buttonStyle(MapActionStyle()).accessibilityHint(AppText.text("在目前地圖查看步行路線"))
+                            }.buttonStyle(MapActionStyle()).tripStageMatch("dock-secondary").accessibilityHint(AppText.text("在目前地圖查看步行路線"))
                             Button { if !planner.started { planner.begin() }; planner.advance() } label: {
                                 Text(live.text("已抵達")).lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
-                            }.buttonStyle(MapActionStyle(prominent: true))
+                            }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
                                 .accessibilityIdentifier("journey-arrive")
                         }.liveFont(.body, weight: .semibold)
                     }
-                }.journeyDockSurface()
-                    .smoothChanges(planner.currentStep)
-                    .smoothChanges(model.language)
-                    .sheet(isPresented: $showRideStops) {
-                        if let ride = planner.activeRide { OnboardStopsView(model: model, ride: ride) }
-                    }
-                    .sheet(isPresented: $chooseVehicle) {
-                        if let ride = planner.activeRide { BoardedVehiclePicker(model: model, ride: ride) }
-                    }
+                }
+                .id(stageKey)
+                .transition(stageTransition)
+            }
+            .journeyDockSurface()
+            .environment(\.tripStageNamespace, stageSpace)
+            .smoothChanges(planner.currentStep)
+            .smoothChanges(model.language)
+            .onChange(of: planner.stepIndex, initial: true) { _, step in shownStepIndex = step }
+            .sheet(isPresented: $showRideStops) {
+                if let ride = planner.activeRide { OnboardStopsView(model: model, ride: ride) }
+            }
+            .sheet(isPresented: $chooseVehicle) {
+                if let ride = planner.activeRide { BoardedVehiclePicker(model: model, ride: ride) }
             }
         }
     }
@@ -1724,9 +1738,12 @@ struct JourneyInstructionBanner: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
+    @Namespace private var stageSpace
     var body: some View {
         if let option = planner.selected {
             Group {
+                // The leading badge or symbol and the main figure stand for the same things in
+                // every stage, so they move to their new place while the wording fades over.
                 if let index = planner.boardingRideIndex, option.rides.indices.contains(index) {
                     TimelineView(.periodic(from: .now, by: 1)) { timeline in
                         WaitingBannerContent(model: model, ride: option.rides[index], date: timeline.date)
@@ -1739,11 +1756,35 @@ struct JourneyInstructionBanner: View {
                     WalkingBannerContent(planner: planner)
                 }
             }
+            .environment(\.tripStageNamespace, stageSpace)
             .modifier(InstructionBannerSurface())
             .smoothChanges(planner.currentStep)
             .smoothChanges(planner.selectedID)
         }
     }
+}
+
+private struct TripStageNamespaceKey: EnvironmentKey {
+    static let defaultValue: Namespace.ID? = nil
+}
+extension EnvironmentValues {
+    /// Shared by the views of one trip card or banner across its stages.
+    var tripStageNamespace: Namespace.ID? {
+        get { self[TripStageNamespaceKey.self] }
+        set { self[TripStageNamespaceKey.self] = newValue }
+    }
+}
+private struct TripStageMatch: ViewModifier {
+    @Environment(\.tripStageNamespace) private var namespace
+    let id: String
+    @ViewBuilder func body(content: Content) -> some View {
+        if let namespace { content.matchedGeometryEffect(id: id, in: namespace) } else { content }
+    }
+}
+private extension View {
+    /// Marks the view that stands for `id` in the current trip stage; the next stage's view
+    /// with the same id takes over its frame instead of appearing from nowhere.
+    func tripStageMatch(_ id: String) -> some View { modifier(TripStageMatch(id: id)) }
 }
 
 struct InstructionBannerSurface: ViewModifier {
@@ -1785,7 +1826,7 @@ private struct WaitingBannerContent: View {
         let access = model.planner.accessInstruction(at: model.planner.boardingRideIndex ?? 0, date: date)
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
+                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name).tripStageMatch("banner-lead")
                     .accessibilityIdentifier("boarding-route")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
@@ -1808,7 +1849,7 @@ private struct WaitingBannerContent: View {
                     Text(ride.route.mode != .bus ? model.metroWaitSource(ride, at: date) : boarding.source)
                         .liveFont(.caption, weight: .semibold).lineLimit(2).minimumScaleFactor(0.9)
                         .foregroundStyle((guide.estimateSeconds ?? -1) >= 0 ? Color(liveHex: "#6EE7A0") : Color.white.opacity(0.72))
-                }.frame(width: live.language == .english ? 112 : 98, alignment: .trailing)
+                }.frame(width: live.language == .english ? 112 : 98, alignment: .trailing).tripStageMatch("banner-figure")
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             BannerStrip {
@@ -1848,7 +1889,7 @@ private struct RidingBannerContent: View {
             let remaining = model.metroRemaining(ride, at: date)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 12) {
-                    RouteBadge(name: ride.route.lineCode, tintName: ride.route.name)
+                    RouteBadge(name: ride.route.lineCode, tintName: ride.route.name).tripStageMatch("banner-lead")
                     VStack(alignment: .leading, spacing: 2) {
                         Text(AppText.text("往 %@", ride.route.localizedDestination(direction: ride.direction))).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                         BannerTitle(text: AppText.text("下車 · ") + ride.alighting.localizedName)
@@ -1860,7 +1901,7 @@ private struct RidingBannerContent: View {
                         Text(AppText.minutes(minutes)).liveFont(.title, weight: .bold).monospacedDigit()
                             .liveNumericText(minutes, countsDown: true)
                         Text(AppText.remainingStops(remaining.stops.count)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
-                    }
+                    }.tripStageMatch("banner-figure")
                 }.padding(.horizontal, 16).padding(.vertical, 13)
                 BannerStrip {
                     Image(systemName: "tram.fill")
@@ -1878,7 +1919,7 @@ private struct RidingBannerContent: View {
         let alightNext = next?.id == ride.alighting.id
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
+                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name).tripStageMatch("banner-lead")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
                         .liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
@@ -1896,7 +1937,7 @@ private struct RidingBannerContent: View {
                         Text(AppText.remainingStops(count+1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                             .liveNumericText(count, countsDown: true)
                     }
-                }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing)
+                }.frame(maxWidth: live.language == .english ? 120 : 112, alignment: .trailing).tripStageMatch("banner-figure")
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
@@ -2022,7 +2063,7 @@ private struct WalkingBannerContent: View {
             Image(systemName: planner.arrived ? "checkmark.circle.fill" : cyclingInstruction != nil ? "bicycle" : "figure.walk")
                 .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(planner.arrived ? Color(liveHex: "#6EE7A0") : Color.white)
-                .frame(width: 40)
+                .frame(width: 40).tripStageMatch("banner-lead")
             VStack(alignment: .leading, spacing: 2) {
                 Text(planner.arrived ? live.text("已抵達") : cyclingInstruction
                      ?? AppText.text("走到「%@」", planner.destination?.localizedName ?? AppText.text("目的地")))
