@@ -30,8 +30,8 @@ jobs:
               --data-urlencode "sql=$1" --data-urlencode "iso_timestamp_start=$start" --data-urlencode "iso_timestamp_end=$end" \
               -o "$2" -w "HTTP %{http_code}\n"
           }
-          query "SELECT source_name, count() AS n FROM logs GROUP BY source_name" sources.json
-          query "SELECT timestamp, source_name, event_message FROM logs WHERE event_message LIKE '%pro check failed%' OR event_message LIKE '%transaction not verified%' OR event_message LIKE '%apple roots%' OR event_message LIKE '%claude stream failed%' OR event_message LIKE '%no answer%' ORDER BY timestamp DESC LIMIT 60" errors.json
+          query "SELECT source, count() AS n FROM logs GROUP BY source" sources.json
+          query "SELECT timestamp, source, event_message FROM logs WHERE event_message LIKE '%pro check failed%' OR event_message LIKE '%transaction not verified%' OR event_message LIKE '%apple roots%' OR event_message LIKE '%claude stream failed%' OR event_message LIKE '%no answer%' ORDER BY timestamp DESC LIMIT 60" errors.json
           python3 - <<'EOF'
           import json, re
           for name in ('sources.json', 'errors.json'):
