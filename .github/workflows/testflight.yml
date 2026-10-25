@@ -72,7 +72,7 @@ jobs:
       BUS_PRIVACY_POLICY_URL: ${{ vars.BUS_PRIVACY_POLICY_URL }}
       BUS_PUBLISH_TESTFLIGHT: ${{ inputs.operation != 'beta-audit' && inputs.operation != 'check-only' && inputs.operation != 'store-audit' && inputs.operation != 'billing-audit' }}
       APP_STORE_REVIEW_CONTACT: ${{ secrets.APP_STORE_REVIEW_CONTACT }}
-      # Public values of the assistant server; the Groq key stays on that server.
+      # Public values of the assistant server; the Claude and Groq keys stay on that server.
       BUS_ASSISTANT_URL: ${{ vars.SUPABASE_URL }}
       BUS_ASSISTANT_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
       BUS_ORDER_SCREENSHOTS: ${{ inputs.order_screenshots }}

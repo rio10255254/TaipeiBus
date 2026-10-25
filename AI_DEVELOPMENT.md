@@ -48,3 +48,7 @@ GitHub 的 iOS Simulator 可以執行原生 App 與 UI 測試；模型推論與�
 已建立 72 句日常語料及獨立 `TaipeiBusAIBenchmarkTests` 真機 scheme。涵蓋「快一點」「臺／台」「北車」「回家」「明天 9 點前」「從公司到…」、多義常用行程與跨午夜。每句保存四個欄位得分、原始條件、問題／選項、工具呼叫、接續後輸出、耗時及錯誤，附 OS、機型、提示版本及來源指紋；錯誤列不排除於分母。執行與 CSV 匯出方式見 [真機基準說明](ios/ai/JOURNEY_BENCHMARK.md)。
 
 這次環境沒有 Xcode 或連線真機，**72 句尚未實測，不能聲稱已有模型準確率**。本次可執行的 11 項 AssistantSafetyTests 使用逐位元複製的核心來源於 Linux 通過；Swift 語法解析、語料結構、語系與離線發行檢查通過。完整 Apple SDK 編譯、新增原生工具／UI 測試與 Mach-O 檢查仍須在 Xcode 執行。
+
+## 延伸研究
+
+語音輸出、多回合對話與用說的操作 App 的研究與路線圖見 [VOICE_ASSISTANT_RESEARCH.md](VOICE_ASSISTANT_RESEARCH.md)。

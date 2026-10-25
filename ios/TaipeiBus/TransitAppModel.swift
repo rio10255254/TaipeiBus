@@ -594,6 +594,8 @@ final class TransitAppModel: ObservableObject {
         /// The second stop of 「先去…然後再去…」, offered as 接著去 once this leg is planned.
         var nextStop: String? = nil
         var constraints = TripConstraints()
+        /// Who read the sentence, e.g. Claude Haiku 5.5, shown in small print under the routes.
+        var answeredBy: String? = nil
         /// Every stop of 「先去 A 再去 B」 in order. The routes show one leg at a time; the map numbers
         /// each stop once its place is known.
         var stops: [Stop] = []
@@ -664,7 +666,7 @@ final class TransitAppModel: ObservableObject {
     /// preference falls back to the recommendation, and the note says so.
     func previewAssistantJourney(request: String, origin: TravelPlace?, destination: TravelPlace, alternatives: [TravelPlace] = [],
                                  preference: RoutePreference, mode: AssistantTravelMode = .any, departure: Date? = nil, arriveBy: Date? = nil,
-                                 nextStop: String? = nil, constraints: TripConstraints = TripConstraints()) {
+                                 nextStop: String? = nil, constraints: TripConstraints = TripConstraints(), answeredBy: String? = nil) {
         guard destination.coordinate.isInServiceArea, origin.map({ $0.coordinate.isInServiceArea }) ?? true else { return }
         planner.finish(); clearWalkingMap(); clearSelection(); activeSavedJourneyID = nil
         planner.preferredMode = mode; planner.schedule(departure, arriveBy: arriveBy); planner.constraints = constraints
@@ -676,7 +678,7 @@ final class TransitAppModel: ObservableObject {
             alternatives: alternatives.filter { $0.id != destination.id }, origin: origin, mode: mode,
             preference: preference, departure: planner.scheduledDeparture,
             arriveBy: planner.arrivalDeadline, note: note, nextStop: next,
-            constraints: constraints,
+            constraints: constraints, answeredBy: answeredBy,
             stops: next.map { [AssistantTrip.Stop(name: destination.localizedName, place: destination), AssistantTrip.Stop(name: $0, place: nil)] } ?? [],
             start: origin, startDeparture: planner.scheduledDeparture, startArriveBy: planner.arrivalDeadline)
         assistantStopsRevision += 1
@@ -689,11 +691,14 @@ final class TransitAppModel: ObservableObject {
         guard let trip = assistantTrip else { return }
         previewAssistantJourney(request: trip.request, origin: trip.origin, destination: place,
             alternatives: [trip.destination] + trip.alternatives, preference: trip.preference, mode: trip.mode,
-            departure: trip.departure, arriveBy: trip.arriveBy, nextStop: trip.nextStop, constraints: trip.constraints)
+            departure: trip.departure, arriveBy: trip.arriveBy, nextStop: trip.nextStop, constraints: trip.constraints,
+            answeredBy: trip.answeredBy)
     }
     /// Applies a change said on the route screen (「改騎車」, 「晚一點」, 「不要搭公車」) in one new plan.
-    func applyAssistantChange(_ change: AssistantChange, request: String) {
+    /// `answeredBy` is who read the change; nil keeps the earlier credit (lifting a limit reads nothing).
+    func applyAssistantChange(_ change: AssistantChange, request: String, answeredBy: String? = nil) {
         guard var trip = assistantTrip, !planner.started else { return }
+        if let answeredBy { trip.answeredBy = answeredBy }
         if let mode = change.mode { trip.mode = mode; planner.preferredMode = mode }
         if let raw = change.preference, let preference = RoutePreference(rawValue: raw.rawValue) {
             trip.preference = preference
