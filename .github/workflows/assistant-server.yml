@@ -50,6 +50,15 @@ jobs:
         if: steps.ready.outputs.ready == 'true'
         run: |
           set -euo pipefail
+          # Values pasted from a phone or web page can carry an invisible line break.
+          trim() { printf '%s' "$1" | tr -d '[:space:]'; }
+          SUPABASE_ACCESS_TOKEN="$(trim "$SUPABASE_ACCESS_TOKEN")"; export SUPABASE_ACCESS_TOKEN
+          SUPABASE_PROJECT_REF="$(trim "$SUPABASE_PROJECT_REF")"
+          GROQ_API_KEY="$(trim "$GROQ_API_KEY")"
+          case "$SUPABASE_ACCESS_TOKEN" in
+            sbp_*) ;;
+            *) echo "::error::SUPABASE_ACCESS_TOKEN must be a personal access token starting with sbp_ (supabase.com/dashboard/account/tokens), not a project API key."; exit 1 ;;
+          esac
           supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
           supabase db push --password "$SUPABASE_DB_PASSWORD"
           supabase config push --project-ref "$SUPABASE_PROJECT_REF" --yes || echo "::warning::Auth settings not pushed; enable anonymous sign-ins in the dashboard."
