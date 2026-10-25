@@ -35,7 +35,7 @@ const chat = {
 
 Deno.test('asks Claude without sampling settings and answers in the chat completions shape', async () => {
   await withServer(() => message('end_turn', '{"destination":"台北車站"}'), async (received) => {
-    const answer = await askClaude('test-key', chat);
+    const { answer } = await askClaude('test-key', chat);
     assertEquals(received.length, 1);
     const { body, key } = received[0];
     assertEquals(key, 'test-key');
@@ -55,7 +55,9 @@ Deno.test('asks Claude without sampling settings and answers in the chat complet
 Deno.test('leaves a declined, cut-off or non-JSON answer to Groq', async () => {
   for (const [stop, text] of [['refusal', ''], ['max_tokens', '{"destination":'], ['end_turn', '台北車站']]) {
     await withServer(() => message(stop, text), async () => {
-      assertEquals(await askClaude('test-key', chat), null);
+      const { answer, failure } = await askClaude('test-key', chat);
+      assertEquals(answer, null);
+      assert(failure);
     });
   }
 });
@@ -63,14 +65,16 @@ Deno.test('leaves a declined, cut-off or non-JSON answer to Groq', async () => {
 Deno.test('fails over at once when Claude errors, without retrying', async () => {
   await withServer(() => Response.json({ type: 'error', error: { type: 'overloaded_error', message: 'busy' } }, { status: 529 }),
     async (received) => {
-      assertEquals(await askClaude('test-key', chat), null);
+      const { answer, failure } = await askClaude('test-key', chat);
+      assertEquals(answer, null);
+      assertEquals(failure, '529 InternalServerError overloaded_error: busy');
       assertEquals(received.length, 1);
     });
 });
 
 Deno.test('sends nothing without a user message', async () => {
   await withServer(() => message('end_turn', '{}'), async (received) => {
-    assertEquals(await askClaude('test-key', { ...chat, messages: [{ role: 'system', content: 'x' }] }), null);
+    assertEquals((await askClaude('test-key', { ...chat, messages: [{ role: 'system', content: 'x' }] })).answer, null);
     assertEquals(received.length, 0);
   });
 });

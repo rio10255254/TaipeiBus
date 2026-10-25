@@ -61,9 +61,12 @@ Deno.serve(async (request) => {
   if (used === null) return reply({ error: 'daily_limit', tier, limit: LIMITS[tier] }, 429);
   const headers = { 'Content-Type': 'application/json', 'X-Assistant-Tier': tier, 'X-Assistant-Used': String(used) };
 
+  let fallback: Record<string, string> = {};
   if (anthropicKey && Number(body.consent) >= CLAUDE_CONSENT) {
-    const answer = await askClaude(anthropicKey, chat);
+    const { answer, failure } = await askClaude(anthropicKey, chat);
     if (answer) return new Response(JSON.stringify(answer), { headers: { ...headers, 'X-Assistant-Provider': 'anthropic' } });
+    // Why Claude did not answer, for the deploy check and troubleshooting; header values must be ASCII.
+    fallback = { 'X-Assistant-Fallback': (failure ?? 'unknown').replace(/[^\x20-\x7e]/g, '?').slice(0, 200) };
   }
   if (!groqKey) return reply({ error: 'unavailable' }, 503);
 
@@ -73,7 +76,7 @@ Deno.serve(async (request) => {
     body: JSON.stringify({ ...chat, model }),
   });
   const text = await upstream.text();
-  return new Response(text, { status: upstream.status, headers: { ...headers, 'X-Assistant-Provider': 'groq' } });
+  return new Response(text, { status: upstream.status, headers: { ...headers, ...fallback, 'X-Assistant-Provider': 'groq' } });
 });
 
 /// Only the fields the app uses, with bounded sizes; nothing else reaches Claude or Groq.

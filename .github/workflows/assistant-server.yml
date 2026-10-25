@@ -119,4 +119,5 @@ jobs:
           provider=$(grep -i '^x-assistant-provider:' "$RUNNER_TEMP/headers3.txt" | cut -d: -f2 | tr -d '[:space:]')
           echo "understand with Claude consent → HTTP $code from ${provider:-?}"; head -c 300 "$RUNNER_TEMP/reply3.json"; echo
           [ "$code" = "200" ]
-          if [ -n "$ANTHROPIC_API_KEY" ] && [ "$provider" != "anthropic" ]; then echo "::warning::Claude is configured but Groq answered; see the function's logs."; fi
+          reason=$(grep -i '^x-assistant-fallback:' "$RUNNER_TEMP/headers3.txt" | cut -d: -f2- | tr -d '\r' | sed 's/^ *//')
+          if [ -n "$ANTHROPIC_API_KEY" ] && [ "$provider" != "anthropic" ]; then echo "::warning::Claude is configured but Groq answered: ${reason:-no reason given}"; fi
