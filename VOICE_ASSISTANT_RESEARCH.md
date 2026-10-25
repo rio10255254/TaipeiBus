@@ -8,6 +8,8 @@
 
 ## 0. 結論先講
 
+> 2026-10-25 更新：方案評估與完整設計見 [VOICE_CHAT_DESIGN.md](VOICE_CHAT_DESIGN.md)。結論改為 Pro 限定的 App 內語音對話：串接式，大腦放在伺服器後面、可以切換供應商；Siri 只當入口。以下為原始研究。
+
 1. **主架構建議「裝置端聽與說 + 可替換的大腦 + App 自己的工具」的串接式（cascade）設計**，不以雲端端到端語音模型（speech-to-speech）為主線。理由是本 App 最重要的價值是「數字正確」：到站時間、剩餘站數、YouBike 車位都必須來自官方資料與 App 自己的估計。串接式可以讓 **App 產生要說出口的句子**，模型只負責理解與挑選工具；端到端語音模型則是模型自己開口，無法逐字保證不編造數字。
 2. **大腦依裝置分層**：iOS 27 + Apple Intelligence 用 Private Cloud Compute（PCC，32K context、可推理、符合資格者免雲端費用）；iOS 26 用裝置端 Foundation Models（4K context，只放 3–5 個工具）；其餘裝置或使用者同意時，沿用現有 Supabase → Groq（gpt-oss）路徑並加上工具呼叫。iOS 27 的 `LanguageModel` 協定可讓三者共用同一套 `Tool` 程式碼。
 3. **先做半雙工（聽→想→說→自動再聽），再做可插話的全雙工**。全雙工需要改用 `.playAndRecord` + 回音消除（voice processing），並重新處理與下車鈴聲、動態島、背景定位的音訊共存，風險較高。
