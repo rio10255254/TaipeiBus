@@ -6,6 +6,12 @@ import TransitCore
 import ActivityKit
 #endif
 
+/// 一路 brand colours, shared by the app, its widgets and Live Activities.
+enum Brand {
+    /// The route line and badge of the app icon: the system's orange, so it adapts to dark mode and high contrast.
+    static let accent = Color.orange
+}
+
 /// A route sign as the app draws it, carried to the widget and Live Activity, which cannot
 /// look up route colours themselves.
 struct RouteSign: Codable, Hashable, Sendable {

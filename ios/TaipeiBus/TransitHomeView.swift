@@ -88,7 +88,7 @@ struct TransitHomeView: View {
                              topInset: geometry.safeAreaInsets.top + 64 + bannerOffset,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
-                    .accessibilityLabel(live.text("台北公車地圖"))
+                    .accessibilityLabel(live.text("一路地圖"))
 #if DEBUG
                     .accessibilityIdentifier("native-map").accessibilityValue(selectionOverlay.cameraState)
 #endif
@@ -1160,7 +1160,7 @@ private struct TransitPanel: View {
                 Button { model.selectStation(station) } label: {
                     HStack(alignment: .center, spacing: 12) {
                         Image(systemName: model.favorites.contains(station.id) ? "star.fill" : model.recentStationIDs.contains(station.id) ? "clock" : station.mode == .bus ? "mappin.circle.fill" : "tram.circle.fill")
-                            .foregroundStyle(model.favorites.contains(station.id) ? Color.orange : Color(liveHex: live.appearance.accentColor))
+                            .foregroundStyle(model.favorites.contains(station.id) ? Color.yellow : Color(liveHex: live.appearance.accentColor))
                             .liveFont(.title2).frame(width: 30)
                         VStack(alignment: .leading, spacing: 5) {
                             HStack { BilingualName(station).liveFont(.body, weight: .semibold); Text(station.localizedBearing).liveFont(.caption).foregroundStyle(.secondary) }
@@ -1291,7 +1291,9 @@ private struct StationDetails: View {
                     }
                 }.padding(.bottom, 18 * CGFloat(live.appearance.spacingScale))
                 HStack {
-                    Text(station.mode == .bus ? live.text("官方到站預估") : live.text("列車方向")).liveFont(.subheadline, weight: .semibold)
+                    Label { Text(station.mode == .bus ? live.text("官方到站預估") : live.text("列車方向")) } icon: {
+                        Image(systemName: station.mode == .bus ? "clock.fill" : "tram.fill").foregroundStyle(Brand.accent)
+                    }.liveFont(.subheadline, weight: .semibold)
                     Spacer()
                     if let time = station.mode == .bus ? model.busArrivals.updatedAt : model.snapshot.estimates.updatedAt {
                         Text(time.formatted(SourceStatusView.clockStyle)).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -1321,7 +1323,7 @@ private struct StationDetails: View {
                                 .liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         }
                         if !row.approaches.isEmpty {
-                            Text(live.text("同方向車輛")).liveFont(.caption2).foregroundStyle(.secondary)
+                            Label(live.text("同方向車輛"), systemImage: "bus.doubledecker").liveFont(.caption2).foregroundStyle(.secondary)
                             HStack(spacing: 8) {
                                 ForEach(row.approaches) { approach in
                                     Button { model.selectVehicle(approach.vehicle) } label: {
@@ -1416,7 +1418,8 @@ private struct RouteDetails: View {
                     if group.approaching.isEmpty {
                         Text(AppText.text("往此站的車輛位置待確認")).liveFont(.subheadline).foregroundStyle(.secondary)
                     } else {
-                        Text(AppText.text("往此站的公車")).liveFont(.subheadline, weight: .semibold)
+                        Label { Text(AppText.text("往此站的公車")) } icon: { Image(systemName: "bus.fill").foregroundStyle(Brand.accent) }
+                            .liveFont(.subheadline, weight: .semibold)
                         ForEach(Array(group.approaching.prefix(3).enumerated()), id: \.element.id) { index, approach in
                             boardingVehicle(approach, stop: stop, nearest: index == 0, at: timeline.date)
                         }
@@ -1449,7 +1452,9 @@ private struct RouteDetails: View {
                 }
                 }
             }
-            Text(route.mode != .bus ? AppText.text("沿線車站") : model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
+            Label {
+                Text(route.mode != .bus ? AppText.text("沿線車站") : model.allRouteVariants && model.routeVariants.count > 1 ? AppText.text("主要站序") : AppText.text("沿線站牌"))
+            } icon: { Image(systemName: "point.topleft.down.to.point.bottomright.curvepath").foregroundStyle(Brand.accent) }
                 .liveFont(.headline).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
             if model.allRouteVariants && model.routeVariants.count > 1 {
                 Text(live.text("切換上方走法，可看各支線停靠站。")).liveFont(.caption).foregroundStyle(.secondary)
@@ -1547,17 +1552,23 @@ private struct VehicleDetails: View {
                 let fresh = vehicle.hasReliablePosition(at: timeline.date)
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").liveFont(.subheadline, weight: .semibold, design: .rounded).monospacedDigit()
+                        Label { Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").monospacedDigit() } icon: {
+                            Image(systemName: "speedometer").foregroundStyle(.secondary)
+                        }.liveFont(.subheadline, weight: .semibold, design: .rounded)
                         Text(live.text("GPS 回報 km/h")).liveFont(.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(fresh ? vehicle.statusLabel : vehicle.trackingLabel(at: timeline.date) ?? AppText.text("定位已延遲")).liveFont(.subheadline, weight: .semibold).foregroundStyle(fresh ? Color.primary : Color.orange)
+                        Label {
+                            Text(fresh ? vehicle.statusLabel : vehicle.trackingLabel(at: timeline.date) ?? AppText.text("定位已延遲"))
+                        } icon: {
+                            Image(systemName: fresh ? "dot.radiowaves.left.and.right" : "exclamationmark.triangle.fill").foregroundStyle(fresh ? Color.green : Color.orange)
+                        }.liveFont(.subheadline, weight: .semibold).foregroundStyle(fresh ? Color.primary : Color.orange)
                         Text(AppText.text("%@ 秒前回報", max(0, Int(timeline.date.timeIntervalSince(vehicle.observedAt))))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         if vehicle.lowFloor { Label(live.text("低底盤"), systemImage: "figure.roll").liveFont(.caption) }
                     }
                 }
             }
-            if let provider = vehicle.localizedProvider { Text(provider).liveFont(.subheadline).foregroundStyle(.secondary) }
+            if let provider = vehicle.localizedProvider { Label(provider, systemImage: "building.2").liveFont(.subheadline).foregroundStyle(.secondary) }
             Toggle(AppText.text("淡化建築、凸顯這輛車"), isOn: $model.highlightVehicle).liveFont(.subheadline)
             HStack(spacing: 10) {
                 Button {
@@ -1572,7 +1583,8 @@ private struct VehicleDetails: View {
             let upcoming = model.upcomingStops
             if !upcoming.isEmpty {
                 Divider()
-                Text(live.text("官方到站預估")).liveFont(.subheadline, weight: .semibold)
+                Label { Text(live.text("官方到站預估")) } icon: { Image(systemName: "clock.fill").foregroundStyle(Brand.accent) }
+                    .liveFont(.subheadline, weight: .semibold)
                 TimelineView(.periodic(from: .now, by: 1)) { timeline in
                 ForEach(Array(upcoming.prefix(3)), id: \.stop.id) { progress in
                     Button {
@@ -1662,30 +1674,37 @@ private struct AppInformationView: View {
             // Short and grouped like iOS Settings: what people change is on top; sources, licences
             // and every privacy explanation sit one level deeper.
             List {
+                Section { brandHeader }
                 Section {
                     NavigationLink { ProSettingsView(model:model) } label: {
-                        Label(AppText.text("台北公車 Pro"),systemImage:"star.circle")
+                        SettingsLabel(title: AppText.text("一路 Pro"), symbol: "star.fill", color: Brand.accent)
                     }.accessibilityIdentifier("settings-pro")
                 }
                 // Only problems surface here; the full data notes live under 資料來源.
                 if model.snapshot.vehicleError != nil || model.snapshot.estimates.error != nil || model.metadataNotice != nil {
                     Section {
-                        if let error = model.snapshot.vehicleError { Label(live.text(error), systemImage: "wifi.exclamationmark") }
-                        if let error = model.snapshot.estimates.error { Label(live.text(error), systemImage: "exclamationmark.triangle") }
-                        if let notice = model.metadataNotice { Label(live.text(notice), systemImage: "info.circle") }
+                        if let error = model.snapshot.vehicleError {
+                            Label { Text(live.text(error)) } icon: { Image(systemName: "wifi.exclamationmark").foregroundStyle(.red) }
+                        }
+                        if let error = model.snapshot.estimates.error {
+                            Label { Text(live.text(error)) } icon: { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow) }
+                        }
+                        if let notice = model.metadataNotice {
+                            Label { Text(live.text(notice)) } icon: { Image(systemName: "info.circle.fill").foregroundStyle(.blue) }
+                        }
                     }
                 }
                 Section {
                     Toggle(isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) })) {
-                        Label("English", systemImage: "character.bubble")
+                        SettingsLabel(title: "English", symbol: "globe", color: .blue)
                     }.accessibilityIdentifier("app-language-toggle")
                     if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
                         NavigationLink { AssistantSettingsView() } label: {
-                            Label(AppText.text("語音與 AI"), systemImage: "waveform")
+                            SettingsLabel(title: AppText.text("語音與 AI"), symbol: "waveform", color: .purple)
                         }.accessibilityIdentifier("settings-assistant")
                     }
                     NavigationLink { MapSettingsView(model: model) } label: {
-                        Label(AppText.text("地圖"), systemImage: "map")
+                        SettingsLabel(title: AppText.text("地圖"), symbol: "map.fill", color: .green)
                     }.accessibilityIdentifier("settings-map")
                     NavigationLink { FareSettingsView(model: model) } label: {
                         Label(AppText.text("車資"), systemImage: "ticket")
@@ -1694,35 +1713,35 @@ private struct AppInformationView: View {
                         List { CommuteHabitSettings(habits: model.commuteHabits) }
                             .navigationTitle(AppText.text("通勤提示")).navigationBarTitleDisplayMode(.inline)
                     } label: {
-                        Label(AppText.text("通勤提示"), systemImage: "clock.arrow.2.circlepath")
+                        SettingsLabel(title: AppText.text("通勤提示"), symbol: "clock.arrow.2.circlepath", color: .teal)
                     }.accessibilityIdentifier("settings-commute")
                 }
                 Section {
                     NavigationLink { OfficialNoticesView() } label: {
-                        Label(AppText.text("交通公告"), systemImage: "megaphone")
+                        SettingsLabel(title: AppText.text("交通公告"), symbol: "megaphone.fill", color: .red)
                     }.accessibilityIdentifier("official-service-notices")
                 }
                 Section {
                     NavigationLink { DataSourcesView(model: model) } label: {
-                        Label(AppText.text("資料來源"), systemImage: "server.rack")
+                        SettingsLabel(title: AppText.text("資料來源"), symbol: "server.rack", color: .gray)
                     }.accessibilityIdentifier("settings-sources")
                     NavigationLink { PrivacyExplanationView() } label: {
-                        Label(AppText.text("隱私"), systemImage: "hand.raised")
+                        SettingsLabel(title: AppText.text("隱私"), symbol: "hand.raised.fill", color: .blue)
                     }.accessibilityIdentifier("settings-privacy")
                     Link(destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!) {
-                        Label(AppText.text("完整隱私政策"), systemImage: "doc.text")
+                        SettingsLabel(title: AppText.text("完整隱私政策"), symbol: "doc.text.fill", color: .gray)
                     }.accessibilityIdentifier("app-privacy-policy")
                     Link(destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!) {
-                        Label(AppText.text("支援與聯絡"), systemImage: "questionmark.circle")
+                        SettingsLabel(title: AppText.text("支援與聯絡"), symbol: "questionmark", color: .indigo)
                     }.accessibilityIdentifier("app-support")
                     ShareLink(item:diagnostics.report) {
-                        Label(AppText.text("分享路線規劃紀錄"),systemImage:"square.and.arrow.up")
+                        SettingsLabel(title: AppText.text("分享路線規劃紀錄"), symbol: "square.and.arrow.up", color: .cyan)
                     }.accessibilityIdentifier("share-journey-diagnostics")
                 } header: { Text(AppText.text("關於")) }
                 if testerBuild {
                     Section {
                         NavigationLink { JourneyBenchmarkView() } label: {
-                            Label(AppText.text("AI 測試"), systemImage: "checklist")
+                            SettingsLabel(title: AppText.text("AI 測試"), symbol: "checklist", color: .gray)
                         }.accessibilityIdentifier("settings-ai-benchmark")
                     } footer: { Text(AppText.text("只在測試版顯示。")) }
                 }
@@ -1732,6 +1751,27 @@ private struct AppInformationView: View {
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }
         }
+    }
+
+    /// The app's own card at the top, as an app's page opens in iOS Settings.
+    private var brandHeader: some View {
+        HStack(spacing: 14) {
+            Image("BrandMark").resizable().scaledToFit().frame(width: 60, height: 60)
+                .clipShape(RoundedRectangle(cornerRadius: 13.5, style: .continuous))
+                .overlay { RoundedRectangle(cornerRadius: 13.5, style: .continuous).strokeBorder(Color.primary.opacity(0.08)) }
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(AppText.text("一路")).font(.title2.bold())
+                    if model.language != .english { Text("OneRoad").font(.subheadline.weight(.semibold)).foregroundStyle(Brand.accent) }
+                }
+                Text(AppText.text("公車、捷運、YouBike 與步行，一路接到底。")).font(.footnote).foregroundStyle(.secondary)
+                if let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String {
+                    Text(AppText.text("版本 %@", version)).font(.caption).foregroundStyle(.tertiary).monospacedDigit()
+                }
+            }
+            Spacer(minLength: 0)
+        }.padding(.vertical, 6).accessibilityElement(children: .combine).accessibilityIdentifier("settings-brand")
     }
 }
 
@@ -1754,17 +1794,21 @@ private struct MapSettingsView: View {
     var body: some View {
         List {
             Section {
-                Toggle(AppText.text("選車時淡化建築"), isOn: $model.highlightVehicle)
+                Toggle(isOn: $model.highlightVehicle) {
+                    SettingsLabel(title: AppText.text("選車時淡化建築"), symbol: "building.2.fill", color: .gray)
+                }
                 if live.display.bikeStations {
-                    Toggle(AppText.text("顯示 YouBike 站點"), isOn: $model.bikeStationsOn)
-                        .accessibilityIdentifier("bike-stations-toggle")
+                    Toggle(isOn: $model.bikeStationsOn) {
+                        SettingsLabel(title: AppText.text("顯示 YouBike 站點"), symbol: "bicycle", color: .mint)
+                    }.accessibilityIdentifier("bike-stations-toggle")
                 }
             } footer: {
                 if live.display.bikeStations { Text(live.text("放大到街道尺度時顯示 YouBike 2.0 站點，點站點可看可借車輛與可還空位。")) }
             }
             Section {
-                Toggle(AppText.text("夜間導航使用深色"), isOn: $model.nightNavigation)
-                    .accessibilityIdentifier("night-navigation-toggle")
+                Toggle(isOn: $model.nightNavigation) {
+                    SettingsLabel(title: AppText.text("夜間導航使用深色"), symbol: "moon.fill", color: .indigo)
+                }.accessibilityIdentifier("night-navigation-toggle")
             } footer: {
                 Text(live.text("日落後到日出前導航時，畫面與地圖自動改為深色，減少夜間刺眼。"))
             }
@@ -1801,7 +1845,7 @@ private struct DataSourcesView: View {
     @ObservedObject var model: TransitAppModel
     var body: some View {
         List {
-            Section(AppText.text("公車")) {
+            Section {
                 Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
                 Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
                 Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
@@ -1809,22 +1853,22 @@ private struct DataSourcesView: View {
                 Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
                 Text(AppText.text("站間車程與車資來自交通部運輸資料流通服務平臺（TDX）；車資依設定的悠遊卡票種計算，已扣捷運與公車 1 小時內轉乘優惠（全票 8 元、學生票 6 元、孩童敬老愛心票 4 元），開啟 TPASS 月票時不計其涵蓋的路段，來源不足時仍標示估計。"))
                 Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
-            }
-            Section(AppText.text("捷運")) {
+            } header: { SectionHeader(title: AppText.text("公車"), symbol: "bus.fill", color: .blue) }
+            Section {
                 Text(AppText.text("捷運路線、出口與車程採用官方資料。即時列車資料未啟用時，候車標示為班距估計。"))
                 Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
-            }
-            Section("YouBike") {
+            } header: { SectionHeader(title: AppText.text("捷運"), symbol: "tram.fill", color: .red) }
+            Section {
                 Text(AppText.text("YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。"))
                 Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
                 Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
-            }
-            Section(AppText.text("地圖")) {
+            } header: { SectionHeader(title: "YouBike", symbol: "bicycle", color: .mint) }
+            Section {
                 Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
                 Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
                 Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
                 NavigationLink(AppText.text("開源授權")) { LicenseView() }
-            }
+            } header: { SectionHeader(title: AppText.text("地圖"), symbol: "map.fill", color: .green) }
         }
         .navigationTitle(AppText.text("資料來源")).navigationBarTitleDisplayMode(.inline)
     }
@@ -1834,14 +1878,14 @@ private struct PrivacyExplanationView: View {
     @Environment(\.liveSettings) private var live
     var body: some View {
         List {
-            Section(AppText.text("智慧輔助與相機")) {
+            Section {
                 Text(AppText.text("開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。"))
-                Text(AppText.text("同意使用線上 AI 理解後，行程那一句話和日期會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數，兩家服務的金鑰都只存在伺服器、不在 App 裡。未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
+                Text(AppText.text("同意使用線上 AI 理解後，行程那一句話和日期會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數，兩家服務的金鑰都只存在伺服器、不在 App 裡。未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
                 Text(AppText.text("按麥克風或對 Siri 說出行程時，聲音只用來轉成文字（支援時在手機上辨識），不儲存錄音。最近說過的句子只存在這支手機，可長按移除。"))
                 Text(AppText.text("掃描車牌才會請求相機權限；影像在手機辨識，不儲存或上傳。拒絕權限仍可手動選車。"))
                 Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
-            }
-            Section(AppText.text("你的位置")) {
+            } header: { SectionHeader(title: AppText.text("智慧輔助與相機"), symbol: "sparkles", color: .purple) }
+            Section {
                 Text(live.text("定位只在使用期間尋找附近站牌，可直接手動搜尋；位置不會傳到公車資料來源。"))
                 Button(live.text("開啟系統設定")) {
                     if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
@@ -1849,27 +1893,27 @@ private struct PrivacyExplanationView: View {
                 Text(AppText.text("定位為選用，只在使用 App 時尋找附近站牌、規劃行程與定位地圖。也能拒絕定位，手動選擇出發地、站牌或路線。App 不會將定位座標加入公車資料查詢。"))
                 Text(AppText.text("地點搜尋與步行路線由 Apple 地圖提供；搜尋文字及路線起終點由 Apple 處理。"))
                 Text(AppText.text("地圖供應者會收到目前畫面需要的圖磚請求及網路連線資訊，因此可能得知你正在查看的大致區域。"))
-            }
-            Section(AppText.text("內容更新")) {
+            } header: { SectionHeader(title: AppText.text("你的位置"), symbol: "location.fill", color: .blue) }
+            Section {
                 Text(AppText.text("搜尋別名、文字、外觀、既有搭車設定與共用車程資料會從 GitHub 下載。這個請求不包含定位或搜尋文字；GitHub 會收到一般網路連線資訊。"))
-            }
-            Section(AppText.text("保存在手機")) {
+            } header: { SectionHeader(title: AppText.text("內容更新"), symbol: "arrow.down.circle.fill", color: .teal) }
+            Section {
                 Text(AppText.text("收藏站牌、最近目的地、最近查看與地圖偏好保存在此裝置。App 沒有帳號、廣告或跨 App 追蹤，也未加入分析 SDK。"))
                 Text(AppText.text("常用行程與個人路線偏好也保存在手機。Pro 購買由 Apple 處理；App 只確認訂閱權限，不讀取付款卡片資料。"))
-            }
-            Section(AppText.text("網路服務")) {
+            } header: { SectionHeader(title: AppText.text("保存在手機"), symbol: "iphone", color: .gray) }
+            Section {
                 Text(AppText.text("公車資料來自臺北市公開資料服務；底圖由 OpenFreeMap 提供。服務商可能依自己的政策處理連線紀錄。"))
                 Text(AppText.text("App 使用期間會預先取得臺北市全市即時車位，供自行車路線比較，並在手機保留近期報告。這個請求不包含你的位置、目的地或選取的站點。"))
                 Link(AppText.text("OpenFreeMap 隱私政策"), destination: URL(string: "https://openfreemap.org/privacy/")!)
-            }
-            Section(AppText.text("測試回饋")) {
+            } header: { SectionHeader(title: AppText.text("網路服務"), symbol: "network", color: .indigo) }
+            Section {
                 Text(AppText.text("透過 TestFlight 主動回報時，Apple 與開發者可能收到你提交的內容、截圖及診斷資訊。分享前請留意截圖是否包含你的位置。"))
-            }
-            Section(AppText.text("管理權限")) {
+            } header: { SectionHeader(title: AppText.text("測試回饋"), symbol: "ladybug.fill", color: .pink) }
+            Section {
                 Text(AppText.text("可在 iPhone 系統設定關閉定位。刪除 App 可移除其本機收藏與偏好。"))
                 Link(AppText.text("完整隱私政策"), destination: URL(string: "https://rio10255254.github.io/TaipeiBus/privacy.html")!)
                 Link(AppText.text("支援與聯絡"), destination: URL(string: "https://rio10255254.github.io/TaipeiBus/support.html")!)
-            }
+            } header: { SectionHeader(title: AppText.text("管理權限"), symbol: "gearshape.fill", color: .gray) }
         }
         .navigationTitle(AppText.text("隱私權說明")).navigationBarTitleDisplayMode(.inline)
     }
@@ -1930,7 +1974,7 @@ private struct VoiceStyleSettings: View {
                 .listRowInsets(EdgeInsets(top: 8, leading: Metrics.margin, bottom: 12, trailing: Metrics.margin))
                 .accessibilityIdentifier("voice-style-picker")
         } header: {
-            Text(AppText.text("語音助理樣式"))
+            SectionHeader(title: AppText.text("語音助理樣式"), symbol: "sparkles", color: .purple)
         }
     }
 }
@@ -1944,13 +1988,13 @@ private struct OnlineUnderstandingSettings: View {
             // The full explanation sits one level deeper.
             NavigationLink(AppText.text("資料如何使用")) {
                 List {
-                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
+                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
                                       "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
                 }
                 .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
             }
         } header: {
-            Text(AppText.text("用一句話規劃"))
+            SectionHeader(title: AppText.text("用一句話規劃"), symbol: "text.bubble.fill", color: .blue)
         } footer: {
             Text(AppText.text("更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次。",
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))

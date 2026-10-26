@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 10,
+  "revision": 11,
   "minimumAppVersion": "1.1.8",
   "copy": {},
   "search": {
@@ -91,7 +91,7 @@
     "resultLimit": 12
   },
   "appearance": {
-    "accentColor": "#007AFF",
+    "accentColor": "#FF9500",
     "walkingColor": "#FF9500",
     "waterColor": "#BADCE5",
     "parkColor": "#D6E6C5",

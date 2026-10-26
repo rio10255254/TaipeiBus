@@ -34,6 +34,7 @@ private struct CommuteWidgetContainer: View {
     var body: some View {
         CommuteWidgetView(entry: entry, family: family)
             .containerBackground(for: .widget) { Color(uiColor: .systemBackground) }
+            .tint(Brand.accent)
     }
 }
 

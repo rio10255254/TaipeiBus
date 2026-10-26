@@ -33,7 +33,7 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public init() {}
     }
     public struct Appearance: Codable, Equatable, Sendable {
-        public var accentColor = "#007AFF"
+        public var accentColor = "#FF9500"
         public var walkingColor = "#FF9500"
         public var waterColor = "#BADCE5"
         public var parkColor = "#D6E6C5"

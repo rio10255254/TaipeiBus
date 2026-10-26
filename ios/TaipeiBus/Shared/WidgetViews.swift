@@ -144,7 +144,7 @@ struct CommuteWidgetView: View {
             Label(AppText.text("常用行程", language: language), systemImage: "star.fill").font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             Spacer(minLength: 0)
-            Text(AppText.text("在台北公車儲存常用行程，這裡就會顯示下一班車", language: language))
+            Text(AppText.text("在「一路」儲存常用行程，這裡就會顯示下一班車", language: language))
                 .font(.subheadline.weight(.medium)).lineLimit(4).minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)

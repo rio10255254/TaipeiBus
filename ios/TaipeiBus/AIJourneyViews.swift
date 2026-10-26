@@ -1091,7 +1091,7 @@ struct OnlineConsentAlert: ViewModifier {
             Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
-            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；台北公車的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
         }
     }
 }
@@ -1205,7 +1205,7 @@ extension JourneyAssistantSession {
         case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
         case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
         case .understanding: activity
-        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；台北公車的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
+        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
         case .done, .problem: ""
         }
     }

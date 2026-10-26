@@ -1,6 +1,6 @@
-# 台北公車 · iPhone
+# 一路 OneRoad · iPhone
 
-以地圖為主的台北公車 App，優先適配 iPhone 17。SwiftUI 介面、CoreLocation 定位、URLSession 資料更新，搭配 MapLibre Native 與 Metal，把簡單的灰色公車模型畫入地圖道路的 3D 場景。
+一路（OneRoad）是以地圖為主的台北交通 App，把公車、捷運、YouBike 與步行接成一趟路，優先適配 iPhone 17。SwiftUI 介面、CoreLocation 定位、URLSession 資料更新，搭配 MapLibre Native 與 Metal，把簡單的灰色公車模型畫入地圖道路的 3D 場景。
 
 底圖使用免金鑰的 OpenFreeMap，配色接近 Apple Maps；**目前不是 Apple Maps 底圖**。
 

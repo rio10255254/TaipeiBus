@@ -24,9 +24,10 @@ struct ProPurchaseView: View {
             ScrollView {
                 VStack(alignment:.leading,spacing:22) {
                     HStack(alignment:.center,spacing:12) {
-                        Image(systemName:"sparkles").font(.system(size:30)).foregroundStyle(.blue)
+                        Image("BrandMark").resizable().scaledToFit().frame(width:56,height:56)
+                            .clipShape(RoundedRectangle(cornerRadius:12.5,style:.continuous)).accessibilityHidden(true)
                         VStack(alignment:.leading,spacing:2) {
-                            Text(AppText.text("台北公車 Pro")).font(.title.bold())
+                            Text(AppText.text("一路 Pro")).font(.title.bold())
                             Text(AppText.text("讓每天的通勤更順手。")).font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -34,7 +35,7 @@ struct ProPurchaseView: View {
                     LazyVGrid(columns:[GridItem(.flexible(),spacing:8),GridItem(.flexible(),spacing:8)],alignment:.leading,spacing:8) {
                         ForEach(Self.benefits,id:\.title) { item in
                             Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8) }
-                                icon: { Image(systemName:item.symbol).foregroundStyle(.blue) }
+                                icon: { SettingsIcon(symbol:item.symbol,color:item.color) }
                                 .frame(maxWidth:.infinity,minHeight:40,alignment:.leading).padding(.horizontal,12)
                                 .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.row))
                         }
@@ -52,7 +53,7 @@ struct ProPurchaseView: View {
                             Button { selected = plan } label: {
                                 HStack(spacing:12) {
                                     Image(systemName:selected == plan ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selected == plan ? Color.blue : Color.secondary)
+                                        .foregroundStyle(selected == plan ? Brand.accent : Color.secondary)
                                     Text(plan.title).fontWeight(.semibold)
                                     if plan == .yearly, let saving = yearlySaving {
                                         Text(AppText.text("省 %@%%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
@@ -68,13 +69,13 @@ struct ProPurchaseView: View {
                                                     .font(.caption).foregroundStyle(.secondary)
                                             } else { Text(plan.period).font(.caption).foregroundStyle(.secondary) }
                                             if purchases.offersSevenDayTrial(plan) {
-                                                Text(AppText.text("先免費試用 7 天")).font(.caption).foregroundStyle(.blue)
+                                                Text(AppText.text("先免費試用 7 天")).font(.caption).foregroundStyle(Brand.accent)
                                             }
                                         }
                                     } else { Text(AppText.text("準備中")).foregroundStyle(.secondary) }
                                 }.padding(16).frame(maxWidth:.infinity,minHeight:70)
                                     .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.panel))
-                                    .overlay { live.shape(.panel).stroke(selected == plan ? Color.blue : Color.clear,lineWidth:1.5) }
+                                    .overlay { live.shape(.panel).stroke(selected == plan ? Brand.accent : Color.clear,lineWidth:1.5) }
                             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                                 .accessibilityIdentifier("pro-plan-"+plan.rawValue)
                         }
@@ -104,7 +105,7 @@ struct ProPurchaseView: View {
                     Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。"))
                         .font(.footnote).foregroundStyle(.secondary)
                     VStack(alignment:.leading,spacing:16) {
-                        ForEach(Self.benefits,id:\.title) { item in benefit(item.symbol,title:item.title,detail:item.detail) }
+                        ForEach(Self.benefits,id:\.title) { item in benefit(item.symbol,color:item.color,title:item.title,detail:item.detail) }
                     }.padding(.top,4)
                     HStack(spacing:20) {
                         Button(AppText.text("恢復購買")) { Task { await purchases.restore() } }
@@ -129,19 +130,19 @@ struct ProPurchaseView: View {
             if let active = purchases.activePlan { selected = active }
         }
     }
-    private static let benefits: [(symbol: String, title: String, detail: String)] = [
-        ("tram.fill","即時捷運列車","全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。"),
-        ("scope","跟隨鏡頭","鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。"),
-        ("bell.badge.fill","下車提醒","快到下車站前通知並震動，手機放口袋也不會坐過站。"),
-        ("timer","動態島與鎖定畫面","不用打開 App，就能看到等車倒數與還有幾站下車。"),
-        ("square.grid.2x2.fill","桌面小工具","常用行程的下一班車與建議出門時間，直接顯示在主畫面。"),
-        ("house.fill","常用行程捷徑","把回家、上班與常去的地方存好，一點就能預覽路線。"),
-        ("slider.horizontal.3","個人路線偏好","選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。"),
-        ("sparkles","更聰明的一句話規劃","用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。"),
+    private static let benefits: [(symbol: String, color: Color, title: String, detail: String)] = [
+        ("tram.fill",Color.indigo,"即時捷運列車","全路網列車在地圖上即時移動，高架與地下分層顯示，點一下就能跟隨。"),
+        ("scope",Brand.accent,"跟隨鏡頭","鏡頭跟在公車或列車後方，隨路線轉向，停靠時繞著車站。"),
+        ("bell.badge.fill",Color.red,"下車提醒","快到下車站前通知並震動，手機放口袋也不會坐過站。"),
+        ("timer",Color.teal,"動態島與鎖定畫面","不用打開 App，就能看到等車倒數與還有幾站下車。"),
+        ("square.grid.2x2.fill",Color.blue,"桌面小工具","常用行程的下一班車與建議出門時間，直接顯示在主畫面。"),
+        ("house.fill",Color.green,"常用行程捷徑","把回家、上班與常去的地方存好，一點就能預覽路線。"),
+        ("slider.horizontal.3",Color.purple,"個人路線偏好","選擇時間優先、少走路或少轉乘，依照你的習慣比較路線。"),
+        ("sparkles",Color.pink,"更聰明的一句話規劃","用更大的線上模型讀懂你說的行程，複雜的說法也更準，每天可用次數也更多。"),
     ]
-    private func benefit(_ symbol: String,title: String,detail: String) -> some View {
+    private func benefit(_ symbol: String,color: Color,title: String,detail: String) -> some View {
         HStack(alignment:.top,spacing:14) {
-            Image(systemName:symbol).font(.title2).foregroundStyle(.blue).frame(width:32)
+            SettingsIcon(symbol:symbol,color:color)
             VStack(alignment:.leading,spacing:5) {
                 Text(AppText.text(title)).font(.headline)
                 Text(AppText.text(detail)).font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal:false,vertical:true)
@@ -160,27 +161,39 @@ struct ProSettingsView: View {
         List {
             Section {
                 Button { showingPurchase = true } label: {
-                    HStack { Text(AppText.text(purchases.hasPro ? "Pro 已開通" : "查看 Pro 方案")); Spacer(); Image(systemName:"chevron.right") }
+                    HStack {
+                        SettingsLabel(title: AppText.text(purchases.hasPro ? "Pro 已開通" : "查看 Pro 方案"), symbol: "star.fill", color: Brand.accent)
+                        Spacer(); Image(systemName:"chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
                 }.accessibilityIdentifier("pro-open-plans")
                 if purchases.hasPro {
-                    Button(AppText.text("管理訂閱")) { Task { await purchases.manage() } }
+                    Button { Task { await purchases.manage() } } label: {
+                        SettingsLabel(title: AppText.text("管理訂閱"), symbol: "creditcard.fill", color: .green)
+                    }
                 }
             } footer: { Text(AppText.text("免費版每天可試用 3 次即時列車或跟隨鏡頭；路線規劃、導航、官方到站與 3D 車輛仍可免費使用。")) }
-            Section(AppText.text("通勤")) {
-                NavigationLink(AppText.text("常用行程")) { SavedJourneysView(model:model) }
-                    .accessibilityIdentifier("pro-saved-journeys")
+            Section {
+                NavigationLink { SavedJourneysView(model:model) } label: {
+                    SettingsLabel(title: AppText.text("常用行程"), symbol: "house.fill", color: .green)
+                }.accessibilityIdentifier("pro-saved-journeys")
                 if purchases.hasPro {
-                    Picker(AppText.text("預設路線偏好"),selection:$commutes.preference) {
+                    Picker(selection:$commutes.preference) {
                         ForEach(RoutePreference.allCases) { choice in Text(choice.title).tag(choice) }
+                    } label: {
+                        SettingsLabel(title: AppText.text("預設路線偏好"), symbol: "slider.horizontal.3", color: .purple)
                     }.accessibilityIdentifier("pro-default-preference")
                 } else {
-                    Button(AppText.text("個人路線偏好")) { showingPurchase = true }
+                    Button { showingPurchase = true } label: {
+                        SettingsLabel(title: AppText.text("個人路線偏好"), symbol: "slider.horizontal.3", color: .purple)
+                    }
                 }
-            }
+            } header: { Text(AppText.text("通勤")) }
             if model.planner.started { Text(AppText.text("新偏好會用於下一次規劃。")) .font(.footnote).foregroundStyle(.secondary) }
             if purchases.hasPro {
                 Section {
-                    Toggle(AppText.text("動態島與鎖定畫面"), isOn: $model.rideActivityOn).accessibilityIdentifier("pro-ride-activity")
+                    Toggle(isOn: $model.rideActivityOn) {
+                        SettingsLabel(title: AppText.text("動態島與鎖定畫面"), symbol: "timer", color: .teal)
+                    }.accessibilityIdentifier("pro-ride-activity")
                     HStack {
                         Text(model.liveActivityStatus).font(.caption).foregroundStyle(.secondary)
                             .accessibilityIdentifier("pro-live-activity-readiness")
@@ -191,8 +204,9 @@ struct ProSettingsView: View {
                             Button(AppText.text("重新顯示")) { model.retryLiveActivity() }
                         }
                     }
-                    Toggle(AppText.text("下車提醒"), isOn: Binding(get: { model.alightReminderOn },
-                        set: { model.setAlightReminderPreference($0) })).accessibilityIdentifier("pro-alight-reminder")
+                    Toggle(isOn: Binding(get: { model.alightReminderOn }, set: { model.setAlightReminderPreference($0) })) {
+                        SettingsLabel(title: AppText.text("下車提醒"), symbol: "bell.badge.fill", color: .red)
+                    }.accessibilityIdentifier("pro-alight-reminder")
                     HStack {
                         Text(model.alightReminderStatus).font(.caption).foregroundStyle(.secondary)
                             .accessibilityIdentifier("pro-alight-readiness")
@@ -208,10 +222,12 @@ struct ProSettingsView: View {
                 }
             }
             Section {
-                Button(AppText.text("恢復購買")) { Task { await purchases.restore() } }
+                Button { Task { await purchases.restore() } } label: {
+                    SettingsLabel(title: AppText.text("恢復購買"), symbol: "arrow.clockwise", color: .gray)
+                }
                 if let message = purchases.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
-        }.navigationTitle(AppText.text("台北公車 Pro")).navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle(AppText.text("一路 Pro")).navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented:$showingPurchase) { ProPurchaseView(purchases:purchases) }
             .task { await purchases.refreshAccess(); await model.refreshNavigationPermissions() }
     }
@@ -336,7 +352,7 @@ struct ProNoteBanner: View {
     var body: some View {
         if let note = model.proNote {
             HStack(spacing: 10) {
-                Image(systemName: "sparkles").foregroundStyle(.blue)
+                Image(systemName: "sparkles").foregroundStyle(Brand.accent)
                 Text(note).liveFont(.subheadline).lineLimit(2).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 4)
                 Button(AppText.text("了解 Pro")) { model.proNote = nil; model.showingProPlans = true }

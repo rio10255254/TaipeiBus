@@ -24,6 +24,7 @@ extension Color {
             let base = UIColor(liveHex: liveHex)
             guard traits.userInterfaceStyle == .dark else { return base }
             if liveHex.uppercased() == "#007AFF" { return UIColor.systemBlue.resolvedColor(with: traits) }
+            if liveHex.uppercased() == "#FF9500" { return UIColor.systemOrange.resolvedColor(with: traits) }
             var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
             base.getRed(&r, green: &g, blue: &b, alpha: &a)
             return UIColor(red: r + (1-r)*0.18, green: g + (1-g)*0.18, blue: b + (1-b)*0.18, alpha: a)
@@ -395,5 +396,40 @@ struct LoadingRows: View {
         .onAppear { dimmed = !reduced }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
+    }
+}
+
+/// A row icon as in iOS Settings: a white symbol on a rounded colour tile, so rows read at a glance.
+struct SettingsIcon: View {
+    let symbol: String
+    let color: Color
+    @ScaledMetric(relativeTo: .body) private var size: CGFloat = 29
+    var body: some View {
+        Image(systemName: symbol)
+            .font(.system(size: size * 0.52, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(color.gradient, in: RoundedRectangle(cornerRadius: size * 0.24, style: .continuous))
+            .accessibilityHidden(true)
+    }
+}
+
+/// A Settings row label: the coloured tile and the title in the primary colour, also inside links and buttons.
+struct SettingsLabel: View {
+    let title: String
+    let symbol: String
+    let color: Color
+    var body: some View {
+        Label { Text(title).foregroundStyle(.primary) } icon: { SettingsIcon(symbol: symbol, color: color) }
+    }
+}
+
+/// A section header that carries a small coloured symbol, so long explanation pages scan by topic.
+struct SectionHeader: View {
+    let title: String
+    let symbol: String
+    var color: Color = .secondary
+    var body: some View {
+        Label { Text(title) } icon: { Image(systemName: symbol).foregroundStyle(color) }
     }
 }
