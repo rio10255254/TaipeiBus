@@ -9,6 +9,7 @@ struct TaipeiBusWidgetBundle: WidgetBundle {
     var body: some Widget {
         CommuteWidget()
         RideLiveActivity()
+        if #available(iOS 18.0, *) { VoiceChatControl() }
     }
 }
 

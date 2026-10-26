@@ -37,6 +37,14 @@ async function checkTier(admin: SupabaseClient, userId: string, proof?: string, 
   if (!proof || proof.length > 20000) return 'free';
   const transaction = await verifyTransaction(proof, APPLE_ROOTS, renewal && renewal.length <= 20000 ? renewal : undefined);
   if (!transaction) return 'free';
+  // One subscription proves Pro on a family's phones and reinstalls, not on any number of them.
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+  const { count } = await admin.from('assistant_pro').select('user_id', { count: 'exact', head: true })
+    .eq('original_transaction_id', transaction.originalTransactionId).neq('user_id', userId).gt('updated_at', since);
+  if (!sharingAllowed(count ?? 0)) {
+    console.warn('pro proof shared too widely', count);
+    return 'free';
+  }
   await admin.from('assistant_pro').upsert({
     user_id: userId,
     original_transaction_id: transaction.originalTransactionId,
@@ -47,6 +55,13 @@ async function checkTier(admin: SupabaseClient, userId: string, proof?: string, 
 }
 
 export type Pro = { originalTransactionId: string; expiresDate: number };
+
+/// Phones one subscription may prove Pro on within 30 days, besides this one: Family Sharing has up
+/// to six people, and a reinstall signs in as a new phone.
+export const SHARED_PHONES = 10;
+export function sharingAllowed(otherPhones: number): boolean {
+  return otherPhones < SHARED_PHONES;
+}
 
 /// The active Pro subscription a signed App Store transaction proves, or null. The checks follow
 /// Apple's App Store Server Library: a three-certificate chain from one of `roots` to an intermediate

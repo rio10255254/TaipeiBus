@@ -18,8 +18,11 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     /// With VoiceOver on, the whole answer is announced at the end in the rider's own voice settings.
     private var announcement = ""
     private var done: CheckedContinuation<Void, Never>?
+    /// Navigation prompts: spoken over other audio briefly, also behind the Lock Screen.
+    private let prompts: Bool
 
-    override init() {
+    init(prompts: Bool = false) {
+        self.prompts = prompts
         super.init()
         synthesizer.delegate = self
     }
@@ -43,10 +46,15 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     func enqueue(_ text: String, routes: [String] = [], language: AppLanguage = .current) {
         guard !text.isEmpty else { return }
         // VoiceOver reads it in the rider's own voice settings instead of a second voice over it.
-        if UIAccessibility.isVoiceOverRunning { announcement += text; return }
+        // Behind the Lock Screen VoiceOver announces nothing, so prompts are spoken there.
+        if UIAccessibility.isVoiceOverRunning, !prompts || UIApplication.shared.applicationState == .active { announcement += text; return }
         if queued.isEmpty {
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            if prompts {
+                try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
+            } else {
+                try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            }
             try? session.setActive(true)
         }
         let utterance = AVSpeechUtterance(string: SpokenAnswer.speakable(text, routes: routes))
@@ -154,6 +162,11 @@ final class VoiceConversation: ObservableObject {
     private var planOptions: [String] = []
     /// The Public Transportation Office's latest notices, once the conversation asked for them.
     private var notices: [OfficialNotice]?
+    /// The last answer, as the rider may report it: what was heard, what was said, the state it came from.
+    private var lastTurn: [String: String]?
+    /// The last answer can be reported, and whether it has been.
+    @Published private(set) var reportable = false
+    @Published private(set) var reported = false
 
     init(model: TransitAppModel) { self.model = model }
 
@@ -196,6 +209,7 @@ final class VoiceConversation: ObservableObject {
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
         names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []; notices = nil
+        lastTurn = nil; reportable = false; reported = false
         // Built for Chinese even when listening in English, so switching languages needs no wait.
         let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
         let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
@@ -230,6 +244,18 @@ final class VoiceConversation: ObservableObject {
         guard active else { return }
         speech.stop(); output.stop()
         handle(choice)
+    }
+
+    /// Sends the last answer to the developer, kept 30 days, after the rider agreed in the panel.
+    func reportLastAnswer() {
+        guard let lastTurn, !reported else { return }
+        reported = true
+        Task {
+            let body: [String: Any] = ["consent": Self.consentVersion, "feedback": lastTurn]
+            let status = (try? await AssistantServer.post("converse", body: body, timeout: 10))?.1 ?? 0
+            JourneyDiagnostics.shared.record("voice report status=\(status)")
+            if status != 200 { reported = false }
+        }
     }
 
     /// The panel's language button: listen in the other language from now on, starting right away.
@@ -368,6 +394,8 @@ final class VoiceConversation: ObservableObject {
                 said += fallback
             }
             history.append(user: text, said: said)
+            lastTurn = ["heard": text, "said": said, "state": context.prompt(), "model": (final["model"] as? String) ?? ""]
+            reportable = true; reported = false
             respond(nil, followUp: true)
         } catch {
             guard !Task.isCancelled else { return }
@@ -642,8 +670,8 @@ struct VoiceStateBuilder {
                         : VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
                     items.append(("第 \(index + 1) 個方案的抵達時間", arrival))
                 }
-                // Official fares, adult electronic ticket, before transfer discounts.
-                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（悠遊卡全票，未扣轉乘優惠）", fare)) }
+                // Official fares, adult electronic ticket, after the metro↔bus transfer discount.
+                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）", fare)) }
             }
         } else if let station = model.mapLabelStation {
             screen = "站牌：\(station.localizedName)"
@@ -758,15 +786,15 @@ struct VoiceStateBuilder {
 }
 
 /// Spoken prompts while navigating (Pro), so the trip can be followed without looking: what to do at
-/// each step, the bus or train coming, getting ready to get off, and arriving. Said while the app is on
-/// screen and the conversation is not talking; behind the Lock Screen the alight notification and the
-/// Live Activity carry the trip. Each prompt is said once.
+/// each step, the bus or train coming, getting ready to get off, and arriving. Also behind the Lock
+/// Screen, where navigation keeps the app running (the audio background mode lets it speak there);
+/// never over the conversation. Each prompt is said once.
 @MainActor
 final class NavigationVoice {
     static let key = "navigationVoicePrompts.v1"
     static var enabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
     private unowned let model: TransitAppModel
-    private let output = SpeechOutput()
+    private let output = SpeechOutput(prompts: true)
     private var said: Set<String> = []
     private var step: Int?
 
@@ -776,8 +804,7 @@ final class NavigationVoice {
     func update(now: Date = Date()) {
         let planner = model.planner
         guard planner.started else { said = []; step = nil; return }
-        guard Self.enabled, model.purchases.hasPro, UIApplication.shared.applicationState == .active,
-              !model.voiceChat.active else { return }
+        guard Self.enabled, model.purchases.hasPro, !model.voiceChat.active else { return }
         if planner.arrived {
             say("arrived", AppText.text("已到達「%@」。", planner.destination?.localizedName ?? AppText.text("目的地")))
             return
