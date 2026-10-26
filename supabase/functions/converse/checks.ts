@@ -47,7 +47,8 @@ export function problems(test: Expectation, reply: Reply): Problem[] {
   if (test.expect && !reply.actions.some((action) => action.type === test.expect)) add('wrong_action', `缺少動作 ${test.expect}`);
   if (test.confirm && reply.confirm.type !== test.confirm) add('wrong_action', `應該問 ${test.confirm}，卻是 ${reply.confirm.type}`);
   if (test.avoid && reply.actions.some((action) => action.type === test.avoid)) add('wrong_action', `不該用 ${test.avoid}`);
-  if (test.avoid === 'web_search' && /上網|搜尋/.test(reply.say)) add('wrong_action', '說要上網查');
+  // Saying it will look online, not saying it cannot (「我沒辦法上網查」 is the right answer).
+  if (test.avoid === 'web_search' && /(?<!沒辦法|無法|不能|不會)(上網|搜尋)(查|看|找)?一下/.test(reply.say)) add('wrong_action', '說要上網查');
   if (test.english && (reply.say.match(/[A-Za-z]+/g) ?? []).length < 3) add('wrong_language', '沒有用英文回答');
   if (test.noAmounts && /[0-9０-９]+\s*(元|塊)/.test(reply.say)) add('invented_fact', '憑記憶說了金額');
   const plan = reply.actions.find((action) => action.type === 'plan_trip');
