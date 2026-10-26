@@ -176,7 +176,7 @@ final class MapAndSearchUsabilityTests: JourneyUsabilityTestBase {
         launch()
         XCUIDevice.shared.press(.home)
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
-        let icon = springboard.icons.matching(NSPredicate(format: "label IN %@", ["台北公車", "臺北公車", "TaipeiBus"])).firstMatch
+        let icon = springboard.icons.matching(NSPredicate(format: "label IN %@", ["一路", "OneRoad", "台北公車", "臺北公車", "TaipeiBus"])).firstMatch
         for _ in 0..<3 {
             if icon.exists && icon.isHittable { break }
             springboard.swipeLeft()

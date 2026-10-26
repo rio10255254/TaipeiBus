@@ -429,7 +429,7 @@ enum AssistantLaunch {
 
 struct PlanTripIntent: AppIntent {
     static let title: LocalizedStringResource = "規劃行程"
-    static let description = IntentDescription("說出要去哪裡，台北公車會在手機上理解並開始規劃路線。")
+    static let description = IntentDescription("說出要去哪裡，「一路」會在手機上理解並開始規劃路線。")
     static let openAppWhenRun = true
     @Parameter(title: "行程", requestValueDialog: IntentDialog("要去哪裡？"))
     var request: String
@@ -452,6 +452,6 @@ struct TaipeiBusShortcuts: AppShortcutsProvider {
             "問\(.applicationName)",
             "用\(.applicationName)問問題",
             "打開\(.applicationName)語音對話",
-        ], shortTitle: "問台北公車", systemImageName: "waveform")
+        ], shortTitle: "問一路", systemImageName: "waveform")
     }
 }

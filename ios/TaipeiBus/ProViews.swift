@@ -26,7 +26,7 @@ struct ProPurchaseView: View {
                     HStack(alignment:.center,spacing:12) {
                         Image(systemName:"sparkles").font(.system(size:30)).foregroundStyle(.blue)
                         VStack(alignment:.leading,spacing:2) {
-                            Text(AppText.text("台北公車 Pro")).font(.title.bold())
+                            Text(AppText.text("一路 Pro")).font(.title.bold())
                             Text(AppText.text("讓每天的通勤更順手。")).font(.subheadline).foregroundStyle(.secondary)
                         }
                     }
@@ -211,7 +211,7 @@ struct ProSettingsView: View {
                 Button(AppText.text("恢復購買")) { Task { await purchases.restore() } }
                 if let message = purchases.message { Text(message).font(.footnote).foregroundStyle(.secondary) }
             }
-        }.navigationTitle(AppText.text("台北公車 Pro")).navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle(AppText.text("一路 Pro")).navigationBarTitleDisplayMode(.inline)
             .sheet(isPresented:$showingPurchase) { ProPurchaseView(purchases:purchases) }
             .task { await purchases.refreshAccess(); await model.refreshNavigationPermissions() }
     }

@@ -88,7 +88,7 @@ struct TransitHomeView: View {
                              topInset: geometry.safeAreaInsets.top + 64 + bannerOffset,
                              reduceMotion: reduceMotion, selectionOverlay: selectionOverlay)
                     .ignoresSafeArea()
-                    .accessibilityLabel(live.text("台北公車地圖"))
+                    .accessibilityLabel(live.text("一路地圖"))
 #if DEBUG
                     .accessibilityIdentifier("native-map").accessibilityValue(selectionOverlay.cameraState)
 #endif
@@ -1664,7 +1664,7 @@ private struct AppInformationView: View {
             List {
                 Section {
                     NavigationLink { ProSettingsView(model:model) } label: {
-                        Label(AppText.text("台北公車 Pro"),systemImage:"star.circle")
+                        Label(AppText.text("一路 Pro"),systemImage:"star.circle")
                     }.accessibilityIdentifier("settings-pro")
                 }
                 // Only problems surface here; the full data notes live under 資料來源.
@@ -1811,7 +1811,7 @@ private struct PrivacyExplanationView: View {
         List {
             Section(AppText.text("智慧輔助與相機")) {
                 Text(AppText.text("開啟交通公告時會下載公運處公開新聞稿，不傳送位置或行程；重點摘錄在手機上進行，並保留全文與原文連結。"))
-                Text(AppText.text("同意使用線上 AI 理解後，行程那一句話和日期會經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數，兩家服務的金鑰都只存在伺服器、不在 App 裡。未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
+                Text(AppText.text("同意使用線上 AI 理解後，行程那一句話和日期會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數，兩家服務的金鑰都只存在伺服器、不在 App 裡。未同意或沒有網路時，只在手機上理解。確認後的地點關鍵字與路線起終點仍由 Apple 地圖處理。"))
                 Text(AppText.text("按麥克風或對 Siri 說出行程時，聲音只用來轉成文字（支援時在手機上辨識），不儲存錄音。最近說過的句子只存在這支手機，可長按移除。"))
                 Text(AppText.text("掃描車牌才會請求相機權限；影像在手機辨識，不儲存或上傳。拒絕權限仍可手動選車。"))
                 Text(AppText.text("通勤提示預設關閉。開啟後只在手機保存已儲存行程的識別碼與開始時間，最多 42 天；可在設定清除，關閉也會清除。"))
@@ -1919,7 +1919,7 @@ private struct OnlineUnderstandingSettings: View {
             // The full explanation sits one level deeper.
             NavigationLink(AppText.text("資料如何使用")) {
                 List {
-                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由台北公車的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
+                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
                                       "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
                 }
                 .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
