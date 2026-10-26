@@ -1244,6 +1244,7 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 4) {
                     Text(timing?.conciseLabel ?? AppText.text("確認接駁中")).liveFont(.subheadline, weight: .semibold).monospacedDigit()
                     Spacer(minLength: 0)
+                    if let fare = model.fareLabel(option) { Text(fare).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).monospacedDigit() }
                     Image(systemName: "chevron.right").liveFont(.caption2).foregroundStyle(MapChrome.secondaryText)
                 }
                 HStack(spacing: 4) {
@@ -1287,6 +1288,10 @@ struct JourneyOptionsView: View {
             if let timing {
                 if !option.walkingOnly { Text(timing.expectedWaitingLabel).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit().fixedSize(horizontal: false, vertical: true) }
                 JourneyArrivalTime(duration: timing)
+            }
+            if let fare = model.fareLabel(option) {
+                Text(fare).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit()
+                    .accessibilityIdentifier("journey-fare-" + option.id)
             }
             JourneyRouteChain(option: option).padding(.top, 5)
             if let reason = planner.optionReasons[option.id] {

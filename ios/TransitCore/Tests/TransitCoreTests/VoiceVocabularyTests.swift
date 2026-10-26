@@ -28,6 +28,14 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertNil(AppLanguage.override)
     }
 
+    func testTheNewActionsAreRead() {
+        XCTAssertEqual(VoiceAction(json: ["type": "notices"]), .notices)
+        XCTAssertEqual(VoiceAction(json: ["type": "save_stop", "stop": "忠孝復興站"]), .saveStop("忠孝復興站"))
+        XCTAssertNil(VoiceAction(json: ["type": "save_stop", "stop": " "]))
+        XCTAssertEqual(VoiceAction(json: ["type": "remind_alight"]), .remindAlight)
+        XCTAssertFalse(VoiceAction.remindAlight.needsConfirmation)
+    }
+
     func testAChoiceIsPickedByNameOrByCount() {
         let places = ["淡水", "淡水老街", "淡水漁人碼頭"]
         XCTAssertEqual(VoiceChoice.pick("淡水", among: places), 0)

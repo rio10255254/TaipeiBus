@@ -195,6 +195,7 @@ final class TransitAppModel: ObservableObject {
             location.setBackgroundNavigation(journeyInBackground)
             updateAlightReminder()
         }
+        navigationVoice.update()
         let activityState = navigationReadiness.liveActivity(enabled: rideActivityOn,
             failed: planner.started && ["unavailable", "dismissed"].contains(rideActivity.debugState))
         if liveActivityState != activityState { liveActivityState = activityState }
@@ -650,6 +651,7 @@ final class TransitAppModel: ObservableObject {
     private(set) lazy var assistant = JourneyAssistantSession(model: self)
     /// The voice conversation (Pro).
     private(set) lazy var voiceChat = VoiceConversation(model: self)
+    private(set) lazy var navigationVoice = NavigationVoice(model: self)
     /// Keep the routes, drop what was understood (the banner's ✕).
     func forgetAssistantTrip() {
         assistantTrip = nil
@@ -1184,6 +1186,7 @@ final class TransitAppModel: ObservableObject {
                     updateEstimatedTrains(with: nil)
                     expireLiveTrainTrial()
                     updateAlightReminder()
+                    navigationVoice.update()
                     updateLiveSurfaces()
                     if !isActive, !journeyInBackground {
                         // The trip ended behind the Lock Screen: stop like a normal suspension.
@@ -1611,6 +1614,13 @@ final class TransitAppModel: ObservableObject {
         }
         let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt ?? date).seconds
         return (max(60,planned - max(0,date.timeIntervalSince(boardedAt ?? date))),true)
+    }
+
+    /// The official fare of an option's rides, adult electronic ticket, before transfer discounts: 「車資 35 元」,
+    /// or 「車資 35 元起」 when a ride's fare is not known. Nil for walking or YouBike alone.
+    func fareLabel(_ option: JourneyOption) -> String? {
+        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata) else { return nil }
+        return fare.complete ? AppText.text("車資 %@ 元", String(fare.total)) : AppText.text("車資 %@ 元起", String(fare.total))
     }
 
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
