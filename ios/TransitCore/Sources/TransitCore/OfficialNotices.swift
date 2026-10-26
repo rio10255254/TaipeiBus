@@ -21,6 +21,33 @@ public enum OfficialNotices {
         url.scheme == "https" && ["pto.gov.taipei", "www.pto.gov.taipei"].contains(url.host?.lowercased() ?? "") &&
             url.user == nil && url.password == nil && (url.port == nil || url.port == 443)
     }
+    /// The newest notice of the last two weeks that names this route: 「307」 but not 「3070」 or 「紅307」.
+    public static func mentioning(route: String, in notices: [OfficialNotice], now: Date = Date()) -> OfficialNotice? {
+        let name = route.trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty else { return nil }
+        return notices.filter { (0...(14 * 86_400)).contains(now.timeIntervalSince($0.publishedAt)) }
+            .sorted { $0.publishedAt > $1.publishedAt }
+            .first { names(name, in: $0.title) || names(name, in: $0.body) }
+    }
+
+    /// Colour and branch prefixes of route names: 「紅32」 is not route 32.
+    private static let prefixes: Set<Character> = ["紅", "藍", "綠", "棕", "橘", "黃", "小"]
+
+    static func names(_ route: String, in text: String) -> Bool {
+        var search = text.startIndex..<text.endIndex
+        while let found = text.range(of: route, range: search) {
+            let before = found.lowerBound > text.startIndex ? text[text.index(before: found.lowerBound)] : nil
+            let after = found.upperBound < text.endIndex ? text[found.upperBound] : nil
+            // A number of its own: not inside a longer number, nor after a letter or colour prefix.
+            let startsWithNumber = route.first?.isNumber == true
+            let joinedBefore = before.map { $0.isNumber || startsWithNumber && ($0.isASCII && $0.isLetter || prefixes.contains($0)) } ?? false
+            let joinedAfter = after?.isNumber == true
+            if !joinedBefore && !joinedAfter { return true }
+            search = found.upperBound..<text.endIndex
+        }
+        return false
+    }
+
     public static func parse(_ data: Data) throws -> [OfficialNotice] {
         guard !data.isEmpty, data.count <= maximumBytes, let text = String(data: data, encoding: .utf8),
               !text.localizedCaseInsensitiveContains("<!DOCTYPE"), !text.localizedCaseInsensitiveContains("<!ENTITY") else {

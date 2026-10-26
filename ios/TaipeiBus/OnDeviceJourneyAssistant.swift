@@ -851,6 +851,22 @@ enum AssistantServer {
         }
     }
     private static let account = Account()
+    private static let warmed = Shared()
+
+    /// Signs in and opens the connection while the rider is still talking, so the answer's first words
+    /// come sooner: at most once a minute, and nothing is sent but an empty preflight.
+    static func warm() {
+        guard let base = baseURL, let url = URL(string: base + "/functions/v1/converse") else { return }
+        let now = Date().timeIntervalSince1970
+        if let last = warmed.value.flatMap(Double.init), now - last < 60 { return }
+        warmed.value = String(now)
+        Task.detached(priority: .utility) {
+            _ = try? await account.token(session: .shared)
+            var request = URLRequest(url: url, timeoutInterval: 5)
+            request.httpMethod = "OPTIONS"
+            _ = try? await URLSession.shared.data(for: request)
+        }
+    }
     /// What the server actually used for the last reply, for the troubleshooting history: the model
     /// that answered and the tier the server granted (a phone whose Pro could not be verified is
     /// served the smaller model as free).

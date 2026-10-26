@@ -1078,5 +1078,11 @@
   "回報這次回答": "Report this answer",
   "回報這次回答？": "Report this answer?",
   "回報": "Report",
-  "你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。": "What you said, this answer and a summary of the screen go to the developer, kept for 30 days and used only to improve voice chat."
+  "你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。": "What you said, this answer and a summary of the screen go to the developer, kept for 30 days and used only to improve voice chat.",
+  "回答時可以直接插話": "Talk over answers",
+  "目前只有基本語音，念起來比較生硬。到 iPhone 的「設定 > 輔助使用 > 朗讀內容 > 聲音」，在中文（台灣）下載「高品質」或「進階」語音，回答和導航提示會自然很多。": "Only the basic voice is on this iPhone, so answers sound flat. In Settings > Accessibility > Spoken Content > Voices, download an Enhanced or Premium voice for your language; answers and navigation prompts will sound much more natural.",
+  "要出發去「%@」了嗎？": "Heading to %@?",
+  "平常這時候出發，點一下看下一班車。": "You usually leave about now. Tap to see the next ride.",
+  "平日出發前通知我": "Remind me before weekday trips",
+  "公告提到 %@：%@": "Notice mentions %@: %@"
 }
