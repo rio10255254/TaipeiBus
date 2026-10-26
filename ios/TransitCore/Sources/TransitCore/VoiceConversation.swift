@@ -489,12 +489,73 @@ public enum VoiceChoice {
 /// voice picked up again by the microphone. Chinese is compared by sound in pairs of syllables, so
 /// 往 heard as 網 still matches, and 四 is 4; English word by word. The rider is cutting in once enough
 /// of what was heard is nowhere in what was spoken.
+/// How long a pause ends a turn. A rider who has to correct themselves (「我是說…」) was probably cut
+/// off, so later turns wait a little longer for them; turns that go well bring it slowly back.
+public enum VoicePatience {
+    public static let usual = 1.3
+    public static let longest = 2.3
+    /// Said anywhere in the turn, or only at its start, where 「不是」 is a correction and not 「不是很遠」.
+    private static let corrections = ["我是說", "我說的是", "我的意思是", "i mean", "i said"]
+    private static let startsCorrecting = ["不是啦", "不是，", "不是,", "不對", "no, i", "no i"]
+
+    public static func corrects(_ text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return corrections.contains { text.contains($0) } || startsCorrecting.contains { text.hasPrefix($0) }
+    }
+
+    public static func next(_ pause: Double, after text: String) -> Double {
+        corrects(text) ? min(pause + 0.3, longest) : max(pause - 0.05, usual)
+    }
+}
+
 public enum VoiceEcho {
     /// `strict` asks for more new words, for the loudspeaker, whose sound reaches the microphone.
     public static func interrupts(heard: String, spoken: String, strict: Bool = false) -> Bool {
         let said = Set(tokens(spoken))
         let new = tokens(heard).filter { !said.contains($0) }
         return new.count >= (strict ? 4 : 2)
+    }
+
+    /// What the rider said once they cut in: `heard` without the answer's own words that came first.
+    /// `echo` is what had been heard of the answer; recognition often rewrites it a little once the
+    /// rider's words follow (「往」 becomes 「網」, 「4」 becomes 「四」), so it is matched by sound, and
+    /// only as far as the echo reaches.
+    public static func removing(echo: String, from heard: String) -> String {
+        let clean = { (text: Substring) in text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)) }
+        guard !echo.isEmpty else { return heard }
+        if heard.hasPrefix(echo) { return clean(heard.dropFirst(echo.count)) }
+        let echoed = units(echo), said = Set(echoed.map(\.sound))
+        var matched = 0, misses = 0, cut: String.Index?
+        for unit in units(heard).prefix(echoed.count + 2) {
+            if said.contains(unit.sound) {
+                matched += 1; misses = 0; cut = unit.end
+            } else {
+                misses += 1
+                if misses == 2 { break }
+            }
+        }
+        guard let cut, matched >= max(2, echoed.count / 2) else { return heard }
+        return clean(heard[cut...])
+    }
+
+    /// Each Chinese character by its sound, each word of letters or digits as itself, with where it ends.
+    private static func units(_ text: String) -> [(sound: String, end: String.Index)] {
+        var units: [(sound: String, end: String.Index)] = [], word = "", index = text.startIndex
+        func endWord() { if !word.isEmpty { units.append((word, index)); word = "" } }
+        while index < text.endIndex {
+            let character = digits[text[index]] ?? Character(text[index].lowercased())
+            if let syllable = NameCorrection.syllable(character) {
+                endWord()
+                units.append((NameCorrection.loose(syllable), text.index(after: index)))
+            } else if character.isLetter || character.isNumber {
+                word.append(character)
+            } else {
+                endWord()
+            }
+            index = text.index(after: index)
+        }
+        endWord()
+        return units
     }
 
     private static let digits: [Character: Character] = ["零": "0", "〇": "0", "一": "1", "二": "2", "兩": "2", "三": "3",

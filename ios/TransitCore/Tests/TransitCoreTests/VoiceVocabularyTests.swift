@@ -61,4 +61,29 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertFalse(VoiceEcho.interrupts(heard: "307 往板橋那", spoken: spoken, strict: true))
         XCTAssertTrue(VoiceEcho.interrupts(heard: "不用了我要改去台北車站", spoken: spoken, strict: true))
     }
+
+    func testARiderCorrectingThemselvesIsWaitedForLonger() {
+        XCTAssertTrue(VoicePatience.corrects("我是說圓山的酒吧"))
+        XCTAssertTrue(VoicePatience.corrects("我們要一起我是說圓山的酒吧。"))
+        XCTAssertTrue(VoicePatience.corrects("不是，是淡水"))
+        XCTAssertTrue(VoicePatience.corrects("I mean the 671"))
+        XCTAssertFalse(VoicePatience.corrects("307 還要多久"))
+        XCTAssertFalse(VoicePatience.corrects("不是很遠吧"))
+        XCTAssertEqual(VoicePatience.next(1.3, after: "我是說圓山"), 1.6, accuracy: 0.001)
+        XCTAssertEqual(VoicePatience.next(2.2, after: "我是說圓山"), VoicePatience.longest)
+        XCTAssertEqual(VoicePatience.next(1.6, after: "307 還要多久"), 1.55, accuracy: 0.001)
+        XCTAssertEqual(VoicePatience.next(1.3, after: "307 還要多久"), VoicePatience.usual)
+    }
+
+    func testTheAnswersOwnWordsAreLeftOutOfWhatTheRiderSaid() {
+        // Exactly as heard before the rider spoke.
+        XCTAssertEqual(VoiceEcho.removing(echo: "307往板橋", from: "307往板橋我是說圓山的酒吧"), "我是說圓山的酒吧")
+        // Rewritten a little once the rider's words followed.
+        XCTAssertEqual(VoiceEcho.removing(echo: "307往板橋約4分鐘到", from: "307網板橋約四分鐘到，我是說圓山的酒吧"), "我是說圓山的酒吧")
+        XCTAssertEqual(VoiceEcho.removing(echo: "The 307 is 4 minutes", from: "the 307 is four minutes wait what about 671"),
+                       "wait what about 671")
+        // Nothing heard of the answer, or not what it starts with: all of it stays.
+        XCTAssertEqual(VoiceEcho.removing(echo: "", from: "我想去圓山"), "我想去圓山")
+        XCTAssertEqual(VoiceEcho.removing(echo: "307往板橋", from: "我想去圓山的酒吧"), "我想去圓山的酒吧")
+    }
 }
