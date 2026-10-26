@@ -322,10 +322,7 @@ struct TransitHomeView: View {
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse,
-                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? {
-                              // Pro riders talk it through; everyone else says one sentence to plan.
-                              if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() }
-                          } : nil)
+                          voice: microphone)
         }
     }
     }
@@ -340,6 +337,15 @@ struct TransitHomeView: View {
     }
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
+    /// The home microphone: the voice conversation, which Pro riders talk things through with (others
+    /// see the plans). 「用一句話規劃」 answers it only while the live settings turn it on.
+    private var microphone: (() -> Void)? {
+        if model.liveSettings.display.sentencePlanning, OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
+            return { if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() } }
+        }
+        return VoiceConversation.available ? { model.voiceChat.start() } : nil
+    }
+
     private func routeToPlace(_ place: MapPlaceSelection) {
         model.tappedPlace = nil
         planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
@@ -1981,6 +1987,7 @@ private struct VoiceStyleSettings: View {
 
 /// 線上理解: asked once before the first sentence goes online; changed here at any time.
 private struct OnlineUnderstandingSettings: View {
+    @Environment(\.liveSettings) private var live
     @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
     var body: some View {
         Section {
@@ -1994,7 +2001,9 @@ private struct OnlineUnderstandingSettings: View {
                 .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
             }
         } header: {
-            SectionHeader(title: AppText.text("用一句話規劃"), symbol: "text.bubble.fill", color: .blue)
+            // While sentence planning is paused this still reads the places the voice conversation plans to.
+            SectionHeader(title: live.display.sentencePlanning ? AppText.text("用一句話規劃") : AppText.text("規劃行程"),
+                          symbol: "text.bubble.fill", color: .blue)
         } footer: {
             Text(AppText.text("更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次。",
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))

@@ -316,7 +316,8 @@ struct JourneyPlanningView: View {
     }
     /// A sentence such as 「騎單車去台大」 typed in the ordinary search box is understood, not searched.
     private var understandsSentence: Bool {
-        assistantAvailable && !editingOrigin && !planner.started && AssistantSentence.looksLikeRequest(query)
+        assistantAvailable && model.liveSettings.display.sentencePlanning && !editingOrigin && !planner.started
+            && AssistantSentence.looksLikeRequest(query)
     }
     /// A sentence is understood right here; only a question or a problem opens the sheet.
     private func openAssistant(_ text: String?) {
