@@ -15,6 +15,12 @@ public enum VoiceAction: Equatable, Sendable {
     case chooseOption(Int)
     /// The state had no answer: look these up and ask again.
     case lookup(stop: String, route: String)
+    /// Read the Public Transportation Office's latest notices and ask again with them.
+    case notices
+    /// Add a stop to the rider's favourites.
+    case saveStop(String)
+    /// Turn on the reminder to get off.
+    case remindAlight
     case startNavigation, boarded, alighted, endTrip
 
     /// Changes the trip, so the rider says yes first.
@@ -49,6 +55,9 @@ public enum VoiceAction: Equatable, Sendable {
         case "lookup":
             guard !text("stop").isEmpty || !text("route").isEmpty else { return nil }
             self = .lookup(stop: text("stop"), route: text("route"))
+        case "notices": self = .notices
+        case "save_stop": guard !text("stop").isEmpty else { return nil }; self = .saveStop(text("stop"))
+        case "remind_alight": self = .remindAlight
         case "start_navigation": self = .startNavigation
         case "boarded": self = .boarded
         case "alighted": self = .alighted
@@ -164,7 +173,9 @@ extension VoiceAction {
         case .showPlace(let place): "顯示 \(place)"
         case .planTrip(let destination, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
-        case .lookup: "查詢"
+        case .lookup, .notices: "查詢"
+        case .saveStop(let stop): "收藏 \(stop)"
+        case .remindAlight: "下車提醒"
         }
     }
 }

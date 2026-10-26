@@ -235,9 +235,12 @@ struct VoiceChatButton: View {
 struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.consentKey) private var enabled = false
     @AppStorage(SpeechInput.modernKey) private var modern = true
+    @AppStorage(NavigationVoice.key) private var prompts = true
     var body: some View {
         Section {
             Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
+            // Said on the phone only; nothing leaves it.
+            Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
             // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
             if enabled {
                 if #available(iOS 26.0, *) {
