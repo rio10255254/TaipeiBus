@@ -266,7 +266,7 @@ struct VoiceChatSettings: View {
                 }
             }
         } header: {
-            Text(AppText.text("語音對話（Pro）"))
+            SectionHeader(title: AppText.text("語音對話（Pro）"), symbol: "bubble.left.and.text.bubble.right.fill", color: Brand.accent)
         } footer: {
             Text(AppText.text("開啟後，按麥克風就能和「一路」來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由本 App 的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
         }

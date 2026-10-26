@@ -1078,5 +1078,7 @@
   "回報這次回答": "Report this answer",
   "回報這次回答？": "Report this answer?",
   "回報": "Report",
-  "你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。": "What you said, this answer and a summary of the screen go to the developer, kept for 30 days and used only to improve voice chat."
+  "你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。": "What you said, this answer and a summary of the screen go to the developer, kept for 30 days and used only to improve voice chat.",
+  "公車、捷運、YouBike 與步行，一路接到底。": "Buses, MRT, YouBike and walking, joined into one road.",
+  "版本 %@": "Version %@"
 }
