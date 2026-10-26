@@ -234,6 +234,8 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
     private(set) var permission: NavigationPermission = .checking
     var onPermissionChange: (() -> Void)?
     var onOpenJourney: (() -> Void)?
+    /// A commute reminder was tapped: the saved journey it named.
+    var onOpenCommute: ((UUID) -> Void)?
     private var permissionGeneration = 0
 
     private func applyPermission(_ value: NavigationPermission) {
@@ -321,7 +323,12 @@ final class AlightReminder: NSObject, UNUserNotificationCenterDelegate {
         return [.banner, .list, .sound]
     }
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
-        guard response.notification.request.content.userInfo["navigation"] as? String == "journey" else { return }
+        let info = response.notification.request.content.userInfo
+        if let commute = (info["commute"] as? String).flatMap(UUID.init(uuidString:)) {
+            await MainActor.run { self.onOpenCommute?(commute) }
+            return
+        }
+        guard info["navigation"] as? String == "journey" else { return }
         await MainActor.run { self.onOpenJourney?() }
     }
 }

@@ -9,6 +9,10 @@ import TransitCore
 @MainActor
 final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     @Published private(set) var speaking = false
+    /// How lively the voice is right now, 0…1: each word lifts it and it settles between words, so the
+    /// glow moves with the answer as it does with the rider's voice.
+    let level = VoiceLevel()
+    private var words = 0
     private let synthesizer = AVSpeechSynthesizer()
     /// Sentences handed to the synthesizer and not yet spoken.
     private var queued: [AVSpeechUtterance] = []
@@ -52,7 +56,8 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
             let session = AVAudioSession.sharedInstance()
             if prompts {
                 try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
-            } else {
+            } else if session.category != .playAndRecord {
+                // The conversation's own session plays as well as listens; it is left as it is.
                 try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
             }
             try? session.setActive(true)
@@ -100,7 +105,18 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
 
     private func finish() {
         done?.resume(); done = nil
-        speaking = false
+        speaking = false; level.value = 0
+    }
+
+    private func spokeWord() {
+        words += 1
+        let word = words
+        level.value = Double.random(in: 0.6...0.95)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(170))
+            guard let self, self.words == word, self.speaking else { return }
+            self.level.value = 0.3
+        }
     }
 
     private func spoken(_ utterance: ObjectIdentifier) {
@@ -113,6 +129,10 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
         Task { @MainActor in self.spoken(id) }
+    }
+    nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, willSpeakRangeOfSpeechString characterRange: NSRange,
+                                       utterance: AVSpeechUtterance) {
+        Task { @MainActor in self.spokeWord() }
     }
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
@@ -208,6 +228,7 @@ final class VoiceConversation: ObservableObject {
         guard Self.available else { return }
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
+        speech.duplex = true; AssistantServer.warm()
         names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []; notices = nil
         lastTurn = nil; reportable = false; reported = false
         // Built for Chinese even when listening in English, so switching languages needs no wait.
@@ -228,7 +249,9 @@ final class VoiceConversation: ObservableObject {
 
     func end() {
         work?.cancel(); work = nil
+        speech.duplex = false
         speech.stop(); output.stop()
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         active = false; phase = .idle; pending = nil; choices = []; askingConsent = false
     }
 
@@ -242,6 +265,7 @@ final class VoiceConversation: ObservableObject {
 
     func choose(_ choice: String) {
         guard active else { return }
+        Haptics.selection()
         speech.stop(); output.stop()
         handle(choice)
     }
@@ -285,9 +309,47 @@ final class VoiceConversation: ObservableObject {
         speech.pauseAfterWords = 0.9
         // A follow-up waits a little less than the first question.
         speech.waitForWords = firstTurn ? 7 : 5
+        AssistantServer.warm()
+        // Already listening under the answer and nothing of it was heard back (headphones): go on with it.
+        if speech.listening, speech.held, speech.transcript.isEmpty { speech.release(); return }
+        startListening(hold: false)
+    }
+
+    /// Talking over an answer (setting on, not with VoiceOver): the microphone listens while it speaks,
+    /// and the answer stops once the rider says something it did not.
+    static let bargeInKey = "voiceBargeIn.v1"
+    static var bargeIn: Bool { UserDefaults.standard.object(forKey: bargeInKey) as? Bool ?? true }
+    /// The latest words heard under the answer that were only its own voice.
+    private var echo = ""
+
+    private func listenWhileSpeaking() {
+        guard Self.bargeIn, active, !UIAccessibility.isVoiceOverRunning, !speech.listening, !speech.preparing,
+              !speech.failed, !speech.blocked else { return }
+        echo = ""
+        startListening(hold: true)
+    }
+
+    private func heardWhileSpeaking(_ text: String) {
+        guard active, phase == .speaking, speech.held else { return }
+        // The loudspeaker's sound reaches the microphone; headphones' does not.
+        let loudspeaker = AVAudioSession.sharedInstance().currentRoute.outputs
+            .contains { $0.portType == .builtInSpeaker || $0.portType == .builtInReceiver }
+        guard VoiceEcho.interrupts(heard: text, spoken: caption, strict: loudspeaker) else { echo = text; return }
+        JourneyDiagnostics.shared.record("voice barge-in loudspeaker=\(loudspeaker)")
+        work?.cancel(); work = nil
+        output.stop()
+        phase = .listening; heard = ""
+        Haptics.listening()
+        speech.pauseAfterWords = 0.9; speech.waitForWords = 5
+        speech.release(dropping: echo)
+    }
+
+    private func startListening(hold: Bool) {
         let hints = VoiceStateBuilder(model: model).hints(language: language)
         Task {
-            await speech.start(language: language, hints: hints, modern: true, unheard: { [weak self] in
+            await speech.start(language: language, hints: hints, modern: true, hold: hold, onWords: hold ? { [weak self] text in
+                self?.heardWhileSpeaking(text)
+            } : nil, unheard: { [weak self] in
                 guard let self else { return }
                 // Silence after an answer simply ends the conversation; a microphone or recognition
                 // problem is said first, so the panel does not just vanish.
@@ -410,6 +472,7 @@ final class VoiceConversation: ObservableObject {
         caption = phase == .speaking ? caption + sentence : sentence
         phase = .speaking
         output.enqueue(sentence, routes: routes, language: language)
+        listenWhileSpeaking()
     }
 
     private static func isLookup(_ action: VoiceAction) -> Bool {
@@ -434,7 +497,10 @@ final class VoiceConversation: ObservableObject {
 
     private func say(_ sentence: String, routes: [String] = []) async {
         caption = sentence; phase = .speaking
-        await output.speak(sentence, routes: routes, language: language)
+        output.stop()
+        output.enqueue(sentence, routes: routes, language: language)
+        listenWhileSpeaking()
+        await output.finishSpeaking()
     }
 
     private func acknowledgement(_ action: VoiceAction) -> String {
@@ -559,19 +625,6 @@ final class VoiceConversation: ObservableObject {
         }
     }
 
-    /// The Public Transportation Office's notices, newest first; nil when the feed cannot be read.
-    private static func latestNotices() async -> [OfficialNotice]? {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.timeoutIntervalForRequest = 6; configuration.timeoutIntervalForResource = 8
-        configuration.httpShouldSetCookies = false; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
-        let session = URLSession(configuration: configuration)
-        defer { session.invalidateAndCancel() }
-        guard let result = try? await session.data(from: OfficialNotices.feedURL),
-              let response = result.1 as? HTTPURLResponse, response.statusCode == 200,
-              response.url.map(OfficialNotices.trusted) == true, result.0.count <= OfficialNotices.maximumBytes else { return nil }
-        return try? OfficialNotices.parse(result.0)
-    }
-
     /// The Apple Maps place for a name said in Taipei, for its card.
     private static func place(named name: String) async -> MKMapItem? {
         let request = MKLocalSearch.Request()
@@ -586,7 +639,7 @@ final class VoiceConversation: ObservableObject {
     private func lookup(_ action: VoiceAction) async -> Bool {
         if case .notices = action {
             guard notices == nil else { return false }
-            notices = await Self.latestNotices()
+            notices = await model.refreshNotices() ? model.recentNotices : nil
             return notices != nil
         }
         guard case .lookup(let stop, let route) = action else { return false }
@@ -663,6 +716,10 @@ struct VoiceStateBuilder {
                 let label = option.walkingOnly ? "全程步行" : option.bikeOnly ? "全程 YouBike" : option.rides.map(\.route.localizedName).joined(separator: "→")
                 names += option.rides.map(\.route.localizedName)
                 facts.append("第 \(index + 1) 個方案：\(label)")
+                // A notice naming one of its routes is said before the rider sets off.
+                if let warning = model.noticeWarning(option) {
+                    facts.append("第 \(index + 1) 個方案的 \(warning.route) 在交通公告中被提到：\(warning.notice.title)")
+                }
                 if let timing = model.journeyDuration(option, at: now) {
                     items.append(("第 \(index + 1) 個方案的全程時間", timing.comparisonLabel))
                     // One time with its day, as it is said, rather than the screen's range.
@@ -670,8 +727,8 @@ struct VoiceStateBuilder {
                         : VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
                     items.append(("第 \(index + 1) 個方案的抵達時間", arrival))
                 }
-                // Official fares, adult electronic ticket, after the metro↔bus transfer discount.
-                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）", fare)) }
+                // Official fares for the rider's ticket type or TPASS, after the metro↔bus transfer discount.
+                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（\(model.fareDescription)）", fare)) }
             }
         } else if let station = model.mapLabelStation {
             screen = "站牌：\(station.localizedName)"

@@ -22,6 +22,21 @@ public struct CommutePatterns: Codable, Equatable, Sendable {
         events.append(Event(journeyID: journeyID, startedAt: now))
         events = Array(events.suffix(240))
     }
+    /// When each saved journey usually starts on weekdays, in minutes after midnight (Taipei): the middle
+    /// start of those used on at least three weekdays in the last six weeks, most used first.
+    public func usualWeekdayStarts(available ids: Set<UUID>, at now: Date) -> [(journeyID: UUID, minute: Int)] {
+        let calendar = AssistantJourneyRequest.calendar
+        let weekdays = events.filter {
+            ids.contains($0.journeyID) && (0...(42 * 86_400)).contains(now.timeIntervalSince($0.startedAt)) &&
+                (2...6).contains(calendar.component(.weekday, from: $0.startedAt))
+        }
+        return Dictionary(grouping: weekdays, by: \.journeyID).compactMap { id, history -> (UUID, Int, Int)? in
+            guard Set(history.map { calendar.startOfDay(for: $0.startedAt) }).count >= 3 else { return nil }
+            let minutes = history.map { calendar.component(.hour, from: $0.startedAt) * 60 + calendar.component(.minute, from: $0.startedAt) }.sorted()
+            return (id, minutes[minutes.count / 2], history.count)
+        }.sorted { $0.2 != $1.2 ? $0.2 > $1.2 : $0.0.uuidString < $1.0.uuidString }.map { ($0.0, $0.1) }
+    }
+
     public func suggestions(available ids: Set<UUID>, at now: Date) -> [UUID] {
         let calendar = AssistantJourneyRequest.calendar
         let minute = calendar.component(.hour, from: now) * 60 + calendar.component(.minute, from: now)

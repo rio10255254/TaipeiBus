@@ -84,15 +84,25 @@ final class SpeechInput: ObservableObject {
     private var stopAnalyzer: (() -> Void)?
     /// The language of the attempt, for what it says about a problem.
     private var spokenLanguage = AppLanguage.current
+    /// The voice conversation: speaking and listening share one audio session from start to end, so no
+    /// time goes into switching between turns and the rider can talk over an answer.
+    var duplex = false
+    /// Listening while an answer is spoken: words are passed to `onWords` but end nothing until
+    /// `release(dropping:)` says the rider is talking.
+    private(set) var held = false
+    private var onWords: ((String) -> Void)?
+    /// The assistant's own words heard before the rider cut in, left out of what was said.
+    private var echo = ""
     /// Bumped by every start and stop, so a late callback from an earlier attempt is ignored.
     private var attempt = 0
 
     /// `modern` listens with Apple's newer recogniser where the phone has it and its language is
     /// downloaded (iOS 26); otherwise, and if it fails before hearing anything, with the usual one.
-    func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, unheard: (() -> Void)? = nil,
-               finished: @escaping (String) -> Void) async {
+    func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, hold: Bool = false,
+               onWords: ((String) -> Void)? = nil, unheard: (() -> Void)? = nil, finished: @escaping (String) -> Void) async {
         stop()
         self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
+        held = hold; self.onWords = onWords; echo = ""
         transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
@@ -133,10 +143,10 @@ final class SpeechInput: ObservableObject {
         request.shouldReportPartialResults = true
         request.requiresOnDeviceRecognition = onDevice
         request.contextualStrings = hints
+        // 「嗎？」 at the end lets listening stop sooner.
+        request.addsPunctuation = true
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            try activateSession()
             let input = engine.inputNode
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
@@ -163,11 +173,17 @@ final class SpeechInput: ObservableObject {
             Task { @MainActor in self?.receive(text: text, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice) }
         })
         // Nothing said at all: stop instead of listening forever, and say so.
-        waitForSilence(waitForWords)
+        if !held { waitForSilence(waitForWords) }
     }
     private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
-        if let text, !text.isEmpty { transcript = text; waitForSilence(pauseAfterWords, counting: true) }
+        if held {
+            // Only the answer's own sound so far: an ended recognition just stops listening quietly.
+            if let text, !text.isEmpty { transcript = text; onWords?(text) }
+            if final || code != nil { stop() }
+            return
+        }
+        if let text, !text.isEmpty { transcript = text; waitForSilence(pause(after: text), counting: true) }
         if let code, transcript.isEmpty {
             JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
             let finished = self.finished, unheard = self.unheard
@@ -197,9 +213,7 @@ final class SpeechInput: ObservableObject {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (sequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
-            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            try activateSession()
             let node = engine.inputNode
             let microphone = node.outputFormat(forBus: 0)
             guard microphone.sampleRate > 0, microphone.channelCount > 0,
@@ -242,7 +256,7 @@ final class SpeechInput: ObservableObject {
         preparing = false; listening = true
         Haptics.listening()
         JourneyDiagnostics.shared.record("speech start analyzer \(locale.identifier)")
-        waitForSilence(waitForWords)
+        if !held { waitForSilence(waitForWords) }
         return true
     }
 
@@ -251,7 +265,35 @@ final class SpeechInput: ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         transcript = text
-        waitForSilence(pauseAfterWords, counting: true)
+        if held { onWords?(text); return }
+        waitForSilence(pause(after: text), counting: true)
+    }
+
+    /// The rider is talking: from now on a pause ends listening as usual. `echo`, the answer's own words
+    /// heard so far, is left out of what was said.
+    func release(dropping echo: String = "") {
+        guard held, listening else { return }
+        held = false; self.echo = echo
+        if transcript.isEmpty { waitForSilence(waitForWords) } else { waitForSilence(pause(after: transcript), counting: true) }
+    }
+
+    /// A question or a finished sentence ends listening sooner than words that may go on.
+    private func pause(after text: String) -> Double {
+        guard let last = text.trimmingCharacters(in: .whitespaces).last else { return pauseAfterWords }
+        return "嗎呢吧啦？?。.!！".contains(last) ? min(pauseAfterWords, 0.5) : pauseAfterWords
+    }
+
+    private func activateSession() throws {
+        let session = AVAudioSession.sharedInstance()
+        if duplex {
+            // A2DP keeps headphones in their good sound; the phone's microphone listens meanwhile.
+            if session.category != .playAndRecord {
+                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
+            }
+        } else {
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+        }
+        try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
     /// Failed before hearing anything: once more with the usual recogniser, as with the phone's own.
@@ -269,8 +311,9 @@ final class SpeechInput: ObservableObject {
     }
 
     func finish() {
-        guard listening else { return }
-        let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard listening, !held else { return }
+        var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !echo.isEmpty, text.hasPrefix(echo) { text = String(text.dropFirst(echo.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
         let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
@@ -289,7 +332,9 @@ final class SpeechInput: ObservableObject {
         request?.endAudio(); task?.cancel()
         stopAnalyzer?(); stopAnalyzer = nil
         request = nil; task = nil; listening = false; preparing = false; finished = nil; unheard = nil; meter.value = 0; silenceSince = nil
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        held = false; onWords = nil
+        // The conversation keeps its session between turns; it lets go when it ends.
+        if !duplex { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
     }
 
     private func takeUnheard() -> (() -> Void)? {

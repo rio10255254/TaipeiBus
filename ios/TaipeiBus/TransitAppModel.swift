@@ -826,6 +826,15 @@ final class TransitAppModel: ObservableObject {
             if bikeStationsOn { pollBikesInBackground() } else { selectedBikeStationID = nil }
         }
     }
+    // MARK: Fares
+    /// The rider's ticket type, which every option's fare and transfer discount is worked out for.
+    @Published var fareClass: FareClass = UserDefaults.standard.string(forKey: "fareClass").flatMap(FareClass.init(rawValue:)) ?? .adult {
+        didSet { UserDefaults.standard.set(fareClass.rawValue, forKey: "fareClass") }
+    }
+    /// A TPASS 基北北桃 monthly pass: the metro and city bus rides it covers cost nothing more.
+    @Published var tpassOn: Bool = UserDefaults.standard.bool(forKey: "tpassOn") {
+        didSet { UserDefaults.standard.set(tpassOn, forKey: "tpassOn") }
+    }
     @Published var selectedBikeStationID: String?
     @Published var selectedBikeStationReturning = false
     var showsBikeStations: Bool { bikeStationsOn && liveSettings.display.bikeStations && !bikeNetwork.stations.isEmpty }
@@ -1039,6 +1048,10 @@ final class TransitAppModel: ObservableObject {
         purchases.onAccessChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onPermissionChange = { [weak self] in self?.synchronizeNavigationState() }
         alightReminder.onOpenJourney = { [weak self] in self?.resumeCurrentJourney() }
+        alightReminder.onOpenCommute = { [weak self] id in
+            guard let self, !self.planner.started, let saved = self.commutes.journeys.first(where: { $0.id == id }) else { return }
+            self.previewSavedJourney(saved)
+        }
         location.onAuthorizationChange = { [weak self] in self?.objectWillChange.send(); self?.synchronizeNavigationState() }
         rideActivity.canPresentNotice = { [weak self] notice, state in
             guard notice.kind == .alighting else { return true }
@@ -1102,6 +1115,7 @@ final class TransitAppModel: ObservableObject {
         guard isActive != active else { if !active { synchronizeNavigationState() }; return }
         isActive = active
         if !planner.started || planner.arrived { rideActivity.endAll() }
+        if active { commuteHabits.scheduleReminders(commutes.journeys) }
         JourneyDiagnostics.shared.record(active ? "scene_active" : "scene_inactive")
         if active { Task { [weak self] in
             await self?.refreshNavigationPermissions()
@@ -1616,13 +1630,53 @@ final class TransitAppModel: ObservableObject {
         return (max(60,planned - max(0,date.timeIntervalSince(boardedAt ?? date))),true)
     }
 
-    /// The official fare of an option's rides, adult electronic ticket, after the metro↔bus transfer
-    /// discount: 「車資 35 元」, or 「車資 35 元起」 when a ride's fare is not known. Nil for walking or YouBike alone.
+    /// The Public Transportation Office's notices, newest first, read at most every half hour while routes
+    /// or the conversation need them.
+    @Published private(set) var recentNotices: [OfficialNotice] = []
+    private var noticesReadAt: Date?
+
+    /// Reads the notices when the last read is older than half an hour; true when there are notices to use.
+    @discardableResult func refreshNotices() async -> Bool {
+        if let noticesReadAt, Date().timeIntervalSince(noticesReadAt) < 1800 { return true }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 6; configuration.timeoutIntervalForResource = 8
+        configuration.httpShouldSetCookies = false; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        guard let result = try? await session.data(from: OfficialNotices.feedURL),
+              let response = result.1 as? HTTPURLResponse, response.statusCode == 200,
+              response.url.map(OfficialNotices.trusted) == true, result.0.count <= OfficialNotices.maximumBytes,
+              let notices = try? OfficialNotices.parse(result.0) else { return noticesReadAt != nil }
+        recentNotices = notices; noticesReadAt = Date()
+        return true
+    }
+
+    /// A recent notice that names one of an option's bus routes, such as a detour for a marathon.
+    func noticeWarning(_ option: JourneyOption) -> (route: String, notice: OfficialNotice)? {
+        guard !recentNotices.isEmpty else { return nil }
+        for ride in option.rides where ride.route.mode == .bus {
+            if let notice = OfficialNotices.mentioning(route: ride.route.name, in: recentNotices) { return (ride.route.localizedName, notice) }
+        }
+        return nil
+    }
+
+    /// The official fare of an option's rides for the rider's ticket type, electronic ticket, after the
+    /// metro↔bus transfer discount: 「車資 35 元」, or 「車資 35 元起」 when a ride's fare is not known. With
+    /// a TPASS pass that covers the rides it reads 「TPASS 月票涵蓋」. Nil for walking or YouBike alone.
     func fareLabel(_ option: JourneyOption) -> String? {
         // walks[i + 1] is the way from ride i to the next; a YouBike ride there breaks the transfer.
         let cycled = Set(option.rides.indices.filter { option.walks.indices.contains($0 + 1) && option.walks[$0 + 1].bike != nil })
-        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata, cycledAfter: cycled) else { return nil }
+        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata, cycledAfter: cycled,
+                                                   fareClass: fareClass, pass: tpassOn) else { return nil }
+        if tpassOn, fare.total == 0 { return fare.complete ? AppText.text("TPASS 月票涵蓋") : AppText.text("TPASS 涵蓋部分路段") }
         return fare.complete ? AppText.text("車資 %@ 元", String(fare.total)) : AppText.text("車資 %@ 元起", String(fare.total))
+    }
+
+    /// What the fare labels are worked out for, in Chinese for the voice assistant to say with them:
+    /// 「悠遊卡學生票，已扣捷運公車轉乘優惠」, or 「TPASS 月票…」 when the pass is on.
+    var fareDescription: String {
+        if tpassOn { return "TPASS 月票，雙北捷運與市區公車不另收費" }
+        return "悠遊卡\(fareClass.ticketName)，已扣捷運公車轉乘優惠"
     }
 
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
