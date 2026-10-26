@@ -76,6 +76,13 @@ Deno.test("The recogniser's other readings reach the model, bounded and without 
   assertEquals(readInput({ utterance: '307' })?.alternatives, []);
 });
 
+Deno.test('the answer length the rider chose is passed on', () => {
+  assertEquals(readInput({ utterance: '307', answerLength: 'short' })?.length, 'short');
+  assertEquals(readInput({ utterance: '307', answerLength: 'huge' })?.length, 'normal');
+  assert(userMessage(readInput({ utterance: '307', answerLength: 'detailed' })!).includes('詳細'));
+  assert(!userMessage(readInput({ utterance: '307' })!).includes('回答長度'));
+});
+
 Deno.test('Claude is asked with a fixed, cacheable system prompt and the reply schema', async () => {
   const received: Record<string, unknown>[] = [];
   const answer = { say: '307 {r1}。', actions: [], confirm: none, choices: [], followUp: false };

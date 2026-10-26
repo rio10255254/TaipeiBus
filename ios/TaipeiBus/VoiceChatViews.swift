@@ -30,7 +30,7 @@ struct VoiceChatHost: ViewModifier {
                 Button(AppText.text("開始對話")) { chat.answerConsent(true) }
                 Button(AppText.text("不要"), role: .cancel) { chat.answerConsent(false) }
             } message: {
-                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由本 App 的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
+                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由本 App 的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。為了聽得更準，每句話的錄音也會交給 Groq 上的 Whisper 轉成文字，不保存（可在設定改成只用手機辨識）。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
             }
             .onChange(of: chat.panelRequest) { _, request in
                 guard let request else { return }
@@ -302,39 +302,97 @@ struct VoiceChatButton: View {
     }
 }
 
-/// 語音對話 (Pro) in Settings: on means the rider agreed to the conversation's use of data.
+/// 語音對話 (Pro) in Settings: on means the rider agreed to the conversation's use of data. Once on,
+/// the rider tunes how it listens, answers and sounds.
 struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.consentKey) private var enabled = false
     @AppStorage(SpeechInput.modernKey) private var modern = true
     @AppStorage(NavigationVoice.key) private var prompts = true
     @AppStorage(VoiceConversation.bargeInKey) private var bargeIn = true
+    @AppStorage(VoiceSettings.cloudKey) private var cloud = true
+    @AppStorage(VoiceSettings.pauseKey) private var pause = VoiceSettings.Pause.normal.rawValue
+    @AppStorage(VoiceSettings.rateKey) private var rate = VoiceSettings.Rate.normal.rawValue
+    @AppStorage(VoiceSettings.lengthKey) private var length = VoiceSettings.AnswerLength.normal.rawValue
+    @AppStorage(VoiceSettings.webKey) private var web = true
+    @AppStorage(VoiceSettings.keepListeningKey) private var keepListening = true
+    @AppStorage(VoiceSettings.chineseVoiceKey) private var chineseVoice = ""
+    @AppStorage(VoiceSettings.englishVoiceKey) private var englishVoice = ""
+    @State private var sample = SpeechOutput()
     /// Only the compact voice is on the phone: answers and prompts sound flat until a better one is downloaded.
     private var basicVoice: Bool {
         guard let voice = SpeechOutput.voice(language: AppLanguage.current == .english ? .english : .traditionalChinese) else { return true }
         return voice.quality == .default
     }
+
     var body: some View {
         Section {
             Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
-            if enabled {
-                Toggle(AppText.text("回答時可以直接插話"), isOn: $bargeIn).accessibilityIdentifier("voice-chat-barge-in")
-            }
             // Said on the phone only; nothing leaves it.
             Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
-            // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
-            if enabled {
-                if #available(iOS 26.0, *) {
-                    Toggle(AppText.text("新版語音辨識"), isOn: $modern).accessibilityIdentifier("voice-chat-modern-recognition")
-                }
-            }
         } header: {
             SectionHeader(title: AppText.text("語音對話（Pro）"), symbol: "bubble.left.and.text.bubble.right.fill", color: Brand.accent)
         } footer: {
-            VStack(alignment: .leading, spacing: 8) {
+            Text(AppText.text("開啟後，按麥克風就能和「一路」來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由本 App 的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+        }
+        if enabled {
+            Section {
+                Toggle(AppText.text("用伺服器辨識語音"), isOn: $cloud).accessibilityIdentifier("voice-chat-cloud-recognition")
+                // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
+                if #available(iOS 26.0, *) {
+                    Toggle(AppText.text("新版手機語音辨識"), isOn: $modern).accessibilityIdentifier("voice-chat-modern-recognition")
+                }
+                Picker(AppText.text("說完後等多久"), selection: $pause) {
+                    ForEach(VoiceSettings.Pause.allCases) { Text($0.label).tag($0.rawValue) }
+                }.accessibilityIdentifier("voice-chat-pause")
+                Toggle(AppText.text("回答時可以直接插話"), isOn: $bargeIn).accessibilityIdentifier("voice-chat-barge-in")
+                Toggle(AppText.text("回答完繼續聽"), isOn: $keepListening).accessibilityIdentifier("voice-chat-keep-listening")
+            } header: {
+                Text(AppText.text("聆聽"))
+            } footer: {
+                Text(cloud
+                     ? AppText.text("每句話的錄音會經由本 App 的伺服器交給 Groq 上的 Whisper 模型轉成文字，中英夾雜、店名和口音都聽得比較準；錄音只用來轉文字，不保存。手機上的辨識仍會同時進行，伺服器無法使用時改用它。說「我是說…」更正時，之後會自動多等一下。")
+                     : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
+            }
+            Section {
+                Picker(AppText.text("回答長度"), selection: $length) {
+                    ForEach(VoiceSettings.AnswerLength.allCases) { Text($0.label).tag($0.rawValue) }
+                }.accessibilityIdentifier("voice-chat-answer-length")
+                Toggle(AppText.text("需要時上網查詢"), isOn: $web).accessibilityIdentifier("voice-chat-web")
+            } header: {
+                Text(AppText.text("回答"))
+            } footer: {
+                Text(AppText.text("關閉上網查詢時，營業時間、活動等最新資訊改用模型已知的內容回答，可能不是最新的。"))
+            }
+            Section {
+                Picker(AppText.text("語速"), selection: $rate) {
+                    ForEach(VoiceSettings.Rate.allCases) { Text($0.label).tag($0.rawValue) }
+                }.accessibilityIdentifier("voice-chat-rate")
+                voicePicker(AppText.text("中文聲音"), language: .traditionalChinese, selection: $chineseVoice)
+                voicePicker(AppText.text("英文聲音"), language: .english, selection: $englishVoice)
+                Button(AppText.text("試聽")) {
+                    let english = AppLanguage.current == .english
+                    sample.stop()
+                    sample.enqueue(english ? "The 307 to Banqiao arrives in 4 minutes." : "307 往板橋，約 4 分鐘到。",
+                                   language: english ? .english : .traditionalChinese)
+                }.accessibilityIdentifier("voice-chat-sample")
+            } header: {
+                Text(AppText.text("聲音"))
+            } footer: {
                 if basicVoice {
                     Label(AppText.text("目前只有基本語音，念起來比較生硬。到 iPhone 的「設定 > 輔助使用 > 朗讀內容 > 聲音」，在中文（台灣）下載「高品質」或「進階」語音，回答和導航提示會自然很多。"), systemImage: "waveform.badge.plus")
                 }
-                Text(AppText.text("開啟後，按麥克風就能和「一路」來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由本 App 的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            }
+        }
+    }
+
+    /// The phone's voices for a language, best first; 「自動」 picks the best each time.
+    private func voicePicker(_ title: String, language: AppLanguage, selection: Binding<String>) -> some View {
+        let voices = SpeechOutput.voices(language: language).sorted { ($0.quality.rawValue, $0.name) > ($1.quality.rawValue, $1.name) }
+        return Picker(title, selection: selection) {
+            Text(AppText.text("自動")).tag("")
+            ForEach(voices, id: \.identifier) { voice in
+                Text(voice.quality == .default ? voice.name : "\(voice.name)（\(AppText.text(voice.quality == .premium ? "進階" : "高品質"))）")
+                    .tag(voice.identifier)
             }
         }
     }

@@ -95,7 +95,14 @@ The rules in this system prompt hold for the whole conversation. Keep to them wh
 
 export type Turn = { user: string; say: string };
 /// `alternatives`: the recogniser's other readings of what was said, best first after `utterance`.
-export type TurnInput = { utterance: string; alternatives?: string[]; state: string; history: Turn[] };
+/// `length`: how long the rider wants answers, from Settings.
+export type TurnInput = { utterance: string; alternatives?: string[]; state: string; history: Turn[]; length?: AnswerLength };
+export type AnswerLength = 'short' | 'normal' | 'detailed';
+const LENGTHS: Record<AnswerLength, string> = {
+  short: '回答長度：乘客要很短的回答，一句話、大約 40 個字以內。',
+  normal: '',
+  detailed: '回答長度：乘客想聽詳細一點，可以說到四五句、大約 150 個字。',
+};
 
 /// The phone's request, bounded; null when it is not one turn of a conversation.
 export function readInput(body: Record<string, unknown>): TurnInput | null {
@@ -109,6 +116,7 @@ export function readInput(body: Record<string, unknown>): TurnInput | null {
     utterance,
     alternatives: alternatives.filter((other, index) => other && other !== utterance && alternatives.indexOf(other) === index),
     state: text(body.state, 4000),
+    length: body.answerLength === 'short' || body.answerLength === 'detailed' ? body.answerLength : 'normal',
     history: history.map((turn) => ({ user: text(turn?.user, 300), say: text(turn?.say, 200) }))
       .filter((turn) => turn.user || turn.say),
   };
@@ -116,6 +124,8 @@ export function readInput(body: Record<string, unknown>): TurnInput | null {
 
 /// What the model is told once the day's web lookups are used up (or a turn cannot follow up with one).
 export const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
+/// The same when the rider turned lookups off.
+export const NO_WEB_CHOSEN = '乘客關閉了上網查詢：不要用 web_search，也不要說要上網查，直接用你知道的回答';
 
 /// One user message: the state, the last eight turns and what was just said. The system prompt never
 /// changes, so it can be cached.
@@ -125,6 +135,7 @@ export function userMessage(input: TurnInput, web?: string): string {
     `目前狀態：\n${input.state || '（沒有提供）'}`,
     history ? `最近對話：\n${history}` : '',
     web ? `網路查詢：${web}` : '',
+    LENGTHS[input.length ?? 'normal'],
     `乘客剛剛說：${input.utterance}`,
     input.alternatives?.length ? `辨識的其他可能：${input.alternatives.map((other) => `「${other}」`).join('')}` : '',
   ].filter(Boolean).join('\n\n');

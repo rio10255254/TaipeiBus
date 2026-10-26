@@ -6,13 +6,16 @@ import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
-import { NO_WEB, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
+import { type Audio, heardTurn, readAudio, transcribe } from './hear.ts';
+import { NO_WEB, NO_WEB_CHOSEN, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
 const DAILY_TURNS = 40;
 /// Web lookups a day; past them the model answers from what it knows.
 const DAILY_WEB = 3;
 /// The voice consent this server's data use matches; the app sends the version the rider agreed to.
 const VOICE_CONSENT = 1;
+/// The consent that also covers sending the turn's audio for server recognition.
+const AUDIO_CONSENT = 2;
 
 Deno.serve(async (request) => {
   if (request.method !== 'POST') return reply({ error: 'method' }, 405);
@@ -45,8 +48,12 @@ Deno.serve(async (request) => {
 
   const headers: Record<string, string> = { 'X-Assistant-Used': String(used), 'X-Assistant-Limit': String(DAILY_TURNS) };
   if (body.stream === true) {
-    const webLeft = await webAllowanceLeft(admin, userId);
-    return streamed({ input, webLeft, used, anthropicKey, groqKey, headers, takeWeb: () => takeWebAllowance(admin, userId) });
+    // The rider can turn web lookups off in Settings.
+    const webLeft = body.web === false ? 0 : await webAllowanceLeft(admin, userId);
+    return streamed({
+      input, webLeft, noWeb: body.web === false ? NO_WEB_CHOSEN : NO_WEB, used, anthropicKey, groqKey, headers,
+      audio: Number(body.consent) >= AUDIO_CONSENT ? readAudio(body) : null, takeWeb: () => takeWebAllowance(admin, userId),
+    });
   }
   // Only the streamed turn can follow up with a web lookup.
   const message = userMessage(input, NO_WEB);
@@ -94,11 +101,12 @@ async function takeWebAllowance(admin: SupabaseClient, userId: string): Promise<
 }
 
 type Turn = {
-  input: TurnInput; webLeft: number; used: number; anthropicKey?: string; groqKey?: string;
-  headers: Record<string, string>; takeWeb: () => Promise<number | null>;
+  input: TurnInput; webLeft: number; noWeb: string; used: number; anthropicKey?: string; groqKey?: string;
+  headers: Record<string, string>; audio: Audio | null; takeWeb: () => Promise<number | null>;
 };
 
-/// Server-sent events, one JSON object each: `{"say": words}` as the spoken sentence is written, so the
+/// Server-sent events, one JSON object each: first `{"heard": words}` when the turn's audio was written
+/// down again on the server, so the phone shows and keeps that; `{"say": words}` as the spoken sentence is written, so the
 /// phone can start speaking at the first full stop; `{"said": true}` once it is whole, so a last sentence
 /// without a full stop need not wait for the actions; then `{"reply": ..., "model", "provider", "used",
 /// "limit"}` with the checked reply, or `{"error": ...}`. Groq answers in one piece, and only while
@@ -109,7 +117,7 @@ type Turn = {
 /// Comments keep the connection alive from the first byte, through the search. Past the day's lookups, Claude is asked
 /// again to answer from what it knows.
 function streamed(turn: Turn): Response {
-  const { input, webLeft, used, anthropicKey, groqKey, headers } = turn;
+  const { webLeft, used, anthropicKey, groqKey, headers } = turn;
   const encoder = new TextEncoder();
   // The rider cut in and the phone hung up: the rest of the turn is written to no one.
   let gone = false;
@@ -133,7 +141,17 @@ function streamed(turn: Turn): Response {
         if (say) send({ say });
         if (said) send({ said: true });
       };
-      const message = userMessage(input, webLeft > 0 ? `今天還能用 ${webLeft} 次` : NO_WEB);
+      if (turn.audio && groqKey) {
+        const heard = await transcribe(groqKey, turn.audio);
+        if ('text' in heard) {
+          turn.input = heardTurn(turn.input, heard.text);
+          send({ heard: heard.text });
+        } else {
+          console.error('server recognition failed', heard.failure);
+        }
+      }
+      const input = turn.input;
+      const message = userMessage(input, webLeft > 0 ? `今天還能用 ${webLeft} 次` : turn.noWeb);
       const claude = anthropicKey ? await streamClaude(anthropicKey, message, speak) : { failure: 'not configured', spoke: false };
       if ('reply' in claude) {
         const search = claude.reply.actions.find((action) => action.type === 'web_search');
@@ -185,7 +203,7 @@ async function followUp(turn: Turn, first: Reply, model: string, query: string, 
     console.error('web lookup failed', found.failure);
   }
   // No lookup left, or it failed: answer from what Claude knows.
-  const known = await streamClaude(key, userMessage(turn.input, NO_WEB), speak);
+  const known = await streamClaude(key, userMessage(turn.input, turn.noWeb), speak);
   if ('reply' in known) {
     const more = known.reply.actions.filter((action) => action.type !== 'web_search');
     return { reply: { ...known.reply, actions: [...actions, ...more].slice(0, 3), say: `${first.say}${known.reply.say}` }, model: known.model, provider: 'anthropic' };
