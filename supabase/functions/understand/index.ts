@@ -5,9 +5,10 @@
 import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import { askClaude } from './claude.ts';
+import { DAILY_AI } from '../_shared/allowance.ts';
 
 const MODELS = { pro: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'], free: ['openai/gpt-oss-20b'] };
-const LIMITS = { pro: 100, free: 20 };
+const LIMITS = DAILY_AI;
 const MAX_INPUT = 6000;
 const MAX_OUTPUT = 800;
 /// Builds whose consent names Claude send this version; older builds agreed to Groq only and stay there.

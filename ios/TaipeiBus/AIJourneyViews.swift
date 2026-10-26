@@ -135,7 +135,26 @@ final class JourneyAssistantSession: ObservableObject {
     }
     private func startSpeech() {
         let refining = refiningVoice
-        Task { await speech.start { [weak self] text in if refining { self?.refine(text) } else { self?.run(text) } } }
+        // 「只用雲端」 for Pro: the server writes the sentence down too.
+        let cloudOnly = VoiceSettings.cloudOnly && model.purchases.hasPro && VoiceConversation.consent == true
+        Task {
+            await speech.start(record: cloudOnly) { [weak self] text in
+                guard let self else { return }
+                guard cloudOnly else { return refining ? self.refine(text) : self.run(text) }
+                guard let sound = self.speech.audio else {
+                    self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                }
+                self.busy = true; self.activity = AppText.text("正在辨識你說的話…")
+                Task { @MainActor in
+                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: [])
+                    self.busy = false
+                    guard let words else {
+                        self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                    }
+                    if refining { self.refine(words) } else { self.run(words) }
+                }
+            }
+        }
     }
 
     /// 「改騎車」, 「晚一點」, 「不要搭公車」, 「改去101」 for the trip on screen. The online model reads the
@@ -153,11 +172,19 @@ final class JourneyAssistantSession: ObservableObject {
         let pro = model.purchases.hasPro
         let now = Date()
         operation = Task { @MainActor in
-            let rules = AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
+            let cloudOnly = VoiceSettings.cloudOnly
+            let rules = cloudOnly ? AssistantChange() : AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
             var change = rules, reader = "rules", credit = AssistantCredit.rules
-            if OnlineJourneyReader.enabled,
+            if OnlineJourneyReader.enabled || cloudOnly,
                let online = try? await OnlineJourneyReader.refine(value, trip: Self.describe(trip), now: now, pro: pro) {
-                change = online.filled(from: rules); reader = "online"; credit = AssistantCredit.online
+                change = online.filled(from: rules); reader = cloudOnly ? "online-only" : "online"; credit = AssistantCredit.online
+            } else if cloudOnly {
+                // 「只用雲端」: no reading on the phone stands in for the server's.
+                guard !Task.isCancelled else { return }
+                busy = false
+                JourneyDiagnostics.shared.record("ai-refine online-only failed")
+                message = AppText.text("線上 AI 暫時無法回應（已設定只用雲端），請稍後再試。")
+                return
             }
             guard !Task.isCancelled else { return }
             busy = false
@@ -253,6 +280,36 @@ final class JourneyAssistantSession: ObservableObject {
             }
         }
     }
+    /// What the voice conversation already understood, planned without reading the sentence again:
+    /// Claude read the rider's words there, so asking it (or the rules) once more would only cost
+    /// time and a second allowance. `sentence` is that request in words, for the screen.
+    func plan(_ reading: JourneyReading, sentence: String) {
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        input = sentence; source = sentence
+        busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
+        chosenDestination = nil; chosenOrigin = nil; prepared = nil
+        let context = makeContext()
+        track(context); activeContext = context
+        activity = AppText.text("正在規劃路線…"); startedAt = Date()
+        startDeadline("understand", context: context)
+        operation = Task { @MainActor in
+            do {
+                let session = try OnDeviceJourneyAssistant.conversation(context: context, pro: model.purchases.hasPro)
+                conversation = session
+                let result = try await session.plan(reading, source: sentence, at: Date())
+                try Task.checkCancellation()
+                deadlineTask?.cancel()
+                record("understand", outcome: "ok", context: context)
+                receive(result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                deadlineTask?.cancel()
+                record("understand", outcome: "error:" + OnDeviceJourneyAssistant.failureKind(error), context: context)
+                busy = false
+                fail(AppText.text("這句話暫時無法理解，請換個說法再試，或直接搜尋地點。"))
+            }
+        }
+    }
     func answer(_ index: Int) {
         guard let conversation, !busy else { return }
         operation?.cancel(); busy = true; message = nil
@@ -277,7 +334,7 @@ final class JourneyAssistantSession: ObservableObject {
     }
     /// Remembered for good; it can be changed in 資訊與設定. The waiting sentence then goes ahead.
     func answerConsent(_ allowed: Bool) {
-        UserDefaults.standard.set(allowed, forKey: OnlineJourneyReader.enabledKey)
+        AIConsent.answer(allowed)
         askingConsent = false
         let text = waitingForConsent, refining = waitingToRefine; waitingForConsent = ""; waitingToRefine = false
         if !text.isEmpty { if refining { refine(text) } else { run(text) } }
@@ -1084,14 +1141,14 @@ struct OnlineConsentAlert: ViewModifier {
     /// The route panel asks unless the sheet is open; the sheet asks while it is.
     let inSheet: Bool
     func body(content: Content) -> some View {
-        content.alert(AppText.text("使用線上 AI 理解？"), isPresented: Binding(
+        content.alert(AppText.text("使用線上 AI？"), isPresented: Binding(
             // The voice screen asks on its own page.
             get: { session.askingConsent && session.presented == inSheet && !session.voiceActive },
             set: { if !$0, session.askingConsent { session.answerConsent(false) } })) {
             Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
-            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+            Text(AIConsent.message)
         }
     }
 }
@@ -1205,7 +1262,7 @@ extension JourneyAssistantSession {
         case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
         case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
         case .understanding: activity
-        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
+        case .consent: AIConsent.message
         case .done, .problem: ""
         }
     }

@@ -25,6 +25,8 @@ jobs:
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
       SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      SPEECH_ORDER: ${{ vars.SPEECH_ORDER }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
@@ -65,6 +67,8 @@ jobs:
           SUPABASE_ACCESS_TOKEN="$(trim "$SUPABASE_ACCESS_TOKEN")"; export SUPABASE_ACCESS_TOKEN
           SUPABASE_PROJECT_REF="$(trim "$SUPABASE_PROJECT_REF")"
           GROQ_API_KEY="$(trim "$GROQ_API_KEY")"
+          OPENAI_API_KEY="$(trim "$OPENAI_API_KEY")"
+          SPEECH_ORDER="$(trim "$SPEECH_ORDER")"
           ANTHROPIC_API_KEY="$(trim "$ANTHROPIC_API_KEY")"
           ANTHROPIC_MODEL="$(trim "$ANTHROPIC_MODEL")"
           ANTHROPIC_WORKSPACE_ID="$(trim "$ANTHROPIC_WORKSPACE_ID")"
@@ -80,6 +84,8 @@ jobs:
           # Read from a file so the values never appear on a command line or in the log.
           umask 077; : > "$RUNNER_TEMP/assistant.env"
           if [ -n "$GROQ_API_KEY" ]; then printf 'GROQ_API_KEY=%s\n' "$GROQ_API_KEY" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$OPENAI_API_KEY" ]; then printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY" >> "$RUNNER_TEMP/assistant.env"; fi
+          if [ -n "$SPEECH_ORDER" ]; then printf 'SPEECH_ORDER=%s\n' "$SPEECH_ORDER" >> "$RUNNER_TEMP/assistant.env"; fi
           if [ -n "$ANTHROPIC_API_KEY" ]; then printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" >> "$RUNNER_TEMP/assistant.env"; fi
           if [ -n "$ANTHROPIC_MODEL" ]; then printf 'ANTHROPIC_MODEL=%s\n' "$ANTHROPIC_MODEL" >> "$RUNNER_TEMP/assistant.env"; fi
           if [ -n "$ANTHROPIC_WORKSPACE_ID" ]; then printf 'ANTHROPIC_WORKSPACE_ID=%s\n' "$ANTHROPIC_WORKSPACE_ID" >> "$RUNNER_TEMP/assistant.env"; fi
@@ -136,4 +142,12 @@ jobs:
           code=$(curl -sS -o "$RUNNER_TEMP/voice.json" -w '%{http_code}' -X POST "$url/functions/v1/converse" \
             -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$voicebody")
           echo "converse without Pro → HTTP $code $(head -c 200 "$RUNNER_TEMP/voice.json")"
+          [ "$code" = "403" ]
+          # Server recognition alone (「只用雲端」) is Pro only as well; this also shows the deployed function
+          # loads its recognition code.
+          audio=$(head -c 1500 /dev/zero | base64 -w0)
+          code=$(curl -sS -o "$RUNNER_TEMP/hear.json" -w '%{http_code}' -X POST "$url/functions/v1/converse" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' \
+            -d "{\"consent\":2,\"transcribe\":true,\"audio\":\"$audio\"}")
+          echo "server recognition without Pro → HTTP $code $(head -c 200 "$RUNNER_TEMP/hear.json")"
           [ "$code" = "403" ]

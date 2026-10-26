@@ -492,8 +492,9 @@ public enum VoiceChoice {
 /// How long a pause ends a turn. A rider who has to correct themselves (「我是說…」) was probably cut
 /// off, so later turns wait a little longer for them; turns that go well bring it slowly back.
 public enum VoicePatience {
+    /// The pause the rider chose in Settings is `usual`; corrections add at most a second to it.
     public static let usual = 1.3
-    public static let longest = 2.3
+    public static func longest(usual: Double = usual) -> Double { usual + 1.0 }
     /// Said anywhere in the turn, or only at its start, where 「不是」 is a correction and not 「不是很遠」.
     private static let corrections = ["我是說", "我說的是", "我的意思是", "i mean", "i said"]
     private static let startsCorrecting = ["不是啦", "不是，", "不是,", "不對", "no, i", "no i"]
@@ -503,8 +504,8 @@ public enum VoicePatience {
         return corrections.contains { text.contains($0) } || startsCorrecting.contains { text.hasPrefix($0) }
     }
 
-    public static func next(_ pause: Double, after text: String) -> Double {
-        corrects(text) ? min(pause + 0.3, longest) : max(pause - 0.05, usual)
+    public static func next(_ pause: Double, after text: String, usual: Double = usual) -> Double {
+        corrects(text) ? min(pause + 0.3, longest(usual: usual)) : max(pause - 0.05, usual)
     }
 }
 

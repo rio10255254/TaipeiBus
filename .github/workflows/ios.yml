@@ -183,6 +183,7 @@ jobs:
           python3 ios/release-check.py
           python3 ios/localization-check.py
           python3 ios/live-update.py validate runtime/settings.json
+          ios/verify-turn-recording.sh
       - name: Audit exact bundled catalog and release-mode routing
         if: github.event_name == 'workflow_dispatch' && inputs.bundled_catalog_audit
         run: |

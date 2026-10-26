@@ -27,11 +27,14 @@ jobs:
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+      - name: Hear recorded sentences on the server
+        run: deno run --allow-env --allow-net --allow-read --no-lock --config supabase/functions/converse/deno.json supabase/functions/converse/hear_check.ts
       - name: Ask and check
         run: deno run --allow-env --allow-net --no-lock --config supabase/functions/converse/deno.json supabase/functions/converse/eval.ts
 

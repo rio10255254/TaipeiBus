@@ -31,12 +31,19 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         synthesizer.delegate = self
     }
 
-    /// An enhanced or premium voice when the rider has downloaded one, otherwise the standard one.
+    /// The voice the rider picked in Settings, else an enhanced or premium one when downloaded, otherwise
+    /// the standard one.
     static func voice(language: AppLanguage) -> AVSpeechSynthesisVoice? {
-        let code = language == .english ? "en-US" : "zh-TW"
-        let voices = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == code }
-        return voices.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: code)
+        if let chosen = VoiceSettings.voice(language: language).flatMap(AVSpeechSynthesisVoice.init(identifier:)) { return chosen }
+        let voices = Self.voices(language: language)
+        return voices.max { $0.quality.rawValue < $1.quality.rawValue } ?? AVSpeechSynthesisVoice(language: Self.code(language))
     }
+
+    static func voices(language: AppLanguage) -> [AVSpeechSynthesisVoice] {
+        AVSpeechSynthesisVoice.speechVoices().filter { $0.language == code(language) }
+    }
+
+    private static func code(_ language: AppLanguage) -> String { language == .english ? "en-US" : "zh-TW" }
 
     /// Returns when the sentence has been spoken or `stop()` cut it short.
     func speak(_ text: String, routes: [String] = [], language: AppLanguage = .current) async {
@@ -64,7 +71,7 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
         }
         let utterance = AVSpeechUtterance(string: SpokenAnswer.speakable(text, routes: routes))
         utterance.voice = Self.voice(language: language)
-        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * 1.06)
+        utterance.rate = min(AVSpeechUtteranceMaximumSpeechRate, AVSpeechUtteranceDefaultSpeechRate * VoiceSettings.rate.multiplier)
         queued.append(utterance)
         speaking = true
         synthesizer.speak(utterance)
@@ -190,11 +197,13 @@ final class VoiceConversation: ObservableObject {
 
     init(model: TransitAppModel) { self.model = model }
 
-    static let consentKey = "voiceConversationConsent.v1"
+    static var consentKey: String { AIConsent.key }
     /// The voice consent the server's data use matches.
     static let consentVersion = 1
+    /// The consent that also covers the turn's audio, given with the server recognition setting.
+    static let audioConsentVersion = 2
     /// nil until asked; false keeps the microphone on the one-sentence planner.
-    static var consent: Bool? { UserDefaults.standard.object(forKey: consentKey) as? Bool }
+    static var consent: Bool? { AIConsent.answer }
     static var available: Bool { AssistantServer.configured }
     static let languageKey = "voiceConversationLanguage.v1"
     private static var savedLanguage: AppLanguage {
@@ -242,7 +251,7 @@ final class VoiceConversation: ObservableObject {
     }
 
     func answerConsent(_ allowed: Bool) {
-        UserDefaults.standard.set(allowed, forKey: Self.consentKey)
+        AIConsent.answer(allowed)
         askingConsent = false
         if allowed { listen(firstTurn: true) } else { end() }
     }
@@ -347,7 +356,9 @@ final class VoiceConversation: ObservableObject {
     private func startListening(hold: Bool) {
         let hints = VoiceStateBuilder(model: model).hints(language: language)
         Task {
-            await speech.start(language: language, hints: hints, modern: true, hold: hold, onWords: hold ? { [weak self] text in
+            await speech.start(language: language, hints: hints, modern: true, hold: hold,
+                               record: VoiceSettings.cloudRecognition || VoiceSettings.cloudOnly,
+                               onWords: hold ? { [weak self] text in
                 self?.heardWhileSpeaking(text)
             } : nil, unheard: { [weak self] in
                 guard let self else { return }
@@ -357,23 +368,58 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
+                // 「只用雲端」: the phone's reading only showed the words live and found the end of the turn;
+                // what was said is the server's, written down before anything is decided.
+                if VoiceSettings.cloudOnly {
+                    guard let sound = self.speech.audio else { return self.respond(self.phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true) }
+                    return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60)))
+                }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
                 if corrected != text { JourneyDiagnostics.shared.record("voice heard \(text) as \(corrected)") }
+                self.alternatives = self.speech.alternatives.map {
+                    self.language == .traditionalChinese ? self.names?.correct($0) ?? $0 : $0
+                }
+                self.audio = self.speech.audio.map { (sound: $0, vocabulary: Array(hints.prefix(60))) }
                 self.handle(corrected)
             })
+        }
+    }
+
+    private func hearOnServer(_ sound: Data, vocabulary: [String]) {
+        phase = .thinking; heard = ""
+        work = Task {
+            do {
+                let words = try await CloudSpeech.transcribe(sound, language: language, vocabulary: vocabulary)
+                guard !Task.isCancelled, active else { return }
+                handle(words)
+            } catch {
+                guard !Task.isCancelled, active else { return }
+                JourneyDiagnostics.shared.record("voice server-only unheard \(String(describing: error).prefix(40))")
+                respond(phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true)
+            }
         }
     }
 
     /// The pause that ends a turn, longer for a rider who had to correct themselves.
     static let pauseKey = "voicePause.v1"
     private var pause: Double {
-        get { UserDefaults.standard.object(forKey: Self.pauseKey) as? Double ?? VoicePatience.usual }
+        get {
+            let usual = VoiceSettings.pause.seconds
+            let stored = UserDefaults.standard.object(forKey: Self.pauseKey) as? Double ?? usual
+            return min(max(stored, usual), VoicePatience.longest(usual: usual))
+        }
         set { UserDefaults.standard.set(newValue, forKey: Self.pauseKey) }
     }
 
+    /// The recogniser's other readings of what was just said, and its audio for the server's recogniser,
+    /// sent with it once.
+    private var alternatives: [String] = []
+    private var audio: (sound: Data, vocabulary: [String])?
+
     private func handle(_ text: String) {
         guard active else { return }
-        pause = VoicePatience.next(pause, after: text)
+        let others = alternatives, sound = audio; alternatives = []; audio = nil
+        pause = VoicePatience.next(pause, after: text, usual: VoiceSettings.pause.seconds)
         // A tapped choice can arrive while the last answer is still being spoken; that answer's wait
         // must not go on to open the microphone over this one.
         work?.cancel(); work = nil
@@ -400,15 +446,23 @@ final class VoiceConversation: ObservableObject {
             work = Task { await say(phrase("好，有需要再叫我。")); end() }
             return
         }
-        work = Task { await turn(text, lookups: 1) }
+        work = Task { await turn(text, alternatives: others, audio: sound, lookups: 1) }
     }
 
-    private func turn(_ text: String, lookups: Int) async {
+    private func turn(_ text: String, alternatives: [String] = [], audio: (sound: Data, vocabulary: [String])? = nil, lookups: Int) async {
         phase = .thinking; choices = []; source = nil
         // Names and figures in the language the rider speaks, so the voice can say them.
         let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending, notices: notices) }
-        let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
-                                   "consent": Self.consentVersion, "stream": true]
+        var body: [String: Any] = ["utterance": text, "alternatives": alternatives, "state": context.prompt(), "history": history.json,
+                                   "consent": Self.consentVersion, "stream": true,
+                                   "answerLength": VoiceSettings.answerLength.rawValue, "web": VoiceSettings.webLookups,
+                                   "speechProvider": VoiceSettings.recognizer.rawValue]
+        // The turn's own audio, written down again on the server; the rider agreed to it with the setting.
+        if let audio {
+            body["audio"] = audio.sound.base64EncodedString(); body["consent"] = Self.audioConsentVersion
+            body["audioLanguage"] = language == .english ? "en" : "zh"; body["vocabulary"] = audio.vocabulary
+        }
+        var text = text
         var answer = SpokenTurn(context: context, heard: text)
         func speak(_ sentence: String) { speakPart(sentence, routes: context.names) }
         do {
@@ -418,7 +472,7 @@ final class VoiceConversation: ObservableObject {
             case 403:
                 model.showingProPlans = true
                 return respond(phrase("語音對話是 Pro 功能，可以在方案頁開啟。"), followUp: false)
-            case 429: return respond(phrase("今天的語音對話次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
+            case 429: return respond(phrase("今天的線上 AI 次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
             default: return respond(phrase("我現在連不上，請稍後再試一次。"), followUp: false)
             }
             var final: [String: Any]?
@@ -427,6 +481,11 @@ final class VoiceConversation: ObservableObject {
                 guard line.hasPrefix("data:"),
                       let event = (try? JSONSerialization.jsonObject(with: Data(line.dropFirst(5).utf8))) as? [String: Any] else { continue }
                 // The first sentence is spoken while the rest of the answer is still being written.
+                // What the server heard in the audio: shown, and kept as what the rider said.
+                if let words = event["heard"] as? String, !words.isEmpty {
+                    if words != text { JourneyDiagnostics.shared.record("voice server heard \(words.count) chars") }
+                    text = words; heard = words
+                }
                 if let words = event["say"] as? String { answer.receive(words).forEach(speak) }
                 if event["said"] as? Bool == true { answer.finishWords().forEach(speak) }
                 if event["reply"] != nil || event["error"] != nil { final = event; break }
@@ -466,7 +525,8 @@ final class VoiceConversation: ObservableObject {
             history.append(user: text, said: said)
             lastTurn = ["heard": text, "said": said, "state": context.prompt(), "model": (final["model"] as? String) ?? ""]
             reportable = true; reported = false
-            respond(nil, followUp: true)
+            // Off in Settings, the conversation ends after an answer unless it asked something back.
+            respond(nil, followUp: VoiceSettings.keepListening || reply.followUp)
         } catch {
             guard !Task.isCancelled else { return }
             if !answer.spoken.isEmpty { return respond(nil, followUp: true) }
@@ -599,7 +659,16 @@ final class VoiceConversation: ObservableObject {
             sentence += (mode == "cycling" ? "騎單車" : mode == "walking" ? "走路" : "") + "去\(destination)"
             if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
-            model.assistant.run(sentence)
+            // Claude already understood it: the places are taken as it named them; only the time it wrote
+            // in words (「明天 14:00 出發」), and 家/公司 by name, are read from the sentence.
+            var reading = RuleJourneyReader.read(sentence).reading
+            reading.destination = destination
+            reading.destinationKind = JourneyAssistantContext.category(of: destination) ?? .place
+            reading.origin = origin
+            reading.originKind = origin.isEmpty ? .none : JourneyAssistantContext.category(of: origin) ?? .place
+            if !then.isEmpty { reading.next = then }
+            reading.travelMode = mode == "cycling" ? .cycling : mode == "walking" ? .walking : reading.travelMode
+            model.assistant.plan(reading, sentence: sentence)
             planning = true
             panelRequest = .routes
         case .chooseOption(let index):
@@ -686,7 +755,7 @@ struct VoiceStateBuilder {
         for journey in model.commutes.journeys { own += [journey.title, place(journey.destination)] + (journey.origin.map { [place($0)] } ?? []) }
         own += model.planner.recentPlaces.map(place)
         let city = VoiceVocabulary.landmarks.map { english ? $0.english : $0.chinese }
-        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english)])
+        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english), VoiceVocabulary.brands])
     }
 
     func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil) -> VoiceContext {
@@ -928,5 +997,121 @@ final class NavigationVoice {
             guard let self, !self.model.voiceChat.active, !self.output.speaking else { return }
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         }
+    }
+}
+
+/// The rider's choices for the voice conversation, from Settings.
+enum VoiceSettings {
+    static let cloudKey = "voiceCloudRecognition.v1"
+    static let pauseKey = "voicePauseStyle.v1"
+    static let rateKey = "voiceSpeechRate.v1"
+    static let lengthKey = "voiceAnswerLength.v1"
+    static let webKey = "voiceWebLookups.v1"
+    static let keepListeningKey = "voiceKeepListening.v1"
+    static let chineseVoiceKey = "voiceChineseVoice.v1"
+    static let englishVoiceKey = "voiceEnglishVoice.v1"
+
+    /// How long a pause ends a turn.
+    enum Pause: String, CaseIterable, Identifiable {
+        case short, normal, long
+        var id: String { rawValue }
+        var seconds: Double {
+            switch self {
+            case .short: 1.0
+            case .normal: VoicePatience.usual
+            case .long: 1.9
+            }
+        }
+        var label: String {
+            switch self {
+            case .short: AppText.text("短")
+            case .normal: AppText.text("標準")
+            case .long: AppText.text("長")
+            }
+        }
+    }
+
+    enum Rate: String, CaseIterable, Identifiable {
+        case slow, normal, fast
+        var id: String { rawValue }
+        var multiplier: Float {
+            switch self {
+            case .slow: 0.9
+            case .normal: 1.06
+            case .fast: 1.22
+            }
+        }
+        var label: String {
+            switch self {
+            case .slow: AppText.text("慢")
+            case .normal: AppText.text("標準")
+            case .fast: AppText.text("快")
+            }
+        }
+    }
+
+    /// Sent with each turn; the server tells the model.
+    enum AnswerLength: String, CaseIterable, Identifiable {
+        case short, normal, detailed
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .short: AppText.text("簡短")
+            case .normal: AppText.text("標準")
+            case .detailed: AppText.text("詳細")
+            }
+        }
+    }
+
+    private static var defaults: UserDefaults { .standard }
+    /// The turn's audio is written down again on the server, which hears mixed Chinese and English far better.
+    static var cloudRecognition: Bool { defaults.object(forKey: cloudKey) as? Bool ?? true }
+    /// 「只用雲端」: the phone still shows the words live, finds the end of a turn and notices a rider
+    /// cutting in, but what was said is always Whisper's and only Claude understands it; when the server
+    /// fails, the rider is told instead of the phone stepping in.
+    static let cloudOnlyKey = "assistantCloudOnly.v1"
+    static let recognizerKey = "voiceSpeechProvider.v1"
+
+    /// Which server recogniser leads; the other answers when it cannot.
+    enum Recognizer: String, CaseIterable, Identifiable {
+        case auto, groq, openai
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .auto: AppText.text("自動")
+            case .groq: AppText.text("Groq Whisper（較快）")
+            case .openai: AppText.text("OpenAI（較準）")
+            }
+        }
+    }
+    static var recognizer: Recognizer { defaults.string(forKey: recognizerKey).flatMap(Recognizer.init(rawValue:)) ?? .auto }
+    static var cloudOnly: Bool { defaults.bool(forKey: cloudOnlyKey) }
+    static var pause: Pause { defaults.string(forKey: pauseKey).flatMap(Pause.init(rawValue:)) ?? .normal }
+    static var rate: Rate { defaults.string(forKey: rateKey).flatMap(Rate.init(rawValue:)) ?? .normal }
+    static var answerLength: AnswerLength { defaults.string(forKey: lengthKey).flatMap(AnswerLength.init(rawValue:)) ?? .normal }
+    static var webLookups: Bool { defaults.object(forKey: webKey) as? Bool ?? true }
+    /// Off: the conversation ends after an answer that asks nothing back.
+    static var keepListening: Bool { defaults.object(forKey: keepListeningKey) as? Bool ?? true }
+    /// The voice picked for a language, or nil for the best one on the phone.
+    static func voice(language: AppLanguage) -> String? {
+        let chosen = defaults.string(forKey: language == .english ? englishVoiceKey : chineseVoiceKey) ?? ""
+        return chosen.isEmpty ? nil : chosen
+    }
+}
+
+/// The app's server writing down a recorded turn on its own (「只用雲端」).
+@MainActor
+enum CloudSpeech {
+    enum Failure: Error { case unheard(Int) }
+
+    static func transcribe(_ sound: Data, language: AppLanguage, vocabulary: [String]) async throws -> String {
+        let body: [String: Any] = ["transcribe": true, "consent": VoiceConversation.audioConsentVersion,
+                                   "audio": sound.base64EncodedString(), "audioLanguage": language == .english ? "en" : "zh",
+                                   "vocabulary": vocabulary, "speechProvider": VoiceSettings.recognizer.rawValue]
+        let (data, status) = try await AssistantServer.post("converse", body: body, timeout: 8)
+        let words = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["heard"] as? String ?? ""
+        guard status == 200, !words.isEmpty else { throw Failure.unheard(status) }
+        JourneyDiagnostics.shared.record("speech server heard \(words.count) chars")
+        return words
     }
 }

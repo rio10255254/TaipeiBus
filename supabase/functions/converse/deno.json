@@ -3,6 +3,7 @@
   "imports": {
     "@anthropic-ai/sdk": "npm:@anthropic-ai/sdk@1",
     "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2.108.2",
-    "@peculiar/x509": "npm:@peculiar/x509@1"
+    "@peculiar/x509": "npm:@peculiar/x509@1",
+    "opencc-js": "npm:opencc-js@1.0.5"
   }
 }

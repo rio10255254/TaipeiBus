@@ -70,7 +70,9 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertFalse(VoicePatience.corrects("307 還要多久"))
         XCTAssertFalse(VoicePatience.corrects("不是很遠吧"))
         XCTAssertEqual(VoicePatience.next(1.3, after: "我是說圓山"), 1.6, accuracy: 0.001)
-        XCTAssertEqual(VoicePatience.next(2.2, after: "我是說圓山"), VoicePatience.longest)
+        XCTAssertEqual(VoicePatience.next(2.2, after: "我是說圓山"), VoicePatience.longest())
+        XCTAssertEqual(VoicePatience.next(1.8, after: "307 還要多久", usual: 1.8), 1.8)
+        XCTAssertEqual(VoicePatience.next(2.7, after: "我是說圓山", usual: 1.8), 2.8, accuracy: 0.001)
         XCTAssertEqual(VoicePatience.next(1.6, after: "307 還要多久"), 1.55, accuracy: 0.001)
         XCTAssertEqual(VoicePatience.next(1.3, after: "307 還要多久"), VoicePatience.usual)
     }

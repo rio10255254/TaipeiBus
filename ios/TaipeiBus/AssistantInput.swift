@@ -102,6 +102,14 @@ final class SpeechInput: ObservableObject {
     /// The longest a turn listens once words came, even while new words keep arriving (a TV, a
     /// conversation nearby): listening must always end.
     private static let longestTalk = 20.0
+    /// The recogniser's other readings of what was said, for the assistant to weigh: a name it does not
+    /// know is often right in one of them. Kept after listening ends, until the next start.
+    private(set) var alternatives: [String] = []
+    /// The turn's own audio for the server's recogniser, when `start` was asked to record; kept after
+    /// listening ends, until the next start.
+    private(set) var audio: Data?
+    private var recording = false
+    private let recorder = TurnRecorder()
     /// Listening has ended and the recogniser is giving its final reading of what it heard.
     private var finishing = false
     private var settle: Task<Void, Never>?
@@ -112,13 +120,14 @@ final class SpeechInput: ObservableObject {
 
     /// `modern` listens with Apple's newer recogniser where the phone has it and its language is
     /// downloaded (iOS 26); otherwise, and if it fails before hearing anything, with the usual one.
-    func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, hold: Bool = false,
+    func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, hold: Bool = false, record: Bool = false,
                onWords: ((String) -> Void)? = nil, unheard: (() -> Void)? = nil, finished: @escaping (String) -> Void) async {
         stop()
+        recording = record; audio = nil
         self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
         held = hold; self.onWords = onWords; echo = ""
         lastVoice = .distantPast; noiseFloor = 0.2; wordsSince = nil
-        transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
+        transcript = ""; alternatives = []; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
         let allowed = await Self.permissions()
@@ -166,8 +175,9 @@ final class SpeechInput: ObservableObject {
             let format = input.outputFormat(forBus: 0)
             guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
             input.removeTap(onBus: 0)
+            if recording { recorder.begin(holding: held) }
             // The audio thread calls this; it must not belong to the main actor.
-            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request) { [weak self] value in
+            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request, recorder: recording ? recorder : nil) { [weak self] value in
                 Task { @MainActor in self?.heard(level: value) }
             })
             engine.prepare()
@@ -184,14 +194,18 @@ final class SpeechInput: ObservableObject {
         JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
         let current = attempt
         // Recognition results arrive on a background queue; they are handed to the main actor here.
-        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, final, code in
-            Task { @MainActor in self?.receive(text: text, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice) }
+        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, others, final, code in
+            Task { @MainActor in
+                self?.receive(text: text, others: others, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice)
+            }
         })
         // Nothing said at all: stop instead of listening forever, and say so.
         if !held { waitForSilence(waitForWords) }
     }
-    private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
+    private func receive(text: String?, others: [String], final: Bool, code: String?, attempt current: Int,
+                         recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
+        if let text, !text.isEmpty, !held { alternatives = others }
         if finishing {
             if let text, !text.isEmpty { transcript = text }
             if final || code != nil { deliver() }
@@ -243,7 +257,9 @@ final class SpeechInput: ObservableObject {
             // The microphone first: what is said while the analyzer starts waits in the stream, so the
             // first word is not lost.
             node.removeTap(onBus: 0)
-            node.installTap(onBus: 0, bufferSize: 1024, format: microphone, block: Self.analyzerTap(converter, to: format, into: input) { [weak self] value in
+            if recording { recorder.begin(holding: held) }
+            node.installTap(onBus: 0, bufferSize: 1024, format: microphone,
+                            block: Self.analyzerTap(converter, to: format, into: input, recorder: recording ? recorder : nil) { [weak self] value in
                 Task { @MainActor in self?.heard(level: value) }
             })
             engine.prepare()
@@ -268,8 +284,10 @@ final class SpeechInput: ObservableObject {
                 for try await result in transcriber.results {
                     var text = String(result.text.characters)
                     if english, !finalized.isEmpty, !finalized.hasSuffix(" "), !text.hasPrefix(" ") { text = " " + text }
+                    let before = finalized
                     if result.isFinal { finalized += text }
-                    self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, attempt: current)
+                    let others = result.alternatives.dropFirst().map { before + String($0.characters) }
+                    self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, others: others, attempt: current)
                 }
                 self?.analyzerEnded(attempt: current)
             } catch {
@@ -289,11 +307,12 @@ final class SpeechInput: ObservableObject {
         return true
     }
 
-    private func receiveAnalyzed(_ text: String, attempt current: Int) {
+    private func receiveAnalyzed(_ text: String, others: [String], attempt current: Int) {
         guard current == attempt, listening else { return }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         transcript = text
+        if !held { alternatives = others }
         if finishing { return }
         if held { onWords?(text); return }
         wordsSince = wordsSince ?? Date()
@@ -305,6 +324,7 @@ final class SpeechInput: ObservableObject {
     func release(dropping echo: String = "") {
         guard held, listening else { return }
         held = false; self.echo = echo
+        recorder.release()
         if transcript.isEmpty { waitForSilence(waitForWords) } else { wordsSince = Date(); waitForSilence(pause(after: transcript), counting: true) }
     }
 
@@ -386,6 +406,13 @@ final class SpeechInput: ObservableObject {
         guard listening, finishing else { return }
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         text = VoiceEcho.removing(echo: echo, from: text)
+        var others: [String] = []
+        for other in alternatives {
+            let other = VoiceEcho.removing(echo: echo, from: other.trimmingCharacters(in: .whitespacesAndNewlines))
+            if !other.isEmpty, other != text, !others.contains(other), others.count < 4 { others.append(other) }
+        }
+        alternatives = others
+        audio = recording && !text.isEmpty ? recorder.finish() : nil
         let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
@@ -405,6 +432,7 @@ final class SpeechInput: ObservableObject {
         stopAnalyzer?(); stopAnalyzer = nil
         request = nil; task = nil; listening = false; preparing = false; finished = nil; unheard = nil; meter.value = 0; silenceSince = nil
         held = false; onWords = nil
+        recorder.discard()
         finishing = false; settle?.cancel(); settle = nil; finalize = nil
         // The conversation keeps its session between turns; it lets go when it ends.
         if !duplex { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
@@ -454,21 +482,23 @@ final class SpeechInput: ObservableObject {
         }
     }
     /// Feeds the recogniser and, about fifteen times a second, reports how loud the voice is.
-    nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest,
+    nonisolated private static func tap(_ request: SFSpeechAudioBufferRecognitionRequest, recorder: TurnRecorder?,
                                         level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
         let meter = LevelMeter()
         return { buffer, _ in
             request.append(buffer)
+            recorder?.append(buffer)
             if meter.due(), let value = loudness(buffer) { level(value) }
         }
     }
     /// The same for SpeechAnalyzer, which takes the microphone's audio only in its own format.
     @available(iOS 26.0, *)
     nonisolated private static func analyzerTap(_ converter: AVAudioConverter, to format: AVAudioFormat,
-                                                into input: AsyncStream<AnalyzerInput>.Continuation,
+                                                into input: AsyncStream<AnalyzerInput>.Continuation, recorder: TurnRecorder?,
                                                 level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
         let meter = LevelMeter()
         return { buffer, _ in
+            recorder?.append(buffer)
             let frames = AVAudioFrameCount((Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate).rounded(.up))
             if frames > 0, let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) {
                 var supplied = false
@@ -492,12 +522,102 @@ final class SpeechInput: ObservableObject {
         let decibels = 20 * log10(max(rms, 0.000_01))
         return Double(min(1, max(0, (decibels + 50) / 40)))
     }
-    nonisolated private static func results(_ deliver: @escaping @Sendable (String?, Bool, String?) -> Void)
+    nonisolated private static func results(_ deliver: @escaping @Sendable (String?, [String], Bool, String?) -> Void)
         -> (SFSpeechRecognitionResult?, Error?) -> Void {
         { result, error in
-            deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false,
-                    (error as NSError?).map { "\($0.domain) \($0.code)" })
+            deliver(result?.bestTranscription.formattedString, result?.transcriptions.dropFirst().map(\.formattedString) ?? [],
+                    result?.isFinal ?? false, (error as NSError?).map { "\($0.domain) \($0.code)" })
         }
+    }
+}
+
+/// The rider's voice for one turn, for the server's recogniser: 16 kHz mono AAC, a few kilobytes a
+/// second, in a temporary file deleted as soon as it is read. The microphone's tap hands it every
+/// buffer. While the answer is still speaking (`holding`) only the last moment is kept, so a rider who
+/// cuts in is heard from their first word without sending the answer itself.
+final class TurnRecorder: @unchecked Sendable {
+    private static let format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+    private static let preRoll: AVAudioFrameCount = 24_000
+    private static let longest: AVAudioFramePosition = 16_000 * 40
+    private let lock = NSLock()
+    private var file: AVAudioFile?
+    private var url: URL?
+    private var converter: AVAudioConverter?
+    private var kept: [AVAudioPCMBuffer] = []
+    private var holding = false
+    private var written: AVAudioFramePosition = 0
+
+    func begin(holding: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        reset()
+        self.holding = holding
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("turn-\(UUID().uuidString).m4a")
+        let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 16_000, AVNumberOfChannelsKey: 1]
+        file = try? AVAudioFile(forWriting: url, settings: settings, commonFormat: .pcmFormatFloat32, interleaved: false)
+        self.url = file == nil ? nil : url
+    }
+
+    /// The rider started talking over the answer: what was kept, and all that follows, is the turn.
+    func release() {
+        lock.lock(); defer { lock.unlock() }
+        guard holding else { return }
+        holding = false
+        kept.forEach(write); kept = []
+    }
+
+    /// On the tap's own thread.
+    func append(_ buffer: AVAudioPCMBuffer) {
+        lock.lock(); defer { lock.unlock() }
+        guard file != nil, let converted = convert(buffer) else { return }
+        guard holding else { return write(converted) }
+        kept.append(converted)
+        var frames = kept.reduce(0) { $0 + $1.frameLength }
+        while frames > Self.preRoll, kept.count > 1 { frames -= kept.removeFirst().frameLength }
+    }
+
+    /// The turn's audio, or nil when there was too little of it or it could not be written.
+    func finish() -> Data? {
+        lock.lock(); defer { lock.unlock() }
+        // Letting go of the file finishes writing it.
+        file = nil
+        guard written > 8_000, let url else { reset(); return nil }
+        let data = try? Data(contentsOf: url)
+        reset()
+        return data
+    }
+
+    func discard() {
+        lock.lock(); defer { lock.unlock() }
+        reset()
+    }
+
+    private func reset() {
+        file = nil
+        if let url { try? FileManager.default.removeItem(at: url) }
+        url = nil; converter = nil; kept = []; holding = false; written = 0
+    }
+
+    private func write(_ buffer: AVAudioPCMBuffer) {
+        guard let file, written < Self.longest else { return }
+        do { try file.write(from: buffer); written += AVAudioFramePosition(buffer.frameLength) } catch { self.file = nil }
+    }
+
+    private func convert(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if converter == nil || converter?.inputFormat != buffer.format {
+            converter = AVAudioConverter(from: buffer.format, to: Self.format)
+            converter?.primeMethod = .none
+        }
+        guard let converter else { return nil }
+        let frames = AVAudioFrameCount((Double(buffer.frameLength) * Self.format.sampleRate / buffer.format.sampleRate).rounded(.up))
+        guard frames > 0, let converted = AVAudioPCMBuffer(pcmFormat: Self.format, frameCapacity: frames) else { return nil }
+        var supplied = false
+        var error: NSError?
+        let status = converter.convert(to: converted, error: &error) { _, state in
+            if supplied { state.pointee = .noDataNow; return nil }
+            supplied = true; state.pointee = .haveData
+            return buffer
+        }
+        return status != .error && converted.frameLength > 0 ? converted : nil
     }
 }
 
@@ -512,21 +632,29 @@ enum ModernSpeech {
     private static var formats: [String: AVAudioFormat] = [:]
 
     static func transcriber(for locale: Locale) async -> SpeechTranscriber? {
-        if let supported = installed[locale.identifier] { return SpeechTranscriber(locale: supported, preset: .progressiveTranscription) }
+        if let supported = installed[locale.identifier] { return Self.module(supported) }
         guard SpeechTranscriber.isAvailable, let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
-        let transcriber = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+        let transcriber = Self.module(supported)
         let status = await AssetInventory.status(forModules: [transcriber])
         if status == .installed { installed[locale.identifier] = supported; return transcriber }
         if status == .supported, downloading.insert(supported.identifier).inserted {
             JourneyDiagnostics.shared.record("speech analyzer-download \(supported.identifier)")
             Task.detached(priority: .utility) {
-                let module = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+                let module = Self.module(supported)
                 do { try await AssetInventory.assetInstallationRequest(supporting: [module])?.downloadAndInstall() } catch {
                     await MainActor.run { _ = ModernSpeech.downloading.remove(supported.identifier) }
                 }
             }
         }
         return nil
+    }
+
+    /// Progressive results, with the recogniser's other readings for the assistant to weigh.
+    nonisolated private static func module(_ locale: Locale) -> SpeechTranscriber {
+        let preset = SpeechTranscriber.Preset.progressiveTranscription
+        return SpeechTranscriber(locale: locale, transcriptionOptions: preset.transcriptionOptions,
+                                 reportingOptions: preset.reportingOptions.union([.alternativeTranscriptions]),
+                                 attributeOptions: preset.attributeOptions)
     }
 
     static func format(for transcriber: SpeechTranscriber, locale: Locale) async -> AVAudioFormat? {

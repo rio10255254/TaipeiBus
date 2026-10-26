@@ -322,10 +322,7 @@ struct TransitHomeView: View {
             HomeSearchRow(model: model, hasSelection: hasSelection,
                           search: { showJourneyItinerary = false; journeyDetent = .large; showJourney = true },
                           browse: openBrowse,
-                          voice: OnDeviceJourneyAssistant.plannerUnavailableReason() == nil ? {
-                              // Pro riders talk it through; everyone else says one sentence to plan.
-                              if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() }
-                          } : nil)
+                          voice: microphone)
         }
     }
     }
@@ -340,6 +337,15 @@ struct TransitHomeView: View {
     }
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
+    /// The home microphone: the voice conversation, which Pro riders talk things through with (others
+    /// see the plans). 「用一句話規劃」 answers it only while the live settings turn it on.
+    private var microphone: (() -> Void)? {
+        if model.liveSettings.display.sentencePlanning, OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
+            return { if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() } }
+        }
+        return VoiceConversation.available ? { model.voiceChat.start() } : nil
+    }
+
     private func routeToPlace(_ place: MapPlaceSelection) {
         model.tappedPlace = nil
         planner.setDestination(TravelPlace(name: place.name, address: "", coordinate: place.coordinate, englishName: place.englishName),
@@ -1667,7 +1673,6 @@ private struct AppInformationView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var diagnostics = JourneyDiagnostics.shared
     @Environment(\.dismiss) private var dismiss
-    @State private var testerBuild = false
 
     var body: some View {
         NavigationStack {
@@ -1698,7 +1703,7 @@ private struct AppInformationView: View {
                     Toggle(isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) })) {
                         SettingsLabel(title: "English", symbol: "globe", color: .blue)
                     }.accessibilityIdentifier("app-language-toggle")
-                    if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
+                    if AssistantServer.configured {
                         NavigationLink { AssistantSettingsView() } label: {
                             SettingsLabel(title: AppText.text("語音與 AI"), symbol: "waveform", color: .purple)
                         }.accessibilityIdentifier("settings-assistant")
@@ -1738,15 +1743,7 @@ private struct AppInformationView: View {
                         SettingsLabel(title: AppText.text("分享路線規劃紀錄"), symbol: "square.and.arrow.up", color: .cyan)
                     }.accessibilityIdentifier("share-journey-diagnostics")
                 } header: { Text(AppText.text("關於")) }
-                if testerBuild {
-                    Section {
-                        NavigationLink { JourneyBenchmarkView() } label: {
-                            SettingsLabel(title: AppText.text("AI 測試"), symbol: "checklist", color: .gray)
-                        }.accessibilityIdentifier("settings-ai-benchmark")
-                    } footer: { Text(AppText.text("只在測試版顯示。")) }
-                }
             }
-            .task { testerBuild = await JourneyBenchmark.testerBuild() }
             .smoothChanges(model.language)
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }
@@ -1775,13 +1772,12 @@ private struct AppInformationView: View {
     }
 }
 
-/// 語音與 AI: how the voice assistant looks and whether sentences are understood online.
+/// 語音與 AI: online AI and how the conversation listens, answers and sounds, then how it looks.
 private struct AssistantSettingsView: View {
     var body: some View {
         List {
-            VoiceStyleSettings()
-            if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
             if VoiceConversation.available { VoiceChatSettings() }
+            VoiceStyleSettings()
         }
         .navigationTitle(AppText.text("語音與 AI")).navigationBarTitleDisplayMode(.inline)
     }
@@ -1975,29 +1971,6 @@ private struct VoiceStyleSettings: View {
                 .accessibilityIdentifier("voice-style-picker")
         } header: {
             SectionHeader(title: AppText.text("語音助理樣式"), symbol: "sparkles", color: .purple)
-        }
-    }
-}
-
-/// 線上理解: asked once before the first sentence goes online; changed here at any time.
-private struct OnlineUnderstandingSettings: View {
-    @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
-    var body: some View {
-        Section {
-            Toggle(AppText.text("使用線上 AI 理解"), isOn: $enabled).accessibilityIdentifier("online-understanding-toggle")
-            // The full explanation sits one level deeper.
-            NavigationLink(AppText.text("資料如何使用")) {
-                List {
-                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
-                                      "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
-                }
-                .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
-            }
-        } header: {
-            SectionHeader(title: AppText.text("用一句話規劃"), symbol: "text.bubble.fill", color: .blue)
-        } footer: {
-            Text(AppText.text("更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次。",
-                              "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
     }
 }

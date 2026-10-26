@@ -69,6 +69,20 @@ Deno.test('the request is bounded and keeps the last eight turns', () => {
   assert(message.endsWith('乘客剛剛說：307 還要多久'));
 });
 
+Deno.test("The recogniser's other readings reach the model, bounded and without repeats", () => {
+  const input = readInput({ utterance: '我要去word jim', alternatives: ['我要去 World Gym', '我要去word jim', '我要去 World Gym', 5, '', 'a', 'b', 'c'] });
+  assertEquals(input?.alternatives, ['我要去 World Gym']);
+  assert(userMessage(input!).endsWith('乘客剛剛說：我要去word jim\n\n辨識的其他可能：「我要去 World Gym」'));
+  assertEquals(readInput({ utterance: '307' })?.alternatives, []);
+});
+
+Deno.test('the answer length the rider chose is passed on', () => {
+  assertEquals(readInput({ utterance: '307', answerLength: 'short' })?.length, 'short');
+  assertEquals(readInput({ utterance: '307', answerLength: 'huge' })?.length, 'normal');
+  assert(userMessage(readInput({ utterance: '307', answerLength: 'detailed' })!).includes('詳細'));
+  assert(!userMessage(readInput({ utterance: '307' })!).includes('回答長度'));
+});
+
 Deno.test('Claude is asked with a fixed, cacheable system prompt and the reply schema', async () => {
   const received: Record<string, unknown>[] = [];
   const answer = { say: '307 {r1}。', actions: [], confirm: none, choices: [], followUp: false };
