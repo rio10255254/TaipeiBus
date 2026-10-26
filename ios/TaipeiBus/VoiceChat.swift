@@ -305,13 +305,14 @@ final class VoiceConversation: ObservableObject {
     private func listen(firstTurn: Bool) {
         guard active else { return }
         phase = .listening; heard = ""
-        Haptics.listening()
-        speech.pauseAfterWords = 0.9
+        // A pause of a second ends a turn; the microphone's own start says 「請說」 with its tap, so no word
+        // is said before it hears.
+        speech.pauseAfterWords = 1.0
         // A follow-up waits a little less than the first question.
         speech.waitForWords = firstTurn ? 7 : 5
         AssistantServer.warm()
         // Already listening under the answer and nothing of it was heard back (headphones): go on with it.
-        if speech.listening, speech.held, speech.transcript.isEmpty { speech.release(); return }
+        if speech.listening, speech.held, speech.transcript.isEmpty { Haptics.listening(); speech.release(); return }
         startListening(hold: false)
     }
 
@@ -340,7 +341,7 @@ final class VoiceConversation: ObservableObject {
         output.stop()
         phase = .listening; heard = ""
         Haptics.listening()
-        speech.pauseAfterWords = 0.9; speech.waitForWords = 5
+        speech.pauseAfterWords = 1.0; speech.waitForWords = 5
         speech.release(dropping: echo)
     }
 

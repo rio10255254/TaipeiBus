@@ -153,7 +153,8 @@ struct VoiceChatPanel: View {
 
     private var status: (symbol: String, text: String) {
         switch chat.phase {
-        case .listening: ("waveform", AppText.text("請說"))
+        // 「請說」 only once the microphone hears, so the first word is not lost.
+        case .listening: speech.listening ? ("waveform", AppText.text("請說")) : ("ellipsis", AppText.text("準備聽…"))
         case .thinking: ("ellipsis", AppText.text("想一下…"))
         case .speaking: ("speaker.wave.2.fill", AppText.text("回答中"))
         case .idle: ("mic", "")
