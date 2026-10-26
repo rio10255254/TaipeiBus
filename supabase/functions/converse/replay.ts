@@ -22,6 +22,15 @@ const JUDGE_TIMEOUT_MS = 30000;
 
 /// The reports to replay: from the last 30 days (older ones are pruned anyway), never-checked first,
 /// then the longest since checked. The limit is the only value in the query, and always an integer.
+/// Whether the verdict columns exist yet: they arrive with the migration, which deploys only from main.
+export const READY_QUERY = "select count(*) as ready from information_schema.columns" +
+  " where table_schema = 'public' and table_name = 'assistant_feedback' and column_name = 'checked_at'";
+
+export function columnsReady(rows: unknown): boolean {
+  const first = Array.isArray(rows) ? rows[0] as Record<string, unknown> | undefined : undefined;
+  return Number(first?.ready ?? 0) > 0;
+}
+
 export function selectQuery(limit: number): string {
   const count = Number.isFinite(limit) ? Math.min(MAX_LIMIT, Math.max(1, Math.floor(limit))) : DEFAULT_LIMIT;
   return 'select id, heard, said, state from public.assistant_feedback' +
@@ -193,6 +202,16 @@ async function main(): Promise<number> {
   // brain.ts logs why Claude failed; here that goes to a public log too, so it passes the same filter.
   const logError = console.error;
   console.error = (...parts: unknown[]) => logError(...parts.map((part) => printable(String(part))));
+
+  try {
+    if (!columnsReady(await query(token, ref, READY_QUERY))) {
+      console.log('The verdict columns are not deployed yet (they come with the migration on main): nothing to replay.');
+      return 0;
+    }
+  } catch (error) {
+    console.log(error instanceof QueryError ? error.message : 'Checking the table failed.');
+    return 1;
+  }
 
   let reports: Report[];
   try {

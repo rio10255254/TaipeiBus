@@ -2,7 +2,7 @@
 import { assert, assertEquals, assertThrows } from 'jsr:@std/assert@1';
 import { check, problems } from './checks.ts';
 import { readReply } from './reply.ts';
-import { expectation, isVerdict, judge, logLine, printable, readJudgment, readReports, selectQuery, updateQuery, verdictOf } from './replay.ts';
+import { columnsReady, expectation, isVerdict, judge, logLine, printable, readJudgment, readReports, selectQuery, updateQuery, verdictOf } from './replay.ts';
 
 const none = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', query: '', mode: 'any', preference: 'balanced', option: 0 };
 const replyOf = (say: string) => readReply({ say, actions: [], confirm: none, choices: [], followUp: false })!;
@@ -107,4 +107,12 @@ Deno.test('the judge is a short request with its labels enforced', async () => {
     Deno.env.delete('ANTHROPIC_BASE_URL');
     await server.shutdown();
   }
+});
+
+Deno.test('the replay waits for the verdict columns to be deployed', () => {
+  assertEquals(columnsReady([{ ready: 1 }]), true);
+  assertEquals(columnsReady([{ ready: '1' }]), true);
+  assertEquals(columnsReady([{ ready: 0 }]), false);
+  assertEquals(columnsReady([]), false);
+  assertEquals(columnsReady({ message: 'error' }), false);
 });
