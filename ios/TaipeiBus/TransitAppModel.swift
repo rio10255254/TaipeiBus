@@ -826,6 +826,15 @@ final class TransitAppModel: ObservableObject {
             if bikeStationsOn { pollBikesInBackground() } else { selectedBikeStationID = nil }
         }
     }
+    // MARK: Fares
+    /// The rider's ticket type, which every option's fare and transfer discount is worked out for.
+    @Published var fareClass: FareClass = UserDefaults.standard.string(forKey: "fareClass").flatMap(FareClass.init(rawValue:)) ?? .adult {
+        didSet { UserDefaults.standard.set(fareClass.rawValue, forKey: "fareClass") }
+    }
+    /// A TPASS 基北北桃 monthly pass: the metro and city bus rides it covers cost nothing more.
+    @Published var tpassOn: Bool = UserDefaults.standard.bool(forKey: "tpassOn") {
+        didSet { UserDefaults.standard.set(tpassOn, forKey: "tpassOn") }
+    }
     @Published var selectedBikeStationID: String?
     @Published var selectedBikeStationReturning = false
     var showsBikeStations: Bool { bikeStationsOn && liveSettings.display.bikeStations && !bikeNetwork.stations.isEmpty }
@@ -1651,13 +1660,23 @@ final class TransitAppModel: ObservableObject {
         return nil
     }
 
-    /// The official fare of an option's rides, adult electronic ticket, after the metro↔bus transfer
-    /// discount: 「車資 35 元」, or 「車資 35 元起」 when a ride's fare is not known. Nil for walking or YouBike alone.
+    /// The official fare of an option's rides for the rider's ticket type, electronic ticket, after the
+    /// metro↔bus transfer discount: 「車資 35 元」, or 「車資 35 元起」 when a ride's fare is not known. With
+    /// a TPASS pass that covers the rides it reads 「TPASS 月票涵蓋」. Nil for walking or YouBike alone.
     func fareLabel(_ option: JourneyOption) -> String? {
         // walks[i + 1] is the way from ride i to the next; a YouBike ride there breaks the transfer.
         let cycled = Set(option.rides.indices.filter { option.walks.indices.contains($0 + 1) && option.walks[$0 + 1].bike != nil })
-        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata, cycledAfter: cycled) else { return nil }
+        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata, cycledAfter: cycled,
+                                                   fareClass: fareClass, pass: tpassOn) else { return nil }
+        if tpassOn, fare.total == 0 { return fare.complete ? AppText.text("TPASS 月票涵蓋") : AppText.text("TPASS 涵蓋部分路段") }
         return fare.complete ? AppText.text("車資 %@ 元", String(fare.total)) : AppText.text("車資 %@ 元起", String(fare.total))
+    }
+
+    /// What the fare labels are worked out for, in Chinese for the voice assistant to say with them:
+    /// 「悠遊卡學生票，已扣捷運公車轉乘優惠」, or 「TPASS 月票…」 when the pass is on.
+    var fareDescription: String {
+        if tpassOn { return "TPASS 月票，雙北捷運與市區公車不另收費" }
+        return "悠遊卡\(fareClass.ticketName)，已扣捷運公車轉乘優惠"
     }
 
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
