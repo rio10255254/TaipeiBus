@@ -67,4 +67,59 @@ final class FareTableTests: XCTestCase {
         // Bus to bus has no metro transfer discount.
         XCTAssertEqual(FareTable.shared.estimate([ride, ride], metadata: TransitMetadata()), FareTable.Estimate(total: 30, complete: true))
     }
+
+    private func metroRide(_ line: String, from: String, to: String) -> TransitRide {
+        var route = BusRoute(id: line + ":0", parentID: line, name: line, variantName: "", departure: "", destination: "")
+        route.mode = .metro
+        let prefix = line.split(separator: ":").prefix(2).joined(separator: ":")
+        return TransitRide(route: route, direction: "0", stops: [
+            stop("m-" + from, from, route: line, sequence: 0, station: prefix + ":" + from, mode: .metro),
+            stop("m-" + to, to, route: line, sequence: 5, station: prefix + ":" + to, mode: .metro)], coordinates: [])
+    }
+
+    private func busRide(_ id: String) -> TransitRide {
+        let route = BusRoute(id: id, parentID: id, name: id, variantName: "", departure: "", destination: "")
+        return TransitRide(route: route, direction: "0", stops: [stop("1", "甲", route: id, sequence: 0), stop("2", "乙", route: id, sequence: 3)], coordinates: [])
+    }
+
+    func testEachClassPaysItsOfficialFare() {
+        let table = FareTable.shared
+        XCTAssertEqual(table.estimate([busRide("10132")], metadata: TransitMetadata(), fareClass: .student), FareTable.Estimate(total: 12, complete: true))
+        XCTAssertEqual(table.estimate([busRide("10132")], metadata: TransitMetadata(), fareClass: .elderly), FareTable.Estimate(total: 8, complete: true))
+        XCTAssertEqual(table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:R28", fareClass: .elderly), 26)
+        XCTAssertEqual(table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:R28", fareClass: .child), 26)
+        XCTAssertEqual(table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:R28", fareClass: .disabled), 26)
+        // Taipei Metro has no student fare; New Taipei Metro publishes no child fare.
+        XCTAssertEqual(table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:R28", fareClass: .student), 65)
+        XCTAssertEqual(table.metroFare(from: "metro:NTMC:Y07", to: "metro:NTMC:Y12", fareClass: .elderly), 10)
+        XCTAssertNil(table.metroFare(from: "metro:NTMC:Y07", to: "metro:NTMC:Y12", fareClass: .child))
+    }
+
+    func testTheTransferDiscountDependsOnTheClass() {
+        let table = FareTable.shared
+        let metro = metroRide("metro:TRTC:BL", from: "BL01", to: "BL12"), bus = busRide("10132")
+        let adult = table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:BL12")!
+        let elderly = table.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:BL12", fareClass: .elderly)!
+        XCTAssertEqual(table.estimate([metro, bus], metadata: TransitMetadata(), fareClass: .adult), FareTable.Estimate(total: adult + 15 - 8, complete: true))
+        XCTAssertEqual(table.estimate([metro, bus], metadata: TransitMetadata(), fareClass: .student), FareTable.Estimate(total: adult + 12 - 6, complete: true))
+        XCTAssertEqual(table.estimate([bus, metro], metadata: TransitMetadata(), fareClass: .elderly), FareTable.Estimate(total: 8 + elderly - 4, complete: true))
+        XCTAssertEqual(table.estimate([metro, bus], metadata: TransitMetadata(), fareClass: .child), FareTable.Estimate(total: elderly + 8 - 4, complete: true))
+    }
+
+    func testATPASSCoversTheMetroAndCityBuses() {
+        let table = FareTable.shared
+        let rides = [metroRide("metro:TRTC:BL", from: "BL01", to: "BL12"), busRide("10132"), metroRide("metro:NTMC:Y", from: "Y07", to: "Y12")]
+        XCTAssertEqual(table.estimate(rides, metadata: TransitMetadata(), pass: true), FareTable.Estimate(total: 0, complete: true))
+        XCTAssertEqual(table.estimate(rides, metadata: TransitMetadata(), fareClass: .student, pass: true), FareTable.Estimate(total: 0, complete: true))
+        // The pass covers a New Taipei Metro line even without a published fare table.
+        let sanying = metroRide("metro:NTMC:LB", from: "LB01", to: "LB05")
+        XCTAssertNil(table.estimate([sanying], metadata: TransitMetadata()))
+        XCTAssertEqual(table.estimate([sanying], metadata: TransitMetadata(), pass: true), FareTable.Estimate(total: 0, complete: true))
+    }
+
+    func testARideOutsideTheTPASSLeavesTheTotalIncomplete() {
+        let table = FareTable.shared
+        XCTAssertEqual(table.estimate([busRide("x"), busRide("10132")], metadata: TransitMetadata(), pass: true), FareTable.Estimate(total: 0, complete: false))
+        XCTAssertNil(table.estimate([busRide("x")], metadata: TransitMetadata(), pass: true))
+    }
 }

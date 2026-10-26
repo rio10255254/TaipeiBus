@@ -47,4 +47,18 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertNil(VoiceChoice.pick("第二個方案要走多久", among: places))
         XCTAssertNil(VoiceChoice.pick("", among: places))
     }
+
+    func testTheAssistantsOwnVoiceIsNotARiderCuttingIn() {
+        let spoken = "307 往板橋，約 4 分鐘到。要跟車嗎？"
+        // Its own sentence heard back, even with a homophone or two.
+        XCTAssertFalse(VoiceEcho.interrupts(heard: "307 往板橋約4分鐘到", spoken: spoken))
+        XCTAssertFalse(VoiceEcho.interrupts(heard: "307網板橋約四分鐘到要跟車", spoken: spoken))
+        XCTAssertFalse(VoiceEcho.interrupts(heard: "", spoken: spoken))
+        // The rider saying something else.
+        XCTAssertTrue(VoiceEcho.interrupts(heard: "等一下那671呢", spoken: spoken))
+        XCTAssertTrue(VoiceEcho.interrupts(heard: "Wait, what about the 671", spoken: "The 307 is 4 minutes away."))
+        // On the loudspeaker a short new phrase is not enough.
+        XCTAssertFalse(VoiceEcho.interrupts(heard: "307 往板橋那", spoken: spoken, strict: true))
+        XCTAssertTrue(VoiceEcho.interrupts(heard: "不用了我要改去台北車站", spoken: spoken, strict: true))
+    }
 }

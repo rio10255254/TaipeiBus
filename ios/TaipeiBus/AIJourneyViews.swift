@@ -1788,7 +1788,8 @@ private struct GlowLevel: ViewModifier {
         case .listening: 0.25 + 0.75 * level.value
         case .thinking: 0.7
         case .done: 0.85
-        case .warning, .calm: 0.4
+        // Calm also while an answer is spoken: its words lift it a little.
+        case .warning, .calm: 0.35 + 0.4 * level.value
         }
         content
             .opacity(value)

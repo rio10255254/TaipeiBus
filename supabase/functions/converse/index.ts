@@ -6,7 +6,7 @@ import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
-import { type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
+import { NO_WEB, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
 const DAILY_TURNS = 40;
 /// Web lookups a day; past them the model answers from what it knows.
@@ -63,7 +63,6 @@ Deno.serve(async (request) => {
   return Response.json({ error: 'unavailable' }, { status: 502, headers: { ...headers, 'X-Assistant-Fallback': headerText(`${claude.failure}; ${groq.failure}`) } });
 });
 
-const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
 /// Reports a phone may send a day.
 const DAILY_REPORTS = 20;
 

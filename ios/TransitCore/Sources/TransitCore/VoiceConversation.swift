@@ -484,3 +484,43 @@ public enum VoiceChoice {
         return nil
     }
 }
+
+/// Whether words heard while the assistant speaks are the rider cutting in, or only the assistant's own
+/// voice picked up again by the microphone. Chinese is compared by sound in pairs of syllables, so
+/// 往 heard as 網 still matches, and 四 is 4; English word by word. The rider is cutting in once enough
+/// of what was heard is nowhere in what was spoken.
+public enum VoiceEcho {
+    /// `strict` asks for more new words, for the loudspeaker, whose sound reaches the microphone.
+    public static func interrupts(heard: String, spoken: String, strict: Bool = false) -> Bool {
+        let said = Set(tokens(spoken))
+        let new = tokens(heard).filter { !said.contains($0) }
+        return new.count >= (strict ? 4 : 2)
+    }
+
+    private static let digits: [Character: Character] = ["零": "0", "〇": "0", "一": "1", "二": "2", "兩": "2", "三": "3",
+                                                         "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9"]
+
+    /// Pairs of syllables in each stretch of Chinese, and lower-cased words of letters or digits.
+    static func tokens(_ text: String) -> [String] {
+        var tokens: [String] = [], sounds: [String] = [], word = ""
+        func endSounds() {
+            if sounds.count == 1 { tokens.append(sounds[0]) }
+            for index in sounds.indices.dropLast() { tokens.append(sounds[index] + "|" + sounds[index + 1]) }
+            sounds = []
+        }
+        func endWord() { if !word.isEmpty { tokens.append(word); word = "" } }
+        for character in text.lowercased() {
+            let character = digits[character] ?? character
+            if let syllable = NameCorrection.syllable(character) {
+                endWord(); sounds.append(NameCorrection.loose(syllable))
+            } else if character.isLetter || character.isNumber {
+                endSounds(); word.append(character)
+            } else {
+                // Punctuation and spaces do not split syllables: recognition hears none of them.
+                endWord()
+            }
+        }
+        endSounds(); endWord()
+        return tokens
+    }
+}

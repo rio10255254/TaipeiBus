@@ -74,6 +74,7 @@ final class VoiceChatOverlay {
     static let shared = VoiceChatOverlay()
     private var window: VoiceChatWindow?
     func show(_ chat: VoiceConversation) {
+        hiding?.cancel(); hiding = nil
         guard window == nil else { return }
         let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
         guard let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first else { return }
@@ -90,9 +91,16 @@ final class VoiceChatOverlay {
         window.isHidden = false
         self.window = window
     }
-    func hide() {
-        window?.isHidden = true
-        window = nil
+    private var hiding: Task<Void, Never>?
+    /// After the panel's own exit animation, unless the conversation came back meanwhile.
+    func hide(after delay: Double = 0.28) {
+        hiding?.cancel()
+        hiding = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled else { return }
+            self.window?.isHidden = true
+            self.window = nil
+        }
     }
 }
 
@@ -113,7 +121,8 @@ private struct VoiceChatLayer: View {
     var body: some View {
         let reduceMotion = InterfaceMotion.reduced(systemReduceMotion)
         ZStack(alignment: .bottom) {
-            EdgeGlow(mood: mood, level: chat.speech.meter, reduceMotion: reduceMotion)
+            // The rider's voice while listening, the answer's words while speaking.
+            EdgeGlow(mood: mood, level: chat.phase == .speaking ? chat.output.level : chat.speech.meter, reduceMotion: reduceMotion)
                 .opacity(shown ? 1 : 0)
             VoiceChatPanel(chat: chat, speech: chat.speech)
                 .background(GeometryReader { proxy in
@@ -125,7 +134,11 @@ private struct VoiceChatLayer: View {
                 .offset(y: shown || reduceMotion ? 0 : 200)
                 .opacity(shown ? 1 : 0)
         }
-        .onAppear { withAnimation(reduceMotion ? nil : .smooth(duration: 0.3)) { shown = true } }
+        .onAppear { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) { shown = true } }
+        // Ending slides the panel away before the window goes.
+        .onChange(of: chat.active) { _, active in
+            withAnimation(reduceMotion ? nil : .smooth(duration: 0.25)) { shown = active }
+        }
     }
 }
 
@@ -134,6 +147,9 @@ struct VoiceChatPanel: View {
     @ObservedObject var chat: VoiceConversation
     @ObservedObject var speech: SpeechInput
     @State private var askingReport = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// Every change of the panel springs into place, unless motion is reduced.
+    private var motion: Animation? { InterfaceMotion.reduced(systemReduceMotion) ? nil : .spring(response: 0.36, dampingFraction: 0.86) }
 
     private var status: (symbol: String, text: String) {
         switch chat.phase {
@@ -149,8 +165,10 @@ struct VoiceChatPanel: View {
             HStack(spacing: 8) {
                 Image(systemName: status.symbol).font(.subheadline.weight(.semibold)).foregroundStyle(.tint)
                     .symbolEffect(.variableColor.iterative, isActive: chat.phase == .listening || chat.phase == .thinking)
+                    .contentTransition(.symbolEffect(.replace))
                     .frame(width: 22)
                 Text(status.text).font(.subheadline.weight(.semibold))
+                    .contentTransition(.opacity)
                 Spacer(minLength: 4)
                 if let remaining = chat.remaining, remaining <= 10 {
                     ModelCredit(text: AppText.text("今天還能問 %@ 次", "\(remaining)"))
@@ -185,23 +203,31 @@ struct VoiceChatPanel: View {
             let words = chat.phase == .listening ? speech.transcript : chat.heard
             if !words.isEmpty {
                 Text(words).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    .contentTransition(.interpolate)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
                     .accessibilityLabel(AppText.text("你說的：%@", words))
             }
             // Listening after something was put on screen: one row, so the screen stays readable.
             let folded = chat.compact && chat.phase == .listening
             if !chat.caption.isEmpty, !folded {
+                // Sentences arrive one after another; each grows in rather than jumping.
                 Text(chat.caption).font(.body).fixedSize(horizontal: false, vertical: true)
+                    .contentTransition(.interpolate)
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                     .accessibilityIdentifier("voice-chat-caption")
             }
             if let source = chat.source, !folded {
                 Label(AppText.text("來源：%@", source), systemImage: "globe").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                    .transition(.opacity)
             }
             if !chat.choices.isEmpty {
                 ChipFlow(spacing: 8) {
-                    ForEach(chat.choices, id: \.self) { choice in
-                        Button(choice) { chat.choose(choice) }.buttonStyle(.bordered).buttonBorderShape(.capsule)
+                    // One after another, a beat apart.
+                    ForEach(Array(chat.choices.enumerated()), id: \.element) { index, choice in
+                        ChoiceChip(title: choice, delay: Double(index) * 0.05, motion: motion) { chat.choose(choice) }
                     }
                 }
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
             }
             if let pending = chat.pending {
                 HStack(spacing: 8) {
@@ -212,8 +238,18 @@ struct VoiceChatPanel: View {
                         Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 36).padding(.horizontal, 6)
                     }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                 }
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
         }
+        .animation(motion, value: chat.phase)
+        .animation(motion, value: chat.caption)
+        .animation(motion, value: chat.choices)
+        .animation(motion, value: chat.compact)
+        .animation(motion, value: chat.pending != nil)
+        .animation(motion, value: chat.reportable)
+        .animation(motion, value: speech.transcript.isEmpty)
+        // A light tap when the answer starts and when listening starts again.
+        .sensoryFeedback(.impact(weight: .light, intensity: 0.6), trigger: chat.phase) { _, new in new == .speaking }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .phoneGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -228,6 +264,22 @@ struct VoiceChatPanel: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voice-chat")
+    }
+}
+
+/// One choice under an answer: it springs in a beat after the one before it, and presses down when tapped.
+private struct ChoiceChip: View {
+    let title: String
+    let delay: Double
+    let motion: Animation?
+    let action: () -> Void
+    @State private var shown = false
+
+    var body: some View {
+        Button(title, action: action)
+            .buttonStyle(.bordered).buttonBorderShape(.capsule)
+            .scaleEffect(shown ? 1 : 0.85).opacity(shown ? 1 : 0)
+            .onAppear { withAnimation(motion?.delay(delay)) { shown = true } }
     }
 }
 
@@ -254,9 +306,18 @@ struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.consentKey) private var enabled = false
     @AppStorage(SpeechInput.modernKey) private var modern = true
     @AppStorage(NavigationVoice.key) private var prompts = true
+    @AppStorage(VoiceConversation.bargeInKey) private var bargeIn = true
+    /// Only the compact voice is on the phone: answers and prompts sound flat until a better one is downloaded.
+    private var basicVoice: Bool {
+        guard let voice = SpeechOutput.voice(language: AppLanguage.current == .english ? .english : .traditionalChinese) else { return true }
+        return voice.quality == .default
+    }
     var body: some View {
         Section {
             Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
+            if enabled {
+                Toggle(AppText.text("回答時可以直接插話"), isOn: $bargeIn).accessibilityIdentifier("voice-chat-barge-in")
+            }
             // Said on the phone only; nothing leaves it.
             Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
             // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
@@ -268,7 +329,12 @@ struct VoiceChatSettings: View {
         } header: {
             Text(AppText.text("語音對話（Pro）"))
         } footer: {
-            Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            VStack(alignment: .leading, spacing: 8) {
+                if basicVoice {
+                    Label(AppText.text("目前只有基本語音，念起來比較生硬。到 iPhone 的「設定 > 輔助使用 > 朗讀內容 > 聲音」，在中文（台灣）下載「高品質」或「進階」語音，回答和導航提示會自然很多。"), systemImage: "waveform.badge.plus")
+                }
+                Text(AppText.text("開啟後，按麥克風就能和台北公車來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由台北公車的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            }
         }
     }
 }

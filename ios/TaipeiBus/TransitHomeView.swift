@@ -1687,6 +1687,9 @@ private struct AppInformationView: View {
                     NavigationLink { MapSettingsView(model: model) } label: {
                         Label(AppText.text("地圖"), systemImage: "map")
                     }.accessibilityIdentifier("settings-map")
+                    NavigationLink { FareSettingsView(model: model) } label: {
+                        Label(AppText.text("車資"), systemImage: "ticket")
+                    }.accessibilityIdentifier("settings-fares")
                     NavigationLink {
                         List { CommuteHabitSettings(habits: model.commuteHabits) }
                             .navigationTitle(AppText.text("通勤提示")).navigationBarTitleDisplayMode(.inline)
@@ -1770,6 +1773,28 @@ private struct MapSettingsView: View {
     }
 }
 
+/// 車資: the ticket type and TPASS pass each route option's fare is worked out for.
+private struct FareSettingsView: View {
+    @ObservedObject var model: TransitAppModel
+    var body: some View {
+        List {
+            Section {
+                Picker(AppText.text("票種"), selection: $model.fareClass) {
+                    ForEach(FareClass.allCases) { choice in Text(choice.title).tag(choice) }
+                }.accessibilityIdentifier("fare-class-picker")
+            } footer: {
+                Text(AppText.text("路線方案依悠遊卡票種計算車資與捷運公車轉乘優惠。捷運沒有學生票，學生搭捷運付全票；捷運孩童票限臺北市、新北市兒童。"))
+            }
+            Section {
+                Toggle(AppText.text("使用 TPASS 月票"), isOn: $model.tpassOn).accessibilityIdentifier("tpass-toggle")
+            } footer: {
+                Text(AppText.text("基北北桃 TPASS 涵蓋臺北捷運、新北捷運與雙北市區公車，這些路段不另計車資。"))
+            }
+        }
+        .navigationTitle(AppText.text("車資")).navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 /// Where the data comes from, with links and licences.
 private struct DataSourcesView: View {
     @Environment(\.liveSettings) private var live
@@ -1782,7 +1807,7 @@ private struct DataSourcesView: View {
                 Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
                 Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
                 Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
-                Text(AppText.text("站間車程與車資來自交通部運輸資料流通服務平臺（TDX）；車資為悠遊卡全票，已扣捷運與公車 1 小時內轉乘優惠 8 元，來源不足時仍標示估計。"))
+                Text(AppText.text("站間車程與車資來自交通部運輸資料流通服務平臺（TDX）；車資依設定的悠遊卡票種計算，已扣捷運與公車 1 小時內轉乘優惠（全票 8 元、學生票 6 元、孩童敬老愛心票 4 元），開啟 TPASS 月票時不計其涵蓋的路段，來源不足時仍標示估計。"))
                 Link("TDX", destination: URL(string: "https://tdx.transportdata.tw/")!)
             }
             Section(AppText.text("捷運")) {

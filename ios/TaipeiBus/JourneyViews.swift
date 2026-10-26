@@ -1065,6 +1065,8 @@ struct JourneyOptionsView: View {
             content(at: timeline.date)
         }
         .onChange(of: planner.selectedID, initial: true) { _, _ in planner.retainVisiblePreview() }
+        // Notices that name a route on these options are marked on them.
+        .task(id: planner.options.count) { if !planner.options.isEmpty { await model.refreshNotices() } }
     }
     @ViewBuilder private func content(at date: Date) -> some View {
         // Before the first option arrives, placeholder rows hold the space the options will
@@ -1292,6 +1294,12 @@ struct JourneyOptionsView: View {
             if let fare = model.fareLabel(option) {
                 Text(fare).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit()
                     .accessibilityIdentifier("journey-fare-" + option.id)
+            }
+            if let warning = model.noticeWarning(option) {
+                Label(AppText.text("公告提到 %@：%@", warning.route, warning.notice.title), systemImage: "exclamationmark.triangle.fill")
+                    .liveFont(.caption).foregroundStyle(.orange).lineLimit(spacious ? nil : 2)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                    .accessibilityIdentifier("journey-notice-" + option.id)
             }
             JourneyRouteChain(option: option).padding(.top, 5)
             if let reason = planner.optionReasons[option.id] {
