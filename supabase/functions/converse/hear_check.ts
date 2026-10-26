@@ -23,10 +23,19 @@ const recordings: { file: string; language: Audio['language']; expect: string[];
 
 const map = '現在：2026-10-25 19:40 星期日（台北）\n畫面：地圖\n附近站牌：忠孝復興站、大安路口';
 let failures = 0;
+// The account's own Whisper limits, as Groq reports them with each answer.
+let limits = '';
+const counting: typeof fetch = async (input, init) => {
+  const response = await fetch(input, init);
+  const header = (name: string) => response.headers.get(name) ?? '?';
+  limits = `每日請求 剩 ${header('x-ratelimit-remaining-requests')}/${header('x-ratelimit-limit-requests')}` +
+    `｜音訊秒數 剩 ${header('x-ratelimit-remaining-audio-seconds')}/${header('x-ratelimit-limit-audio-seconds')}`;
+  return response;
+};
 for (const recording of recordings) {
   const bytes = await Deno.readFile(new URL(`./fixtures/${recording.file}`, import.meta.url));
   const started = performance.now();
-  const heard = await transcribe(groqKey, { bytes, language: recording.language, vocabulary });
+  const heard = await transcribe(groqKey, { bytes, language: recording.language, vocabulary }, counting);
   const ms = Math.round(performance.now() - started);
   if (!('text' in heard)) {
     failures++;
@@ -48,6 +57,7 @@ for (const recording of recordings) {
     console.log(`${fine ? '✓' : '✗'} Claude｜${'reply' in answer ? `${answer.reply.say}｜${answer.reply.actions.map((action) => `${action.type}(${action.destination})`).join(' ')}` : answer.failure}`);
   }
 }
+console.log(`Groq Whisper 額度：${limits}`);
 if (failures) {
   console.log(`${failures} 項沒有通過。`);
   Deno.exit(1);
