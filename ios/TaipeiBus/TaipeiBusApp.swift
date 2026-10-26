@@ -15,6 +15,8 @@ struct TaipeiBusApp: App {
     private let tuning = ForecastTuningService(cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ForecastTuning"))
 
+    init() { AskTaipeiBusIntent.connect() }
+
     var body: some Scene {
         WindowGroup {
             root

@@ -4,7 +4,7 @@ import { encodeHex } from 'jsr:@std/encoding@1/hex';
 import { APPLE_ROOT_CA, APPLE_ROOT_CA_G2, APPLE_ROOT_CA_G3 } from './apple_roots.ts';
 import { X509Certificate } from 'node:crypto';
 import * as x509 from '@peculiar/x509';
-import { verifyTransaction } from './pro.ts';
+import { sharingAllowed, verifyTransaction } from './pro.ts';
 
 // Sandbox transactions for Pro monthly, valid until 2099, signed by test chains shaped like Apple's (the
 // intermediate and leaf carry Apple's marker extensions). Only the test roots and the signed transactions
@@ -193,4 +193,10 @@ Deno.test('a subscription in billing grace stays Pro until grace ends', async ()
   assertEquals(await verifyTransaction(lapsed, [root], ended), null, 'grace over');
   const another = await sign({ originalTransactionId: '2000000000000010', environment: 'Sandbox', gracePeriodExpiresDate: graceEnds });
   assertEquals(await verifyTransaction(lapsed, [root], another), null, 'another subscription\'s renewal');
+});
+
+Deno.test('a subscription proves Pro on a family and reinstalls, not on any number of phones', () => {
+  assert(sharingAllowed(0));
+  assert(sharingAllowed(9));
+  assert(!sharingAllowed(10));
 });

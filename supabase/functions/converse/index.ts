@@ -30,6 +30,7 @@ Deno.serve(async (request) => {
     return reply({ error: 'invalid' }, 400);
   }
   if (!(Number(body.consent) >= VOICE_CONSENT)) return reply({ error: 'consent_required' }, 400);
+  if (body.feedback && typeof body.feedback === 'object') return await saveFeedback(admin, userId, body.feedback as Record<string, unknown>);
   const input = readInput(body);
   if (!input) return reply({ error: 'invalid' }, 400);
 
@@ -63,6 +64,25 @@ Deno.serve(async (request) => {
 });
 
 const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
+/// Reports a phone may send a day.
+const DAILY_REPORTS = 20;
+
+/// A voice answer the rider reported: what was heard, what was said and the state it answered from,
+/// kept 30 days (pruned with the allowances) to improve the conversation.
+async function saveFeedback(admin: SupabaseClient, userId: string, feedback: Record<string, unknown>): Promise<Response> {
+  const text = (key: string, limit: number) =>
+    typeof feedback[key] === 'string' ? (feedback[key] as string).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, '').trim().slice(0, limit) : '';
+  const report = { user_id: userId, heard: text('heard', 300), said: text('said', 600), state: text('state', 4000),
+    model: text('model', 80), note: text('note', 300) };
+  if (!report.heard && !report.said) return reply({ error: 'invalid' }, 400);
+  const since = new Date(Date.now() - 86_400_000).toISOString();
+  const { count } = await admin.from('assistant_feedback').select('id', { count: 'exact', head: true })
+    .eq('user_id', userId).gt('created_at', since);
+  if ((count ?? 0) >= DAILY_REPORTS) return reply({ error: 'daily_limit' }, 429);
+  const { error } = await admin.from('assistant_feedback').insert(report);
+  if (error) return reply({ error: 'feedback' }, 500);
+  return reply({ saved: true }, 200);
+}
 
 async function webAllowanceLeft(admin: SupabaseClient, userId: string): Promise<number> {
   const { data } = await admin.from('assistant_web_usage').select('count').eq('user_id', userId).eq('day', taipeiDay()).maybeSingle();

@@ -2,8 +2,8 @@ import Foundation
 
 /// Official fares (MOTC TDX, bundled): the adult metro fare between stations and the adult electronic
 /// ticket fare of each bus route, with its fare buffer zones. A trip's fare adds up its rides; metro
-/// rides one after another are one journey through the gates. Transfer discounts and YouBike are not
-/// included, so a trip's total is an upper estimate.
+/// rides one after another are one journey through the gates, and a direct metro↔bus transfer takes off
+/// the transfer discount. YouBike is not included.
 public struct FareTable: Sendable {
     struct Metro: Decodable, Sendable { let stations: [String]; let adult: [[Int?]] }
     struct Bus: Decodable, Sendable { let name: String; let price: Int; let free: Bool; let zones: [[String]] }
@@ -64,33 +64,50 @@ public struct FareTable: Sendable {
         return (route.price * sections, located)
     }
 
-    /// The fare of a whole trip's rides, or nil when none of them has a known fare.
-    public func estimate(_ rides: [TransitRide], metadata: TransitMetadata) -> Estimate? {
+    /// What an adult electronic ticket saves on each direct metro↔bus transfer within the hour (Taipei
+    /// Metro: 「捷運與公車雙向轉乘優惠」, 普通卡 NT$8). A YouBike or light-rail ride between breaks it.
+    public static let transferDiscount = 8
+
+    /// The fare of a whole trip's rides, or nil when none of them has a known fare. `cycledAfter` holds the
+    /// rides followed by a YouBike ride, after which the next ride is not a direct transfer.
+    public func estimate(_ rides: [TransitRide], metadata: TransitMetadata, cycledAfter: Set<Int> = []) -> Estimate? {
         guard !rides.isEmpty else { return nil }
-        var total = 0, complete = true, known = false, index = 0
+        enum Kind { case metro, bus, other }
+        // Metro rides in a row are one journey through the gates: one fare unit.
+        var units: [(kind: Kind, fare: Int?, located: Bool, first: Int, last: Int)] = []
+        var index = 0
         while index < rides.count {
             let ride = rides[index]
             if ride.route.mode == .metro {
-                // Metro rides in a row are one journey through the gates.
                 var last = index
-                while last + 1 < rides.count, rides[last + 1].route.mode == .metro { last += 1 }
-                if let fare = metroFare(from: ride.boarding.stationID, to: rides[last].alighting.stationID) {
-                    total += fare; known = true
+                while last + 1 < rides.count, rides[last + 1].route.mode == .metro, !cycledAfter.contains(last) { last += 1 }
+                var fare = metroFare(from: ride.boarding.stationID, to: rides[last].alighting.stationID)
+                if fare == nil {
+                    let legs = rides[index...last].map { metroFare(from: $0.boarding.stationID, to: $0.alighting.stationID) }
+                    let known = legs.compactMap { $0 }
+                    fare = known.isEmpty ? nil : known.reduce(0, +)
+                    units.append((.metro, fare, known.count == legs.count, index, last))
                 } else {
-                    for leg in rides[index...last] {
-                        if let fare = metroFare(from: leg.boarding.stationID, to: leg.alighting.stationID) { total += fare; known = true }
-                        else { complete = false }
-                    }
+                    units.append((.metro, fare, true, index, last))
                 }
                 index = last + 1
-                continue
-            }
-            if ride.route.mode == .bus, let fare = busFare(ride, metadata: metadata) {
-                total += fare.price; known = true; complete = complete && fare.located
+            } else if ride.route.mode == .bus, let fare = busFare(ride, metadata: metadata) {
+                units.append((.bus, fare.price, fare.located, index, index)); index += 1
             } else {
-                complete = false
+                units.append((ride.route.mode == .bus ? .bus : .other, nil, false, index, index)); index += 1
             }
-            index += 1
+        }
+        var total = 0, complete = true, known = false
+        for (position, unit) in units.enumerated() {
+            guard var fare = unit.fare else { complete = false; continue }
+            if position > 0 {
+                let previous = units[position - 1]
+                let direct = !cycledAfter.contains(previous.last)
+                if direct, (previous.kind == .metro && unit.kind == .bus) || (previous.kind == .bus && unit.kind == .metro) {
+                    fare = max(0, fare - Self.transferDiscount)
+                }
+            }
+            total += fare; known = true; complete = complete && unit.located
         }
         return known ? Estimate(total: total, complete: complete) : nil
     }

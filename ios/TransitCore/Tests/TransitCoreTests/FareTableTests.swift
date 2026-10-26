@@ -51,4 +51,20 @@ final class FareTableTests: XCTestCase {
         XCTAssertEqual(FareTable.shared.estimate(rides, metadata: TransitMetadata()), FareTable.Estimate(total: 15, complete: false))
         XCTAssertNil(FareTable.shared.estimate([rides[0]], metadata: TransitMetadata()))
     }
+
+    func testAMetroToBusTransferTakesOffTheDiscountUnlessCycled() {
+        var line = BusRoute(id: "metro:TRTC:BL:0", parentID: "metro:TRTC:BL", name: "板南線", variantName: "", departure: "", destination: "")
+        line.mode = .metro
+        let metro = TransitRide(route: line, direction: "0", stops: [
+            stop("a", "頂埔", route: "metro:TRTC:BL", sequence: 0, station: "metro:TRTC:BL01", mode: .metro),
+            stop("b", "台北車站", route: "metro:TRTC:BL", sequence: 11, station: "metro:TRTC:BL12", mode: .metro)], coordinates: [])
+        let bus = BusRoute(id: "10132", parentID: "10132", name: "234", variantName: "", departure: "", destination: "")
+        let ride = TransitRide(route: bus, direction: "0", stops: [stop("1", "甲", route: "10132", sequence: 0), stop("2", "乙", route: "10132", sequence: 3)], coordinates: [])
+        let metroFare = FareTable.shared.metroFare(from: "metro:TRTC:BL01", to: "metro:TRTC:BL12")!
+        XCTAssertEqual(FareTable.shared.estimate([metro, ride], metadata: TransitMetadata()), FareTable.Estimate(total: metroFare + 15 - 8, complete: true))
+        XCTAssertEqual(FareTable.shared.estimate([ride, metro], metadata: TransitMetadata()), FareTable.Estimate(total: 15 + metroFare - 8, complete: true))
+        XCTAssertEqual(FareTable.shared.estimate([metro, ride], metadata: TransitMetadata(), cycledAfter: [0]), FareTable.Estimate(total: metroFare + 15, complete: true))
+        // Bus to bus has no metro transfer discount.
+        XCTAssertEqual(FareTable.shared.estimate([ride, ride], metadata: TransitMetadata()), FareTable.Estimate(total: 30, complete: true))
+    }
 }

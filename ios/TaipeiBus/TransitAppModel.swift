@@ -1616,10 +1616,12 @@ final class TransitAppModel: ObservableObject {
         return (max(60,planned - max(0,date.timeIntervalSince(boardedAt ?? date))),true)
     }
 
-    /// The official fare of an option's rides, adult electronic ticket, before transfer discounts: 「車資 35 元」,
-    /// or 「車資 35 元起」 when a ride's fare is not known. Nil for walking or YouBike alone.
+    /// The official fare of an option's rides, adult electronic ticket, after the metro↔bus transfer
+    /// discount: 「車資 35 元」, or 「車資 35 元起」 when a ride's fare is not known. Nil for walking or YouBike alone.
     func fareLabel(_ option: JourneyOption) -> String? {
-        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata) else { return nil }
+        // walks[i + 1] is the way from ride i to the next; a YouBike ride there breaks the transfer.
+        let cycled = Set(option.rides.indices.filter { option.walks.indices.contains($0 + 1) && option.walks[$0 + 1].bike != nil })
+        guard let fare = FareTable.shared.estimate(option.rides, metadata: metadata, cycledAfter: cycled) else { return nil }
         return fare.complete ? AppText.text("車資 %@ 元", String(fare.total)) : AppText.text("車資 %@ 元起", String(fare.total))
     }
 
