@@ -727,8 +727,8 @@ struct VoiceStateBuilder {
                         : VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
                     items.append(("第 \(index + 1) 個方案的抵達時間", arrival))
                 }
-                // Official fares, adult electronic ticket, after the metro↔bus transfer discount.
-                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）", fare)) }
+                // Official fares for the rider's ticket type or TPASS, after the metro↔bus transfer discount.
+                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（\(model.fareDescription)）", fare)) }
             }
         } else if let station = model.mapLabelStation {
             screen = "站牌：\(station.localizedName)"
