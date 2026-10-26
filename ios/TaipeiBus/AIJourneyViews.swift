@@ -138,9 +138,12 @@ final class JourneyAssistantSession: ObservableObject {
         // 「只用雲端」 for Pro: the server writes the sentence down too.
         let cloudOnly = VoiceSettings.cloudOnly && model.purchases.hasPro && VoiceConversation.consent == true
         Task {
-            await speech.start(cloudOnly: cloudOnly) { [weak self] text in
+            await speech.start(record: cloudOnly) { [weak self] text in
                 guard let self else { return }
-                guard text.isEmpty, let sound = self.speech.audio else { return refining ? self.refine(text) : self.run(text) }
+                guard cloudOnly else { return refining ? self.refine(text) : self.run(text) }
+                guard let sound = self.speech.audio else {
+                    self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                }
                 self.busy = true; self.activity = AppText.text("正在辨識你說的話…")
                 Task { @MainActor in
                     let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: [])

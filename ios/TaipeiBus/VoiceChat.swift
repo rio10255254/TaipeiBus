@@ -332,8 +332,7 @@ final class VoiceConversation: ObservableObject {
     private var echo = ""
 
     private func listenWhileSpeaking() {
-        // 「只用雲端」 has no words on the phone to tell the rider from the answer's own voice.
-        guard Self.bargeIn, !VoiceSettings.cloudOnly, active, !UIAccessibility.isVoiceOverRunning, !speech.listening, !speech.preparing,
+        guard Self.bargeIn, active, !UIAccessibility.isVoiceOverRunning, !speech.listening, !speech.preparing,
               !speech.failed, !speech.blocked else { return }
         echo = ""
         startListening(hold: true)
@@ -357,8 +356,8 @@ final class VoiceConversation: ObservableObject {
     private func startListening(hold: Bool) {
         let hints = VoiceStateBuilder(model: model).hints(language: language)
         Task {
-            await speech.start(language: language, hints: hints, modern: true, hold: hold, record: VoiceSettings.cloudRecognition,
-                               cloudOnly: VoiceSettings.cloudOnly,
+            await speech.start(language: language, hints: hints, modern: true, hold: hold,
+                               record: VoiceSettings.cloudRecognition || VoiceSettings.cloudOnly,
                                onWords: hold ? { [weak self] text in
                 self?.heardWhileSpeaking(text)
             } : nil, unheard: { [weak self] in
@@ -369,8 +368,12 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
-                // 「只用雲端」: the server writes the turn down first, then it goes on as usual.
-                if text.isEmpty, let sound = self.speech.audio { return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60))) }
+                // 「只用雲端」: the phone's reading only showed the words live and found the end of the turn;
+                // what was said is the server's, written down before anything is decided.
+                if VoiceSettings.cloudOnly {
+                    guard let sound = self.speech.audio else { return self.respond(self.phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true) }
+                    return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60)))
+                }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
                 if corrected != text { JourneyDiagnostics.shared.record("voice heard \(text) as \(corrected)") }
                 self.alternatives = self.speech.alternatives.map {
@@ -1053,8 +1056,9 @@ enum VoiceSettings {
     private static var defaults: UserDefaults { .standard }
     /// The turn's audio is written down again on the server, which hears mixed Chinese and English far better.
     static var cloudRecognition: Bool { defaults.object(forKey: cloudKey) as? Bool ?? true }
-    /// 「只用雲端」: nothing is recognised or understood on the phone, so what the rider hears is the
-    /// server's own work; when it fails, the rider is told instead of the phone stepping in.
+    /// 「只用雲端」: the phone still shows the words live, finds the end of a turn and notices a rider
+    /// cutting in, but what was said is always Whisper's and only Claude understands it; when the server
+    /// fails, the rider is told instead of the phone stepping in.
     static let cloudOnlyKey = "assistantCloudOnly.v1"
     static var cloudOnly: Bool { defaults.bool(forKey: cloudOnlyKey) }
     static var pause: Pause { defaults.string(forKey: pauseKey).flatMap(Pause.init(rawValue:)) ?? .normal }

@@ -364,7 +364,7 @@ struct VoiceChatSettings: View {
                     if on { cloud = true; UserDefaults.standard.set(true, forKey: OnlineJourneyReader.enabledKey) }
                 })).accessibilityIdentifier("assistant-cloud-only")
             } footer: {
-                Text(AppText.text("開啟後，手機上不辨識語音、也不用手機上的模型或規則理解句子：語音對話和一句話規劃都只由伺服器的 Whisper 與 Claude 處理，伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。插話會暫停，說話時畫面上不會即時顯示文字；回答仍由 iPhone 的語音念出。"))
+                Text(AppText.text("開啟後，手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的 Whisper 為準，句子也只由 Claude 理解，不用手機上的模型或規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))
             }
             Section {
                 Picker(AppText.text("回答長度"), selection: $length) {

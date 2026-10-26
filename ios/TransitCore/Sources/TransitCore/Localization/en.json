@@ -1128,6 +1128,6 @@
   "伺服器沒有聽清楚，請再說一次。": "The server didn't catch that. Please say it again.",
   "線上 AI 暫時無法回應（已設定只用雲端），請稍後再試。": "Online AI isn't responding right now (set to cloud only). Please try again later.",
   "只用雲端": "Cloud only",
-  "開啟後，手機上不辨識語音、也不用手機上的模型或規則理解句子：語音對話和一句話規劃都只由伺服器的 Whisper 與 Claude 處理，伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。插話會暫停，說話時畫面上不會即時顯示文字；回答仍由 iPhone 的語音念出。": "When on, the phone neither recognizes speech nor uses its own model or rules to understand sentences: voice conversations and one-sentence planning are handled only by Whisper and Claude on the server. If the server has a problem you are told so, rather than the phone stepping in, so you can see how the cloud service itself performs. Cutting in is paused and no live text appears while you speak; answers are still read aloud by your iPhone.",
-  "規劃行程": "Trip planning"
+  "規劃行程": "Trip planning",
+  "開啟後，手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的 Whisper 為準，句子也只由 Claude 理解，不用手機上的模型或規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。": "When on, the phone only shows your words live, tells when you have finished and notices you cutting in; what you said is always what Whisper on the server heard, and only Claude understands it, never a model or rules on the phone. If the server has a problem you are told so, rather than the phone stepping in, so you can see how the cloud service itself performs. Each sentence waits a little for the server; answers are still read aloud by your iPhone."
 }

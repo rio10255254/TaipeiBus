@@ -110,8 +110,6 @@ final class SpeechInput: ObservableObject {
     private(set) var audio: Data?
     private var recording = false
     private let recorder = TurnRecorder()
-    /// 「只用雲端」: nothing is recognised on the phone; the turn is only recorded, for the server.
-    private var cloudOnly = false
     /// Listening has ended and the recogniser is giving its final reading of what it heard.
     private var finishing = false
     private var settle: Task<Void, Never>?
@@ -122,13 +120,10 @@ final class SpeechInput: ObservableObject {
 
     /// `modern` listens with Apple's newer recogniser where the phone has it and its language is
     /// downloaded (iOS 26); otherwise, and if it fails before hearing anything, with the usual one.
-    /// `cloudOnly` records the turn without recognising it on the phone: `finished` then gets no words
-    /// and `audio` holds the turn, for the server to write down.
     func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, hold: Bool = false, record: Bool = false,
-               cloudOnly: Bool = false, onWords: ((String) -> Void)? = nil, unheard: (() -> Void)? = nil,
-               finished: @escaping (String) -> Void) async {
+               onWords: ((String) -> Void)? = nil, unheard: (() -> Void)? = nil, finished: @escaping (String) -> Void) async {
         stop()
-        self.cloudOnly = cloudOnly; recording = record || cloudOnly; audio = nil
+        recording = record; audio = nil
         self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
         held = hold; self.onWords = onWords; echo = ""
         lastVoice = .distantPast; noiseFloor = 0.2; wordsSince = nil
@@ -145,7 +140,6 @@ final class SpeechInput: ObservableObject {
             takeUnheard()?()
             return
         }
-        if cloudOnly { self.finished = finished; return beginRecording() }
         let locale = language == .english ? Locale(identifier: "en-US") : Locale(identifier: "zh-TW")
         if modern, Self.modernEnabled {
             if #available(iOS 26.0, *), let transcriber = await ModernSpeech.transcriber(for: locale) {
@@ -208,33 +202,6 @@ final class SpeechInput: ObservableObject {
         // Nothing said at all: stop instead of listening forever, and say so.
         if !held { waitForSilence(waitForWords) }
     }
-    /// 「只用雲端」: the microphone only records the turn and tells when the rider is talking; the pause
-    /// that ends a turn is timed from the voice itself, as there are no words to go by.
-    private func beginRecording() {
-        do {
-            try activateSession()
-            let input = engine.inputNode
-            let format = input.outputFormat(forBus: 0)
-            guard format.sampleRate > 0, format.channelCount > 0 else { throw SpeechFailure.noMicrophone }
-            input.removeTap(onBus: 0)
-            recorder.begin(holding: held)
-            input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.recordingTap(recorder) { [weak self] value in
-                Task { @MainActor in self?.heard(level: value) }
-            })
-            engine.prepare()
-            try engine.start()
-        } catch {
-            JourneyDiagnostics.shared.record("speech audio-error \((error as NSError).domain) \((error as NSError).code)")
-            problem = AppText.text("麥克風目前無法使用，請直接打字。", language: spokenLanguage); failed = true
-            let unheard = takeUnheard()
-            stop(); unheard?(); return
-        }
-        preparing = false; listening = true
-        Haptics.listening()
-        JourneyDiagnostics.shared.record("speech start cloud-only")
-        if !held { waitForSilence(waitForWords) }
-    }
-
     private func receive(text: String?, others: [String], final: Bool, code: String?, attempt current: Int,
                          recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
@@ -377,11 +344,7 @@ final class SpeechInput: ObservableObject {
         meter.value = value
         // The room's sound sinks the floor at once and lifts it slowly, so a voice stands out above it.
         noiseFloor = value < noiseFloor ? value : noiseFloor + (value - noiseFloor) * 0.02
-        if value > noiseFloor + 0.18 {
-            lastVoice = Date()
-            // With nothing recognised, the voice itself starts the pause that ends the turn.
-            if cloudOnly, !held, !finishing, wordsSince == nil { wordsSince = Date(); waitForSilence(pauseAfterWords, counting: true) }
-        }
+        if value > noiseFloor + 0.18 { lastVoice = Date() }
     }
 
     private func activateSession() throws {
@@ -431,8 +394,6 @@ final class SpeechInput: ObservableObject {
         meter.value = 0
         request?.endAudio()
         finalize?(); finalize = nil
-        // Nothing on the phone to give a final reading.
-        if cloudOnly { return deliver() }
         let current = attempt
         settle = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(700))
@@ -443,15 +404,6 @@ final class SpeechInput: ObservableObject {
 
     private func deliver() {
         guard listening, finishing else { return }
-        if cloudOnly {
-            audio = wordsSince != nil ? recorder.finish() : nil
-            let done = finished, unheard = self.unheard
-            stop()
-            JourneyDiagnostics.shared.record("speech done cloud-only audio=\(audio != nil)")
-            if audio == nil { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。", language: spokenLanguage); unheard?() }
-            else { done?("") }
-            return
-        }
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         text = VoiceEcho.removing(echo: echo, from: text)
         var others: [String] = []
@@ -536,14 +488,6 @@ final class SpeechInput: ObservableObject {
         return { buffer, _ in
             request.append(buffer)
             recorder?.append(buffer)
-            if meter.due(), let value = loudness(buffer) { level(value) }
-        }
-    }
-    /// Only the recording and the level, for 「只用雲端」.
-    nonisolated private static func recordingTap(_ recorder: TurnRecorder, level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
-        let meter = LevelMeter()
-        return { buffer, _ in
-            recorder.append(buffer)
             if meter.due(), let value = loudness(buffer) { level(value) }
         }
     }
