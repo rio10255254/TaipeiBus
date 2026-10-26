@@ -197,13 +197,13 @@ final class VoiceConversation: ObservableObject {
 
     init(model: TransitAppModel) { self.model = model }
 
-    static let consentKey = "voiceConversationConsent.v1"
+    static var consentKey: String { AIConsent.key }
     /// The voice consent the server's data use matches.
     static let consentVersion = 1
     /// The consent that also covers the turn's audio, given with the server recognition setting.
     static let audioConsentVersion = 2
     /// nil until asked; false keeps the microphone on the one-sentence planner.
-    static var consent: Bool? { UserDefaults.standard.object(forKey: consentKey) as? Bool }
+    static var consent: Bool? { AIConsent.answer }
     static var available: Bool { AssistantServer.configured }
     static let languageKey = "voiceConversationLanguage.v1"
     private static var savedLanguage: AppLanguage {
@@ -251,7 +251,7 @@ final class VoiceConversation: ObservableObject {
     }
 
     func answerConsent(_ allowed: Bool) {
-        UserDefaults.standard.set(allowed, forKey: Self.consentKey)
+        AIConsent.answer(allowed)
         askingConsent = false
         if allowed { listen(firstTurn: true) } else { end() }
     }
@@ -455,7 +455,8 @@ final class VoiceConversation: ObservableObject {
         let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending, notices: notices) }
         var body: [String: Any] = ["utterance": text, "alternatives": alternatives, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true,
-                                   "answerLength": VoiceSettings.answerLength.rawValue, "web": VoiceSettings.webLookups]
+                                   "answerLength": VoiceSettings.answerLength.rawValue, "web": VoiceSettings.webLookups,
+                                   "speechProvider": VoiceSettings.recognizer.rawValue]
         // The turn's own audio, written down again on the server; the rider agreed to it with the setting.
         if let audio {
             body["audio"] = audio.sound.base64EncodedString(); body["consent"] = Self.audioConsentVersion
@@ -1060,6 +1061,21 @@ enum VoiceSettings {
     /// cutting in, but what was said is always Whisper's and only Claude understands it; when the server
     /// fails, the rider is told instead of the phone stepping in.
     static let cloudOnlyKey = "assistantCloudOnly.v1"
+    static let recognizerKey = "voiceSpeechProvider.v1"
+
+    /// Which server recogniser leads; the other answers when it cannot.
+    enum Recognizer: String, CaseIterable, Identifiable {
+        case auto, groq, openai
+        var id: String { rawValue }
+        var label: String {
+            switch self {
+            case .auto: AppText.text("自動")
+            case .groq: AppText.text("Groq Whisper（較快）")
+            case .openai: AppText.text("OpenAI（較準）")
+            }
+        }
+    }
+    static var recognizer: Recognizer { defaults.string(forKey: recognizerKey).flatMap(Recognizer.init(rawValue:)) ?? .auto }
     static var cloudOnly: Bool { defaults.bool(forKey: cloudOnlyKey) }
     static var pause: Pause { defaults.string(forKey: pauseKey).flatMap(Pause.init(rawValue:)) ?? .normal }
     static var rate: Rate { defaults.string(forKey: rateKey).flatMap(Rate.init(rawValue:)) ?? .normal }
@@ -1082,7 +1098,7 @@ enum CloudSpeech {
     static func transcribe(_ sound: Data, language: AppLanguage, vocabulary: [String]) async throws -> String {
         let body: [String: Any] = ["transcribe": true, "consent": VoiceConversation.audioConsentVersion,
                                    "audio": sound.base64EncodedString(), "audioLanguage": language == .english ? "en" : "zh",
-                                   "vocabulary": vocabulary]
+                                   "vocabulary": vocabulary, "speechProvider": VoiceSettings.recognizer.rawValue]
         let (data, status) = try await AssistantServer.post("converse", body: body, timeout: 8)
         let words = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["heard"] as? String ?? ""
         guard status == 200, !words.isEmpty else { throw Failure.unheard(status) }

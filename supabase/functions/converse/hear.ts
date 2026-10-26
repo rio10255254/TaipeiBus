@@ -28,6 +28,13 @@ export function speechOrder(keys: SpeechKeys, order = 'groq,openai'): Recognizer
     .filter((name, index, all) => all.indexOf(name) === index);
 }
 
+/// The rider's choice in Settings leads, the other follows; without one, SPEECH_ORDER or Groq first.
+export function preferredOrder(keys: SpeechKeys, preferred: unknown, configured?: string): Recognizer[] {
+  if (preferred === 'openai') return speechOrder(keys, 'openai,groq');
+  if (preferred === 'groq') return speechOrder(keys, 'groq,openai');
+  return speechOrder(keys, configured || undefined);
+}
+
 /// The turn written down by the first recogniser that can; each failure is kept for the log.
 export async function hear(keys: SpeechKeys, audio: Audio, order = speechOrder(keys), fetcher: typeof fetch = fetch):
   Promise<Heard & { by?: Recognizer; failures: string[] }> {

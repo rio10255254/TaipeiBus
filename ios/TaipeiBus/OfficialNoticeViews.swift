@@ -106,7 +106,7 @@ private struct OfficialNoticeDetail: View {
                 Link(AppText.text("完整公告與附件"), destination: notice.source)
             }
             Section {
-                if OnDeviceJourneyAssistant.unavailableReason(language: .traditionalChinese) != nil, !OnlineJourneyReader.enabled {
+                if !OnlineJourneyReader.enabled {
                     Text(AppText.text("重點摘錄目前無法使用，仍可閱讀下方全文。"))
                 }
                 else if document.canSummarize {
@@ -114,7 +114,7 @@ private struct OfficialNoticeDetail: View {
                         operation?.cancel(); busy = true; failed = false
                         operation = Task { @MainActor in
                             do {
-                                let result = try await OnDeviceJourneyAssistant.excerpt(document, language: .traditionalChinese)
+                                let result = try await OnDeviceJourneyAssistant.excerpt(document)
                                 try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit
                             } catch { if !Task.isCancelled { failed = true } }
                             busy = false

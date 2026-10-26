@@ -1,5 +1,5 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { chinesePunctuation, hallucinated, hear, heardTurn, readAudio, speechOrder, traditional, transcribe, transcribeOpenAI, whisperPrompt } from './hear.ts';
+import { chinesePunctuation, hallucinated, hear, heardTurn, preferredOrder, readAudio, speechOrder, traditional, transcribe, transcribeOpenAI, whisperPrompt } from './hear.ts';
 
 const sound = btoa(String.fromCharCode(...new Uint8Array(2000).fill(7)));
 
@@ -71,6 +71,11 @@ Deno.test('the next recogniser answers when the first is rate limited', async ()
   assertEquals(speechOrder({ groq: 'g', openai: 'o' }, 'openai, groq'), ['openai', 'groq']);
   assertEquals(speechOrder({ groq: 'g' }, 'openai,groq'), ['groq']);
   assertEquals(speechOrder({}), []);
+  // The rider's choice leads; a recogniser without a key is left out.
+  assertEquals(preferredOrder({ groq: 'g', openai: 'o' }, 'openai'), ['openai', 'groq']);
+  assertEquals(preferredOrder({ groq: 'g', openai: 'o' }, 'groq', 'openai,groq'), ['groq', 'openai']);
+  assertEquals(preferredOrder({ groq: 'g', openai: 'o' }, 'auto', 'openai,groq'), ['openai', 'groq']);
+  assertEquals(preferredOrder({ groq: 'g' }, 'openai'), ['groq']);
   const fake = (async (input: string) => input.includes('groq')
     ? new Response('slow down', { status: 429 })
     : Response.json({ text: '307還要多久?' })) as typeof fetch;

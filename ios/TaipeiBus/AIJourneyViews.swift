@@ -304,7 +304,7 @@ final class JourneyAssistantSession: ObservableObject {
     }
     /// Remembered for good; it can be changed in 資訊與設定. The waiting sentence then goes ahead.
     func answerConsent(_ allowed: Bool) {
-        UserDefaults.standard.set(allowed, forKey: OnlineJourneyReader.enabledKey)
+        AIConsent.answer(allowed)
         askingConsent = false
         let text = waitingForConsent, refining = waitingToRefine; waitingForConsent = ""; waitingToRefine = false
         if !text.isEmpty { if refining { refine(text) } else { run(text) } }
@@ -1111,14 +1111,14 @@ struct OnlineConsentAlert: ViewModifier {
     /// The route panel asks unless the sheet is open; the sheet asks while it is.
     let inSheet: Bool
     func body(content: Content) -> some View {
-        content.alert(AppText.text("使用線上 AI 理解？"), isPresented: Binding(
+        content.alert(AppText.text("使用線上 AI？"), isPresented: Binding(
             // The voice screen asks on its own page.
             get: { session.askingConsent && session.presented == inSheet && !session.voiceActive },
             set: { if !$0, session.askingConsent { session.answerConsent(false) } })) {
             Button(AppText.text("使用線上理解")) { session.answerConsent(true) }
             Button(AppText.text("只在手機上理解"), role: .cancel) { session.answerConsent(false) }
         } message: {
-            Text(AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。"))
+            Text(AIConsent.message)
         }
     }
 }
@@ -1232,7 +1232,7 @@ extension JourneyAssistantSession {
         case .preparing: AppText.text("例如：明天九點前到台大、騎單車去101")
         case .listening: speech.transcript.isEmpty ? AppText.text("例如：明天九點前到台大、騎單車去101") : AppText.text("說完停一下，就會開始規劃")
         case .understanding: activity
-        case .consent: AppText.text("為了更準確，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂；Claude 暫時無法使用時，改由 Groq 上的開源模型（OpenAI gpt-oss）處理。不包含位置、常用行程或帳號；本 App 的伺服器不保存句子，只用匿名代號記錄每天用了幾次。沒有網路時改用手機上的理解。之後可在資訊與設定更改。")
+        case .consent: AIConsent.message
         case .done, .problem: ""
         }
     }

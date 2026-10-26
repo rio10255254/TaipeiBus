@@ -24,13 +24,13 @@ struct VoiceChatHost: ViewModifier {
             // The microphone and voice stop when the app leaves the screen; the next tap starts a new
             // conversation. Inactive is not enough: iOS's permission prompts and Control Center pass through it.
             .onChange(of: scenePhase) { _, phase in if phase == .background, chat.active { chat.end() } }
-            .alert(AppText.text("開啟語音對話？"), isPresented: Binding(
+            .alert(AppText.text("使用線上 AI？"), isPresented: Binding(
                 get: { chat.askingConsent },
                 set: { if !$0, chat.askingConsent { chat.answerConsent(false) } })) {
                 Button(AppText.text("開始對話")) { chat.answerConsent(true) }
                 Button(AppText.text("不要"), role: .cancel) { chat.answerConsent(false) }
             } message: {
-                Text(AppText.text("你說的話、現在畫面上的行程與附近站名（不含位置座標）會經由本 App 的伺服器傳給 Anthropic 的 Claude 理解並回答；需要最新資訊時，Claude 會用網路搜尋（每天最多 3 次）。Claude 暫時無法使用時，改由 Groq 上的開源模型處理。為了聽得更準，每句話的錄音也會交給 Groq 上的 Whisper 轉成文字，不保存（可在設定改成只用手機辨識）。回答由 iPhone 念出，伺服器不保存對話。Pro 每天可以問 40 次，之後可在資訊與設定關閉。"))
+                Text(AIConsent.message)
             }
             .onChange(of: chat.panelRequest) { _, request in
                 guard let request else { return }
@@ -311,6 +311,7 @@ struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.bargeInKey) private var bargeIn = true
     @AppStorage(VoiceSettings.cloudKey) private var cloud = true
     @AppStorage(VoiceSettings.cloudOnlyKey) private var cloudOnly = false
+    @AppStorage(VoiceSettings.recognizerKey) private var recognizer = VoiceSettings.Recognizer.auto.rawValue
     @AppStorage(VoiceSettings.pauseKey) private var pause = VoiceSettings.Pause.normal.rawValue
     @AppStorage(VoiceSettings.rateKey) private var rate = VoiceSettings.Rate.normal.rawValue
     @AppStorage(VoiceSettings.lengthKey) private var length = VoiceSettings.AnswerLength.normal.rawValue
@@ -327,18 +328,24 @@ struct VoiceChatSettings: View {
 
     var body: some View {
         Section {
-            Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
+            Toggle(AppText.text("使用線上 AI"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
             // Said on the phone only; nothing leaves it.
             Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
         } header: {
-            SectionHeader(title: AppText.text("語音對話（Pro）"), symbol: "bubble.left.and.text.bubble.right.fill", color: Brand.accent)
+            SectionHeader(title: AppText.text("線上 AI 與語音對話"), symbol: "bubble.left.and.text.bubble.right.fill", color: Brand.accent)
         } footer: {
-            Text(AppText.text("開啟後，按麥克風就能和「一路」來回對話：問到站、規劃路線、導航時說「我上車了」，也能問票價、景點等一般問題。你說的話、畫面上的行程與附近站名會經由本 App 的伺服器傳給 Anthropic 的 Claude（備援為 Groq 上的開源模型），需要最新資訊時 Claude 會上網搜尋，每天最多 3 次；伺服器不保存對話。關閉時，麥克風改回用一句話規劃。"))
+            Text(AppText.text("開啟後，規劃行程時由 Claude 讀懂你說或打的話（免費版每天 %@ 次，Pro 每天 %@ 次）；Pro 還能按麥克風和「一路」來回對話，每天 40 次。關閉時，只用手機上的規則理解中文句子。",
+                              "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
         if enabled {
             Section {
                 Toggle(AppText.text("用伺服器辨識語音"), isOn: $cloud).accessibilityIdentifier("voice-chat-cloud-recognition")
                     .disabled(cloudOnly)
+                if cloud {
+                    Picker(AppText.text("辨識服務"), selection: $recognizer) {
+                        ForEach(VoiceSettings.Recognizer.allCases) { Text($0.label).tag($0.rawValue) }
+                    }.accessibilityIdentifier("voice-chat-recognizer")
+                }
                 // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
                 if #available(iOS 26.0, *) {
                     Toggle(AppText.text("新版手機語音辨識"), isOn: $modern).accessibilityIdentifier("voice-chat-modern-recognition")
@@ -354,14 +361,14 @@ struct VoiceChatSettings: View {
                 Text(AppText.text("聆聽"))
             } footer: {
                 Text(cloud
-                     ? AppText.text("每句話的錄音會經由本 App 的伺服器交給 Groq 上的 Whisper 模型轉成文字，中英夾雜、店名和口音都聽得比較準；錄音只用來轉文字，不保存。手機上的辨識仍會同時進行，伺服器無法使用時改用它。說「我是說…」更正時，之後會自動多等一下。")
+                     ? AppText.text("每句話的錄音會經由本 App 的伺服器交給所選的辨識服務（Groq 上的 Whisper，或 OpenAI 的語音模型）轉成文字，中英夾雜、店名和口音都聽得比較準；選的服務無法使用時自動改用另一個，都不行時才用手機上的辨識。錄音只用來轉文字，不保存。說「我是說…」更正時，之後會自動多等一下。")
                      : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
             }
             Section {
                 // Turning it on also agrees to online understanding, which it uses for every sentence.
                 Toggle(AppText.text("只用雲端"), isOn: Binding(get: { cloudOnly }, set: { on in
                     cloudOnly = on
-                    if on { cloud = true; UserDefaults.standard.set(true, forKey: OnlineJourneyReader.enabledKey) }
+                    if on { cloud = true; AIConsent.answer(true) }
                 })).accessibilityIdentifier("assistant-cloud-only")
             } footer: {
                 Text(AppText.text("開啟後，手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的 Whisper 為準，句子也只由 Claude 理解，不用手機上的模型或規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))

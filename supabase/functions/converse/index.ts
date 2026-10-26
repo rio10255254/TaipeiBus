@@ -6,7 +6,7 @@ import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
-import { type Audio, hear, heardTurn, readAudio, type SpeechKeys, speechOrder } from './hear.ts';
+import { type Audio, hear, heardTurn, preferredOrder, readAudio, type Recognizer, type SpeechKeys } from './hear.ts';
 import { NO_WEB, NO_WEB_CHOSEN, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
 const DAILY_TURNS = 40;
@@ -55,6 +55,7 @@ Deno.serve(async (request) => {
     const webLeft = body.web === false ? 0 : await webAllowanceLeft(admin, userId);
     return streamed({
       input, webLeft, noWeb: body.web === false ? NO_WEB_CHOSEN : NO_WEB, used, anthropicKey, groqKey, speech, headers,
+      speechOrder: preferredOrder(speech, body.speechProvider, Deno.env.get('SPEECH_ORDER')),
       audio: Number(body.consent) >= AUDIO_CONSENT ? readAudio(body) : null, takeWeb: () => takeWebAllowance(admin, userId),
     });
   }
@@ -82,7 +83,7 @@ async function transcribeOnly(admin: SupabaseClient, userId: string, body: Recor
   const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined,
     typeof body.renewal === 'string' ? body.renewal : undefined);
   if (tier !== 'pro') return reply({ error: 'pro_required' }, 403);
-  const order = speechOrder(speech, Deno.env.get('SPEECH_ORDER'));
+  const order = preferredOrder(speech, body.speechProvider, Deno.env.get('SPEECH_ORDER'));
   if (!order.length) return reply({ error: 'not_configured' }, 503);
   const heard = await hear(speech, audio, order);
   if (heard.failures.length) console.error('server recognition fell back', heard.failures.join('; '));
@@ -123,6 +124,7 @@ async function takeWebAllowance(admin: SupabaseClient, userId: string): Promise<
 
 type Turn = {
   input: TurnInput; webLeft: number; noWeb: string; used: number; anthropicKey?: string; groqKey?: string; speech: SpeechKeys;
+  speechOrder: Recognizer[];
   headers: Record<string, string>; audio: Audio | null; takeWeb: () => Promise<number | null>;
 };
 
@@ -162,9 +164,8 @@ function streamed(turn: Turn): Response {
         if (say) send({ say });
         if (said) send({ said: true });
       };
-      const order = speechOrder(turn.speech, Deno.env.get('SPEECH_ORDER'));
-      if (turn.audio && order.length) {
-        const heard = await hear(turn.speech, turn.audio, order);
+      if (turn.audio && turn.speechOrder.length) {
+        const heard = await hear(turn.speech, turn.audio, turn.speechOrder);
         if (heard.failures.length) console.error('server recognition fell back', heard.failures.join('; '));
         if ('text' in heard) {
           turn.input = heardTurn(turn.input, heard.text);

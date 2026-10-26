@@ -1673,7 +1673,6 @@ private struct AppInformationView: View {
     @ObservedObject var model: TransitAppModel
     @ObservedObject private var diagnostics = JourneyDiagnostics.shared
     @Environment(\.dismiss) private var dismiss
-    @State private var testerBuild = false
 
     var body: some View {
         NavigationStack {
@@ -1704,7 +1703,7 @@ private struct AppInformationView: View {
                     Toggle(isOn: Binding(get: { model.language == .english }, set: { model.setLanguage($0 ? .english : .traditionalChinese) })) {
                         SettingsLabel(title: "English", symbol: "globe", color: .blue)
                     }.accessibilityIdentifier("app-language-toggle")
-                    if OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
+                    if AssistantServer.configured {
                         NavigationLink { AssistantSettingsView() } label: {
                             SettingsLabel(title: AppText.text("語音與 AI"), symbol: "waveform", color: .purple)
                         }.accessibilityIdentifier("settings-assistant")
@@ -1744,15 +1743,7 @@ private struct AppInformationView: View {
                         SettingsLabel(title: AppText.text("分享路線規劃紀錄"), symbol: "square.and.arrow.up", color: .cyan)
                     }.accessibilityIdentifier("share-journey-diagnostics")
                 } header: { Text(AppText.text("關於")) }
-                if testerBuild {
-                    Section {
-                        NavigationLink { JourneyBenchmarkView() } label: {
-                            SettingsLabel(title: AppText.text("AI 測試"), symbol: "checklist", color: .gray)
-                        }.accessibilityIdentifier("settings-ai-benchmark")
-                    } footer: { Text(AppText.text("只在測試版顯示。")) }
-                }
             }
-            .task { testerBuild = await JourneyBenchmark.testerBuild() }
             .smoothChanges(model.language)
             .navigationTitle(AppText.text("資訊與設定")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button(live.text("完成")) { dismiss() } } }
@@ -1786,7 +1777,6 @@ private struct AssistantSettingsView: View {
     var body: some View {
         List {
             VoiceStyleSettings()
-            if OnlineJourneyReader.configured { OnlineUnderstandingSettings() }
             if VoiceConversation.available { VoiceChatSettings() }
         }
         .navigationTitle(AppText.text("語音與 AI")).navigationBarTitleDisplayMode(.inline)
@@ -1986,31 +1976,6 @@ private struct VoiceStyleSettings: View {
 }
 
 /// 線上理解: asked once before the first sentence goes online; changed here at any time.
-private struct OnlineUnderstandingSettings: View {
-    @Environment(\.liveSettings) private var live
-    @AppStorage(OnlineJourneyReader.enabledKey) private var enabled = false
-    var body: some View {
-        Section {
-            Toggle(AppText.text("使用線上 AI 理解"), isOn: $enabled).accessibilityIdentifier("online-understanding-toggle")
-            // The full explanation sits one level deeper.
-            NavigationLink(AppText.text("資料如何使用")) {
-                List {
-                    Text(AppText.text("開啟時，你說或打的那一句話、今天日期，以及需要時搜尋到的地點名稱與地址，會先經由本 App 的伺服器傳給 Anthropic 的 Claude 讀懂，Claude 暫時無法使用時改用 Groq 上的開源模型（OpenAI gpt-oss），不傳送位置、常用行程或帳號；伺服器不保存句子，只用每支手機的匿名代號記錄每天次數並確認 Pro，金鑰只存在伺服器；沒有網路或額度用完時改用手機上的模型或規則。免費版每天 %@ 次，Pro 每天 %@ 次。",
-                                      "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
-                }
-                .navigationTitle(AppText.text("線上 AI 理解")).navigationBarTitleDisplayMode(.inline)
-            }
-        } header: {
-            // While sentence planning is paused this still reads the places the voice conversation plans to.
-            SectionHeader(title: live.display.sentencePlanning ? AppText.text("用一句話規劃") : AppText.text("規劃行程"),
-                          symbol: "text.bubble.fill", color: .blue)
-        } footer: {
-            Text(AppText.text("更準確地理解你說的話。免費版每天 %@ 次，Pro 每天 %@ 次。",
-                              "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
-        }
-    }
-}
-
 enum NightNavigation {
     /// UI tests capture fixed light and dark appearances whatever the hour, so automation
     /// leaves the system appearance alone unless a test asks for the night switch.
