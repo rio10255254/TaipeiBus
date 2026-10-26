@@ -1075,6 +1075,7 @@ enum VoiceSettings {
 }
 
 /// The app's server writing down a recorded turn on its own (「只用雲端」).
+@MainActor
 enum CloudSpeech {
     enum Failure: Error { case unheard(Int) }
 
