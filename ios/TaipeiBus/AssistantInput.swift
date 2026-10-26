@@ -93,6 +93,20 @@ final class SpeechInput: ObservableObject {
     private var onWords: ((String) -> Void)?
     /// The assistant's own words heard before the rider cut in, left out of what was said.
     private var echo = ""
+    /// When a voice was last heard above the room's own sound, and that sound's level: a pause is timed
+    /// from the voice, not from the last new word, since words can arrive later than they are said.
+    private var lastVoice = Date.distantPast
+    private var noiseFloor = 0.2
+    /// When the first words were heard; listening ends after a long monologue all the same.
+    private var wordsSince: Date?
+    /// The longest a turn listens once words came, even while new words keep arriving (a TV, a
+    /// conversation nearby): listening must always end.
+    private static let longestTalk = 20.0
+    /// Listening has ended and the recogniser is giving its final reading of what it heard.
+    private var finishing = false
+    private var settle: Task<Void, Never>?
+    /// Asks SpeechAnalyzer for its final reading once the audio has ended.
+    private var finalize: (() -> Void)?
     /// Bumped by every start and stop, so a late callback from an earlier attempt is ignored.
     private var attempt = 0
 
@@ -103,6 +117,7 @@ final class SpeechInput: ObservableObject {
         stop()
         self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
         held = hold; self.onWords = onWords; echo = ""
+        lastVoice = .distantPast; noiseFloor = 0.2; wordsSince = nil
         transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
@@ -153,7 +168,7 @@ final class SpeechInput: ObservableObject {
             input.removeTap(onBus: 0)
             // The audio thread calls this; it must not belong to the main actor.
             input.installTap(onBus: 0, bufferSize: 1024, format: format, block: Self.tap(request) { [weak self] value in
-                Task { @MainActor in if self?.listening == true { self?.meter.value = value } }
+                Task { @MainActor in self?.heard(level: value) }
             })
             engine.prepare()
             try engine.start()
@@ -177,13 +192,18 @@ final class SpeechInput: ObservableObject {
     }
     private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
+        if finishing {
+            if let text, !text.isEmpty { transcript = text }
+            if final || code != nil { deliver() }
+            return
+        }
         if held {
             // Only the answer's own sound so far: an ended recognition just stops listening quietly.
             if let text, !text.isEmpty { transcript = text; onWords?(text) }
             if final || code != nil { stop() }
             return
         }
-        if let text, !text.isEmpty { transcript = text; waitForSilence(pause(after: text), counting: true) }
+        if let text, !text.isEmpty { transcript = text; wordsSince = wordsSince ?? Date(); waitForSilence(pause(after: text), counting: true) }
         if let code, transcript.isEmpty {
             JourneyDiagnostics.shared.record("speech error \(code) on-device=\(onDevice)")
             let finished = self.finished, unheard = self.unheard
@@ -197,7 +217,8 @@ final class SpeechInput: ObservableObject {
             }
             return
         }
-        if final || code != nil { finish() }
+        // The recogniser decided the sentence is over: its reading is final already.
+        if final || code != nil { finishing = true; deliver() }
     }
     private enum SpeechFailure: Error { case noMicrophone }
 
@@ -208,7 +229,7 @@ final class SpeechInput: ObservableObject {
     /// Listens with SpeechAnalyzer. False when it could not start, so the usual recogniser takes over.
     @available(iOS 26.0, *)
     private func beginAnalyzer(_ transcriber: SpeechTranscriber, locale: Locale, attempt current: Int) async -> Bool {
-        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else { return false }
+        guard let format = await ModernSpeech.format(for: transcriber, locale: locale) else { return false }
         guard current == attempt else { return true }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (sequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
@@ -219,20 +240,25 @@ final class SpeechInput: ObservableObject {
             guard microphone.sampleRate > 0, microphone.channelCount > 0,
                   let converter = AVAudioConverter(from: microphone, to: format) else { throw SpeechFailure.noMicrophone }
             converter.primeMethod = .none
-            try await analyzer.start(inputSequence: sequence)
-            guard current == attempt else { input.finish(); await analyzer.cancelAndFinishNow(); return true }
+            // The microphone first: what is said while the analyzer starts waits in the stream, so the
+            // first word is not lost.
             node.removeTap(onBus: 0)
             node.installTap(onBus: 0, bufferSize: 1024, format: microphone, block: Self.analyzerTap(converter, to: format, into: input) { [weak self] value in
-                Task { @MainActor in if self?.listening == true { self?.meter.value = value } }
+                Task { @MainActor in self?.heard(level: value) }
             })
             engine.prepare()
             try engine.start()
+            preparing = false; listening = true
+            Haptics.listening()
+            try await analyzer.start(inputSequence: sequence)
+            guard current == attempt else { input.finish(); await analyzer.cancelAndFinishNow(); return true }
         } catch {
             JourneyDiagnostics.shared.record("speech analyzer-error \((error as NSError).domain) \((error as NSError).code)")
             input.finish()
             Task { await analyzer.cancelAndFinishNow() }
             if engine.isRunning { engine.stop() }
             engine.inputNode.removeTap(onBus: 0)
+            listening = false; preparing = true
             return false
         }
         let english = locale.language.languageCode == .english
@@ -245,6 +271,7 @@ final class SpeechInput: ObservableObject {
                     if result.isFinal { finalized += text }
                     self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, attempt: current)
                 }
+                self?.analyzerEnded(attempt: current)
             } catch {
                 self?.analyzerFailed(error, locale: locale, attempt: current)
             }
@@ -253,8 +280,10 @@ final class SpeechInput: ObservableObject {
             input.finish(); results.cancel()
             Task { await analyzer.cancelAndFinishNow() }
         }
-        preparing = false; listening = true
-        Haptics.listening()
+        finalize = {
+            input.finish()
+            Task { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
+        }
         JourneyDiagnostics.shared.record("speech start analyzer \(locale.identifier)")
         if !held { waitForSilence(waitForWords) }
         return true
@@ -265,7 +294,9 @@ final class SpeechInput: ObservableObject {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         transcript = text
+        if finishing { return }
         if held { onWords?(text); return }
+        wordsSince = wordsSince ?? Date()
         waitForSilence(pause(after: text), counting: true)
     }
 
@@ -274,21 +305,36 @@ final class SpeechInput: ObservableObject {
     func release(dropping echo: String = "") {
         guard held, listening else { return }
         held = false; self.echo = echo
-        if transcript.isEmpty { waitForSilence(waitForWords) } else { waitForSilence(pause(after: transcript), counting: true) }
+        if transcript.isEmpty { waitForSilence(waitForWords) } else { wordsSince = Date(); waitForSilence(pause(after: transcript), counting: true) }
     }
 
-    /// A question or a finished sentence ends listening sooner than words that may go on.
+    /// Words that lead on (「我想去圓山的…」) wait longer for the rest of the sentence.
+    private static let leadOn = ["的", "去", "到", "在", "和", "跟", "從", "往", "要", "想", "有", "還有", "然後", "那個", "就是", "嗯", "呃"]
+    private static let englishLeadOn: Set<String> = ["the", "to", "and", "from", "a", "of", "in", "at", "um", "uh"]
     private func pause(after text: String) -> Double {
-        guard let last = text.trimmingCharacters(in: .whitespaces).last else { return pauseAfterWords }
-        return "嗎呢吧啦？?。.!！".contains(last) ? min(pauseAfterWords, 0.5) : pauseAfterWords
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
+        let lastWord = words.split(whereSeparator: { !$0.isLetter }).last.map(String.init) ?? ""
+        let leadsOn = Self.leadOn.contains(where: { words.hasSuffix($0) }) || Self.englishLeadOn.contains(lastWord)
+        return leadsOn ? pauseAfterWords + 0.6 : pauseAfterWords
+    }
+
+    /// The microphone's level: shown on screen, and above the room's own sound it counts as a voice.
+    private func heard(level value: Double) {
+        guard listening else { return }
+        meter.value = value
+        // The room's sound sinks the floor at once and lifts it slowly, so a voice stands out above it.
+        noiseFloor = value < noiseFloor ? value : noiseFloor + (value - noiseFloor) * 0.02
+        if value > noiseFloor + 0.18 { lastVoice = Date() }
     }
 
     private func activateSession() throws {
         let session = AVAudioSession.sharedInstance()
         if duplex {
-            // A2DP keeps headphones in their good sound; the phone's microphone listens meanwhile.
+            // A headset's own microphone is the one near the mouth: with earbuds in and the phone in a
+            // pocket it hears far better, so Bluetooth headsets are allowed in for listening too.
             if session.category != .playAndRecord {
-                try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothA2DP, .duckOthers])
+                try session.setCategory(.playAndRecord, mode: .default,
+                                        options: [.defaultToSpeaker, .allowBluetooth, .allowBluetoothA2DP, .duckOthers])
             }
         } else {
             try session.setCategory(.record, mode: .measurement, options: .duckOthers)
@@ -296,8 +342,15 @@ final class SpeechInput: ObservableObject {
         try session.setActive(true, options: .notifyOthersOnDeactivation)
     }
 
+    /// The analyzer gave its final reading after the audio ended.
+    private func analyzerEnded(attempt current: Int) {
+        guard current == attempt, finishing else { return }
+        deliver()
+    }
+
     /// Failed before hearing anything: once more with the usual recogniser, as with the phone's own.
     private func analyzerFailed(_ error: Error, locale: Locale, attempt current: Int) {
+        if current == attempt, finishing { return deliver() }
         guard current == attempt, listening, transcript.isEmpty else { return }
         JourneyDiagnostics.shared.record("speech analyzer-failed \((error as NSError).domain) \((error as NSError).code)")
         let finished = self.finished, unheard = self.unheard
@@ -310,8 +363,27 @@ final class SpeechInput: ObservableObject {
         begin(recognizer, onDevice: recognizer.supportsOnDeviceRecognition)
     }
 
+    /// Listening ends: the microphone stops and the recogniser gets a moment for its final reading of
+    /// what it heard, which is better than its last guess while listening; then the words go on.
     func finish() {
-        guard listening, !held else { return }
+        guard listening, !held, !finishing else { return }
+        finishing = true
+        silence?.cancel(); silence = nil; silenceSince = nil
+        if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
+        meter.value = 0
+        request?.endAudio()
+        finalize?(); finalize = nil
+        let current = attempt
+        settle = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard let self, current == self.attempt else { return }
+            self.deliver()
+        }
+    }
+
+    private func deliver() {
+        guard listening, finishing else { return }
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         if !echo.isEmpty, text.hasPrefix(echo) { text = String(text.dropFirst(echo.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
         let done = finished, unheard = self.unheard
@@ -333,6 +405,7 @@ final class SpeechInput: ObservableObject {
         stopAnalyzer?(); stopAnalyzer = nil
         request = nil; task = nil; listening = false; preparing = false; finished = nil; unheard = nil; meter.value = 0; silenceSince = nil
         held = false; onWords = nil
+        finishing = false; settle?.cancel(); settle = nil; finalize = nil
         // The conversation keeps its session between turns; it lets go when it ends.
         if !duplex { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
     }
@@ -346,9 +419,21 @@ final class SpeechInput: ObservableObject {
     private func waitForSilence(_ seconds: Double, counting: Bool = false) {
         silence?.cancel()
         silenceSince = counting ? Date() : nil; silenceLength = seconds
+        // New words restart the pause, but never past the longest talk.
+        let talked = wordsSince.map { Date().timeIntervalSince($0) } ?? 0
         silence = Task { @MainActor [weak self] in
-            do { try await Task.sleep(for: .seconds(seconds)) } catch { return }
-            self?.finish()
+            var wait = counting ? max(0, min(seconds, Self.longestTalk - talked)) : seconds
+            while true {
+                do { try await Task.sleep(for: .seconds(wait)) } catch { return }
+                guard let self else { return }
+                // Still talking, though no new word came yet: the pause counts from the last sound of a voice,
+                // up to the longest talk.
+                let quiet = Date().timeIntervalSince(self.lastVoice)
+                let left = Self.longestTalk - Date().timeIntervalSince(self.wordsSince ?? .distantPast)
+                if counting, quiet < seconds, left > 0 { wait = min(seconds - quiet, left); continue }
+                self.finish()
+                return
+            }
         }
     }
 
@@ -422,12 +507,16 @@ final class SpeechInput: ObservableObject {
 @MainActor
 enum ModernSpeech {
     private static var downloading: Set<String> = []
+    /// Languages found installed, and their analyzer formats: asked once, so listening starts sooner.
+    private static var installed: [String: Locale] = [:]
+    private static var formats: [String: AVAudioFormat] = [:]
 
     static func transcriber(for locale: Locale) async -> SpeechTranscriber? {
+        if let supported = installed[locale.identifier] { return SpeechTranscriber(locale: supported, preset: .progressiveTranscription) }
         guard SpeechTranscriber.isAvailable, let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
         let transcriber = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
         let status = await AssetInventory.status(forModules: [transcriber])
-        if status == .installed { return transcriber }
+        if status == .installed { installed[locale.identifier] = supported; return transcriber }
         if status == .supported, downloading.insert(supported.identifier).inserted {
             JourneyDiagnostics.shared.record("speech analyzer-download \(supported.identifier)")
             Task.detached(priority: .utility) {
@@ -438,6 +527,13 @@ enum ModernSpeech {
             }
         }
         return nil
+    }
+
+    static func format(for transcriber: SpeechTranscriber, locale: Locale) async -> AVAudioFormat? {
+        if let format = formats[locale.identifier] { return format }
+        let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        formats[locale.identifier] = format
+        return format
     }
 }
 

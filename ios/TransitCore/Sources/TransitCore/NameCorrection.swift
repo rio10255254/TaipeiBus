@@ -34,6 +34,11 @@ public struct NameCorrection: Sendable {
         .sorted { $0.text.count > $1.text.count }
     }
 
+    static func toneless(_ syllable: String) -> String { syllable.applyingTransform(.stripDiacritics, reverse: false) ?? syllable }
+
+    /// Words before a place: a name right after one is a place, whatever its tones were heard as.
+    private static let cues: Set<Character> = ["去", "到", "從", "在", "往"]
+
     /// The text with every stretch that sounds like a known name written as that name.
     public func correct(_ text: String) -> String {
         var characters = Array(text)
@@ -54,7 +59,12 @@ public struct NameCorrection: Sendable {
                     if exact[index] != name.exact[offset] { sameExact = false }
                     if loose[index] != name.loose[offset] { sameLoose = false; break }
                 }
-                guard !sameText, sameExact || (sameLoose && length >= name.looseFrom) else { continue }
+                // Right after 「去」「到」…, a name may differ in tone only: 「去遠山」 is 去圓山, while 「到四政府」
+                // (another sound, not only another tone) stays as heard.
+                let named = sameLoose && start > 0 && Self.cues.contains(characters[start - 1]) && (0..<length).allSatisfy { offset in
+                    exact[start + offset].map(Self.toneless) == Self.toneless(name.exact[offset])
+                }
+                guard !sameText, sameExact || (sameLoose && length >= name.looseFrom) || named else { continue }
                 replacements.append((start, name))
                 for index in start..<(start + length) { taken[index] = true }
             }

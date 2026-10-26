@@ -38,4 +38,12 @@ final class NameCorrectionTests: XCTestCase {
         XCTAssertEqual(names.correct("到市正府"), "到市政府", "…which 市正府 does, tones included")
         XCTAssertEqual(names.correct("去宗孝敦化"), "去忠孝敦化")
     }
+
+    func testAShortNameAfterAPlaceWordMayDifferInTone() {
+        let names = NameCorrection(nearby: [], others: ["圓山", "公館"])
+        XCTAssertEqual(names.correct("我想去遠山的酒吧有什麼推薦的嗎"), "我想去圓山的酒吧有什麼推薦的嗎")
+        // Without a place word before it, a different tone stays a different word.
+        XCTAssertEqual(names.correct("遠山很美"), "遠山很美")
+        XCTAssertEqual(names.correct("公關部門"), "公關部門")
+    }
 }
