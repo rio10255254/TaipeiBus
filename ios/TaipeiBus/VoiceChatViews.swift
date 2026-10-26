@@ -310,6 +310,7 @@ struct VoiceChatSettings: View {
     @AppStorage(NavigationVoice.key) private var prompts = true
     @AppStorage(VoiceConversation.bargeInKey) private var bargeIn = true
     @AppStorage(VoiceSettings.cloudKey) private var cloud = true
+    @AppStorage(VoiceSettings.cloudOnlyKey) private var cloudOnly = false
     @AppStorage(VoiceSettings.pauseKey) private var pause = VoiceSettings.Pause.normal.rawValue
     @AppStorage(VoiceSettings.rateKey) private var rate = VoiceSettings.Rate.normal.rawValue
     @AppStorage(VoiceSettings.lengthKey) private var length = VoiceSettings.AnswerLength.normal.rawValue
@@ -337,14 +338,17 @@ struct VoiceChatSettings: View {
         if enabled {
             Section {
                 Toggle(AppText.text("用伺服器辨識語音"), isOn: $cloud).accessibilityIdentifier("voice-chat-cloud-recognition")
+                    .disabled(cloudOnly)
                 // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
                 if #available(iOS 26.0, *) {
                     Toggle(AppText.text("新版手機語音辨識"), isOn: $modern).accessibilityIdentifier("voice-chat-modern-recognition")
+                        .disabled(cloudOnly)
                 }
                 Picker(AppText.text("說完後等多久"), selection: $pause) {
                     ForEach(VoiceSettings.Pause.allCases) { Text($0.label).tag($0.rawValue) }
                 }.accessibilityIdentifier("voice-chat-pause")
                 Toggle(AppText.text("回答時可以直接插話"), isOn: $bargeIn).accessibilityIdentifier("voice-chat-barge-in")
+                    .disabled(cloudOnly)
                 Toggle(AppText.text("回答完繼續聽"), isOn: $keepListening).accessibilityIdentifier("voice-chat-keep-listening")
             } header: {
                 Text(AppText.text("聆聽"))
@@ -352,6 +356,15 @@ struct VoiceChatSettings: View {
                 Text(cloud
                      ? AppText.text("每句話的錄音會經由本 App 的伺服器交給 Groq 上的 Whisper 模型轉成文字，中英夾雜、店名和口音都聽得比較準；錄音只用來轉文字，不保存。手機上的辨識仍會同時進行，伺服器無法使用時改用它。說「我是說…」更正時，之後會自動多等一下。")
                      : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
+            }
+            Section {
+                // Turning it on also agrees to online understanding, which it uses for every sentence.
+                Toggle(AppText.text("只用雲端"), isOn: Binding(get: { cloudOnly }, set: { on in
+                    cloudOnly = on
+                    if on { cloud = true; UserDefaults.standard.set(true, forKey: OnlineJourneyReader.enabledKey) }
+                })).accessibilityIdentifier("assistant-cloud-only")
+            } footer: {
+                Text(AppText.text("開啟後，手機上不辨識語音、也不用手機上的模型或規則理解句子：語音對話和一句話規劃都只由伺服器的 Whisper 與 Claude 處理，伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。插話會暫停，說話時畫面上不會即時顯示文字；回答仍由 iPhone 的語音念出。"))
             }
             Section {
                 Picker(AppText.text("回答長度"), selection: $length) {

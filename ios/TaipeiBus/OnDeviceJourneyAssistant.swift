@@ -1305,7 +1305,14 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     }
     func prewarm() { model?.prewarm() }
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
-        let rules = useRules ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
+        // 「只用雲端」: the server's reading alone, and its failure shown as it is.
+        let cloudOnly = VoiceSettings.cloudOnly
+        let rules = useRules && !cloudOnly ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
+        if cloudOnly {
+            let reading = try await OnlineJourneyReader.read(text, now: now, pro: pro)
+            reader = "online-only"; context.note(reader: reader); credit = AssistantCredit.online
+            return try await context.resolve(reading, source: text, now: now)
+        }
         // 1. Online, when the rider agreed; read at the moment of asking, so a fresh answer counts.
         if OnlineJourneyReader.enabled {
             do {

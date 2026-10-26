@@ -135,7 +135,23 @@ final class JourneyAssistantSession: ObservableObject {
     }
     private func startSpeech() {
         let refining = refiningVoice
-        Task { await speech.start { [weak self] text in if refining { self?.refine(text) } else { self?.run(text) } } }
+        // 「只用雲端」 for Pro: the server writes the sentence down too.
+        let cloudOnly = VoiceSettings.cloudOnly && model.purchases.hasPro && VoiceConversation.consent == true
+        Task {
+            await speech.start(cloudOnly: cloudOnly) { [weak self] text in
+                guard let self else { return }
+                guard text.isEmpty, let sound = self.speech.audio else { return refining ? self.refine(text) : self.run(text) }
+                self.busy = true; self.activity = AppText.text("正在辨識你說的話…")
+                Task { @MainActor in
+                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: [])
+                    self.busy = false
+                    guard let words else {
+                        self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                    }
+                    if refining { self.refine(words) } else { self.run(words) }
+                }
+            }
+        }
     }
 
     /// 「改騎車」, 「晚一點」, 「不要搭公車」, 「改去101」 for the trip on screen. The online model reads the
@@ -153,11 +169,19 @@ final class JourneyAssistantSession: ObservableObject {
         let pro = model.purchases.hasPro
         let now = Date()
         operation = Task { @MainActor in
-            let rules = AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
+            let cloudOnly = VoiceSettings.cloudOnly
+            let rules = cloudOnly ? AssistantChange() : AssistantChange.read(value, now: now, constraints: trip.constraints, departure: trip.departure)
             var change = rules, reader = "rules", credit = AssistantCredit.rules
-            if OnlineJourneyReader.enabled,
+            if OnlineJourneyReader.enabled || cloudOnly,
                let online = try? await OnlineJourneyReader.refine(value, trip: Self.describe(trip), now: now, pro: pro) {
-                change = online.filled(from: rules); reader = "online"; credit = AssistantCredit.online
+                change = online.filled(from: rules); reader = cloudOnly ? "online-only" : "online"; credit = AssistantCredit.online
+            } else if cloudOnly {
+                // 「只用雲端」: no reading on the phone stands in for the server's.
+                guard !Task.isCancelled else { return }
+                busy = false
+                JourneyDiagnostics.shared.record("ai-refine online-only failed")
+                message = AppText.text("線上 AI 暫時無法回應（已設定只用雲端），請稍後再試。")
+                return
             }
             guard !Task.isCancelled else { return }
             busy = false

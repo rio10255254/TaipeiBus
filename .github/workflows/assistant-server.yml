@@ -137,3 +137,11 @@ jobs:
             -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' -d "$voicebody")
           echo "converse without Pro → HTTP $code $(head -c 200 "$RUNNER_TEMP/voice.json")"
           [ "$code" = "403" ]
+          # Server recognition alone (「只用雲端」) is Pro only as well; this also shows the deployed function
+          # loads its recognition code.
+          audio=$(head -c 1500 /dev/zero | base64 -w0)
+          code=$(curl -sS -o "$RUNNER_TEMP/hear.json" -w '%{http_code}' -X POST "$url/functions/v1/converse" \
+            -H "Authorization: Bearer $token" -H "apikey: $key" -H 'Content-Type: application/json' \
+            -d "{\"consent\":2,\"transcribe\":true,\"audio\":\"$audio\"}")
+          echo "server recognition without Pro → HTTP $code $(head -c 200 "$RUNNER_TEMP/hear.json")"
+          [ "$code" = "403" ]

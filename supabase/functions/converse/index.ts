@@ -34,6 +34,7 @@ Deno.serve(async (request) => {
   }
   if (!(Number(body.consent) >= VOICE_CONSENT)) return reply({ error: 'consent_required' }, 400);
   if (body.feedback && typeof body.feedback === 'object') return await saveFeedback(admin, userId, body.feedback as Record<string, unknown>);
+  if (body.transcribe === true) return await transcribeOnly(admin, userId, body, groqKey);
   const input = readInput(body);
   if (!input) return reply({ error: 'invalid' }, 400);
 
@@ -69,6 +70,22 @@ Deno.serve(async (request) => {
   console.error('no answer', claude.failure, groq.failure);
   return Response.json({ error: 'unavailable' }, { status: 502, headers: { ...headers, 'X-Assistant-Fallback': headerText(`${claude.failure}; ${groq.failure}`) } });
 });
+
+/// The phone's 「只用雲端」 setting: the turn's audio is written down on its own, with nothing heard on the
+/// phone, and the phone then goes on with the words as usual (its next request takes the turn).
+async function transcribeOnly(admin: SupabaseClient, userId: string, body: Record<string, unknown>, groqKey?: string): Promise<Response> {
+  if (!(Number(body.consent) >= AUDIO_CONSENT)) return reply({ error: 'consent_required' }, 400);
+  const audio = readAudio(body);
+  if (!audio) return reply({ error: 'invalid' }, 400);
+  const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined,
+    typeof body.renewal === 'string' ? body.renewal : undefined);
+  if (tier !== 'pro') return reply({ error: 'pro_required' }, 403);
+  if (!groqKey) return reply({ error: 'not_configured' }, 503);
+  const heard = await transcribe(groqKey, audio);
+  if ('text' in heard) return reply({ heard: heard.text }, 200);
+  console.error('server recognition failed', heard.failure);
+  return reply({ error: 'unheard', reason: heard.failure }, 502);
+}
 
 /// Reports a phone may send a day.
 const DAILY_REPORTS = 20;

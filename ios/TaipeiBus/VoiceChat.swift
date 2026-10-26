@@ -332,7 +332,8 @@ final class VoiceConversation: ObservableObject {
     private var echo = ""
 
     private func listenWhileSpeaking() {
-        guard Self.bargeIn, active, !UIAccessibility.isVoiceOverRunning, !speech.listening, !speech.preparing,
+        // 「只用雲端」 has no words on the phone to tell the rider from the answer's own voice.
+        guard Self.bargeIn, !VoiceSettings.cloudOnly, active, !UIAccessibility.isVoiceOverRunning, !speech.listening, !speech.preparing,
               !speech.failed, !speech.blocked else { return }
         echo = ""
         startListening(hold: true)
@@ -357,6 +358,7 @@ final class VoiceConversation: ObservableObject {
         let hints = VoiceStateBuilder(model: model).hints(language: language)
         Task {
             await speech.start(language: language, hints: hints, modern: true, hold: hold, record: VoiceSettings.cloudRecognition,
+                               cloudOnly: VoiceSettings.cloudOnly,
                                onWords: hold ? { [weak self] text in
                 self?.heardWhileSpeaking(text)
             } : nil, unheard: { [weak self] in
@@ -367,6 +369,8 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
+                // 「只用雲端」: the server writes the turn down first, then it goes on as usual.
+                if text.isEmpty, let sound = self.speech.audio { return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60))) }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
                 if corrected != text { JourneyDiagnostics.shared.record("voice heard \(text) as \(corrected)") }
                 self.alternatives = self.speech.alternatives.map {
@@ -375,6 +379,21 @@ final class VoiceConversation: ObservableObject {
                 self.audio = self.speech.audio.map { (sound: $0, vocabulary: Array(hints.prefix(60))) }
                 self.handle(corrected)
             })
+        }
+    }
+
+    private func hearOnServer(_ sound: Data, vocabulary: [String]) {
+        phase = .thinking; heard = ""
+        work = Task {
+            do {
+                let words = try await CloudSpeech.transcribe(sound, language: language, vocabulary: vocabulary)
+                guard !Task.isCancelled, active else { return }
+                handle(words)
+            } catch {
+                guard !Task.isCancelled, active else { return }
+                JourneyDiagnostics.shared.record("voice server-only unheard \(String(describing: error).prefix(40))")
+                respond(phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true)
+            }
         }
     }
 
@@ -1034,6 +1053,10 @@ enum VoiceSettings {
     private static var defaults: UserDefaults { .standard }
     /// The turn's audio is written down again on the server, which hears mixed Chinese and English far better.
     static var cloudRecognition: Bool { defaults.object(forKey: cloudKey) as? Bool ?? true }
+    /// 「只用雲端」: nothing is recognised or understood on the phone, so what the rider hears is the
+    /// server's own work; when it fails, the rider is told instead of the phone stepping in.
+    static let cloudOnlyKey = "assistantCloudOnly.v1"
+    static var cloudOnly: Bool { defaults.bool(forKey: cloudOnlyKey) }
     static var pause: Pause { defaults.string(forKey: pauseKey).flatMap(Pause.init(rawValue:)) ?? .normal }
     static var rate: Rate { defaults.string(forKey: rateKey).flatMap(Rate.init(rawValue:)) ?? .normal }
     static var answerLength: AnswerLength { defaults.string(forKey: lengthKey).flatMap(AnswerLength.init(rawValue:)) ?? .normal }
@@ -1044,5 +1067,21 @@ enum VoiceSettings {
     static func voice(language: AppLanguage) -> String? {
         let chosen = defaults.string(forKey: language == .english ? englishVoiceKey : chineseVoiceKey) ?? ""
         return chosen.isEmpty ? nil : chosen
+    }
+}
+
+/// The app's server writing down a recorded turn on its own (「只用雲端」).
+enum CloudSpeech {
+    enum Failure: Error { case unheard(Int) }
+
+    static func transcribe(_ sound: Data, language: AppLanguage, vocabulary: [String]) async throws -> String {
+        let body: [String: Any] = ["transcribe": true, "consent": VoiceConversation.audioConsentVersion,
+                                   "audio": sound.base64EncodedString(), "audioLanguage": language == .english ? "en" : "zh",
+                                   "vocabulary": vocabulary]
+        let (data, status) = try await AssistantServer.post("converse", body: body, timeout: 8)
+        let words = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["heard"] as? String ?? ""
+        guard status == 200, !words.isEmpty else { throw Failure.unheard(status) }
+        JourneyDiagnostics.shared.record("speech server heard \(words.count) chars")
+        return words
     }
 }
