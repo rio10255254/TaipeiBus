@@ -385,7 +385,7 @@ final class SpeechInput: ObservableObject {
     private func deliver() {
         guard listening, finishing else { return }
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !echo.isEmpty, text.hasPrefix(echo) { text = String(text.dropFirst(echo.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+        text = VoiceEcho.removing(echo: echo, from: text)
         let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")

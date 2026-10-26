@@ -497,6 +497,48 @@ public enum VoiceEcho {
         return new.count >= (strict ? 4 : 2)
     }
 
+    /// What the rider said once they cut in: `heard` without the answer's own words that came first.
+    /// `echo` is what had been heard of the answer; recognition often rewrites it a little once the
+    /// rider's words follow (「往」 becomes 「網」, 「4」 becomes 「四」), so it is matched by sound, and
+    /// only as far as the echo reaches.
+    public static func removing(echo: String, from heard: String) -> String {
+        let clean = { (text: Substring) in text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)) }
+        guard !echo.isEmpty else { return heard }
+        if heard.hasPrefix(echo) { return clean(heard.dropFirst(echo.count)) }
+        let echoed = units(echo), said = Set(echoed.map(\.sound))
+        var matched = 0, misses = 0, cut: String.Index?
+        for unit in units(heard).prefix(echoed.count + 2) {
+            if said.contains(unit.sound) {
+                matched += 1; misses = 0; cut = unit.end
+            } else {
+                misses += 1
+                if misses == 2 { break }
+            }
+        }
+        guard let cut, matched >= max(2, echoed.count / 2) else { return heard }
+        return clean(heard[cut...])
+    }
+
+    /// Each Chinese character by its sound, each word of letters or digits as itself, with where it ends.
+    private static func units(_ text: String) -> [(sound: String, end: String.Index)] {
+        var units: [(sound: String, end: String.Index)] = [], word = "", index = text.startIndex
+        func endWord() { if !word.isEmpty { units.append((word, index)); word = "" } }
+        while index < text.endIndex {
+            let character = digits[text[index]] ?? Character(text[index].lowercased())
+            if let syllable = NameCorrection.syllable(character) {
+                endWord()
+                units.append((NameCorrection.loose(syllable), text.index(after: index)))
+            } else if character.isLetter || character.isNumber {
+                word.append(character)
+            } else {
+                endWord()
+            }
+            index = text.index(after: index)
+        }
+        endWord()
+        return units
+    }
+
     private static let digits: [Character: Character] = ["零": "0", "〇": "0", "一": "1", "二": "2", "兩": "2", "三": "3",
                                                          "四": "4", "五": "5", "六": "6", "七": "7", "八": "8", "九": "9"]
 
