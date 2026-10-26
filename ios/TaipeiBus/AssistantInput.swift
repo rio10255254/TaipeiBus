@@ -99,6 +99,9 @@ final class SpeechInput: ObservableObject {
     private var noiseFloor = 0.2
     /// When the first words were heard; listening ends after a long monologue all the same.
     private var wordsSince: Date?
+    /// The longest a turn listens once words came, even while new words keep arriving (a TV, a
+    /// conversation nearby): listening must always end.
+    private static let longestTalk = 20.0
     /// Listening has ended and the recogniser is giving its final reading of what it heard.
     private var finishing = false
     private var settle: Task<Void, Never>?
@@ -302,7 +305,7 @@ final class SpeechInput: ObservableObject {
     func release(dropping echo: String = "") {
         guard held, listening else { return }
         held = false; self.echo = echo
-        if transcript.isEmpty { waitForSilence(waitForWords) } else { waitForSilence(pause(after: transcript), counting: true) }
+        if transcript.isEmpty { waitForSilence(waitForWords) } else { wordsSince = Date(); waitForSilence(pause(after: transcript), counting: true) }
     }
 
     /// Words that lead on (「我想去圓山的…」) wait longer for the rest of the sentence.
@@ -416,16 +419,18 @@ final class SpeechInput: ObservableObject {
     private func waitForSilence(_ seconds: Double, counting: Bool = false) {
         silence?.cancel()
         silenceSince = counting ? Date() : nil; silenceLength = seconds
+        // New words restart the pause, but never past the longest talk.
+        let talked = wordsSince.map { Date().timeIntervalSince($0) } ?? 0
         silence = Task { @MainActor [weak self] in
-            var wait = seconds
+            var wait = counting ? max(0, min(seconds, Self.longestTalk - talked)) : seconds
             while true {
                 do { try await Task.sleep(for: .seconds(wait)) } catch { return }
                 guard let self else { return }
                 // Still talking, though no new word came yet: the pause counts from the last sound of a voice,
-                // for at most fifteen seconds of talking.
+                // up to the longest talk.
                 let quiet = Date().timeIntervalSince(self.lastVoice)
-                let talking = Date().timeIntervalSince(self.wordsSince ?? .distantPast)
-                if counting, quiet < seconds, talking < 15 { wait = seconds - quiet; continue }
+                let left = Self.longestTalk - Date().timeIntervalSince(self.wordsSince ?? .distantPast)
+                if counting, quiet < seconds, left > 0 { wait = min(seconds - quiet, left); continue }
                 self.finish()
                 return
             }
