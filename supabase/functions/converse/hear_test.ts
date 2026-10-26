@@ -1,5 +1,5 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { chinesePunctuation, hallucinated, heardTurn, readAudio, traditional, transcribe, whisperPrompt } from './hear.ts';
+import { chinesePunctuation, hallucinated, hear, heardTurn, readAudio, speechOrder, traditional, transcribe, transcribeOpenAI, whisperPrompt } from './hear.ts';
 
 const sound = btoa(String.fromCharCode(...new Uint8Array(2000).fill(7)));
 
@@ -47,6 +47,38 @@ Deno.test("Whisper's failures and its words for silence fall back to the phone's
   assert(hallucinated('請不吝點贊訂閱'));
   assert(!hallucinated('我要去 World Gym'));
   assertEquals(traditional('World Gym'), 'World Gym');
+});
+
+Deno.test("OpenAI's model is told the languages and the names to expect", async () => {
+  let sent: FormData | undefined;
+  let url = '';
+  const fake = (async (input: string, init: RequestInit) => {
+    url = input; sent = init.body as FormData;
+    return Response.json({ text: '我要去 World Gym，怎麼搭比較快？' });
+  }) as typeof fetch;
+  const audio = { bytes: new Uint8Array(2000), language: 'zh' as const, vocabulary: ['World Gym', '圓山', 'bad<name>'] };
+  assertEquals(await transcribeOpenAI('key', audio, fake, 'gpt-transcribe'), { text: '我要去 World Gym，怎麼搭比較快？' });
+  assertEquals(url, 'https://api.openai.com/v1/audio/transcriptions');
+  assertEquals(sent?.getAll('languages[]'), ['zh-tw', 'en']);
+  assertEquals(sent?.getAll('keywords[]'), ['World Gym', '圓山']);
+  assertEquals(sent?.get('language'), null);
+  await transcribeOpenAI('key', audio, fake, 'whisper-1');
+  assertEquals(sent?.get('language'), 'zh');
+});
+
+Deno.test('the next recogniser answers when the first is rate limited', async () => {
+  assertEquals(speechOrder({ groq: 'g', openai: 'o' }), ['groq', 'openai']);
+  assertEquals(speechOrder({ groq: 'g', openai: 'o' }, 'openai, groq'), ['openai', 'groq']);
+  assertEquals(speechOrder({ groq: 'g' }, 'openai,groq'), ['groq']);
+  assertEquals(speechOrder({}), []);
+  const fake = (async (input: string) => input.includes('groq')
+    ? new Response('slow down', { status: 429 })
+    : Response.json({ text: '307還要多久?' })) as typeof fetch;
+  const audio = { bytes: new Uint8Array(2000), language: 'zh' as const, vocabulary: [] };
+  const heard = await hear({ groq: 'g', openai: 'o' }, audio, ['groq', 'openai'], fake);
+  assertEquals(heard, { text: '307還要多久？', by: 'openai', failures: ['whisper 429'] });
+  const none = await hear({ groq: 'g' }, audio, ['groq'], fake);
+  assertEquals(none, { failure: 'whisper 429', failures: ['whisper 429'] });
 });
 
 Deno.test("the phone's own readings stay as alternatives", () => {

@@ -1,15 +1,16 @@
-// Sends a few recorded sentences to Whisper on Groq the way the server does for a turn, with the real
-// key, and checks each comes back with the words that matter; the first is then answered by Claude
-// from what Whisper heard. The recordings are synthesized voices in the phone's format (16 kHz mono AAC).
+// Sends a few recorded sentences to each speech recogniser with a key (Whisper on Groq, OpenAI) the
+// way the server does for a turn, and checks each comes back with the words that matter; the first is
+// then answered by Claude from what was heard. The recordings are synthesized voices in the phone's format (16 kHz mono AAC).
 // deno run --allow-env --allow-net --allow-read --config supabase/functions/converse/deno.json supabase/functions/converse/hear_check.ts
 import { askClaude } from './brain.ts';
-import { type Audio, heardTurn, transcribe } from './hear.ts';
+import { type Audio, type Heard, heardTurn, transcribe, transcribeOpenAI } from './hear.ts';
 import { userMessage } from './reply.ts';
 
 const groqKey = Deno.env.get('GROQ_API_KEY');
+const openaiKey = Deno.env.get('OPENAI_API_KEY');
 const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY');
-if (!groqKey) {
-  console.log('No GROQ_API_KEY: server recognition not checked.');
+if (!groqKey && !openaiKey) {
+  console.log('No GROQ_API_KEY or OPENAI_API_KEY: server recognition not checked.');
   Deno.exit(0);
 }
 
@@ -32,32 +33,40 @@ const counting: typeof fetch = async (input, init) => {
     `｜音訊秒數 剩 ${header('x-ratelimit-remaining-audio-seconds')}/${header('x-ratelimit-limit-audio-seconds')}`;
   return response;
 };
-for (const recording of recordings) {
-  const bytes = await Deno.readFile(new URL(`./fixtures/${recording.file}`, import.meta.url));
-  const started = performance.now();
-  const heard = await transcribe(groqKey, { bytes, language: recording.language, vocabulary }, counting);
-  const ms = Math.round(performance.now() - started);
-  if (!('text' in heard)) {
-    failures++;
-    console.log(`✗ ${recording.file}｜${heard.failure}｜${ms} ms`);
-    continue;
-  }
-  const lower = heard.text.toLowerCase();
-  const missing = recording.expect.filter((words) => !words.split('|').some((word) => lower.includes(word.toLowerCase())));
-  if (missing.length) failures++;
-  console.log(`${missing.length ? '✗' : '✓'} ${recording.file}｜聽到：${heard.text}｜${ms} ms${missing.length ? `｜缺少：${missing.join('、')}` : ''}`);
+// Each recogniser with a key hears every recording, so they can be compared side by side.
+const recognizers: { name: string; ask: (audio: Audio) => Promise<Heard> }[] = [
+  ...(groqKey ? [{ name: 'Groq Whisper', ask: (audio: Audio) => transcribe(groqKey, audio, counting) }] : []),
+  ...(openaiKey ? [{ name: 'OpenAI', ask: (audio: Audio) => transcribeOpenAI(openaiKey, audio) }] : []),
+];
+for (const recognizer of recognizers) {
+  console.log(`## ${recognizer.name}`);
+  for (const recording of recordings) {
+    const bytes = await Deno.readFile(new URL(`./fixtures/${recording.file}`, import.meta.url));
+    const started = performance.now();
+    const heard = await recognizer.ask({ bytes, language: recording.language, vocabulary });
+    const ms = Math.round(performance.now() - started);
+    if (!('text' in heard)) {
+      failures++;
+      console.log(`✗ ${recording.file}｜${heard.failure}｜${ms} ms`);
+      continue;
+    }
+    const lower = heard.text.toLowerCase();
+    const missing = recording.expect.filter((words) => !words.split('|').some((word) => lower.includes(word.toLowerCase())));
+    if (missing.length) failures++;
+    console.log(`${missing.length ? '✗' : '✓'} ${recording.file}｜聽到：${heard.text}｜${ms} ms${missing.length ? `｜缺少：${missing.join('、')}` : ''}`);
 
-  // What the model makes of it, from Whisper's reading with the phone's own as an alternative.
-  if (recording.file === 'wg.m4a' && anthropicKey) {
-    const turn = heardTurn({ utterance: recording.phone, state: map, history: [] }, heard.text);
-    const answer = await askClaude(anthropicKey, userMessage(turn));
-    const plan = 'reply' in answer ? answer.reply.actions.find((action) => action.type === 'plan_trip') : undefined;
-    const fine = Boolean(plan?.destination.includes('World Gym'));
-    if (!fine) failures++;
-    console.log(`${fine ? '✓' : '✗'} Claude｜${'reply' in answer ? `${answer.reply.say}｜${answer.reply.actions.map((action) => `${action.type}(${action.destination})`).join(' ')}` : answer.failure}`);
+    // What the model makes of it, from Whisper's reading with the phone's own as an alternative.
+    if (recording.file === 'wg.m4a' && anthropicKey) {
+      const turn = heardTurn({ utterance: recording.phone, state: map, history: [] }, heard.text);
+      const answer = await askClaude(anthropicKey, userMessage(turn));
+      const plan = 'reply' in answer ? answer.reply.actions.find((action) => action.type === 'plan_trip') : undefined;
+      const fine = Boolean(plan?.destination.includes('World Gym'));
+      if (!fine) failures++;
+      console.log(`${fine ? '✓' : '✗'} Claude｜${'reply' in answer ? `${answer.reply.say}｜${answer.reply.actions.map((action) => `${action.type}(${action.destination})`).join(' ')}` : answer.failure}`);
+    }
   }
 }
-console.log(`Groq Whisper 額度：${limits}`);
+if (groqKey) console.log(`Groq Whisper 額度：${limits}`);
 if (failures) {
   console.log(`${failures} 項沒有通過。`);
   Deno.exit(1);

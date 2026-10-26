@@ -6,7 +6,7 @@ import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
-import { type Audio, heardTurn, readAudio, transcribe } from './hear.ts';
+import { type Audio, hear, heardTurn, readAudio, type SpeechKeys, speechOrder } from './hear.ts';
 import { NO_WEB, NO_WEB_CHOSEN, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
 const DAILY_TURNS = 40;
@@ -34,7 +34,9 @@ Deno.serve(async (request) => {
   }
   if (!(Number(body.consent) >= VOICE_CONSENT)) return reply({ error: 'consent_required' }, 400);
   if (body.feedback && typeof body.feedback === 'object') return await saveFeedback(admin, userId, body.feedback as Record<string, unknown>);
-  if (body.transcribe === true) return await transcribeOnly(admin, userId, body, groqKey);
+  // Speech recognisers: Whisper on Groq and OpenAI's, in SPEECH_ORDER.
+  const speech: SpeechKeys = { groq: groqKey, openai: Deno.env.get('OPENAI_API_KEY') };
+  if (body.transcribe === true) return await transcribeOnly(admin, userId, body, speech);
   const input = readInput(body);
   if (!input) return reply({ error: 'invalid' }, 400);
 
@@ -52,7 +54,7 @@ Deno.serve(async (request) => {
     // The rider can turn web lookups off in Settings.
     const webLeft = body.web === false ? 0 : await webAllowanceLeft(admin, userId);
     return streamed({
-      input, webLeft, noWeb: body.web === false ? NO_WEB_CHOSEN : NO_WEB, used, anthropicKey, groqKey, headers,
+      input, webLeft, noWeb: body.web === false ? NO_WEB_CHOSEN : NO_WEB, used, anthropicKey, groqKey, speech, headers,
       audio: Number(body.consent) >= AUDIO_CONSENT ? readAudio(body) : null, takeWeb: () => takeWebAllowance(admin, userId),
     });
   }
@@ -73,16 +75,18 @@ Deno.serve(async (request) => {
 
 /// The phone's 「只用雲端」 setting: the turn's audio is written down on its own, with nothing heard on the
 /// phone, and the phone then goes on with the words as usual (its next request takes the turn).
-async function transcribeOnly(admin: SupabaseClient, userId: string, body: Record<string, unknown>, groqKey?: string): Promise<Response> {
+async function transcribeOnly(admin: SupabaseClient, userId: string, body: Record<string, unknown>, speech: SpeechKeys): Promise<Response> {
   if (!(Number(body.consent) >= AUDIO_CONSENT)) return reply({ error: 'consent_required' }, 400);
   const audio = readAudio(body);
   if (!audio) return reply({ error: 'invalid' }, 400);
   const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined,
     typeof body.renewal === 'string' ? body.renewal : undefined);
   if (tier !== 'pro') return reply({ error: 'pro_required' }, 403);
-  if (!groqKey) return reply({ error: 'not_configured' }, 503);
-  const heard = await transcribe(groqKey, audio);
-  if ('text' in heard) return reply({ heard: heard.text }, 200);
+  const order = speechOrder(speech, Deno.env.get('SPEECH_ORDER'));
+  if (!order.length) return reply({ error: 'not_configured' }, 503);
+  const heard = await hear(speech, audio, order);
+  if (heard.failures.length) console.error('server recognition fell back', heard.failures.join('; '));
+  if ('text' in heard) return reply({ heard: heard.text, by: heard.by }, 200);
   console.error('server recognition failed', heard.failure);
   return reply({ error: 'unheard', reason: heard.failure }, 502);
 }
@@ -118,7 +122,7 @@ async function takeWebAllowance(admin: SupabaseClient, userId: string): Promise<
 }
 
 type Turn = {
-  input: TurnInput; webLeft: number; noWeb: string; used: number; anthropicKey?: string; groqKey?: string;
+  input: TurnInput; webLeft: number; noWeb: string; used: number; anthropicKey?: string; groqKey?: string; speech: SpeechKeys;
   headers: Record<string, string>; audio: Audio | null; takeWeb: () => Promise<number | null>;
 };
 
@@ -158,13 +162,13 @@ function streamed(turn: Turn): Response {
         if (say) send({ say });
         if (said) send({ said: true });
       };
-      if (turn.audio && groqKey) {
-        const heard = await transcribe(groqKey, turn.audio);
+      const order = speechOrder(turn.speech, Deno.env.get('SPEECH_ORDER'));
+      if (turn.audio && order.length) {
+        const heard = await hear(turn.speech, turn.audio, order);
+        if (heard.failures.length) console.error('server recognition fell back', heard.failures.join('; '));
         if ('text' in heard) {
           turn.input = heardTurn(turn.input, heard.text);
-          send({ heard: heard.text });
-        } else {
-          console.error('server recognition failed', heard.failure);
+          send({ heard: heard.text, by: heard.by });
         }
       }
       const input = turn.input;
