@@ -6,8 +6,12 @@ public enum AppLanguage: String, Codable, CaseIterable, Sendable {
     public static let preferenceKey = "appInterfaceLanguage"
     // The app initializes a missing preference from the device. Core consumers
     // without an app preference retain their original deterministic language.
+    /// A language for one piece of work instead of the app's: the voice conversation describes the
+    /// screen in the language the rider speaks, which may not be the app's.
+    @TaskLocal public static var override: AppLanguage?
     public static var current: AppLanguage {
-        UserDefaults.standard.string(forKey: preferenceKey).flatMap(AppLanguage.init(rawValue:)) ?? .traditionalChinese
+        if let override { return override }
+        return UserDefaults.standard.string(forKey: preferenceKey).flatMap(AppLanguage.init(rawValue:)) ?? .traditionalChinese
     }
     public static func deviceDefault(_ preferences: [String]) -> AppLanguage {
         preferences.first?.lowercased().hasPrefix("zh") == true ? .traditionalChinese : .english

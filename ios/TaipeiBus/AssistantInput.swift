@@ -80,13 +80,19 @@ final class SpeechInput: ObservableObject {
     var waitForWords = 6.0
     /// Stop, route and place names the recogniser should expect.
     private var hints: [String] = []
+    /// Ends listening with Apple's newer recogniser (iOS 26), when that is what listens.
+    private var stopAnalyzer: (() -> Void)?
+    /// The language of the attempt, for what it says about a problem.
+    private var spokenLanguage = AppLanguage.current
     /// Bumped by every start and stop, so a late callback from an earlier attempt is ignored.
     private var attempt = 0
 
-    func start(language: AppLanguage = .current, hints: [String] = [], unheard: (() -> Void)? = nil,
+    /// `modern` listens with Apple's newer recogniser where the phone has it and its language is
+    /// downloaded (iOS 26); otherwise, and if it fails before hearing anything, with the usual one.
+    func start(language: AppLanguage = .current, hints: [String] = [], modern: Bool = false, unheard: (() -> Void)? = nil,
                finished: @escaping (String) -> Void) async {
         stop()
-        self.hints = Array(hints.prefix(100)); self.unheard = unheard
+        self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
         transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
@@ -96,15 +102,23 @@ final class SpeechInput: ObservableObject {
             preparing = false
             JourneyDiagnostics.shared.record("speech denied")
             blocked = true; failed = true
-            problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。")
+            problem = AppText.text("需要麥克風與語音辨識權限才能用說的，請到系統設定開啟；也可以直接打字。", language: spokenLanguage)
             takeUnheard()?()
             return
         }
         let locale = language == .english ? Locale(identifier: "en-US") : Locale(identifier: "zh-TW")
+        if modern, Self.modernEnabled {
+            if #available(iOS 26.0, *), let transcriber = await ModernSpeech.transcriber(for: locale) {
+                guard current == attempt else { return }
+                self.finished = finished
+                if await beginAnalyzer(transcriber, locale: locale, attempt: current) { return }
+                guard current == attempt else { return }
+            }
+        }
         guard let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
             preparing = false
             JourneyDiagnostics.shared.record("speech unavailable")
-            problem = AppText.text("語音辨識目前無法使用，請直接打字。"); failed = true
+            problem = AppText.text("語音辨識目前無法使用，請直接打字。", language: spokenLanguage); failed = true
             takeUnheard()?()
             return
         }
@@ -135,7 +149,7 @@ final class SpeechInput: ObservableObject {
             try engine.start()
         } catch {
             JourneyDiagnostics.shared.record("speech audio-error \((error as NSError).domain) \((error as NSError).code)")
-            problem = AppText.text("麥克風目前無法使用，請直接打字。"); failed = true
+            problem = AppText.text("麥克風目前無法使用，請直接打字。", language: spokenLanguage); failed = true
             let unheard = takeUnheard()
             stop(); unheard?(); return
         }
@@ -162,7 +176,7 @@ final class SpeechInput: ObservableObject {
                 self.finished = finished; self.unheard = unheard
                 begin(recognizer, onDevice: false)
             } else {
-                problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。")
+                problem = AppText.text("沒有辨識到內容，請再說一次，或直接打字。", language: spokenLanguage)
                 unheard?()
             }
             return
@@ -171,13 +185,96 @@ final class SpeechInput: ObservableObject {
     }
     private enum SpeechFailure: Error { case noMicrophone }
 
+    static let modernKey = "speechModernRecognition.v1"
+    /// On unless the rider turned it off in Settings to compare.
+    static var modernEnabled: Bool { UserDefaults.standard.object(forKey: modernKey) as? Bool ?? true }
+
+    /// Listens with SpeechAnalyzer. False when it could not start, so the usual recogniser takes over.
+    @available(iOS 26.0, *)
+    private func beginAnalyzer(_ transcriber: SpeechTranscriber, locale: Locale, attempt current: Int) async -> Bool {
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else { return false }
+        guard current == attempt else { return true }
+        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let (sequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.record, mode: .measurement, options: .duckOthers)
+            try session.setActive(true, options: .notifyOthersOnDeactivation)
+            let node = engine.inputNode
+            let microphone = node.outputFormat(forBus: 0)
+            guard microphone.sampleRate > 0, microphone.channelCount > 0,
+                  let converter = AVAudioConverter(from: microphone, to: format) else { throw SpeechFailure.noMicrophone }
+            converter.primeMethod = .none
+            try await analyzer.start(inputSequence: sequence)
+            guard current == attempt else { input.finish(); await analyzer.cancelAndFinishNow(); return true }
+            node.removeTap(onBus: 0)
+            node.installTap(onBus: 0, bufferSize: 1024, format: microphone, block: Self.analyzerTap(converter, to: format, into: input) { [weak self] value in
+                Task { @MainActor in if self?.listening == true { self?.meter.value = value } }
+            })
+            engine.prepare()
+            try engine.start()
+        } catch {
+            JourneyDiagnostics.shared.record("speech analyzer-error \((error as NSError).domain) \((error as NSError).code)")
+            input.finish()
+            Task { await analyzer.cancelAndFinishNow() }
+            if engine.isRunning { engine.stop() }
+            engine.inputNode.removeTap(onBus: 0)
+            return false
+        }
+        let english = locale.language.languageCode == .english
+        let results = Task { [weak self] in
+            var finalized = ""
+            do {
+                for try await result in transcriber.results {
+                    var text = String(result.text.characters)
+                    if english, !finalized.isEmpty, !finalized.hasSuffix(" "), !text.hasPrefix(" ") { text = " " + text }
+                    if result.isFinal { finalized += text }
+                    self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, attempt: current)
+                }
+            } catch {
+                self?.analyzerFailed(error, locale: locale, attempt: current)
+            }
+        }
+        stopAnalyzer = {
+            input.finish(); results.cancel()
+            Task { await analyzer.cancelAndFinishNow() }
+        }
+        preparing = false; listening = true
+        Haptics.listening()
+        JourneyDiagnostics.shared.record("speech start analyzer \(locale.identifier)")
+        waitForSilence(waitForWords)
+        return true
+    }
+
+    private func receiveAnalyzed(_ text: String, attempt current: Int) {
+        guard current == attempt, listening else { return }
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        transcript = text
+        waitForSilence(pauseAfterWords, counting: true)
+    }
+
+    /// Failed before hearing anything: once more with the usual recogniser, as with the phone's own.
+    private func analyzerFailed(_ error: Error, locale: Locale, attempt current: Int) {
+        guard current == attempt, listening, transcript.isEmpty else { return }
+        JourneyDiagnostics.shared.record("speech analyzer-failed \((error as NSError).domain) \((error as NSError).code)")
+        let finished = self.finished, unheard = self.unheard
+        stop()
+        guard let finished, let recognizer = SFSpeechRecognizer(locale: locale), recognizer.isAvailable else {
+            problem = AppText.text("語音辨識目前無法使用，請直接打字。", language: spokenLanguage); failed = true
+            unheard?(); return
+        }
+        self.finished = finished; self.unheard = unheard
+        begin(recognizer, onDevice: recognizer.supportsOnDeviceRecognition)
+    }
+
     func finish() {
         guard listening else { return }
         let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
-        if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。"); unheard?() }
+        if text.isEmpty { problem = AppText.text("沒有聽到聲音，請再說一次，或直接打字。", language: spokenLanguage); unheard?() }
         else { done?(text) }
     }
 
@@ -190,6 +287,7 @@ final class SpeechInput: ObservableObject {
         if engine.isRunning { engine.stop() }
         engine.inputNode.removeTap(onBus: 0)
         request?.endAudio(); task?.cancel()
+        stopAnalyzer?(); stopAnalyzer = nil
         request = nil; task = nil; listening = false; preparing = false; finished = nil; unheard = nil; meter.value = 0; silenceSince = nil
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
@@ -231,14 +329,38 @@ final class SpeechInput: ObservableObject {
         let meter = LevelMeter()
         return { buffer, _ in
             request.append(buffer)
-            guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0, meter.due() else { return }
-            var sum: Float = 0
-            for index in 0..<Int(buffer.frameLength) { sum += samples[index] * samples[index] }
-            let rms = sqrt(sum / Float(buffer.frameLength))
-            // Speech sits around -50…-10 dB; map that to 0…1.
-            let decibels = 20 * log10(max(rms, 0.000_01))
-            level(Double(min(1, max(0, (decibels + 50) / 40))))
+            if meter.due(), let value = loudness(buffer) { level(value) }
         }
+    }
+    /// The same for SpeechAnalyzer, which takes the microphone's audio only in its own format.
+    @available(iOS 26.0, *)
+    nonisolated private static func analyzerTap(_ converter: AVAudioConverter, to format: AVAudioFormat,
+                                                into input: AsyncStream<AnalyzerInput>.Continuation,
+                                                level: @escaping @Sendable (Double) -> Void) -> AVAudioNodeTapBlock {
+        let meter = LevelMeter()
+        return { buffer, _ in
+            let frames = AVAudioFrameCount((Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate).rounded(.up))
+            if frames > 0, let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frames) {
+                var supplied = false
+                var error: NSError?
+                let status = converter.convert(to: converted, error: &error) { _, state in
+                    if supplied { state.pointee = .noDataNow; return nil }
+                    supplied = true; state.pointee = .haveData
+                    return buffer
+                }
+                if status != .error, converted.frameLength > 0 { input.yield(AnalyzerInput(buffer: converted)) }
+            }
+            if meter.due(), let value = loudness(buffer) { level(value) }
+        }
+    }
+    /// 0…1 for how loud a buffer is: speech sits around -50…-10 dB.
+    nonisolated private static func loudness(_ buffer: AVAudioPCMBuffer) -> Double? {
+        guard let samples = buffer.floatChannelData?[0], buffer.frameLength > 0 else { return nil }
+        var sum: Float = 0
+        for index in 0..<Int(buffer.frameLength) { sum += samples[index] * samples[index] }
+        let rms = sqrt(sum / Float(buffer.frameLength))
+        let decibels = 20 * log10(max(rms, 0.000_01))
+        return Double(min(1, max(0, (decibels + 50) / 40)))
     }
     nonisolated private static func results(_ deliver: @escaping @Sendable (String?, Bool, String?) -> Void)
         -> (SFSpeechRecognitionResult?, Error?) -> Void {
@@ -246,6 +368,31 @@ final class SpeechInput: ObservableObject {
             deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false,
                     (error as NSError?).map { "\($0.domain) \($0.code)" })
         }
+    }
+}
+
+/// Apple's newer recogniser (iOS 26): used once the phone has it and the language is downloaded. The
+/// first time, the language downloads in the background while the usual recogniser listens.
+@available(iOS 26.0, *)
+@MainActor
+enum ModernSpeech {
+    private static var downloading: Set<String> = []
+
+    static func transcriber(for locale: Locale) async -> SpeechTranscriber? {
+        guard SpeechTranscriber.isAvailable, let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
+        let transcriber = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+        let status = await AssetInventory.status(forModules: [transcriber])
+        if status == .installed { return transcriber }
+        if status == .supported, downloading.insert(supported.identifier).inserted {
+            JourneyDiagnostics.shared.record("speech analyzer-download \(supported.identifier)")
+            Task.detached(priority: .utility) {
+                let module = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+                do { try await AssetInventory.assetInstallationRequest(supporting: [module])?.downloadAndInstall() } catch {
+                    await MainActor.run { _ = ModernSpeech.downloading.remove(supported.identifier) }
+                }
+            }
+        }
+        return nil
     }
 }
 

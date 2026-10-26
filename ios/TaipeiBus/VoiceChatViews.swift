@@ -156,6 +156,14 @@ struct VoiceChatPanel: View {
                 } else if let model = AssistantServer.answeredBy, chat.phase == .speaking {
                     ModelCredit(text: model)
                 }
+                // The language it listens in: a visitor can talk English to the Chinese app, and back.
+                Button { chat.switchLanguage() } label: {
+                    Text(verbatim: chat.language == .english ? "EN" : "中").font(.footnote.weight(.bold))
+                        .frame(minWidth: 32, minHeight: 32).background(Color(uiColor: .tertiarySystemFill), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(chat.language == .english ? AppText.text("改用中文聽") : AppText.text("改用英文聽"))
+                .accessibilityIdentifier("voice-chat-language")
                 Button { chat.end() } label: {
                     Image(systemName: "xmark").font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                         .background(Color(uiColor: .tertiarySystemFill), in: Circle())
@@ -224,9 +232,16 @@ struct VoiceChatButton: View {
 /// 語音對話 (Pro) in Settings: on means the rider agreed to the conversation's use of data.
 struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.consentKey) private var enabled = false
+    @AppStorage(SpeechInput.modernKey) private var modern = true
     var body: some View {
         Section {
             Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
+            // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
+            if enabled {
+                if #available(iOS 26.0, *) {
+                    Toggle(AppText.text("新版語音辨識"), isOn: $modern).accessibilityIdentifier("voice-chat-modern-recognition")
+                }
+            }
         } header: {
             Text(AppText.text("語音對話（Pro）"))
         } footer: {

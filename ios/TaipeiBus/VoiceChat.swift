@@ -133,6 +133,9 @@ final class VoiceConversation: ObservableObject {
     @Published private(set) var pending: VoiceAction?
     /// Turns left today, once the server has said.
     @Published private(set) var remaining: Int?
+    /// Heard and spoken in this language: the app's own until the rider switches it in the panel, so a
+    /// visitor can talk English to the Chinese app. Claude answers in the language it hears.
+    @Published private(set) var language = VoiceConversation.savedLanguage
     @Published var askingConsent = false
     @Published var panelRequest: PanelRequest?
 
@@ -150,8 +153,11 @@ final class VoiceConversation: ObservableObject {
     /// nil until asked; false keeps the microphone on the one-sentence planner.
     static var consent: Bool? { UserDefaults.standard.object(forKey: consentKey) as? Bool }
     static var available: Bool { AssistantServer.configured }
-    /// Heard and spoken in the app's language; Claude answers in the language it hears.
-    private var language: AppLanguage { AppLanguage.current == .english ? .english : .traditionalChinese }
+    static let languageKey = "voiceConversationLanguage.v1"
+    private static var savedLanguage: AppLanguage {
+        UserDefaults.standard.string(forKey: languageKey).flatMap(AppLanguage.init(rawValue:))
+            ?? (AppLanguage.current == .english ? .english : .traditionalChinese)
+    }
     /// Stop and place names put back into what was heard: 忠孝敦華 becomes 忠孝敦化. Built in the
     /// background when a conversation starts and used once ready; Chinese only.
     private var names: NameCorrection?
@@ -179,14 +185,13 @@ final class VoiceConversation: ObservableObject {
         guard Self.available else { return }
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
-        names = nil
-        if language == .traditionalChinese {
-            let nearby = VoiceStateBuilder(model: model).hints
-            let others = model.metadata.stations.values.map(\.name)
-            Task { [weak self] in
-                let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
-                self?.names = built
-            }
+        names = nil; language = Self.savedLanguage
+        // Built for Chinese even when listening in English, so switching languages needs no wait.
+        let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
+        let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
+        Task { [weak self] in
+            let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
+            self?.names = built
         }
         if Self.consent == true { listen(firstTurn: true) } else { askingConsent = true }
     }
@@ -217,6 +222,17 @@ final class VoiceConversation: ObservableObject {
         handle(choice)
     }
 
+    /// The panel's language button: listen in the other language from now on, starting right away.
+    func switchLanguage() {
+        guard active else { return }
+        language = language == .english ? .traditionalChinese : .english
+        UserDefaults.standard.set(language.rawValue, forKey: Self.languageKey)
+        JourneyDiagnostics.shared.record("voice language \(language.rawValue)")
+        work?.cancel(); work = nil
+        speech.stop(); output.stop()
+        listen(firstTurn: false)
+    }
+
     /// The confirmation button: the same as saying yes or no.
     func confirm(_ yes: Bool) {
         guard active else { return }
@@ -233,9 +249,9 @@ final class VoiceConversation: ObservableObject {
         speech.pauseAfterWords = 0.9
         // A follow-up waits a little less than the first question.
         speech.waitForWords = firstTurn ? 7 : 5
-        let hints = VoiceStateBuilder(model: model).hints
+        let hints = VoiceStateBuilder(model: model).hints(language: language)
         Task {
-            await speech.start(language: language, hints: hints, unheard: { [weak self] in
+            await speech.start(language: language, hints: hints, modern: true, unheard: { [weak self] in
                 guard let self else { return }
                 // Silence after an answer simply ends the conversation; a microphone or recognition
                 // problem is said first, so the panel does not just vanish.
@@ -243,7 +259,7 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
-                let corrected = self.names?.correct(text) ?? text
+                let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
                 if corrected != text { JourneyDiagnostics.shared.record("voice heard \(text) as \(corrected)") }
                 self.handle(corrected)
             })
@@ -265,13 +281,13 @@ final class VoiceConversation: ObservableObject {
                 return
             case .no:
                 self.pending = nil
-                respond(AppText.text("好，先不要。"), followUp: true)
+                respond(phrase("好，先不要。"), followUp: true)
                 return
             case .unclear: break
             }
         }
         if isGoodbye(text) {
-            work = Task { await say(AppText.text("好，有需要再叫我。")); end() }
+            work = Task { await say(phrase("好，有需要再叫我。")); end() }
             return
         }
         work = Task { await turn(text, lookups: 1) }
@@ -279,7 +295,8 @@ final class VoiceConversation: ObservableObject {
 
     private func turn(_ text: String, lookups: Int) async {
         phase = .thinking; choices = []; source = nil
-        let context = VoiceStateBuilder(model: model).context(pending: pending)
+        // Names and figures in the language the rider speaks, so the voice can say them.
+        let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending) }
         let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true]
         var answer = SpokenTurn(context: context, heard: text)
@@ -290,9 +307,9 @@ final class VoiceConversation: ObservableObject {
             case 200: break
             case 403:
                 model.showingProPlans = true
-                return respond(AppText.text("語音對話是 Pro 功能，可以在方案頁開啟。"), followUp: false)
-            case 429: return respond(AppText.text("今天的語音對話次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
-            default: return respond(AppText.text("我現在連不上，請稍後再試一次。"), followUp: false)
+                return respond(phrase("語音對話是 Pro 功能，可以在方案頁開啟。"), followUp: false)
+            case 429: return respond(phrase("今天的語音對話次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
+            default: return respond(phrase("我現在連不上，請稍後再試一次。"), followUp: false)
             }
             var final: [String: Any]?
             for try await line in lines {
@@ -308,7 +325,7 @@ final class VoiceConversation: ObservableObject {
             guard let final, let json = final["reply"] as? [String: Any], let reply = VoiceReply(json: json) else {
                 // Cut off after some of the answer was spoken: let the rider go on from there.
                 if !answer.spoken.isEmpty { return respond(nil, followUp: true) }
-                return respond(AppText.text("我現在連不上，請稍後再試一次。"), followUp: true)
+                return respond(phrase("我現在連不上，請稍後再試一次。"), followUp: true)
             }
             AssistantServer.answered(by: final["model"] as? String, response: response)
             if let used = final["used"] as? Int, let limit = final["limit"] as? Int { remaining = max(0, limit - used) }
@@ -330,8 +347,8 @@ final class VoiceConversation: ObservableObject {
             // all could be said is the rider told so.
             if let failure = answer.refused, answer.spoken.isEmpty {
                 let fallback: String
-                if case .unknownSlot = failure { fallback = AppText.text("這個我現在查不到，可以換個方式問嗎？") }
-                else { fallback = AppText.text("結果在畫面上，請看一下。") }
+                if case .unknownSlot = failure { fallback = phrase("這個我現在查不到，可以換個方式問嗎？") }
+                else { fallback = phrase("結果在畫面上，請看一下。") }
                 speak(fallback)
                 said += fallback
             }
@@ -340,7 +357,7 @@ final class VoiceConversation: ObservableObject {
         } catch {
             guard !Task.isCancelled else { return }
             if !answer.spoken.isEmpty { return respond(nil, followUp: true) }
-            respond(AppText.text("連線不穩，請再說一次。"), followUp: true)
+            respond(phrase("連線不穩，請再說一次。"), followUp: true)
         }
     }
 
@@ -375,13 +392,16 @@ final class VoiceConversation: ObservableObject {
 
     private func acknowledgement(_ action: VoiceAction) -> String {
         switch action {
-        case .startNavigation: model.planner.started ? AppText.text("好，開始導航。") : AppText.text("目前沒有可以開始的路線。")
-        case .boarded: AppText.text("好，已上車，我會提醒你下車。")
-        case .alighted: AppText.text("好，已下車。")
-        case .endTrip: AppText.text("好，行程結束。")
-        default: AppText.text("好。")
+        case .startNavigation: model.planner.started ? phrase("好，開始導航。") : phrase("目前沒有可以開始的路線。")
+        case .boarded: phrase("好，已上車，我會提醒你下車。")
+        case .alighted: phrase("好，已下車。")
+        case .endTrip: phrase("好，行程結束。")
+        default: phrase("好。")
         }
     }
+
+    /// A fixed sentence in the language the conversation is in, which may not be the app's.
+    private func phrase(_ key: String) -> String { AppText.text(key, language: language) }
 
     // MARK: Actions
 
@@ -472,17 +492,25 @@ final class VoiceConversation: ObservableObject {
 struct VoiceStateBuilder {
     let model: TransitAppModel
 
-    /// Names the recogniser should expect: what is on screen and nearby, in the language it listens in.
-    var hints: [String] {
-        let english = AppLanguage.current == .english
-        var names = nearbyStations.map { english ? $0.localizedName : $0.name }
-        if let station = model.mapLabelStation { names.append(english ? station.localizedName : station.name) }
-        if let route = model.selectedRoute { names.append(english ? route.localizedName : route.name) }
+    /// Names the recogniser should expect, in the language it listens in: what is on screen and nearby
+    /// first, then the rider's own stops and places, then the city's best-known places.
+    func hints(language: AppLanguage) -> [String] {
+        let english = language == .english
+        func name(_ chinese: String, _ englishName: String?) -> String { english ? englishName.flatMap { $0.isEmpty ? nil : $0 } ?? chinese : chinese }
+        func place(_ place: TravelPlace) -> String { name(place.name, place.englishName) }
+        var screen = nearbyStations.map { name($0.name, $0.englishName) }
+        if let shown = model.mapLabelStation { screen.append(name(shown.name, shown.englishName)) }
+        if let shown = model.selectedRoute { screen.append(name(shown.name, shown.englishName)) }
         if let ride = model.planner.activeRide {
-            names += english ? [ride.route.localizedName, ride.boarding.localizedName, ride.alighting.localizedName]
-                : [ride.route.name, ride.boarding.name, ride.alighting.name]
+            screen += [name(ride.route.name, ride.route.englishName), name(ride.boarding.name, ride.boarding.englishName),
+                       name(ride.alighting.name, ride.alighting.englishName)]
         }
-        return Array(Set(names))
+        if let destination = model.planner.destination { screen.append(place(destination)) }
+        var own = model.favorites.compactMap { model.metadata.stations[$0] }.map { name($0.name, $0.englishName) }
+        for journey in model.commutes.journeys { own += [journey.title, place(journey.destination)] + (journey.origin.map { [place($0)] } ?? []) }
+        own += model.planner.recentPlaces.map(place)
+        let city = VoiceVocabulary.landmarks.map { english ? $0.english : $0.chinese }
+        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english)])
     }
 
     func context(pending: VoiceAction?) -> VoiceContext {
