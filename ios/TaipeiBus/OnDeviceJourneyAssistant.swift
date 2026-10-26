@@ -7,7 +7,7 @@ enum OnDeviceJourneyAssistant {
 
     /// 用一句話規劃 itself: the rules read Chinese on every phone; an English request needs online
     /// understanding, as nothing on the phone reads English.
-    static func plannerUnavailableReason(language: AppLanguage = .current) -> String? {
+    @MainActor static func plannerUnavailableReason(language: AppLanguage = .current) -> String? {
 #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("--test-ai-unavailable") {
             return AppText.text("用英文規劃需要開啟線上 AI，仍可手動搜尋與規劃行程。")
