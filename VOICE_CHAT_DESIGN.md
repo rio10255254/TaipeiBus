@@ -411,3 +411,25 @@ Groq 文件把下列數字標為開發者方案的基本上限，**以組織為�
 - **入口**：`AskTaipeiBusIntent` 移到 `Shared/VoiceChatControl.swift`，App 和小工具 extension 共用。iOS 18 的控制中心與鎖定畫面多了「問台北公車」控制項，App 啟動時接上 handler。
 - **回報**：面板上的 ⚠︎ 按鈕確認後，把該輪聽到的話、回答、狀態與模型存入 `assistant_feedback`，保存 30 天，每支手機每天最多 20 則。
 - **訂閱憑證共用上限**：同一份訂閱 30 天內，最多在另外 10 支手機確認 Pro（家人共享與重新安裝也算在內），超過時當作免費版。
+
+## 13. 回報變成回歸檢查（2026-10-26 起）
+
+- **重問**：`converse/replay.ts` 讀最近 30 天的回報（每次最多 20 則，沒檢查過的先），用現在的提示和模型重問同一輪。
+  - 只帶當時的狀態和聽到的話，沒有最近對話；網路查詢當作已用完。
+  - 新的回答先過和 `eval.ts` 一樣的檢查（`checks.ts`）：不存在的空位、自己寫的即時數字、超過 110 字、說要上網查、英文問卻沒用英文答、洩漏設定、用「您」。
+  - 再請 Claude 當評審（低 effort、固定 schema），判斷新的回答有沒有照狀態回答乘客的意思，以及當時的回答錯在哪。
+- **結果**：寫回 `assistant_feedback` 的四個欄位（migration `20261029000000_feedback_review.sql`）。
+  - `verdict`：`pass` 或 `fail:<類別>`。檢查抓到的問題優先，其次才看評審。
+  - `reported_issue`：當時的回答錯在哪。
+  - `checked_model`、`checked_at`：用哪個模型、什麼時候檢查的。
+  - 類別只有這幾個：`misheard`（聽錯）、`wrong_action`（動作或確認不對）、`invented_fact`（編造數字或事實）、`unhelpful`（沒回答到）、`too_long`、`wrong_language`、`leaked_prompt`、`tone`、`fine`。
+- **什麼時候跑**：「Voice conversation evaluation」工作流程，每週一早上、手動，以及 PR 跑完固定評估之後。
+  - 沒有 `SUPABASE_ACCESS_TOKEN`、`ANTHROPIC_API_KEY` 或 `SUPABASE_PROJECT_REF` 時只提示，不算失敗。
+  - 回報沒通過不算失敗；Supabase 或 Claude 問不到才算。
+- **隱私**：repo 是公開的，工作流程的紀錄誰都看得到。
+  - 紀錄裡只有回報的編號、類別和數量，沒有聽到的話、回答、狀態或使用者，也不上傳任何檔案。
+  - 回報的內容只會從資料庫送給 Claude 重問。查詢裡只有整數編號和固定的類別，不放回報的文字。
+- **怎麼看**：Supabase 後台 Table editor › `assistant_feedback`，依 `verdict` 篩選；或在 SQL editor 查（見 `supabase/README.md`）。
+  - `fail:` 表示現在的提示還是答不好。
+  - `pass` 而 `reported_issue` 不是 `fine`，表示已經修好。
+  - 要變成固定評估時，用自己的話在 `eval.ts` 加一個案例，不要貼乘客的原話。

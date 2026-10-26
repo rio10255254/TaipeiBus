@@ -107,6 +107,9 @@ export function readInput(body: Record<string, unknown>): TurnInput | null {
   };
 }
 
+/// What the model is told once the day's web lookups are used up (or a turn cannot follow up with one).
+export const NO_WEB = '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答';
+
 /// One user message: the state, the last eight turns and what was just said. The system prompt never
 /// changes, so it can be cached.
 export function userMessage(input: TurnInput, web?: string): string {
