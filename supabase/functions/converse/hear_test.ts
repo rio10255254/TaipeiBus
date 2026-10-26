@@ -1,5 +1,5 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
-import { hallucinated, heardTurn, readAudio, traditional, transcribe, whisperPrompt } from './hear.ts';
+import { chinesePunctuation, hallucinated, heardTurn, readAudio, traditional, transcribe, whisperPrompt } from './hear.ts';
 
 const sound = btoa(String.fromCharCode(...new Uint8Array(2000).fill(7)));
 
@@ -31,6 +31,10 @@ Deno.test("Whisper's reading becomes what was said, in Taiwan's characters", asy
   }) as typeof fetch;
   const heard = await transcribe('key', { bytes: new Uint8Array(2000), language: 'zh', vocabulary: [] }, fake);
   assertEquals(heard, { text: '我想去圓山的酒吧，有什麼推薦的嗎' });
+  assertEquals(chinesePunctuation('我要去 World Gym,怎麼搭比較快?'), '我要去 World Gym，怎麼搭比較快？');
+  assertEquals(chinesePunctuation('307還要多久?'), '307還要多久？');
+  assertEquals(chinesePunctuation('到站了.'), '到站了。');
+  assertEquals(chinesePunctuation('3.5 公里，12:30 出發'), '3.5 公里，12:30 出發');
   assertEquals(sent?.get('model'), 'whisper-large-v3');
   assertEquals(sent?.get('language'), 'zh');
 });

@@ -59,7 +59,7 @@ export async function transcribe(apiKey: string, audio: Audio, fetcher: typeof f
     });
     if (!response.ok) return { failure: `whisper ${response.status}` };
     const raw = String((await response.json())?.text ?? '').trim();
-    const text = audio.language === 'zh' ? traditional(raw) : raw;
+    const text = audio.language === 'zh' ? chinesePunctuation(traditional(raw)) : raw;
     if (!text || hallucinated(text)) return { failure: 'whisper unusable' };
     return { text: text.slice(0, 300) };
   } catch (error) {
@@ -72,6 +72,13 @@ const toTaiwan = OpenCC.Converter({ from: 'cn', to: 'twp' });
 /// Whisper often writes Mandarin in simplified characters; the rider reads Taiwan's.
 export function traditional(text: string): string {
   return toTaiwan(text);
+}
+
+/// Whisper writes Chinese with the half-width marks of English text (「怎麼搭比較快?」).
+export function chinesePunctuation(text: string): string {
+  const marks: Record<string, string> = { ',': '，', '?': '？', '!': '！', ':': '：', ';': '；' };
+  return text.replace(/([\p{Script=Han}A-Za-z0-9])([,?!:;])(?!\d)/gu, (_, before: string, mark: string) => before + marks[mark])
+    .replace(/(?<=[\p{Script=Han}])\.(?=\s|$)/gu, '。');
 }
 
 /// Whisper's habit on silence or noise: the closing lines of the videos it learned from.
