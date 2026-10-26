@@ -1058,5 +1058,9 @@
   "好。": "OK.",
   "改用中文聽": "Listen in Chinese",
   "改用英文聽": "Listen in English",
-  "新版語音辨識": "New speech recognition"
+  "新版語音辨識": "New speech recognition",
+  "捷運站": "MRT station",
+  "找不到「%@」，請換個說法再說一次。": "I couldn't find \"%@\". Please say it another way.",
+  "「%@」要去哪一個？可以直接說或點選。": "Which \"%@\" do you mean? Say or tap one.",
+  "好，改到%@。": "OK, going to %@ instead."
 }

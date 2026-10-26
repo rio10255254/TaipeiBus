@@ -448,3 +448,28 @@ public struct VoiceHistory: Equatable, Sendable {
     public static let limit = 8
     public var json: [[String: String]] { turns.map { ["user": $0.user, "say": $0.said] } }
 }
+
+/// One of the choices on the panel, named or counted by the rider: 「淡水站」 or 「第二個」.
+public enum VoiceChoice {
+    public static func pick(_ text: String, among choices: [String]) -> Int? {
+        let said = StationSearch.normalize(text)
+        guard !said.isEmpty else { return nil }
+        if let exact = choices.firstIndex(where: { StationSearch.normalize($0) == said }) { return exact }
+        let named = choices.indices.filter { index in
+            let choice = StationSearch.normalize(choices[index])
+            return choice.count >= 2 && (said.contains(choice) || (said.count >= 2 && choice.contains(said)))
+        }
+        // 「淡水老街」 names 淡水老街 rather than 淡水: the longest name said wins.
+        let length = { (index: Int) in StationSearch.normalize(choices[index]).count }
+        if let longest = named.max(by: { length($0) < length($1) }), named.filter({ length($0) == length(longest) }).count == 1 {
+            return longest
+        }
+        let ordinals = [["第一", "first"], ["第二", "second"], ["第三", "third"]]
+        // Only a short answer is a count: 「第二個方案要走多久」 is a question.
+        let short = said.allSatisfy(\.isASCII) ? said.count <= 16 : said.count <= 6
+        for (index, words) in ordinals.enumerated() where index < choices.count && short {
+            if words.contains(where: { said.contains($0) }) { return index }
+        }
+        return nil
+    }
+}

@@ -81,6 +81,25 @@ final class JourneyAssistantSession: ObservableObject {
             point.isInServiceArea ? TravelPlace(name: AppText.text("目前位置"), address: "", coordinate: point) : nil
         }
     }
+    /// A metro station named exactly as said, first: 「淡水」 is the station, which Apple Maps' points of
+    /// interest do not include (they offer 淡水美食 or a bank branch named after it).
+    static func stations(named words: String, in metadata: TransitMetadata) -> [TravelPlace] {
+        var key = StationSearch.normalize(StationSearch.cleanQuery(words))
+        if key.hasPrefix("捷運") { key.removeFirst(2) }
+        if key.hasSuffix("站"), key.count > 2 { key.removeLast() }
+        guard key.count >= 2 else { return [] }
+        let found = metadata.stations.values.filter { StationSearch.normalize($0.name) == key }
+            .sorted { ($0.mode == .metro ? 0 : 1, $0.id) < ($1.mode == .metro ? 0 : 1, $1.id) }
+        guard let first = found.first else { return [] }
+        // Named as the station is, so it is the exact match that needs no further choosing.
+        return [TravelPlace(name: first.name, address: first.mode == .metro ? AppText.text("捷運站") : first.address,
+                            coordinate: first.coordinate, isTransitPlace: true, englishName: first.englishName.isEmpty ? nil : first.englishName)]
+    }
+    /// Search results with the station of that name in front, once.
+    static func withStations(_ found: [TravelPlace], words: String, metadata: TransitMetadata) -> [TravelPlace] {
+        let stations = stations(named: words, in: metadata)
+        return stations + found.filter { place in !stations.contains { $0.coordinate.distance(to: place.coordinate) < 150 } }
+    }
     private var preference: RoutePreference {
         turn.flatMap { RoutePreference(rawValue: $0.request.preference.rawValue) } ?? .balanced
     }
@@ -164,7 +183,7 @@ final class JourneyAssistantSession: ObservableObject {
             search.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
             search.setContext(near)
             let found = ((try? await search.find(text: words, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
-            return found.first { Self.matches($0, words) }
+            return Self.withStations(found, words: words, metadata: model.metadata).first { Self.matches($0, words) }
         }
         busy = true; activity = AppText.text("正在搜尋地點…")
         let destination = change.destination.isEmpty ? trip.destination : await place(change.destination, near: model.location.usableCoordinate)
@@ -347,7 +366,7 @@ final class JourneyAssistantSession: ObservableObject {
         search.setContext(model.location.usableCoordinate)
         fixSearching = true
         Task { @MainActor in
-            let found = (try? await search.find(text: text)) ?? []
+            let found = Self.withStations((try? await search.find(text: text)) ?? [], words: text, metadata: model.metadata)
             fixResults = Array(found.filter { $0.coordinate.isInServiceArea }.prefix(6))
             fixSearching = false
             message = fixResults.isEmpty ? AppText.text("找不到服務範圍內的地點，請換個關鍵字。") : nil
@@ -382,11 +401,13 @@ final class JourneyAssistantSession: ObservableObject {
     private func makeContext() -> JourneyAssistantContext {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
+        let metadata = model.metadata
         let context = JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { query in
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
-            return try await toolSearch.find(text: query, queryLimit: 3, timeout: 4)
+            let found = try await toolSearch.find(text: query, queryLimit: 3, timeout: 4)
+            return Self.withStations(found, words: query, metadata: metadata)
         }
         // Asked at the moment of choosing, so a consent given after this context was made counts.
         if OnlineJourneyReader.configured {

@@ -129,6 +129,9 @@ final class VoiceConversation: ObservableObject {
     /// The page an answer from the web came from, shown in small print under it.
     @Published private(set) var source: String?
     @Published private(set) var choices: [String] = []
+    /// Something was put on screen for the rider: while listening, the panel keeps to one row so it
+    /// covers as little of it as it can.
+    @Published private(set) var compact = false
     /// Asked and waiting for a yes: shown as a button as well.
     @Published private(set) var pending: VoiceAction?
     /// Turns left today, once the server has said.
@@ -144,6 +147,11 @@ final class VoiceConversation: ObservableObject {
     private unowned let model: TransitAppModel
     private var history = VoiceHistory()
     private var work: Task<Void, Never>?
+    /// A trip was handed to the planner this turn: once the answer is spoken, what it found is followed up.
+    private var planning = false
+    /// The planner's places or options offered as choices, in the order shown.
+    private var planPlaces: [TravelPlace] = []
+    private var planOptions: [String] = []
 
     init(model: TransitAppModel) { self.model = model }
 
@@ -185,7 +193,7 @@ final class VoiceConversation: ObservableObject {
         guard Self.available else { return }
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
-        names = nil; language = Self.savedLanguage
+        names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []
         // Built for Chinese even when listening in English, so switching languages needs no wait.
         let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
         let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
@@ -272,6 +280,10 @@ final class VoiceConversation: ObservableObject {
         // must not go on to open the microphone over this one.
         work?.cancel(); work = nil
         heard = text
+        if let index = VoiceChoice.pick(text, among: choices), !planPlaces.isEmpty || !planOptions.isEmpty {
+            return choosePlan(index)
+        }
+        planPlaces = []; planOptions = []
         if let pending {
             switch VoiceConfirmation.read(text) {
             case .yes:
@@ -334,6 +346,7 @@ final class VoiceConversation: ObservableObject {
                await self.lookup(lookup) {
                 return await turn(text, lookups: lookups - 1)
             }
+            compact = reply.actions.contains { !Self.isLookup($0) }
             for action in reply.actions { run(action) }
             pending = reply.confirm
             choices = reply.choices
@@ -381,6 +394,8 @@ final class VoiceConversation: ObservableObject {
         work = Task {
             if let sentence { await say(sentence, routes: routes) } else { await output.finishSpeaking() }
             guard !Task.isCancelled, active else { return }
+            if planning { planning = false; await followPlan() }
+            guard !Task.isCancelled, active else { return }
             if followUp || pending != nil || !choices.isEmpty { listen(firstTurn: false) } else { end() }
         }
     }
@@ -401,7 +416,49 @@ final class VoiceConversation: ObservableObject {
     }
 
     /// A fixed sentence in the language the conversation is in, which may not be the app's.
-    private func phrase(_ key: String) -> String { AppText.text(key, language: language) }
+    private func phrase(_ key: String, _ values: String...) -> String { AppText.format(key, values: values, language: language) }
+
+    // MARK: Following the planner
+
+    /// The planner finds the places after the answer was spoken. When it could not settle one, say so and
+    /// offer what it found, to say or tap, instead of leaving 「我幫你規劃」 standing over 「找不到」.
+    private func followPlan() async {
+        let assistant = model.assistant
+        var waited = 0
+        while (assistant.busy || assistant.fixSearching), waited < 48 {
+            try? await Task.sleep(for: .milliseconds(250)); waited += 1
+        }
+        guard !Task.isCancelled, active else { return }
+        if let problem = assistant.problem, !problem.keyword.isEmpty {
+            planPlaces = Array(assistant.fixResults.prefix(3))
+            choices = planPlaces.map(\.localizedName)
+            compact = false
+            JourneyDiagnostics.shared.record("voice plan unsettled places=\(planPlaces.count)")
+            await say(planPlaces.isEmpty ? phrase("找不到「%@」，請換個說法再說一次。", problem.keyword)
+                      : phrase("「%@」要去哪一個？可以直接說或點選。", problem.keyword))
+        } else if let clarification = assistant.clarification {
+            planOptions = clarification.options
+            choices = Array(planOptions.prefix(3))
+            compact = false
+            await say(clarification.question)
+        } else if let message = assistant.message {
+            compact = false
+            await say(message)
+        }
+    }
+
+    private func choosePlan(_ index: Int) {
+        let places = planPlaces, options = planOptions
+        planPlaces = []; planOptions = []; choices = []
+        if places.indices.contains(index) {
+            model.assistant.chooseFix(places[index])
+        } else if options.indices.contains(index) {
+            model.assistant.answer(index)
+        } else { return }
+        planning = true; compact = true
+        panelRequest = .routes
+        respond(phrase("好，改到%@。", places.indices.contains(index) ? places[index].localizedName : options[index]), followUp: true)
+    }
 
     // MARK: Actions
 
@@ -437,6 +494,7 @@ final class VoiceConversation: ObservableObject {
             if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
             model.assistant.run(sentence)
+            planning = true
             panelRequest = .routes
         case .chooseOption(let index):
             guard planner.options.indices.contains(index - 1), !planner.started else { return }
