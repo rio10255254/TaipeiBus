@@ -175,11 +175,13 @@ struct VoiceChatPanel: View {
                 Text(words).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                     .accessibilityLabel(AppText.text("你說的：%@", words))
             }
-            if !chat.caption.isEmpty {
+            // Listening after something was put on screen: one row, so the screen stays readable.
+            let folded = chat.compact && chat.phase == .listening
+            if !chat.caption.isEmpty, !folded {
                 Text(chat.caption).font(.body).fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("voice-chat-caption")
             }
-            if let source = chat.source {
+            if let source = chat.source, !folded {
                 Label(AppText.text("來源：%@", source), systemImage: "globe").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
             if !chat.choices.isEmpty {
