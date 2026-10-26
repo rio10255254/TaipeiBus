@@ -280,6 +280,36 @@ final class JourneyAssistantSession: ObservableObject {
             }
         }
     }
+    /// What the voice conversation already understood, planned without reading the sentence again:
+    /// Claude read the rider's words there, so asking it (or the rules) once more would only cost
+    /// time and a second allowance. `sentence` is that request in words, for the screen.
+    func plan(_ reading: JourneyReading, sentence: String) {
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        input = sentence; source = sentence
+        busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
+        chosenDestination = nil; chosenOrigin = nil; prepared = nil
+        let context = makeContext()
+        track(context); activeContext = context
+        activity = AppText.text("正在規劃路線…"); startedAt = Date()
+        startDeadline("understand", context: context)
+        operation = Task { @MainActor in
+            do {
+                let session = try OnDeviceJourneyAssistant.conversation(context: context, pro: model.purchases.hasPro)
+                conversation = session
+                let result = try await session.plan(reading, source: sentence, at: Date())
+                try Task.checkCancellation()
+                deadlineTask?.cancel()
+                record("understand", outcome: "ok", context: context)
+                receive(result)
+            } catch {
+                guard !Task.isCancelled else { return }
+                deadlineTask?.cancel()
+                record("understand", outcome: "error:" + OnDeviceJourneyAssistant.failureKind(error), context: context)
+                busy = false
+                fail(AppText.text("這句話暫時無法理解，請換個說法再試，或直接搜尋地點。"))
+            }
+        }
+    }
     func answer(_ index: Int) {
         guard let conversation, !busy else { return }
         operation?.cancel(); busy = true; message = nil

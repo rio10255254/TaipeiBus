@@ -62,6 +62,8 @@ struct AssistantJourneyTurn {
 @MainActor
 protocol JourneyAssistantConversation: AnyObject {
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn
+    /// A request already understood elsewhere (the voice conversation's Claude): planned as it is.
+    func plan(_ reading: JourneyReading, source: String, at now: Date) async throws -> AssistantJourneyTurn
     func answer(option: Int) async throws -> AssistantJourneyTurn
     /// Loads the model before the first request, so the first answer does not wait for it.
     func prewarm()
@@ -71,11 +73,13 @@ protocol JourneyAssistantConversation: AnyObject {
 extension JourneyAssistantConversation {
     func prewarm() {}
     var credit: String? { nil }
+    func plan(_ reading: JourneyReading, source: String, at now: Date) async throws -> AssistantJourneyTurn {
+        try await begin(source, at: now)
+    }
 }
 
 /// Names for the small credit under an assistant result.
 enum AssistantCredit {
-    static var onDevice: String { AppText.text("Apple 裝置端模型") }
     static var rules: String { AppText.text("App 內建規則") }
     static var online: String { AssistantServer.answeredBy ?? AppText.text("線上模型") }
 }
@@ -964,8 +968,8 @@ enum AssistantServer {
 @MainActor
 enum OnlineJourneyReader {
     static var enabledKey: String { AIConsent.key }
-    private static let countKey = "assistantOnlineCount.v1"
-    /// Requests per phone per day, also counted by the server.
+    /// Online AI requests per phone per day, counted by the server across the planner and the voice
+    /// conversation alike.
     static func dailyLimit(pro: Bool) -> Int { pro ? 100 : 20 }
     /// The server answers with Claude and uses these only when it falls back to Groq: Pro reads with the
     /// larger model, and the smaller one when its allowance is used up; everyone else with the smaller
@@ -982,15 +986,6 @@ enum OnlineJourneyReader {
     /// Apple asks apps to get permission before sending what a person types to another company's AI.
     static var needsConsent: Bool { configured && consent == nil }
 
-    private static func takeAllowance(now: Date, pro: Bool) -> Bool {
-        let day = AssistantJourneyRequest.calendar.startOfDay(for: now).timeIntervalSince1970
-        let stored = UserDefaults.standard.array(forKey: countKey) as? [Double] ?? []
-        let used = stored.count == 2 && stored[0] == day ? Int(stored[1]) : 0
-        guard used < dailyLimit(pro: pro) else { return false }
-        UserDefaults.standard.set([day, Double(used + 1)], forKey: countKey)
-        return true
-    }
-
     /// Kept short: every token counts against the shared daily allowance.
     static let instructions = """
     只輸出 JSON：{"destination":"","destinationKind":"place|home|work|school|none","origin":"","originKind":"place|home|work|school|none",\
@@ -1003,7 +998,6 @@ enum OnlineJourneyReader {
 
     static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
         guard configured else { throw Failure.notConfigured }
-        guard takeAllowance(now: now, pro: pro) else { throw Failure.limit }
         let formatter = DateFormatter()
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
@@ -1014,8 +1008,9 @@ enum OnlineJourneyReader {
                 let reading = try await read(text, at: formatter.string(from: now), model: model, session: session)
                 JourneyDiagnostics.shared.record(String(format: "ai-online ok model=%@ %@ %.1fs", model, AssistantServer.served, Date().timeIntervalSince(began)))
                 return reading
-            } catch Failure.http(let status) where [400, 404, 413, 429, 498].contains(status) || status >= 500 {
-                // A retired model (404), a refused option (400) or a used-up allowance (429): try the next.
+            } catch Failure.http(let status) where [400, 404, 413, 498].contains(status) || status >= 500 {
+                // A retired model (404) or a refused option (400): try the next. A used-up allowance (429)
+                // is not tried again, as each try would take from it once more.
                 JourneyDiagnostics.shared.record("ai-online \(model) http(\(status))")
                 lastError = Failure.http(status)
             } catch Failure.invalid {
@@ -1128,7 +1123,6 @@ enum OnlineJourneyReader {
     /// A change to the trip on screen, read by the online model with the trip described in words.
     static func refine(_ text: String, trip: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> AssistantChange {
         guard enabled else { throw Failure.notConfigured }
-        guard takeAllowance(now: now, pro: pro) else { throw Failure.limit }
         let formatter = DateFormatter()
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
         formatter.locale = Locale(identifier: "en_US_POSIX"); formatter.dateFormat = "yyyy-MM-dd HH:mm EEEE"
@@ -1269,6 +1263,10 @@ final class RuleFirstConversation: JourneyAssistantConversation {
         guard !rules.reading.destination.isEmpty else { throw AssistantIntentDraft.ValidationError.input }
         reader = rules.confident ? "rules" : "rules-guess"; context.note(reader: reader); credit = AssistantCredit.rules
         return try await context.resolve(rules.reading, source: text, now: now)
+    }
+    func plan(_ reading: JourneyReading, source: String, at now: Date) async throws -> AssistantJourneyTurn {
+        reader = "voice"; context.note(reader: reader); credit = AssistantCredit.online
+        return try await context.resolve(reading, source: source, now: now)
     }
     func answer(option: Int) async throws -> AssistantJourneyTurn { try await context.answer(option: option) }
 

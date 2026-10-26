@@ -4,12 +4,14 @@
 // answered from a web search, a few a day. Turns come from Pro's own daily allowance; nothing is stored.
 import { caller, headerText, reply, taipeiDay } from '../_shared/caller.ts';
 import { tierOf } from '../_shared/pro.ts';
+import { DAILY_AI } from '../_shared/allowance.ts';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { askClaude, askGroq, searchWeb, streamClaude } from './brain.ts';
 import { type Audio, hear, heardTurn, preferredOrder, readAudio, type Recognizer, type SpeechKeys } from './hear.ts';
 import { NO_WEB, NO_WEB_CHOSEN, type Reply, readInput, type TurnInput, userMessage, webQuestion } from './reply.ts';
 
-const DAILY_TURNS = 40;
+/// Voice turns take from the same daily allowance as the rest of online AI (Pro only here).
+const DAILY_TURNS = DAILY_AI.pro;
 /// Web lookups a day; past them the model answers from what it knows.
 const DAILY_WEB = 3;
 /// The voice consent this server's data use matches; the app sends the version the rider agreed to.
@@ -43,7 +45,7 @@ Deno.serve(async (request) => {
   const tier = await tierOf(admin, userId, typeof body.proof === 'string' ? body.proof : undefined,
     typeof body.renewal === 'string' ? body.renewal : undefined);
   if (tier !== 'pro') return reply({ error: 'pro_required' }, 403);
-  const { data: used, error: allowanceError } = await admin.rpc('take_voice_allowance', {
+  const { data: used, error: allowanceError } = await admin.rpc('take_assistant_allowance', {
     p_user: userId, p_day: taipeiDay(), p_limit: DAILY_TURNS,
   });
   if (allowanceError) return reply({ error: 'allowance' }, 500);

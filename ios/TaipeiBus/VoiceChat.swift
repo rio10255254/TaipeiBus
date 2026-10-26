@@ -472,7 +472,7 @@ final class VoiceConversation: ObservableObject {
             case 403:
                 model.showingProPlans = true
                 return respond(phrase("語音對話是 Pro 功能，可以在方案頁開啟。"), followUp: false)
-            case 429: return respond(phrase("今天的語音對話次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
+            case 429: return respond(phrase("今天的線上 AI 次數用完了，明天再聊，或改用打字搜尋。"), followUp: false)
             default: return respond(phrase("我現在連不上，請稍後再試一次。"), followUp: false)
             }
             var final: [String: Any]?
@@ -659,7 +659,16 @@ final class VoiceConversation: ObservableObject {
             sentence += (mode == "cycling" ? "騎單車" : mode == "walking" ? "走路" : "") + "去\(destination)"
             if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
-            model.assistant.run(sentence)
+            // Claude already understood it: the places are taken as it named them; only the time it wrote
+            // in words (「明天 14:00 出發」), and 家/公司 by name, are read from the sentence.
+            var reading = RuleJourneyReader.read(sentence).reading
+            reading.destination = destination
+            reading.destinationKind = JourneyAssistantContext.category(of: destination) ?? .place
+            reading.origin = origin
+            reading.originKind = origin.isEmpty ? .none : JourneyAssistantContext.category(of: origin) ?? .place
+            if !then.isEmpty { reading.next = then }
+            reading.travelMode = mode == "cycling" ? .cycling : mode == "walking" ? .walking : reading.travelMode
+            model.assistant.plan(reading, sentence: sentence)
             planning = true
             panelRequest = .routes
         case .chooseOption(let index):

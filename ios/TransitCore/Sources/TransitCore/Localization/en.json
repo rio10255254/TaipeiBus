@@ -1127,15 +1127,18 @@
   "線上 AI 暫時無法回應（已設定只用雲端），請稍後再試。": "Online AI isn't responding right now (set to cloud only). Please try again later.",
   "只用雲端": "Cloud only",
   "規劃行程": "Trip planning",
-  "開啟後，手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的 Whisper 為準，句子也只由 Claude 理解，不用手機上的模型或規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。": "When on, the phone only shows your words live, tells when you have finished and notices you cutting in; what you said is always what Whisper on the server heard, and only Claude understands it, never a model or rules on the phone. If the server has a problem you are told so, rather than the phone stepping in, so you can see how the cloud service itself performs. Each sentence waits a little for the server; answers are still read aloud by your iPhone.",
   "每句話的錄音會經由本 App 的伺服器交給所選的辨識服務（Groq 上的 Whisper，或 OpenAI 的語音模型）轉成文字，中英夾雜、店名和口音都聽得比較準；選的服務無法使用時自動改用另一個，都不行時才用手機上的辨識。錄音只用來轉文字，不保存。說「我是說…」更正時，之後會自動多等一下。": "Each sentence's recording goes through OneRoad's own server to the recognition service you choose (Whisper on Groq, or OpenAI's speech model) to be written down, which hears mixed languages, shop names and accents far better; if that service is unavailable the other one is used, and the phone's own recognition only when neither works. Recordings are used only for this and not kept. After you correct yourself (\"I mean…\"), it waits a little longer for you.",
   "你說或打的話、畫面上的行程與附近站名，以及需要時搜尋到的地點名稱，會經由本 App 的伺服器傳給 Anthropic 的 Claude 理解並回答，暫時無法使用時改由 Groq 上的開源模型處理；需要最新資訊時 Claude 會上網搜尋（每天最多 3 次）。語音對話時，每句話的錄音會交給 Groq 上的 Whisper 或 OpenAI 的語音模型轉成文字。不包含位置座標、常用行程或帳號；伺服器不保存對話與錄音，只用匿名代號記錄每天用了幾次。可隨時在資訊與設定關閉。": "What you say or type, the trip on screen and nearby stop names, and when needed the names of places found by search, go through OneRoad's own server to Anthropic's Claude to understand and answer; when Claude is unavailable, an open model on Groq answers instead. For current information Claude searches the web (up to 3 times a day). In voice conversations, each sentence's recording is written down by Whisper on Groq or OpenAI's speech model. No location coordinates, saved trips or account details are sent; the server keeps no conversations or recordings, only an anonymous count of daily use. You can turn this off any time in Info & Settings.",
   "使用線上 AI？": "Use online AI?",
   "使用線上 AI": "Use online AI",
   "線上 AI 與語音對話": "Online AI and voice conversation",
-  "開啟後，規劃行程時由 Claude 讀懂你說或打的話（免費版每天 %@ 次，Pro 每天 %@ 次）；Pro 還能按麥克風和「一路」來回對話，每天 40 次。關閉時，只用手機上的規則理解中文句子。": "When on, Claude reads what you say or type when planning a trip (%@ times a day free, %@ with Pro); with Pro you can also talk things through with OneRoad from the microphone, 40 times a day. When off, only the phone's own rules read Chinese sentences.",
   "用英文規劃需要開啟線上 AI，仍可手動搜尋與規劃行程。": "Planning in English needs online AI; you can still search and plan trips yourself.",
   "辨識服務": "Recognition service",
   "Groq Whisper（較快）": "Groq Whisper (faster)",
-  "OpenAI（較準）": "OpenAI (more accurate)"
+  "OpenAI（較準）": "OpenAI (more accurate)",
+  "開啟後，規劃行程時由 Claude 讀懂你說或打的話，Pro 還能按麥克風和「一路」來回對話；兩者共用每天的次數（免費版 %@ 次，Pro %@ 次）。關閉時，只用手機上的規則理解中文句子。": "When on, Claude reads what you say or type when planning a trip, and with Pro you can talk things through with OneRoad from the microphone; both share one daily count (%@ a day free, %@ with Pro). When off, only the phone's own rules read Chinese sentences.",
+  "今天的線上 AI 次數用完了，明天再聊，或改用打字搜尋。": "Today's online AI uses are used up. Let's talk tomorrow, or type a search instead.",
+  "正在規劃路線…": "Planning routes…",
+  "只用雲端：手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的辨識為準，句子也只由 Claude 理解，不用手機上的規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。": "Cloud only: the phone only shows your words live, tells when you have finished and notices you cutting in; what you said is always what the server heard, and only Claude understands it, never the phone's rules. If the server has a problem you are told so, rather than the phone stepping in, so you can see how the cloud service itself performs. Each sentence waits a little for the server; answers are still read aloud by your iPhone.",
+  "隱私與資料": "Privacy and data"
 }

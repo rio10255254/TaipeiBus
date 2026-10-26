@@ -1772,12 +1772,12 @@ private struct AppInformationView: View {
     }
 }
 
-/// 語音與 AI: how the voice assistant looks and whether sentences are understood online.
+/// 語音與 AI: online AI and how the conversation listens, answers and sounds, then how it looks.
 private struct AssistantSettingsView: View {
     var body: some View {
         List {
-            VoiceStyleSettings()
             if VoiceConversation.available { VoiceChatSettings() }
+            VoiceStyleSettings()
         }
         .navigationTitle(AppText.text("語音與 AI")).navigationBarTitleDisplayMode(.inline)
     }
@@ -1975,7 +1975,6 @@ private struct VoiceStyleSettings: View {
     }
 }
 
-/// 線上理解: asked once before the first sentence goes online; changed here at any time.
 enum NightNavigation {
     /// UI tests capture fixed light and dark appearances whatever the hour, so automation
     /// leaves the system appearance alone unless a test asks for the night switch.

@@ -329,12 +329,10 @@ struct VoiceChatSettings: View {
     var body: some View {
         Section {
             Toggle(AppText.text("使用線上 AI"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
-            // Said on the phone only; nothing leaves it.
-            Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
         } header: {
             SectionHeader(title: AppText.text("線上 AI 與語音對話"), symbol: "bubble.left.and.text.bubble.right.fill", color: Brand.accent)
         } footer: {
-            Text(AppText.text("開啟後，規劃行程時由 Claude 讀懂你說或打的話（免費版每天 %@ 次，Pro 每天 %@ 次）；Pro 還能按麥克風和「一路」來回對話，每天 40 次。關閉時，只用手機上的規則理解中文句子。",
+            Text(AppText.text("開啟後，規劃行程時由 Claude 讀懂你說或打的話，Pro 還能按麥克風和「一路」來回對話；兩者共用每天的次數（免費版 %@ 次，Pro %@ 次）。關閉時，只用手機上的規則理解中文句子。",
                               "\(OnlineJourneyReader.dailyLimit(pro: false))", "\(OnlineJourneyReader.dailyLimit(pro: true))"))
         }
         if enabled {
@@ -365,15 +363,6 @@ struct VoiceChatSettings: View {
                      : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
             }
             Section {
-                // Turning it on also agrees to online understanding, which it uses for every sentence.
-                Toggle(AppText.text("只用雲端"), isOn: Binding(get: { cloudOnly }, set: { on in
-                    cloudOnly = on
-                    if on { cloud = true; AIConsent.answer(true) }
-                })).accessibilityIdentifier("assistant-cloud-only")
-            } footer: {
-                Text(AppText.text("開啟後，手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的 Whisper 為準，句子也只由 Claude 理解，不用手機上的模型或規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))
-            }
-            Section {
                 Picker(AppText.text("回答長度"), selection: $length) {
                     ForEach(VoiceSettings.AnswerLength.allCases) { Text($0.label).tag($0.rawValue) }
                 }.accessibilityIdentifier("voice-chat-answer-length")
@@ -383,24 +372,43 @@ struct VoiceChatSettings: View {
             } footer: {
                 Text(AppText.text("關閉上網查詢時，營業時間、活動等最新資訊改用模型已知的內容回答，可能不是最新的。"))
             }
+        }
+        // The voice answers and navigation prompts are spoken with; on the phone only, nothing leaves it.
+        Section {
+            Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
+            Picker(AppText.text("語速"), selection: $rate) {
+                ForEach(VoiceSettings.Rate.allCases) { Text($0.label).tag($0.rawValue) }
+            }.accessibilityIdentifier("voice-chat-rate")
+            voicePicker(AppText.text("中文聲音"), language: .traditionalChinese, selection: $chineseVoice)
+            voicePicker(AppText.text("英文聲音"), language: .english, selection: $englishVoice)
+            Button(AppText.text("試聽")) {
+                let english = AppLanguage.current == .english
+                sample.stop()
+                sample.enqueue(english ? "The 307 to Banqiao arrives in 4 minutes." : "307 往板橋，約 4 分鐘到。",
+                               language: english ? .english : .traditionalChinese)
+            }.accessibilityIdentifier("voice-chat-sample")
+        } header: {
+            Text(AppText.text("聲音"))
+        } footer: {
+            if basicVoice {
+                Label(AppText.text("目前只有基本語音，念起來比較生硬。到 iPhone 的「設定 > 輔助使用 > 朗讀內容 > 聲音」，在中文（台灣）下載「高品質」或「進階」語音，回答和導航提示會自然很多。"), systemImage: "waveform.badge.plus")
+            }
+        }
+        if enabled {
             Section {
-                Picker(AppText.text("語速"), selection: $rate) {
-                    ForEach(VoiceSettings.Rate.allCases) { Text($0.label).tag($0.rawValue) }
-                }.accessibilityIdentifier("voice-chat-rate")
-                voicePicker(AppText.text("中文聲音"), language: .traditionalChinese, selection: $chineseVoice)
-                voicePicker(AppText.text("英文聲音"), language: .english, selection: $englishVoice)
-                Button(AppText.text("試聽")) {
-                    let english = AppLanguage.current == .english
-                    sample.stop()
-                    sample.enqueue(english ? "The 307 to Banqiao arrives in 4 minutes." : "307 往板橋，約 4 分鐘到。",
-                                   language: english ? .english : .traditionalChinese)
-                }.accessibilityIdentifier("voice-chat-sample")
-            } header: {
-                Text(AppText.text("聲音"))
-            } footer: {
-                if basicVoice {
-                    Label(AppText.text("目前只有基本語音，念起來比較生硬。到 iPhone 的「設定 > 輔助使用 > 朗讀內容 > 聲音」，在中文（台灣）下載「高品質」或「進階」語音，回答和導航提示會自然很多。"), systemImage: "waveform.badge.plus")
+                // Turning it on also agrees to online understanding, which it uses for every sentence.
+                Toggle(AppText.text("只用雲端"), isOn: Binding(get: { cloudOnly }, set: { on in
+                    cloudOnly = on
+                    if on { cloud = true; AIConsent.answer(true) }
+                })).accessibilityIdentifier("assistant-cloud-only")
+                NavigationLink(AppText.text("資料如何使用")) {
+                    List { Text(AIConsent.message) }
+                        .navigationTitle(AppText.text("資料如何使用")).navigationBarTitleDisplayMode(.inline)
                 }
+            } header: {
+                Text(AppText.text("隱私與資料"))
+            } footer: {
+                Text(AppText.text("只用雲端：手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的辨識為準，句子也只由 Claude 理解，不用手機上的規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))
             }
         }
     }
