@@ -18,8 +18,11 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     /// With VoiceOver on, the whole answer is announced at the end in the rider's own voice settings.
     private var announcement = ""
     private var done: CheckedContinuation<Void, Never>?
+    /// Navigation prompts: spoken over other audio briefly, also behind the Lock Screen.
+    private let prompts: Bool
 
-    override init() {
+    init(prompts: Bool = false) {
+        self.prompts = prompts
         super.init()
         synthesizer.delegate = self
     }
@@ -43,10 +46,15 @@ final class SpeechOutput: NSObject, ObservableObject, AVSpeechSynthesizerDelegat
     func enqueue(_ text: String, routes: [String] = [], language: AppLanguage = .current) {
         guard !text.isEmpty else { return }
         // VoiceOver reads it in the rider's own voice settings instead of a second voice over it.
-        if UIAccessibility.isVoiceOverRunning { announcement += text; return }
+        // Behind the Lock Screen VoiceOver announces nothing, so prompts are spoken there.
+        if UIAccessibility.isVoiceOverRunning, !prompts || UIApplication.shared.applicationState == .active { announcement += text; return }
         if queued.isEmpty {
             let session = AVAudioSession.sharedInstance()
-            try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            if prompts {
+                try? session.setCategory(.playback, mode: .voicePrompt, options: [.duckOthers, .interruptSpokenAudioAndMixWithOthers])
+            } else {
+                try? session.setCategory(.playback, mode: .spokenAudio, options: [.duckOthers])
+            }
             try? session.setActive(true)
         }
         let utterance = AVSpeechUtterance(string: SpokenAnswer.speakable(text, routes: routes))
@@ -152,6 +160,13 @@ final class VoiceConversation: ObservableObject {
     /// The planner's places or options offered as choices, in the order shown.
     private var planPlaces: [TravelPlace] = []
     private var planOptions: [String] = []
+    /// The Public Transportation Office's latest notices, once the conversation asked for them.
+    private var notices: [OfficialNotice]?
+    /// The last answer, as the rider may report it: what was heard, what was said, the state it came from.
+    private var lastTurn: [String: String]?
+    /// The last answer can be reported, and whether it has been.
+    @Published private(set) var reportable = false
+    @Published private(set) var reported = false
 
     init(model: TransitAppModel) { self.model = model }
 
@@ -193,7 +208,8 @@ final class VoiceConversation: ObservableObject {
         guard Self.available else { return }
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
-        names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []
+        names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []; notices = nil
+        lastTurn = nil; reportable = false; reported = false
         // Built for Chinese even when listening in English, so switching languages needs no wait.
         let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
         let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
@@ -228,6 +244,18 @@ final class VoiceConversation: ObservableObject {
         guard active else { return }
         speech.stop(); output.stop()
         handle(choice)
+    }
+
+    /// Sends the last answer to the developer, kept 30 days, after the rider agreed in the panel.
+    func reportLastAnswer() {
+        guard let lastTurn, !reported else { return }
+        reported = true
+        Task {
+            let body: [String: Any] = ["consent": Self.consentVersion, "feedback": lastTurn]
+            let status = (try? await AssistantServer.post("converse", body: body, timeout: 10))?.1 ?? 0
+            JourneyDiagnostics.shared.record("voice report status=\(status)")
+            if status != 200 { reported = false }
+        }
     }
 
     /// The panel's language button: listen in the other language from now on, starting right away.
@@ -308,7 +336,7 @@ final class VoiceConversation: ObservableObject {
     private func turn(_ text: String, lookups: Int) async {
         phase = .thinking; choices = []; source = nil
         // Names and figures in the language the rider speaks, so the voice can say them.
-        let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending) }
+        let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending, notices: notices) }
         let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true]
         var answer = SpokenTurn(context: context, heard: text)
@@ -366,6 +394,8 @@ final class VoiceConversation: ObservableObject {
                 said += fallback
             }
             history.append(user: text, said: said)
+            lastTurn = ["heard": text, "said": said, "state": context.prompt(), "model": (final["model"] as? String) ?? ""]
+            reportable = true; reported = false
             respond(nil, followUp: true)
         } catch {
             guard !Task.isCancelled else { return }
@@ -383,8 +413,10 @@ final class VoiceConversation: ObservableObject {
     }
 
     private static func isLookup(_ action: VoiceAction) -> Bool {
-        if case .lookup = action { return true }
-        return false
+        switch action {
+        case .lookup, .notices: true
+        default: false
+        }
     }
 
     /// Speak, then keep listening so the rider can simply go on talking. Without a sentence, it waits
@@ -515,9 +547,29 @@ final class VoiceConversation: ObservableObject {
         case .endTrip:
             guard planner.started else { return }
             model.finishJourney()
-        case .lookup:
+        case .saveStop(let name):
+            Task {
+                guard let station = await model.findStations(query: name, limit: 5).first, !model.favorites.contains(station.id) else { return }
+                model.toggleFavorite(station)
+            }
+        case .remindAlight:
+            if !model.alightReminderOn { model.toggleAlightReminder() } else { model.requestAlightReminderAccess() }
+        case .lookup, .notices:
             break
         }
+    }
+
+    /// The Public Transportation Office's notices, newest first; nil when the feed cannot be read.
+    private static func latestNotices() async -> [OfficialNotice]? {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.timeoutIntervalForRequest = 6; configuration.timeoutIntervalForResource = 8
+        configuration.httpShouldSetCookies = false; configuration.httpCookieStorage = nil; configuration.urlCredentialStorage = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel() }
+        guard let result = try? await session.data(from: OfficialNotices.feedURL),
+              let response = result.1 as? HTTPURLResponse, response.statusCode == 200,
+              response.url.map(OfficialNotices.trusted) == true, result.0.count <= OfficialNotices.maximumBytes else { return nil }
+        return try? OfficialNotices.parse(result.0)
     }
 
     /// The Apple Maps place for a name said in Taipei, for its card.
@@ -532,6 +584,11 @@ final class VoiceConversation: ObservableObject {
 
     /// Puts what the rider asked about on screen so the next state includes it. False when nothing matched.
     private func lookup(_ action: VoiceAction) async -> Bool {
+        if case .notices = action {
+            guard notices == nil else { return false }
+            notices = await Self.latestNotices()
+            return notices != nil
+        }
         guard case .lookup(let stop, let route) = action else { return false }
         if !stop.isEmpty, let station = await model.findStations(query: stop, limit: 5).first {
             model.selectStation(station)
@@ -571,7 +628,7 @@ struct VoiceStateBuilder {
         return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english)])
     }
 
-    func context(pending: VoiceAction?) -> VoiceContext {
+    func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil) -> VoiceContext {
         let now = Date(), planner = model.planner
         var facts: [String] = [], items: [(meaning: String, value: String)] = [], names: [String] = []
         let screen: String
@@ -613,6 +670,8 @@ struct VoiceStateBuilder {
                         : VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
                     items.append(("第 \(index + 1) 個方案的抵達時間", arrival))
                 }
+                // Official fares, adult electronic ticket, after the metro↔bus transfer discount.
+                if let fare = model.fareLabel(option) { items.append(("第 \(index + 1) 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）", fare)) }
             }
         } else if let station = model.mapLabelStation {
             screen = "站牌：\(station.localizedName)"
@@ -641,6 +700,24 @@ struct VoiceStateBuilder {
             names.append(bike.localizedName)
             items.append(("\(bike.localizedName) 可借車輛", "\(dock.rentable) 輛"))
             items.append(("\(bike.localizedName) 可還空位", "\(dock.returnable) 格"))
+        }
+        // YouBike by the destination, for the last stretch or the way back.
+        if let destination = planner.destination, !planner.arrived, let bike = nearestBikeStation(to: destination.coordinate, within: 500),
+           let dock = model.bikeDock(bike.id) {
+            names.append(bike.localizedName)
+            items.append(("目的地附近 YouBike 站 \(bike.localizedName) 可借車輛", "\(dock.rentable) 輛"))
+            items.append(("目的地附近 YouBike 站 \(bike.localizedName) 可還空位", "\(dock.returnable) 格"))
+        }
+        if let notices {
+            let recent = notices.filter { now.timeIntervalSince($0.publishedAt) < 14 * 86_400 }.prefix(5)
+            if recent.isEmpty { facts.append("交通公告：最近兩週沒有新的公告") }
+            for (index, notice) in recent.enumerated() {
+                var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
+                let parts = calendar.dateComponents([.month, .day], from: notice.publishedAt)
+                let day = "\(parts.month ?? 0)/\(parts.day ?? 0)"
+                let body = notice.body.replacingOccurrences(of: "\n", with: " ").prefix(140)
+                facts.append("交通公告 \(index + 1)（臺北市公共運輸處，\(day)）：\(notice.title)。\(body)")
+            }
         }
         let nearby = nearbyStations.map(\.localizedName)
         if !nearby.isEmpty { facts.append("附近站牌：" + nearby.joined(separator: "、")); names += nearby }
@@ -693,11 +770,98 @@ struct VoiceStateBuilder {
             .first { $0.route?.localizedName == route || $0.route?.name == route }?.approaches.first?.vehicle
     }
 
+    /// The closest YouBike station to a place, within a walk.
+    func nearestBikeStation(to point: Coordinate, within meters: Double) -> BikeStation? {
+        model.bikeNetwork.stations.filter { $0.coordinate.distance(to: point) <= meters }
+            .min { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) }
+    }
+
     /// A YouBike station with bikes near the station on screen, or near the rider.
     func nearestBikeStation(near: String) -> BikeStation? {
         let center = model.mapLabelStation?.coordinate ?? model.location.usableCoordinate
         guard let center else { return nil }
         return model.bikeNetwork.stations.filter { $0.coordinate.distance(to: center) <= 800 && (model.bikeDock($0.id)?.rentable ?? 1) > 0 }
             .min { $0.coordinate.distance(to: center) < $1.coordinate.distance(to: center) }
+    }
+}
+
+/// Spoken prompts while navigating (Pro), so the trip can be followed without looking: what to do at
+/// each step, the bus or train coming, getting ready to get off, and arriving. Also behind the Lock
+/// Screen, where navigation keeps the app running (the audio background mode lets it speak there);
+/// never over the conversation. Each prompt is said once.
+@MainActor
+final class NavigationVoice {
+    static let key = "navigationVoicePrompts.v1"
+    static var enabled: Bool { UserDefaults.standard.object(forKey: key) as? Bool ?? true }
+    private unowned let model: TransitAppModel
+    private let output = SpeechOutput(prompts: true)
+    private var said: Set<String> = []
+    private var step: Int?
+
+    init(model: TransitAppModel) { self.model = model }
+
+    /// Called whenever navigation moves on: a location fix, a refresh, a step or boarding change.
+    func update(now: Date = Date()) {
+        let planner = model.planner
+        guard planner.started else { said = []; step = nil; return }
+        guard Self.enabled, model.purchases.hasPro, !model.voiceChat.active else { return }
+        if planner.arrived {
+            say("arrived", AppText.text("已到達「%@」。", planner.destination?.localizedName ?? AppText.text("目的地")))
+            return
+        }
+        if step != planner.stepIndex {
+            step = planner.stepIndex
+            if let sentence = stepSentence() { say("step-\(planner.stepIndex)", sentence) }
+        }
+        guard let ride = planner.activeRide else { return }
+        let route = ride.route.localizedName
+        // Walking to the stop, or waiting there for a bus: the vehicle coming is worth hearing.
+        let waiting: Bool
+        switch planner.currentStep {
+        case .walk?: waiting = true
+        case .ride?: waiting = ride.route.mode == .bus && model.boardedVehicle == nil
+        case nil: waiting = false
+        }
+        if waiting, model.boardedVehicle == nil { approaching(ride, route: route, now: now) }
+        if case .ride = planner.currentStep, let seconds = model.onboardSecondsToAlight(ride, at: now), seconds <= AlightReminder.leadSeconds {
+            say("alight-\(ride.id)", AppText.text("快到「%@」了，準備下車。", ride.alighting.localizedName))
+        }
+    }
+
+    private func approaching(_ ride: TransitRide, route: String, now: Date) {
+        guard let seconds = model.boardingInformation(ride, at: now).seconds, seconds > 0 else { return }
+        if seconds <= 60 {
+            say("arriving-\(ride.id)", AppText.text("%@ 快到「%@」了。", route, ride.boarding.localizedName))
+        } else if seconds <= 180 {
+            say("near-\(ride.id)", AppText.text("%@ 大約 %@ 分鐘後到「%@」。", route, String(Int((seconds / 60).rounded(.up))), ride.boarding.localizedName))
+        }
+    }
+
+    private func stepSentence() -> String? {
+        let planner = model.planner
+        switch planner.currentStep {
+        case .walk?:
+            if let ride = planner.activeRide {
+                return AppText.text("走到「%@」，搭 %@。", ride.boarding.localizedName, ride.route.localizedName)
+            }
+            return AppText.text("走到「%@」。", planner.destination?.localizedName ?? AppText.text("目的地"))
+        case .ride?:
+            guard let ride = planner.activeRide else { return nil }
+            return AppText.text("搭 %@ 往 %@，在「%@」下車。", ride.route.localizedName,
+                                ride.route.localizedDestination(direction: ride.direction), ride.alighting.localizedName)
+        case nil: return nil
+        }
+    }
+
+    private func say(_ key: String, _ sentence: String) {
+        guard said.insert(key).inserted else { return }
+        JourneyDiagnostics.shared.record("navigation voice \(key.split(separator: "-").first ?? "")")
+        output.enqueue(sentence, language: AppLanguage.current)
+        Task { [weak self] in
+            await self?.output.finishSpeaking()
+            // Other audio was lowered for the prompt; it comes back unless the conversation took over.
+            guard let self, !self.model.voiceChat.active, !self.output.speaking else { return }
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        }
     }
 }

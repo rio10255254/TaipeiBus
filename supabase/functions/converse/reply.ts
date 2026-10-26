@@ -4,7 +4,7 @@
 
 export const ACTION_TYPES = [
   'none', 'show_stop', 'show_route', 'follow_vehicle', 'plan_trip', 'choose_option', 'show_bike', 'show_place', 'lookup', 'web_search',
-  'start_navigation', 'boarded', 'alighted', 'end_trip',
+  'notices', 'save_stop', 'remind_alight', 'start_navigation', 'boarded', 'alighted', 'end_trip',
 ] as const;
 export type ActionType = typeof ACTION_TYPES[number];
 /// Change the trip: only ever asked as a question first, never run straight from a reply.
@@ -60,7 +60,8 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - 只能用「可用資料」裡真的列出的代號。乘客要的即時資料不在裡面（例如問的路線、站牌沒有列出），就用 lookup 去查，say 只說「我查一下」，不要有空位（例如問 299 而可用資料沒有 299，就說「我查一下 299」）；沒有「可用資料」時，say 裡不能有空位。例如問附近有沒有 YouBike 而可用資料沒有車位，就說「我把附近的 YouBike 站標在地圖上」，不要提車輛或車位數。
 - 空位會換成畫面上的完整說法，可能是「5 分鐘」「1 分鐘內」「尚未發車」「全程約 25 分」「19:55」「3 輛」。空位前後不要再加「約」「分鐘」「後」「到」「全程」這類字，用這樣的句型：「307 往板橋，{r1}。」「第一個方案{r1}，{r2}抵達。」「下車站還要{r1}。」
 - 景點介紹、怎麼轉乘、哪種搭法比較省錢這類一般知識可以直接回答；不確定的說「建議出發前再確認」。
-- 營業時間、票價金額、電話這類具體數字不要憑記憶說。營業時間和電話用 show_place 打開地點卡，say 說「營業時間在卡片上」；票價可以說哪種搭法比較便宜，金額請乘客看方案或官方票價。
+- 營業時間、票價金額、電話這類具體數字不要憑記憶說。營業時間和電話用 show_place 打開地點卡，say 說「營業時間在卡片上」。
+- 票價：「可用資料」有方案的車資時，用它的空位說（例如「第二個最便宜，{r7}」），那是官方票價、悠遊卡全票，已扣捷運與公車轉乘優惠；沒有時不要說金額，可以說哪種搭法比較便宜，或用 plan_trip 規劃讓乘客看方案的車資。
 - 怎麼去、要多久：用 plan_trip 規劃，搭車或走路要幾分鐘、在哪一站轉乘都交給方案，不要憑記憶說轉乘站或分鐘數；say 只講大方向（例如「搭捷運最省事」），細節請乘客看方案。
 - 路線名稱、站名照「目前狀態」裡的寫法。
 
@@ -70,7 +71,9 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，除非乘客這次改了。乘客只想改出發時間、交通方式或偏好，也用 plan_trip 重新規劃。
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
 - lookup：「目前狀態」裡沒有乘客要的即時資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
-- web_search：非必要不用。只有乘客問今天或最新的活動、臨時停駛、封路或天氣，而「網路查詢」還有次數時才用；query 寫成簡短的搜尋字詞，say 只說「我上網查一下」。營業時間用 show_place；路線、景點介紹這類不常變的事用自己的知識。「網路查詢」寫著今天已用完時，說你沒有最新資訊，建議乘客去哪裡確認。
+- notices：乘客問停駛、改道、封路、管制或交通公告，而「目前狀態」沒有「交通公告」時用，say 只說「我看一下交通公告」，App 會把臺北市公共運輸處最近的公告加進狀態再問你一次。有「交通公告」時照它回答，公告沒寫到的就說公告沒有提到。
+- save_stop：把站牌加入收藏（stop）。remind_alight：開啟下車提醒。
+- web_search：非必要不用。只有乘客問今天或最新的活動、天氣，或交通公告沒寫到的臨時停駛、封路，而「網路查詢」還有次數時才用；query 寫成簡短的搜尋字詞，say 只說「我上網查一下」。營業時間用 show_place；路線、景點介紹這類不常變的事用自己的知識。「網路查詢」寫著今天已用完時，說你沒有最新資訊，建議乘客去哪裡確認。
 - 沒用到的欄位留空字串，option 填 0。
 
 確認（confirm）
@@ -138,6 +141,7 @@ function readAction(value: unknown): Action | null {
     case 'lookup': return action.stop || action.route ? action : null;
     case 'web_search': return action.query ? action : null;
     case 'show_place': return action.destination ? action : null;
+    case 'save_stop': return action.stop ? action : null;
     default: return action;
   }
 }

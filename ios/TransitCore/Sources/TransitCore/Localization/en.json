@@ -1062,5 +1062,21 @@
   "捷運站": "MRT station",
   "找不到「%@」，請換個說法再說一次。": "I couldn't find \"%@\". Please say it another way.",
   "「%@」要去哪一個？可以直接說或點選。": "Which \"%@\" do you mean? Say or tap one.",
-  "好，改到%@。": "OK, going to %@ instead."
+  "好，改到%@。": "OK, going to %@ instead.",
+  "車資 %@ 元": "Fare NT$%@",
+  "車資 %@ 元起": "Fare from NT$%@",
+  "已到達「%@」。": "You've arrived at %@.",
+  "%@ 快到「%@」了。": "The %@ is almost at %@.",
+  "%@ 大約 %@ 分鐘後到「%@」。": "The %@ arrives in about %@ minutes at %@.",
+  "走到「%@」，搭 %@。": "Walk to %@ and take the %@.",
+  "走到「%@」。": "Walk to %@.",
+  "搭 %@ 往 %@，在「%@」下車。": "Take the %@ toward %@ and get off at %@.",
+  "導航時語音提示": "Spoken navigation prompts",
+  "站間車程與車資來自交通部運輸資料流通服務平臺（TDX）；車資為悠遊卡全票，已扣捷運與公車 1 小時內轉乘優惠 8 元，來源不足時仍標示估計。": "Station travel times and fares come from MOTC's Transport Data eXchange (TDX). Fares are adult EasyCard fares with the NT$8 metro–bus transfer discount within an hour; estimates are labelled when sources are incomplete.",
+  "問一路": "Ask OneRoad",
+  "已回報": "Reported",
+  "回報這次回答": "Report this answer",
+  "回報這次回答？": "Report this answer?",
+  "回報": "Report",
+  "你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。": "What you said, this answer and a summary of the screen go to the developer, kept for 30 days and used only to improve voice chat."
 }

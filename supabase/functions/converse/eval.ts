@@ -23,6 +23,8 @@ const now = '現在：2026-10-25 19:40 星期日（台北）';
 const station = `${now}\n畫面：站牌：忠孝復興站\n附近站牌：忠孝復興站、大安路口\n可用資料（念的時候寫成 {代號}）：\n[r1] 307 往板橋 在 忠孝復興站 的到站\n[r2] 671 往大坪林 在 忠孝復興站 的到站\n[r3] 紅25 往捷運昆陽站 在 忠孝復興站 的到站`;
 const map = `${now}\n畫面：地圖\n附近站牌：忠孝復興站、大安路口`;
 const routes = `${now}\n畫面：路線方案：到 台北101\n第 1 個方案：信義幹線\n第 2 個方案：BR→藍5\n第 3 個方案：全程步行\n可用資料（念的時候寫成 {代號}）：\n[r1] 第 1 個方案的全程時間\n[r2] 第 1 個方案的抵達時間\n[r3] 第 2 個方案的全程時間\n[r4] 第 2 個方案的抵達時間\n[r5] 第 3 個方案的全程時間\n[r6] 第 3 個方案的抵達時間`;
+const priced = `${routes}\n[r7] 第 1 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）\n[r8] 第 2 個方案的車資（悠遊卡全票，已扣捷運公車轉乘優惠）`;
+const announced = `${map}\n交通公告 1（臺北市公共運輸處，10/24）：10/26 臺北馬拉松交通管制。10/26 5:00 至 13:00 仁愛路、中山南路管制，307、262 等 30 條路線改道，請提早出門。`;
 const waiting = `${now}\n畫面：導航中：在 忠孝復興站 等 307 往板橋\n目的地：板橋車站\n上車站：忠孝復興站\n下車站：板橋車站\n可用資料（念的時候寫成 {代號}）：\n[r1] 307 到 忠孝復興站 的下一班`;
 const onboard = `${now}\n畫面：導航中：在 307 往板橋 的車上\n目的地：板橋車站\n上車站：忠孝復興站\n下車站：板橋車站\n可用資料（念的時候寫成 {代號}）：\n[r1] 預計抵達下車站 板橋車站`;
 
@@ -49,6 +51,10 @@ const cases: Case[] = [
   { name: '多站行程', state: map, utterance: '明天下午去西門町再去淡水', expect: 'plan_trip', time: '明天', then: '淡水' },
   { name: '記得時間與下一站', state: tomorrow, utterance: '改成少走路的', history: earlier, expect: 'plan_trip', time: '明天', then: '淡水' },
   { name: '省錢', state: map, utterance: '從忠孝復興到淡水，車資最便宜要怎麼搭？', expect: 'plan_trip', avoid: 'web_search', noAmounts: true },
+  { name: '車資', state: priced, utterance: '哪個最便宜？要多少錢？', slot: true, noAmounts: true },
+  { name: '交通公告', state: map, utterance: '今天公車有沒有改道？', expect: 'notices', avoid: 'web_search' },
+  { name: '照公告回答', state: announced, utterance: '那 307 會改道嗎？', avoid: 'web_search' },
+  { name: '收藏', state: station, utterance: '把這站加入收藏', expect: 'save_stop' },
   { name: '營業時間', state: map, utterance: '故宮開到幾點？', expect: 'show_place', avoid: 'web_search' },
   { name: '要上網', state: map, utterance: '今天淡水有什麼活動？', expect: 'web_search' },
   { name: '網路用完', state: map, utterance: '今天淡水有什麼活動？', web: '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答', avoid: 'web_search', noAmounts: true },

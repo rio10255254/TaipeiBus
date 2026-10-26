@@ -133,6 +133,7 @@ private struct VoiceChatLayer: View {
 struct VoiceChatPanel: View {
     @ObservedObject var chat: VoiceConversation
     @ObservedObject var speech: SpeechInput
+    @State private var askingReport = false
 
     private var status: (symbol: String, text: String) {
         switch chat.phase {
@@ -155,6 +156,17 @@ struct VoiceChatPanel: View {
                     ModelCredit(text: AppText.text("今天還能問 %@ 次", "\(remaining)"))
                 } else if let model = AssistantServer.answeredBy, chat.phase == .speaking {
                     ModelCredit(text: model)
+                }
+                // A wrong answer can be sent to the developer, once the rider agrees.
+                if chat.reportable {
+                    Button { if !chat.reported { askingReport = true } } label: {
+                        Image(systemName: chat.reported ? "checkmark.bubble" : "exclamationmark.bubble")
+                            .font(.footnote.weight(.bold)).frame(width: 32, height: 32)
+                            .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(chat.reported ? AppText.text("已回報") : AppText.text("回報這次回答"))
+                    .accessibilityIdentifier("voice-chat-report")
                 }
                 // The language it listens in: a visitor can talk English to the Chinese app, and back.
                 Button { chat.switchLanguage() } label: {
@@ -208,6 +220,12 @@ struct VoiceChatPanel: View {
         // While it speaks, a tap stops it and listens: the way to cut in without waiting.
         .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
         .onTapGesture { if chat.phase == .speaking { chat.interrupt() } }
+        .alert(AppText.text("回報這次回答？"), isPresented: $askingReport) {
+            Button(AppText.text("回報")) { chat.reportLastAnswer() }
+            Button(AppText.text("取消"), role: .cancel) {}
+        } message: {
+            Text(AppText.text("你說的話、這次的回答與當時的畫面摘要會傳給開發者，保存 30 天，只用來改進語音對話。"))
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("voice-chat")
     }
@@ -235,9 +253,12 @@ struct VoiceChatButton: View {
 struct VoiceChatSettings: View {
     @AppStorage(VoiceConversation.consentKey) private var enabled = false
     @AppStorage(SpeechInput.modernKey) private var modern = true
+    @AppStorage(NavigationVoice.key) private var prompts = true
     var body: some View {
         Section {
             Toggle(AppText.text("語音對話"), isOn: $enabled).accessibilityIdentifier("voice-chat-toggle")
+            // Said on the phone only; nothing leaves it.
+            Toggle(AppText.text("導航時語音提示"), isOn: $prompts).accessibilityIdentifier("navigation-voice-toggle")
             // iOS 26's recogniser, on by default; off returns to the usual one, to compare.
             if enabled {
                 if #available(iOS 26.0, *) {
@@ -264,14 +285,7 @@ enum VoiceChatLaunch {
     static func take() -> Bool { defer { pending = false }; return pending }
 }
 
-struct AskTaipeiBusIntent: AppIntent {
-    static let title: LocalizedStringResource = "問一路"
-    static let description = IntentDescription("打開「一路」的語音對話（Pro）：查到站、規劃路線、導航時上下車。")
-    static let openAppWhenRun = true
-
-    @MainActor
-    func perform() async throws -> some IntentResult {
-        VoiceChatLaunch.request()
-        return .result()
-    }
+extension AskTaipeiBusIntent {
+    /// Runs the intent in the app; the widget extension, which shares the intent, never sets it.
+    @MainActor static func connect() { handler = { VoiceChatLaunch.request() } }
 }
