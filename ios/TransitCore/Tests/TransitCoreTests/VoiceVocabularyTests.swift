@@ -62,6 +62,19 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertTrue(VoiceEcho.interrupts(heard: "不用了我要改去台北車站", spoken: spoken, strict: true))
     }
 
+    func testARiderCorrectingThemselvesIsWaitedForLonger() {
+        XCTAssertTrue(VoicePatience.corrects("我是說圓山的酒吧"))
+        XCTAssertTrue(VoicePatience.corrects("我們要一起我是說圓山的酒吧。"))
+        XCTAssertTrue(VoicePatience.corrects("不是，是淡水"))
+        XCTAssertTrue(VoicePatience.corrects("I mean the 671"))
+        XCTAssertFalse(VoicePatience.corrects("307 還要多久"))
+        XCTAssertFalse(VoicePatience.corrects("不是很遠吧"))
+        XCTAssertEqual(VoicePatience.next(1.3, after: "我是說圓山"), 1.6, accuracy: 0.001)
+        XCTAssertEqual(VoicePatience.next(2.2, after: "我是說圓山"), VoicePatience.longest)
+        XCTAssertEqual(VoicePatience.next(1.6, after: "307 還要多久"), 1.55, accuracy: 0.001)
+        XCTAssertEqual(VoicePatience.next(1.3, after: "307 還要多久"), VoicePatience.usual)
+    }
+
     func testTheAnswersOwnWordsAreLeftOutOfWhatTheRiderSaid() {
         // Exactly as heard before the rider spoke.
         XCTAssertEqual(VoiceEcho.removing(echo: "307往板橋", from: "307往板橋我是說圓山的酒吧"), "我是說圓山的酒吧")

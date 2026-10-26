@@ -315,7 +315,7 @@ final class SpeechInput: ObservableObject {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased()
         let lastWord = words.split(whereSeparator: { !$0.isLetter }).last.map(String.init) ?? ""
         let leadsOn = Self.leadOn.contains(where: { words.hasSuffix($0) }) || Self.englishLeadOn.contains(lastWord)
-        return leadsOn ? pauseAfterWords + 0.6 : pauseAfterWords
+        return leadsOn ? pauseAfterWords + 0.8 : pauseAfterWords
     }
 
     /// The microphone's level: shown on screen, and above the room's own sound it counts as a voice.

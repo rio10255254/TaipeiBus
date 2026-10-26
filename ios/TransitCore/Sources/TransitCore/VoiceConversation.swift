@@ -489,6 +489,25 @@ public enum VoiceChoice {
 /// voice picked up again by the microphone. Chinese is compared by sound in pairs of syllables, so
 /// 往 heard as 網 still matches, and 四 is 4; English word by word. The rider is cutting in once enough
 /// of what was heard is nowhere in what was spoken.
+/// How long a pause ends a turn. A rider who has to correct themselves (「我是說…」) was probably cut
+/// off, so later turns wait a little longer for them; turns that go well bring it slowly back.
+public enum VoicePatience {
+    public static let usual = 1.3
+    public static let longest = 2.3
+    /// Said anywhere in the turn, or only at its start, where 「不是」 is a correction and not 「不是很遠」.
+    private static let corrections = ["我是說", "我說的是", "我的意思是", "i mean", "i said"]
+    private static let startsCorrecting = ["不是啦", "不是，", "不是,", "不對", "no, i", "no i"]
+
+    public static func corrects(_ text: String) -> Bool {
+        let text = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return corrections.contains { text.contains($0) } || startsCorrecting.contains { text.hasPrefix($0) }
+    }
+
+    public static func next(_ pause: Double, after text: String) -> Double {
+        corrects(text) ? min(pause + 0.3, longest) : max(pause - 0.05, usual)
+    }
+}
+
 public enum VoiceEcho {
     /// `strict` asks for more new words, for the loudspeaker, whose sound reaches the microphone.
     public static func interrupts(heard: String, spoken: String, strict: Bool = false) -> Bool {
