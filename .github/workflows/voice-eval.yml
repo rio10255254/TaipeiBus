@@ -50,6 +50,8 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
       ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+      # A pull request's prompt may not ship: its replay reports without writing verdicts.
+      REPLAY_WRITE: ${{ github.event_name != 'pull_request' }}
     steps:
       - name: Stop here until the project is set up
         id: ready

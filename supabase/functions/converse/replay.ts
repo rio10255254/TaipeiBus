@@ -221,7 +221,7 @@ async function main(): Promise<number> {
     const verdict = verdictOf(problems(expectation(report), answer.reply), judged);
     const model = /^[A-Za-z0-9._:@/-]{1,80}$/.test(answer.model) ? answer.model : claudeModel();
     try {
-      await query(token, ref, updateQuery(report.id, verdict, judged.reported, model));
+      if (Deno.env.get('REPLAY_WRITE') !== 'false') await query(token, ref, updateQuery(report.id, verdict, judged.reported, model));
     } catch (error) {
       console.log(`#${report.id} ${error instanceof QueryError ? error.message : 'Writing the verdict failed.'}`);
       return 1;
