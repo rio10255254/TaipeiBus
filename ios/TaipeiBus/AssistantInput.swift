@@ -102,6 +102,9 @@ final class SpeechInput: ObservableObject {
     /// The longest a turn listens once words came, even while new words keep arriving (a TV, a
     /// conversation nearby): listening must always end.
     private static let longestTalk = 20.0
+    /// The recogniser's other readings of what was said, for the assistant to weigh: a name it does not
+    /// know is often right in one of them. Kept after listening ends, until the next start.
+    private(set) var alternatives: [String] = []
     /// Listening has ended and the recogniser is giving its final reading of what it heard.
     private var finishing = false
     private var settle: Task<Void, Never>?
@@ -118,7 +121,7 @@ final class SpeechInput: ObservableObject {
         self.hints = Array(hints.prefix(VoiceVocabulary.limit)); self.unheard = unheard; spokenLanguage = language
         held = hold; self.onWords = onWords; echo = ""
         lastVoice = .distantPast; noiseFloor = 0.2; wordsSince = nil
-        transcript = ""; problem = nil; blocked = false; failed = false; preparing = true
+        transcript = ""; alternatives = []; problem = nil; blocked = false; failed = false; preparing = true
         let current = attempt
         JourneyDiagnostics.shared.record("speech tap speech=\(SFSpeechRecognizer.authorizationStatus().rawValue) mic=\(AVAudioApplication.shared.recordPermission.rawValue)")
         let allowed = await Self.permissions()
@@ -184,14 +187,18 @@ final class SpeechInput: ObservableObject {
         JourneyDiagnostics.shared.record("speech start on-device=\(onDevice)")
         let current = attempt
         // Recognition results arrive on a background queue; they are handed to the main actor here.
-        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, final, code in
-            Task { @MainActor in self?.receive(text: text, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice) }
+        task = recognizer.recognitionTask(with: request, resultHandler: Self.results { [weak self] text, others, final, code in
+            Task { @MainActor in
+                self?.receive(text: text, others: others, final: final, code: code, attempt: current, recognizer: recognizer, onDevice: onDevice)
+            }
         })
         // Nothing said at all: stop instead of listening forever, and say so.
         if !held { waitForSilence(waitForWords) }
     }
-    private func receive(text: String?, final: Bool, code: String?, attempt current: Int, recognizer: SFSpeechRecognizer, onDevice: Bool) {
+    private func receive(text: String?, others: [String], final: Bool, code: String?, attempt current: Int,
+                         recognizer: SFSpeechRecognizer, onDevice: Bool) {
         guard current == attempt, listening else { return }
+        if let text, !text.isEmpty, !held { alternatives = others }
         if finishing {
             if let text, !text.isEmpty { transcript = text }
             if final || code != nil { deliver() }
@@ -268,8 +275,10 @@ final class SpeechInput: ObservableObject {
                 for try await result in transcriber.results {
                     var text = String(result.text.characters)
                     if english, !finalized.isEmpty, !finalized.hasSuffix(" "), !text.hasPrefix(" ") { text = " " + text }
+                    let before = finalized
                     if result.isFinal { finalized += text }
-                    self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, attempt: current)
+                    let others = result.alternatives.dropFirst().map { before + String($0.characters) }
+                    self?.receiveAnalyzed(result.isFinal ? finalized : finalized + text, others: others, attempt: current)
                 }
                 self?.analyzerEnded(attempt: current)
             } catch {
@@ -289,11 +298,12 @@ final class SpeechInput: ObservableObject {
         return true
     }
 
-    private func receiveAnalyzed(_ text: String, attempt current: Int) {
+    private func receiveAnalyzed(_ text: String, others: [String], attempt current: Int) {
         guard current == attempt, listening else { return }
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
         transcript = text
+        if !held { alternatives = others }
         if finishing { return }
         if held { onWords?(text); return }
         wordsSince = wordsSince ?? Date()
@@ -386,6 +396,12 @@ final class SpeechInput: ObservableObject {
         guard listening, finishing else { return }
         var text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
         text = VoiceEcho.removing(echo: echo, from: text)
+        var others: [String] = []
+        for other in alternatives {
+            let other = VoiceEcho.removing(echo: echo, from: other.trimmingCharacters(in: .whitespacesAndNewlines))
+            if !other.isEmpty, other != text, !others.contains(other), others.count < 4 { others.append(other) }
+        }
+        alternatives = others
         let done = finished, unheard = self.unheard
         stop()
         JourneyDiagnostics.shared.record("speech done heard=\(!text.isEmpty)")
@@ -492,11 +508,11 @@ final class SpeechInput: ObservableObject {
         let decibels = 20 * log10(max(rms, 0.000_01))
         return Double(min(1, max(0, (decibels + 50) / 40)))
     }
-    nonisolated private static func results(_ deliver: @escaping @Sendable (String?, Bool, String?) -> Void)
+    nonisolated private static func results(_ deliver: @escaping @Sendable (String?, [String], Bool, String?) -> Void)
         -> (SFSpeechRecognitionResult?, Error?) -> Void {
         { result, error in
-            deliver(result?.bestTranscription.formattedString, result?.isFinal ?? false,
-                    (error as NSError?).map { "\($0.domain) \($0.code)" })
+            deliver(result?.bestTranscription.formattedString, result?.transcriptions.dropFirst().map(\.formattedString) ?? [],
+                    result?.isFinal ?? false, (error as NSError?).map { "\($0.domain) \($0.code)" })
         }
     }
 }
@@ -512,21 +528,29 @@ enum ModernSpeech {
     private static var formats: [String: AVAudioFormat] = [:]
 
     static func transcriber(for locale: Locale) async -> SpeechTranscriber? {
-        if let supported = installed[locale.identifier] { return SpeechTranscriber(locale: supported, preset: .progressiveTranscription) }
+        if let supported = installed[locale.identifier] { return Self.module(supported) }
         guard SpeechTranscriber.isAvailable, let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else { return nil }
-        let transcriber = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+        let transcriber = Self.module(supported)
         let status = await AssetInventory.status(forModules: [transcriber])
         if status == .installed { installed[locale.identifier] = supported; return transcriber }
         if status == .supported, downloading.insert(supported.identifier).inserted {
             JourneyDiagnostics.shared.record("speech analyzer-download \(supported.identifier)")
             Task.detached(priority: .utility) {
-                let module = SpeechTranscriber(locale: supported, preset: .progressiveTranscription)
+                let module = Self.module(supported)
                 do { try await AssetInventory.assetInstallationRequest(supporting: [module])?.downloadAndInstall() } catch {
                     await MainActor.run { _ = ModernSpeech.downloading.remove(supported.identifier) }
                 }
             }
         }
         return nil
+    }
+
+    /// Progressive results, with the recogniser's other readings for the assistant to weigh.
+    nonisolated private static func module(_ locale: Locale) -> SpeechTranscriber {
+        let preset = SpeechTranscriber.Preset.progressiveTranscription
+        return SpeechTranscriber(locale: locale, transcriptionOptions: preset.transcriptionOptions,
+                                 reportingOptions: preset.reportingOptions.union([.alternativeTranscriptions]),
+                                 attributeOptions: preset.attributeOptions)
     }
 
     static func format(for transcriber: SpeechTranscriber, locale: Locale) async -> AVAudioFormat? {

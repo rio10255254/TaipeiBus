@@ -24,6 +24,14 @@ public enum VoiceVocabulary {
         ("光華商場", "Guanghua Digital Plaza"), ("台大醫院", "NTU Hospital"), ("台灣大學", "National Taiwan University"),
     ]
 
+    /// Shops and chains riders name in English, even in a Chinese sentence, which the Chinese recogniser
+    /// rarely spells out by itself.
+    public static let brands = [
+        "World Gym", "Starbucks", "7-Eleven", "FamilyMart", "IKEA", "Costco", "Uniqlo", "MUJI", "McDonald's",
+        "MOS Burger", "Louisa", "SOGO", "ATT 4 FUN", "Breeze", "Eslite", "Carrefour", "PX Mart", "Decathlon",
+        "Apple Store", "H&M", "Zara", "Mitsukoshi", "Q Square", "Bellavita", "Miramar", "Global Mall",
+    ]
+
     /// Words of the app itself, said in almost every conversation.
     public static func appWords(english: Bool) -> [String] {
         english ? ["YouBike", "MRT", "bus", "I'm on the bus", "get off", "navigation"]

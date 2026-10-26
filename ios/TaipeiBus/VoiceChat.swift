@@ -359,6 +359,9 @@ final class VoiceConversation: ObservableObject {
                 guard let self else { return }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
                 if corrected != text { JourneyDiagnostics.shared.record("voice heard \(text) as \(corrected)") }
+                self.alternatives = self.speech.alternatives.map {
+                    self.language == .traditionalChinese ? self.names?.correct($0) ?? $0 : $0
+                }
                 self.handle(corrected)
             })
         }
@@ -371,8 +374,12 @@ final class VoiceConversation: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.pauseKey) }
     }
 
+    /// The recogniser's other readings of what was just said, sent with it once.
+    private var alternatives: [String] = []
+
     private func handle(_ text: String) {
         guard active else { return }
+        let others = alternatives; alternatives = []
         pause = VoicePatience.next(pause, after: text)
         // A tapped choice can arrive while the last answer is still being spoken; that answer's wait
         // must not go on to open the microphone over this one.
@@ -400,14 +407,14 @@ final class VoiceConversation: ObservableObject {
             work = Task { await say(phrase("好，有需要再叫我。")); end() }
             return
         }
-        work = Task { await turn(text, lookups: 1) }
+        work = Task { await turn(text, alternatives: others, lookups: 1) }
     }
 
-    private func turn(_ text: String, lookups: Int) async {
+    private func turn(_ text: String, alternatives: [String] = [], lookups: Int) async {
         phase = .thinking; choices = []; source = nil
         // Names and figures in the language the rider speaks, so the voice can say them.
         let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending, notices: notices) }
-        let body: [String: Any] = ["utterance": text, "state": context.prompt(), "history": history.json,
+        let body: [String: Any] = ["utterance": text, "alternatives": alternatives, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true]
         var answer = SpokenTurn(context: context, heard: text)
         func speak(_ sentence: String) { speakPart(sentence, routes: context.names) }
@@ -442,7 +449,7 @@ final class VoiceConversation: ObservableObject {
             // The state had no answer: look it up while 「我查一下」 is spoken, then ask once more.
             if lookups > 0, let lookup = reply.actions.first(where: Self.isLookup),
                await self.lookup(lookup) {
-                return await turn(text, lookups: lookups - 1)
+                return await turn(text, alternatives: alternatives, lookups: lookups - 1)
             }
             compact = reply.actions.contains { !Self.isLookup($0) }
             for action in reply.actions { run(action) }
@@ -686,7 +693,7 @@ struct VoiceStateBuilder {
         for journey in model.commutes.journeys { own += [journey.title, place(journey.destination)] + (journey.origin.map { [place($0)] } ?? []) }
         own += model.planner.recentPlaces.map(place)
         let city = VoiceVocabulary.landmarks.map { english ? $0.english : $0.chinese }
-        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english)])
+        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english), VoiceVocabulary.brands])
     }
 
     func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil) -> VoiceContext {

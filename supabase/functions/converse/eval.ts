@@ -7,6 +7,8 @@ import { type Reply, userMessage, webQuestion } from './reply.ts';
 
 type Ask = (message: string, onSay: () => void) => Promise<Awaited<ReturnType<typeof askGroq>>>;
 type Case = Expectation & {
+  /// The recogniser's other readings, as the phone sends them.
+  alternatives?: string[];
   name: string;
   /// The day's web lookups left, as the server tells the model; 3 when not given.
   web?: string;
@@ -53,6 +55,8 @@ const cases: Case[] = [
   { name: '網路用完', state: map, utterance: '今天淡水有什麼活動？', web: '今天已用完：不要用 web_search，也不要說要上網查，直接用你知道的回答', avoid: 'web_search', noAmounts: true },
   { name: '聽錯路線', state: station, utterance: '三零七還要多酒', slot: true },
   { name: '聽錯地名', state: map, utterance: '我要從忠孝福星去淡水老姐', expect: 'plan_trip', origin: '忠孝復興', destination: '淡水老街' },
+  { name: '英文店名', state: map, utterance: '我要去word jim', expect: 'plan_trip', destination: 'World Gym' },
+  { name: '其他聽法', state: map, utterance: '我要去世界真', alternatives: ['我要去world 真', '我要去 World Gym'], expect: 'plan_trip', destination: 'World Gym' },
   { name: '雜音與更正', state: map, utterance: '我們要一起我是說我要去原山站', expect: 'plan_trip', destination: '圓山' },
   { name: '中英夾雜', state: map, utterance: '我要去 Taipei 一零一', expect: 'plan_trip', destination: '101' },
   { name: '離題', state: map, utterance: '幫我寫一段 Python 程式' },
@@ -85,7 +89,7 @@ for (const provider of providers) {
     if (provider.name === 'groq') await new Promise((resolve) => setTimeout(resolve, 9000));
     const started = performance.now();
     let first = 0;
-    const answer = await provider.ask(userMessage({ utterance: test.utterance, state: test.state, history: test.history ?? [] }, test.web ?? '今天還能用 3 次'),
+    const answer = await provider.ask(userMessage({ utterance: test.utterance, alternatives: test.alternatives, state: test.state, history: test.history ?? [] }, test.web ?? '今天還能用 3 次'),
       () => { first ||= Math.round(performance.now() - started); });
     const ms = Math.round(performance.now() - started);
     times.push(ms);
