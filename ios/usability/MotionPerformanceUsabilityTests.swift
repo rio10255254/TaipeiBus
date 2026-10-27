@@ -81,8 +81,10 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
     /// app's heartbeat log (--test-view-changes) tells whether its main thread came back.
     func testDiagnoseItineraryStall() {
         continueAfterFailure = true
-        for variant in ["baseline", "no-nav", "no-itinerary", "no-detent-selection", "plain-sheet",
-                        "no-panel-height", "no-type-env", "no-tint"] {
+        // The first round: only leaving out the navigation stack or the sheet's presentation
+        // styling (background interaction, content interaction, drag indicator, corner radius,
+        // material) let the main thread come back. This round takes the styling apart.
+        for variant in ["baseline", "no-material", "no-content-interaction", "no-background-interaction", "no-sheet-chrome"] {
             launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-view-changes",
                     "--diag-variant", variant])
             guard button("journey-board").waitForExistence(timeout: 90) else {

@@ -419,11 +419,12 @@ struct TransitHomeView: View {
                             instead: { $0.presentationDetents(journeyDetents) })
                 // Only up through a height the sheet offers: during a trip it is large alone, and
                 // naming a missing detent there kept iOS 17 re-dimming the map on every layout pass.
-                .diagnostic("plain-sheet", {
+                .diagnostic("no-background-interaction", {
                     $0.presentationBackgroundInteraction(journeyDetents.contains(.height(560)) ? .enabled(upThrough: .height(560)) : .automatic)
-                        .presentationContentInteraction(.scrolls)
-                        .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
                 }, instead: { $0 })
+                .diagnostic("no-content-interaction", { $0.presentationContentInteraction(.scrolls) }, instead: { $0 })
+                .diagnostic("no-sheet-chrome", { $0.presentationDragIndicator(.visible).presentationCornerRadius(30) }, instead: { $0 })
+                .diagnostic("no-material", { $0.presentationBackground(.regularMaterial) }, instead: { $0 })
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
                 .diagnostic("no-panel-height", {
                     $0.background {
