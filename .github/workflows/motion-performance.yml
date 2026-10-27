@@ -26,18 +26,27 @@ env:
 
 jobs:
   measure:
-    name: iOS ${{ matrix.ios }} · ${{ matrix.name }}
+    name: iOS ${{ matrix.ios }} · ${{ matrix.name }}${{ matrix.app == 'main' && ' · main app' || '' }}
     runs-on: macos-15
     timeout-minutes: 75
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { ios: '26', download: '', name: 'iPhone 17 Pro', device: 'iPhone-17-Pro' }
-          - { ios: '18', download: '', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation' }
-          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation' }
+          - { ios: '26', download: '', name: 'iPhone 17 Pro', device: 'iPhone-17-Pro', app: 'branch' }
+          - { ios: '18', download: '', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          # The same trip on the app as it is on main, for telling a new problem from an old one.
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'main' }
     steps:
       - uses: actions/checkout@v4
+      - name: App sources from main
+        if: matrix.app == 'main'
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          git checkout FETCH_HEAD -- ios/TaipeiBus
+          git status --short | head -20
       - name: Simulator for iOS ${{ matrix.ios }}
         run: |
           set -euo pipefail
@@ -71,8 +80,31 @@ jobs:
           ruby ios/usability/setup.rb
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture=$!
-          trap 'kill "$location_fixture" 2>/dev/null || true' EXIT
+          # Watchdog: whenever the app holds a core for long, sample its threads so a stall
+          # shows where the main thread is. The CPU timeline is kept as well.
+          (
+            samples=0
+            while true; do
+              sleep 15
+              pid=$(pgrep -f 'TaipeiBus\.app/TaipeiBus( |$)' | head -1 || true)
+              [ -n "$pid" ] || continue
+              cpu=$(ps -o %cpu= -p "$pid" | tr -d ' ' || echo 0)
+              echo "$(date +%T) pid=$pid cpu=$cpu" >> "$RUNNER_TEMP/app-cpu.log"
+              if [ "${cpu%.*}" -ge 85 ] && [ "$samples" -lt 6 ]; then
+                samples=$((samples + 1))
+                sudo sample "$pid" 3 -file "$RUNNER_TEMP/app-sample-$samples.txt" > /dev/null 2>&1 || true
+              fi
+            done
+          ) &
+          watchdog=$!
+          trap 'kill "$location_fixture" "$watchdog" 2>/dev/null || true' EXIT
           selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests'
+          if [ '${{ matrix.app }}' = 'main' ]; then
+            # Main has no motion lab; it walks the existing trip test that has the same steps.
+            selection='TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
+          elif [ '${{ matrix.ios }}' = '17' ]; then
+            selection="$selection TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip"
+          fi
           if [ -n '${{ inputs.test }}' ]; then
             [[ '${{ inputs.test }}' =~ ^MotionPerformanceUsabilityTests(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid test name'; exit 1; }
             selection='TaipeiBusUsabilityTests/${{ inputs.test }}'
@@ -80,7 +112,7 @@ jobs:
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/motion.xcresult" \
-            "-only-testing:$selection" \
+            $(printf -- '-only-testing:%s ' $selection) \
             -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
             | tee "$RUNNER_TEMP/motion-tests.log"
       - name: Summary
@@ -98,9 +130,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: motion-ios${{ matrix.ios }}-${{ matrix.device }}
+          name: motion-ios${{ matrix.ios }}-${{ matrix.device }}-${{ matrix.app }}
           path: |
             ${{ runner.temp }}/motion-tests.log
             ${{ runner.temp }}/motion-attachments
+            ${{ runner.temp }}/app-cpu.log
+            ${{ runner.temp }}/app-sample-*.txt
           retention-days: 14
           if-no-files-found: ignore

@@ -156,7 +156,7 @@ final class MotionCostProbe: NSObject, ObservableObject {
             "model": environment["SIMULATOR_MODEL_IDENTIFIER"] ?? "",
             "screen_hz": UIScreen.main.maximumFramesPerSecond,
             "still": MotionBudget.shared.conserving, "low_power": ProcessInfo.processInfo.isLowPowerModeEnabled]
-        if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
+        if JSONSerialization.isValidJSONObject(value), let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) {
             report = String(decoding: data, as: UTF8.self)
         }
     }

@@ -36,7 +36,11 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         return (summary(windows), value)
     }
     private func publish(_ name: String, _ value: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { return }
+        // JSONSerialization raises (not throws) on a value it cannot write; check first.
+        guard JSONSerialization.isValidJSONObject(value),
+              let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else {
+            XCTFail("Not JSON: \(value)"); return
+        }
         let text = String(decoding: data, as: UTF8.self)
         print("MOTION-COST-RESULT " + name + " " + text)
         let attachment = XCTAttachment(string: text)
@@ -50,14 +54,17 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
             let moving = measure(component, still: false)
             let still = measure(component, still: true)
             if device.isEmpty {
-                device = ["os": moving.report["os"] ?? "", "device": moving.report["device"] ?? "",
-                          "model": moving.report["model"] ?? "", "screen_hz": moving.report["screen_hz"] ?? 0]
+                device = ["os": moving.report["os"] as? String ?? "", "device": moving.report["device"] as? String ?? "",
+                          "model": moving.report["model"] as? String ?? "", "screen_hz": moving.report["screen_hz"] as? Int ?? 0]
             }
             XCTAssertEqual(still.report["still"] as? Bool, true)
             XCTAssertEqual(moving.report["still"] as? Bool, false)
             let extra = ((moving.summary["main_cpu_pct"] as? Double) ?? 0) - ((still.summary["main_cpu_pct"] as? Double) ?? 0)
-            rows.append(["component": component, "moving": moving.summary, "still": still.summary,
-                         "main_cpu_extra_pct": (extra * 100).rounded() / 100])
+            let row: [String: Any] = ["component": component, "moving": moving.summary, "still": still.summary,
+                                      "main_cpu_extra_pct": (extra * 100).rounded() / 100]
+            // Each piece is reported as soon as it is measured, so a later failure keeps it.
+            publish("motion-cost-" + component, ["device": device, "result": row])
+            rows.append(row)
         }
         publish("motion-cost", ["device": device, "results": rows])
         // Pieces animated by Core Animation run in the render server: moving costs the app's main
@@ -111,7 +118,7 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(button("搜尋目的地").waitForExistence(timeout: 10))
         capture("motion-trip-home")
         let trip = report()
-        publish("motion-trip-pacing", ["os": trip["os"] ?? "", "device": trip["device"] ?? "",
+        publish("motion-trip-pacing", ["os": trip["os"] as? String ?? "", "device": trip["device"] as? String ?? "",
                                        "pacing": summary(trip["windows"] as? [[String: Any]] ?? [])])
         XCTAssertEqual(app.state, .runningForeground)
     }
