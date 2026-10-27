@@ -14,7 +14,16 @@ const PREFERENCES = ['balanced', 'faster', 'lessWalking', 'fewerTransfers'] as c
 
 export type Action = {
   type: ActionType; stop: string; route: string; destination: string; origin: string; time: string; then: string; query: string;
-  mode: typeof MODES[number]; preference: typeof PREFERENCES[number]; option: number;
+  mode: typeof MODES[number]; preference: typeof PREFERENCES[number]; avoid: Avoid; option: number;
+};
+/// What a trip must not use: buses, the MRT, YouBike, or named lines (307, 紅線).
+export type Avoid = { bus: boolean; metro: boolean; bike: boolean; routes: string[] };
+const NO_AVOID: Avoid = { bus: false, metro: false, bike: false, routes: [] };
+const AVOID_SCHEMA = {
+  type: 'object',
+  properties: { bus: { type: 'boolean' }, metro: { type: 'boolean' }, bike: { type: 'boolean' }, routes: { type: 'array', items: { type: 'string' } } },
+  required: ['bus', 'metro', 'bike', 'routes'],
+  additionalProperties: false,
 };
 export type Reply = { say: string; actions: Action[]; confirm: Action; choices: string[]; followUp: boolean };
 
@@ -26,9 +35,10 @@ const ACTION_SCHEMA = {
     origin: { type: 'string' }, time: { type: 'string' }, then: { type: 'string' }, query: { type: 'string' },
     mode: { type: 'string', enum: [...MODES] },
     preference: { type: 'string', enum: [...PREFERENCES] },
+    avoid: AVOID_SCHEMA,
     option: { type: 'integer' },
   },
-  required: ['type', 'stop', 'route', 'destination', 'origin', 'time', 'then', 'query', 'mode', 'preference', 'option'],
+  required: ['type', 'stop', 'route', 'destination', 'origin', 'time', 'then', 'query', 'mode', 'preference', 'avoid', 'option'],
   additionalProperties: false,
 };
 
@@ -66,15 +76,17 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - 景點介紹、怎麼轉乘、哪種搭法比較省錢這類一般知識可以直接回答；不確定的說「建議出發前再確認」。
 - 營業時間、票價金額、電話這類具體數字不要憑記憶說。營業時間和電話用 show_place 打開地點卡，say 說「營業時間在卡片上」。
 - 票價：「可用資料」有方案的車資時，用它的空位說（例如「第二個最便宜，{r7}」），那是官方票價、悠遊卡全票，已扣捷運與公車轉乘優惠；沒有時不要說金額，可以說哪種搭法比較便宜，或用 plan_trip 規劃讓乘客看方案的車資。
-- 怎麼去、要多久：用 plan_trip 規劃，搭車或走路要幾分鐘、在哪一站轉乘都交給方案，不要憑記憶說轉乘站或分鐘數（「車程約 30 分鐘」這種也不行）；問怎麼搭最便宜、最快時也一樣。say 只講大方向（例如「搭捷運最省事」），細節請乘客看方案。
+- 怎麼去、要多久：用 plan_trip 規劃，搭車或走路要幾分鐘、在哪一站轉乘都交給方案，不要憑記憶說轉乘站或分鐘數（「車程約 30 分鐘」這種也不行）；問怎麼搭最便宜、最快時也一樣。say 只講大方向（例如「搭捷運最省事」），方案規劃好了 App 會自己說。
 - 路線名稱、站名照「目前狀態」裡的寫法。
 
 動作（actions，最多三個；沒有就給空陣列）
 - show_stop：在地圖顯示站牌（stop）。show_route：顯示路線（route）。follow_vehicle：跟著某路線的車（route）。show_bike：顯示附近的 YouBike 站（stop 可留空）。show_place：打開 Apple 地圖的地點卡（營業時間、電話、網站），destination 寫地點名稱。
-- plan_trip：規劃行程。乘客說「我要去／想去／帶我去／怎麼去」某處，就是要規劃行程，用 plan_trip，即使地名是從辨識文字推測出來的；只有問營業時間、電話這類地點資訊才用 show_place。origin 沒說就留空，time 照抄乘客說的時間（例如「明天早上九點前」），沒說就留空；乘客要去好幾個地方（「先去西門町再去淡水，最後去士林」），destination 放第一站，then 依序寫後面全部的站，用「、」隔開（「淡水、士林」），一站都不能漏；mode（any、cycling、walking）與 preference（balanced、faster、lessWalking、fewerTransfers）照乘客的要求，沒說就用 any 和 balanced。
+- plan_trip：規劃行程。乘客說「我要去／想去／帶我去／怎麼去」某處，就是要規劃行程，用 plan_trip，即使地名是從辨識文字推測出來的；只有問營業時間、電話這類地點資訊才用 show_place。origin 沒說就留空；乘客要去好幾個地方（「先去西門町再去淡水，最後去士林」），destination 放第一站，then 依序寫後面全部的站，用「、」隔開（「淡水、士林」），一站都不能漏。
+- plan_trip 的 time 寫成 App 算得出的說法：日子（今天、明天、後天、週六、10月30日）加 24 小時制時刻，再加「出發」或「前抵達」，例如「明天 14:00 出發」「今天 18:30 前抵達」。乘客說「半小時後」「下班後」「等一下」「趕九點的會」時，依「目前狀態」的「現在」換算成時刻；只說「明天下午」就寫「明天 14:00 出發」；說「現在」或沒提時間就留空，不要填現在的時刻。
+- plan_trip 的 mode：騎車 cycling、走路 walking，其他 any。preference：要快 faster、少走路 lessWalking、不想轉車／要直達 fewerTransfers，其他 balanced。avoid：乘客說只坐公車（「坐公車去」）時 metro 為 true；只搭捷運（「搭捷運到」）時 bus 為 true；不要騎 YouBike 時 bike 為 true；不想搭的路線或捷運線寫進 routes（「307」「紅線」「板南線」）。沒說的都是 false 和空陣列。
 - plan_trip 的 destination、origin、then 會拿去 Apple 地圖搜尋，所以寫地圖上找得到的正式名稱，不要寫描述：分店寫店名加分店（「蘋果專賣店」「Apple Store 信義」寫「Apple 信義A13」，「台北101的蘋果」寫「Apple 台北101」）、「台大」寫「國立臺灣大學」、「北車」寫「台北車站」。乘客說的細節不存在時（例如信義區沒有 A43 這棟百貨，Apple 在台北只有信義A13 和台北101 兩家），多半是聽錯，改成最可能的真實地點；真的分不出是哪一家，才用 choices 問。
-- 用 plan_trip 時，say 只用一句話複述你聽懂的行程（例如「好，下午兩點從這裡出發，先到 Apple 信義A13，再去臺北植物園和國立臺灣大學。」），讓乘客知道有沒有聽錯；不要說「請看方案」「規劃好了」或任何結果，地點找到沒有、方案怎麼樣，App 規劃完會自己說。
-- 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，除非乘客這次改了。乘客只想改出發時間、交通方式或偏好，也用 plan_trip 重新規劃。
+- 用 plan_trip 時，say 只用一句話複述你聽懂的行程（例如「好，下午兩點從這裡出發，先到 Apple 信義A13，再去臺北植物園和國立臺灣大學。」），讓乘客知道有沒有聽錯；不要說「請看方案」「規劃好了」或任何結果，也不要有空位（方案還沒出來，沒有時間可填），地點找到沒有、方案怎麼樣，App 規劃完會自己說。
+- 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，「偏好」「交通方式」「限制」也照填進 preference、mode、avoid，除非乘客這次改了。乘客只想改出發時間、交通方式或偏好，也用 plan_trip 重新規劃。
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
 - lookup：「目前狀態」裡沒有乘客要的即時資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
 - 「目前狀態」說某個方案的路線在交通公告中被提到時，回答那個方案就先提醒一句（例如「307 今天因馬拉松改道，出發前留意」）。
@@ -143,7 +155,17 @@ export function userMessage(input: TurnInput, web?: string): string {
   ].filter(Boolean).join('\n\n');
 }
 
-const EMPTY: Action = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', query: '', mode: 'any', preference: 'balanced', option: 0 };
+const EMPTY: Action = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', query: '', mode: 'any', preference: 'balanced', avoid: NO_AVOID, option: 0 };
+
+function readAvoid(value: unknown): Avoid {
+  if (!value || typeof value !== 'object') return NO_AVOID;
+  const raw = value as Record<string, unknown>;
+  const routes = Array.isArray(raw.routes) ? raw.routes.filter((route): route is string => typeof route === 'string') : [];
+  return {
+    bus: raw.bus === true, metro: raw.metro === true, bike: raw.bike === true,
+    routes: [...new Set(routes.map((route) => route.trim().slice(0, 12)).filter(Boolean))].slice(0, 4),
+  };
+}
 
 function readAction(value: unknown): Action | null {
   if (!value || typeof value !== 'object') return null;
@@ -155,6 +177,7 @@ function readAction(value: unknown): Action | null {
     origin: text('origin'), time: text('time', 40), then: text('then'), query: text('query', 100),
     mode: MODES.includes(raw.mode as typeof MODES[number]) ? raw.mode as Action['mode'] : 'any',
     preference: PREFERENCES.includes(raw.preference as typeof PREFERENCES[number]) ? raw.preference as Action['preference'] : 'balanced',
+    avoid: readAvoid(raw.avoid),
     option: Number.isInteger(raw.option) ? raw.option as number : 0,
   };
   // An action missing what it acts on is dropped rather than guessed.

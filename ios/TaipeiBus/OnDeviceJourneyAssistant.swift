@@ -62,6 +62,8 @@ struct AssistantJourneyTurn {
 @MainActor
 protocol JourneyAssistantConversation: AnyObject {
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn
+    /// The same, with the words heard another way, for the online model to weigh.
+    func begin(_ text: String, heard others: [String], at now: Date) async throws -> AssistantJourneyTurn
     /// A request already understood elsewhere (the voice conversation's Claude): planned as it is.
     func plan(_ reading: JourneyReading, source: String, at now: Date) async throws -> AssistantJourneyTurn
     func answer(option: Int) async throws -> AssistantJourneyTurn
@@ -75,6 +77,9 @@ extension JourneyAssistantConversation {
     var credit: String? { nil }
     func plan(_ reading: JourneyReading, source: String, at now: Date) async throws -> AssistantJourneyTurn {
         try await begin(source, at: now)
+    }
+    func begin(_ text: String, heard others: [String], at now: Date) async throws -> AssistantJourneyTurn {
+        try await begin(text, at: now)
     }
 }
 
@@ -318,8 +323,11 @@ enum RuleJourneyReader {
             guard let range = value.range(of: pattern, options: .regularExpression) else { return nil }
             let found = String(value[range]); value.replaceSubrange(range, with: " "); return found
         }
-        if take("(只搭|只坐|只要|只想搭)捷運") != nil || take("(不要|不想|別|不)(搭|坐)?公車") != nil { result.avoidBus = true }
-        if take("(只搭|只坐|只要|只想搭)公車") != nil || take("(不要|不想|別|不)(搭|坐)?捷運") != nil { result.avoidMetro = true }
+        // 「坐捷運去」 asks for that alone, as 「只搭捷運」 does; the 去 stays for the place after it.
+        if take("(只搭|只坐|只要|只想搭)捷運") != nil || take("(不要|不想|別|不)(搭|坐)?公車") != nil
+            || take("(坐|搭|搭乘)捷運(?=\\s*(去|到|回))") != nil { result.avoidBus = true }
+        if take("(只搭|只坐|只要|只想搭)公車") != nil || take("(不要|不想|別|不)(搭|坐)?捷運") != nil
+            || take("(坐|搭|搭乘)公車(?=\\s*(去|到|回))") != nil { result.avoidMetro = true }
         if take("(不要|不想|別|不)(騎)?(youbike|ubike|單車|腳踏車|自行車)") != nil || take("不騎車?") != nil { result.avoidBike = true }
         while let found = take("(避開|不要搭|不要坐|不搭|不坐|別搭|別坐)\\s*([0-9a-z]{1,5}路?|[紅藍綠橘棕黃]線|[\\p{Han}]{2,4}線)") {
             let line = found.replacingOccurrences(of: "^(避開|不要搭|不要坐|不搭|不坐|別搭|別坐)\\s*", with: "", options: .regularExpression)
@@ -603,7 +611,8 @@ final class JourneyAssistantContext {
         // the sentence's own words decide, as they do for the rules and the on-device model.
         let modelDate = departAt ?? (hour >= 0 ? Self.date(day: day, hour: hour, minute: minute) : nil)
         var modelTimeUsable = modelTime && modelDate.map { $0 > now.addingTimeInterval(-300) && $0 < now.addingTimeInterval(60 * 86_400) } == true
-        let spokenTime = SpokenTime.read(source, now: now)
+        // Leaving within a few minutes (「今天 19:40 出發」 written at 19:40) is leaving now, on live arrivals.
+        let spokenTime = SpokenTime.read(source, now: now).flatMap { $0.kind == .departure && abs($0.date.timeIntervalSince(now)) < 300 ? nil : $0 }
         // The words win over the model whenever they are clear: a clock time always, and a part of the
         // day unless the model only refines it (下班 → 18:00). On a phone 「我明天早上要去台大」 came back
         // from the online model as tomorrow 00:00 and was planned for midnight.
@@ -1008,10 +1017,12 @@ enum OnlineJourneyReader {
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
     目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；地區加店家種類寫成「西門町附近的網咖」；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
-    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。好幾個目的地時第一個填 destination，後面的依序用「、」隔開填 next，一個都不能漏。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
+    需求是語音辨識的文字時可能有同音錯字（南京住行→南京復興），地名寫成最可能的正確名稱；有「其他聽法」時是同一句話的另一種辨識，綜合判斷，以地名真實存在、說得通的為準。說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。要快 faster、少走路 lessWalking、不想轉車或要直達 fewerTransfers。「半小時後」「20分鐘後」依現在換算成時刻。好幾個目的地時第一個填 destination，後面的依序用「、」隔開填 next，一個都不能漏。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid；說坐或搭某種車去（坐捷運去、搭公車去）就是只搭那種：坐捷運 avoid.bus=true，坐公車 avoid.metro=true。不要編造。
     """
 
-    static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
+    /// `others` are the same words heard another way (the phone's reading beside the server's), for the
+    /// model to weigh: 「南京住行」 from one and 「南京復興」 from the other.
+    static func read(_ text: String, now: Date, pro: Bool, heard others: [String] = [], session: URLSession = .shared) async throws -> JourneyReading {
         guard configured else { throw Failure.notConfigured }
         let formatter = DateFormatter()
         formatter.calendar = AssistantJourneyRequest.calendar; formatter.timeZone = AssistantJourneyRequest.calendar.timeZone
@@ -1020,7 +1031,7 @@ enum OnlineJourneyReader {
         let began = Date()
         for model in models(pro: pro) {
             do {
-                let reading = try await read(text, at: formatter.string(from: now), model: model, session: session)
+                let reading = try await read(text, at: formatter.string(from: now), heard: others, model: model, session: session)
                 JourneyDiagnostics.shared.record(String(format: "ai-online ok %@ %.1fs", AssistantServer.served, Date().timeIntervalSince(began)))
                 return reading
             } catch Failure.http(let status) where [400, 404, 413, 498].contains(status) || status >= 500 {
@@ -1036,7 +1047,8 @@ enum OnlineJourneyReader {
         throw lastError
     }
 
-    private static func read(_ text: String, at clock: String, model: String, session: URLSession) async throws -> JourneyReading {
+    private static func read(_ text: String, at clock: String, heard others: [String], model: String, session: URLSession) async throws -> JourneyReading {
+        let alternatives = others.filter { !$0.isEmpty && $0 != text }.prefix(3).map { "「\($0)」" }.joined()
         let body: [String: Any] = [
             // gpt-oss reasons before answering; a little reasoning, kept out of the reply, is enough here,
             // and the limit leaves room for it on top of the short JSON answer.
@@ -1044,7 +1056,7 @@ enum OnlineJourneyReader {
             "reasoning_effort": "low", "include_reasoning": false,
             "response_format": ["type": "json_object"],
             "messages": [["role": "system", "content": instructions],
-                         ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)"]],
+                         ["role": "user", "content": "現在（台北）：\(clock)\n需求：\(text)" + (alternatives.isEmpty ? "" : "\n其他聽法：\(alternatives)")]],
         ]
         let (data, status) = try await AssistantServer.send(body, timeout: 6, session: session)
         guard status == 200 else { throw Failure.http(status) }
@@ -1254,18 +1266,22 @@ final class RuleFirstConversation: JourneyAssistantConversation {
     }
     func prewarm() {}
     func begin(_ text: String, at now: Date) async throws -> AssistantJourneyTurn {
-        // 「只用雲端」: the server's reading alone, and its failure shown as it is.
+        try await begin(text, heard: [], at: now)
+    }
+    func begin(_ text: String, heard others: [String], at now: Date) async throws -> AssistantJourneyTurn {
+        // 「只用雲端」: the server's reading leads, with the phone's live words beside it for the model to
+        // weigh; a failure is shown as it is, nothing on the phone stands in.
         let cloudOnly = VoiceSettings.cloudOnly
         let rules = useRules && !cloudOnly ? RuleJourneyReader.read(text, savedTitles: context.savedTitles) : nil
         if cloudOnly {
-            let reading = try await OnlineJourneyReader.read(text, now: now, pro: pro)
+            let reading = try await OnlineJourneyReader.read(text, now: now, pro: pro, heard: others)
             reader = "online-only"; context.note(reader: reader); credit = AssistantCredit.online
             return try await context.resolve(reading, source: text, now: now)
         }
         // 1. Online, when the rider agreed; read at the moment of asking, so a fresh answer counts.
         if OnlineJourneyReader.enabled {
             do {
-                let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now, pro: pro), rules: rules, source: text)
+                let reading = Self.merge(try await OnlineJourneyReader.read(text, now: now, pro: pro, heard: others), rules: rules, source: text)
                 reader = pro ? "online-pro" : "online"; context.note(reader: reader); credit = AssistantCredit.online
                 return try await context.resolve(reading, source: text, now: now)
             } catch {

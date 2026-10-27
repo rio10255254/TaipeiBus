@@ -42,7 +42,7 @@ final class VoiceConversationTests: XCTestCase {
 
     func testPlanTripKeepsTheRidersWords() {
         let decoded = VoiceReply(json: ["say": "幫你找去台大的路線。", "actions": [action("plan_trip", ["destination": "台大機械館", "time": "明天早上九點前"])]])
-        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced", then: "")])
+        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "台大機械館", origin: "", time: "明天早上九點前", mode: "any", preference: "balanced", then: "", avoid: TripAvoidance())])
     }
 
     func testAPlaceCardNamesItsPlace() {
@@ -52,7 +52,16 @@ final class VoiceConversationTests: XCTestCase {
 
     func testPlanTripKeepsTheLaterStops() {
         let decoded = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "西門町", "time": "明天下午", "then": "淡水"])]])
-        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "西門町", origin: "", time: "明天下午", mode: "any", preference: "balanced", then: "淡水")])
+        XCTAssertEqual(decoded?.actions, [.planTrip(destination: "西門町", origin: "", time: "明天下午", mode: "any", preference: "balanced", then: "淡水", avoid: TripAvoidance())])
+    }
+
+    func testPlanTripKeepsWhatTheTripMustNotUse() {
+        let bus = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "南京復興",
+            "avoid": ["bus": false, "metro": true, "bike": true, "routes": [" 紅線 ", "紅線", 5, "307"] as [Any]] as [String: Any]])]])
+        XCTAssertEqual(bus?.actions, [.planTrip(destination: "南京復興", origin: "", time: "", mode: "any", preference: "balanced", then: "",
+                                                 avoid: TripAvoidance(metro: true, bike: true, routes: ["紅線", "307"]))])
+        let none = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "南京復興", "avoid": "bus"])]])
+        XCTAssertEqual(none?.actions, [.planTrip(destination: "南京復興", origin: "", time: "", mode: "any", preference: "balanced", then: "", avoid: TripAvoidance())])
     }
 
     func testChoicesAreTrimmedUniqueAndAtMostThree() {

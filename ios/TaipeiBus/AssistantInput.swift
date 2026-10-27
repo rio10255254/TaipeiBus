@@ -15,6 +15,21 @@ enum AssistantSentence {
         guard value.count >= 2, value.count <= 600 else { return false }
         return markers.contains { value.contains($0) }
     }
+
+    /// Words that ask something rather than name a trip: 「307 還要多久」「附近有 YouBike 嗎」「淡水有什麼好吃的」.
+    private static let questions = ["嗎", "呢", "多久", "幾分", "幾點", "什麼", "有沒有", "哪裡", "哪一", "多少錢", "車資", "票價",
+                                     "公告", "改道", "停駛", "營業", "開到", "還要", "到了沒", "來了沒", "為什麼", "?", "？",
+                                     "how", "what", "when", "where", "which", "is there"]
+    /// Words that make it a trip even when asked as a question: 「我要去台大要多久」 is planned.
+    private static let trips = ["去", "回家", "回公司", "帶我", "規劃", "怎麼到", "騎", "走路", "步行", " to ", "go to", "get to"]
+
+    /// A question for the voice assistant, not a trip or a place: it asks something and names no trip.
+    static func asksQuestion(_ text: String) -> Bool {
+        let value = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        guard value.count >= 2 else { return false }
+        let trip = trips.contains(where: value.contains) || (value.contains("從") && value.contains("到"))
+        return !trip && questions.contains(where: value.contains)
+    }
 }
 
 /// The last sentences that led to a plan, offered as one-tap chips. Kept only on this phone.

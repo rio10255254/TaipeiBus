@@ -4,7 +4,7 @@ import { check, problems } from './checks.ts';
 import { readReply } from './reply.ts';
 import { columnsReady, expectation, isVerdict, judge, logLine, printable, readJudgment, readReports, selectQuery, updateQuery, verdictOf } from './replay.ts';
 
-const none = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', query: '', mode: 'any', preference: 'balanced', option: 0 };
+const none = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', then: '', query: '', mode: 'any', preference: 'balanced', avoid: { bus: false, metro: false, bike: false, routes: [] }, option: 0 };
 const replyOf = (say: string) => readReply({ say, actions: [], confirm: none, choices: [], followUp: false })!;
 const fine = { pass: true, category: 'fine', reported: 'misheard' } as const;
 

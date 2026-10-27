@@ -233,7 +233,9 @@ final class VoiceConversation: ObservableObject {
 
     // MARK: Starting and ending
 
-    func start() {
+    /// `first` is what the rider already said elsewhere (into the search box), answered as the first
+    /// turn; `heard` its other readings.
+    func start(saying first: String? = nil, heard readings: [String] = []) {
         guard Self.available else { return }
         guard model.purchases.hasPro else { model.showingProPlans = true; return }
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
@@ -247,13 +249,23 @@ final class VoiceConversation: ObservableObject {
             let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
             self?.names = built
         }
-        if Self.consent == true { listen(firstTurn: true) } else { askingConsent = true }
+        openingTurn = first.map { ($0, readings) }
+        if Self.consent == true { beginTalking() } else { askingConsent = true }
+    }
+    /// What was said before the conversation opened, waiting for it.
+    private var openingTurn: (text: String, others: [String])?
+
+    private func beginTalking() {
+        guard let first = openingTurn else { return listen(firstTurn: true) }
+        openingTurn = nil
+        alternatives = first.others
+        handle(first.text)
     }
 
     func answerConsent(_ allowed: Bool) {
         AIConsent.answer(allowed)
         askingConsent = false
-        if allowed { listen(firstTurn: true) } else { end() }
+        if allowed { beginTalking() } else { openingTurn = nil; end() }
     }
 
     func end() {
@@ -370,10 +382,11 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
-                // 「只用雲端」: the phone's reading only showed the words live and found the end of the turn;
-                // what was said is the server's, written down before anything is decided.
+                // 「只用雲端」: what was said is the server's, written down before anything is decided; the
+                // phone's live words go with it as another reading for Claude to weigh, never in its place.
                 if VoiceSettings.cloudOnly {
                     guard let sound = self.speech.audio else { return self.respond(self.phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true) }
+                    self.alternatives = Array(([text] + self.speech.alternatives).filter { !$0.isEmpty }.prefix(4))
                     return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60)))
                 }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
@@ -643,31 +656,41 @@ final class VoiceConversation: ObservableObject {
     /// vouches for, and the stops still to come of a trip with several.
     private func sayPlan() async {
         let planner = model.planner
+        let limits = model.assistantTrip?.constraints ?? TripConstraints()
         var waited = 0
         // The first options come within a few seconds; walking checks may still refine them afterwards.
-        while planner.options.isEmpty, waited < 40, planner.planning || waited < 8 {
+        // With limits (只搭公車), whether any route keeps to them is known only once the checks are done.
+        while waited < 40, planner.options.isEmpty ? (planner.planning || waited < 8) : !limits.isEmpty && (planner.planning || planner.checkingWalks) {
             try? await Task.sleep(for: .milliseconds(250)); waited += 1
         }
         guard !Task.isCancelled, active, let destination = planner.destination else { return }
         let now = Date()
         var sentence = AppLanguage.$override.withValue(language) { () -> String in
             let name = destination.localizedName
-            guard let option = planner.options.first else {
-                return planner.message ?? phrase("到「%@」暫時找不到可搭的路線，可以換個時間或交通方式。", name)
-            }
-            guard let timing = model.journeyDuration(option, at: now), timing.unknownWaits == 0 else {
-                return phrase("到「%@」的路線好了，候車時間要看當天班次，請看畫面。", name)
-            }
-            let arrival = VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
-            return phrase("到「%@」的路線好了：第一個方案%@，%@抵達。", name, timing.comparisonLabel, arrival)
+            // None of the routes keeps to what was asked: said first, so the rider is not misled.
+            let unmet = !limits.isEmpty && planner.constraintsUnmet
+                ? phrase("沒有完全符合「%@」的路線，先用一般推薦。", limits.summary.replacingOccurrences(of: " · ", with: "、")) : ""
+            return unmet + planSentence(planner, name: name, now: now)
         }
         if let trip = model.assistantTrip, trip.stops.count > trip.leg + 1 {
             let later = trip.stops.dropFirst(trip.leg + 1).map { $0.place?.localizedName ?? $0.name }
             sentence += phrase("這是第 %@ 段，接著的%@點路線上方的編號就能看。", "\(trip.leg + 1)", later.joined(separator: "、"))
         }
-        JourneyDiagnostics.shared.record("voice plan said options=\(planner.options.count)")
+        JourneyDiagnostics.shared.record("voice plan said options=\(planner.options.count) unmet=\(planner.constraintsUnmet)")
         history.append(user: "", said: sentence)
         await say(sentence)
+    }
+
+    /// The first option's time and arrival, which the app vouches for, or why there is none.
+    private func planSentence(_ planner: JourneyPlannerModel, name: String, now: Date) -> String {
+        guard let option = planner.options.first else {
+            return planner.message ?? phrase("到「%@」暫時找不到可搭的路線，可以換個時間或交通方式。", name)
+        }
+        guard let timing = model.journeyDuration(option, at: now), timing.unknownWaits == 0 else {
+            return phrase("到「%@」的路線好了，候車時間要看當天班次，請看畫面。", name)
+        }
+        let arrival = VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
+        return phrase("到「%@」的路線好了：第一個方案%@，%@抵達。", name, timing.comparisonLabel, arrival)
     }
 
     private func choosePlan(_ index: Int) {
@@ -709,13 +732,15 @@ final class VoiceConversation: ObservableObject {
                 guard let place = await Self.place(named: name) else { return }
                 panelRequest = .place(place)
             }
-        case .planTrip(let destination, let origin, let time, let mode, let preference, let then):
+        case .planTrip(let destination, let origin, let time, let mode, let preference, let then, let avoid):
             // The ordinary one-sentence planner takes it from here: places, times, later stops and questions.
+            let limits = TripConstraints(avoidBus: avoid.bus, avoidMetro: avoid.metro, avoidBike: avoid.bike, avoidRoutes: avoid.routes)
             var sentence = time
             if !origin.isEmpty { sentence += "從\(origin)" }
             sentence += (mode == "cycling" ? "騎單車" : mode == "walking" ? "走路" : "") + "去\(destination)"
             if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
+            if !limits.isEmpty { sentence += "，" + limits.summary.replacingOccurrences(of: " · ", with: "、") }
             // Claude already understood it: the places are taken as it named them; only the time it wrote
             // in words (「明天 14:00 出發」), and 家/公司 by name, are read from the sentence.
             var reading = RuleJourneyReader.read(sentence).reading
@@ -725,6 +750,8 @@ final class VoiceConversation: ObservableObject {
             reading.originKind = origin.isEmpty ? .none : JourneyAssistantContext.category(of: origin) ?? .place
             if !then.isEmpty { reading.next = then }
             reading.travelMode = mode == "cycling" ? .cycling : mode == "walking" ? .walking : reading.travelMode
+            // What the trip must not use, as Claude read it (「坐公車去」 avoids the MRT).
+            if !limits.isEmpty { reading.avoid = limits }
             model.assistant.plan(reading, sentence: sentence)
             planning = true
             panelRequest = .routes
@@ -927,6 +954,12 @@ struct VoiceStateBuilder {
             facts.append("時間：\(VoiceClock.label(departure, now: now)) 出發")
         } else {
             facts.append("時間：現在出發")
+        }
+        // The way of travelling, preference and limits the rider asked for, so a later turn keeps them.
+        if let trip = model.assistantTrip {
+            if trip.mode != .any { facts.append("交通方式：\(trip.mode.rawValue)") }
+            if trip.preference != .balanced { facts.append("偏好：\(trip.preference.rawValue)") }
+            if !trip.constraints.isEmpty { facts.append("限制：\(trip.constraints.summary)") }
         }
         if let trip = model.assistantTrip, trip.stops.count > 1 {
             facts.append("行程：\(trip.stops.map(\.name).joined(separator: " → "))，現在是第 \(trip.leg + 1) 段")
@@ -1161,11 +1194,11 @@ enum VoiceSettings {
 enum CloudSpeech {
     enum Failure: Error { case unheard(Int) }
 
-    static func transcribe(_ sound: Data, language: AppLanguage, vocabulary: [String]) async throws -> String {
+    static func transcribe(_ sound: Data, language: AppLanguage, vocabulary: [String], timeout: TimeInterval = 8) async throws -> String {
         let body: [String: Any] = ["transcribe": true, "consent": VoiceConversation.audioConsentVersion,
                                    "audio": sound.base64EncodedString(), "audioLanguage": language == .english ? "en" : "zh",
                                    "vocabulary": vocabulary, "speechProvider": VoiceSettings.recognizer.rawValue]
-        let (data, status) = try await AssistantServer.post("converse", body: body, timeout: 8)
+        let (data, status) = try await AssistantServer.post("converse", body: body, timeout: timeout)
         let words = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["heard"] as? String ?? ""
         guard status == 200, !words.isEmpty else { throw Failure.unheard(status) }
         JourneyDiagnostics.shared.record("speech server heard \(words.count) chars")

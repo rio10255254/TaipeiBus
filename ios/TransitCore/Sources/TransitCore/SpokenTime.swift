@@ -25,6 +25,12 @@ public struct SpokenTime: Equatable, Sendable {
     public static func read(_ text: String, now: Date, calendar: Calendar = AssistantJourneyRequest.calendar) -> SpokenTime? {
         let value = (text.folding(options: [.widthInsensitive, .caseInsensitive], locale: Locale(identifier: "zh_TW")))
             .replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "：", with: ":")
+        // 「半小時後出發」「20 分鐘內到」: counted from now, to the minute.
+        if let minutes = later(value) {
+            let arriving = !departureWords.contains(where: value.contains)
+                && ["到", "抵達", "內", "前"].contains(where: value.contains)
+            return SpokenTime(date: now.addingTimeInterval(Double(minutes) * 60), kind: arriving ? .arrival : .departure, exact: true)
+        }
         // 「一小時」 and 「三個鐘頭」 are durations, not clock times.
         // 「快一點」 asks for a faster trip; it is not one o'clock.
         let plain = ["前往", "目前", "前面", "以前的", "小時", "鐘頭", "分鐘"].reduce(value) { $0.replacingOccurrences(of: $1, with: "") }
@@ -63,10 +69,44 @@ public struct SpokenTime: Equatable, Sendable {
         return SpokenTime(date: date, kind: kind, exact: clock != nil)
     }
 
-    /// 今天 0, 明天 1, 後天 2, 大後天 3; 週六 the coming Saturday; 下週一 Monday of next week.
+    /// Minutes from now in 「半小時後」「一個半小時後」「20分鐘後」「十分鐘內」; nil without one.
+    /// 「一小時車程」 is a length, not a time.
+    static func later(_ text: String) -> Int? {
+        let number = "([0-9]{1,3}|[零〇一二兩三四五六七八九十]{1,3})"
+        func match(_ pattern: String) -> String? { text.range(of: pattern, options: .regularExpression).map { String(text[$0]) } }
+        if let phrase = match(number + "(個)?(半)?(小時|鐘頭)(後|以後|之後|內)"),
+           let count = phrase.range(of: number, options: .regularExpression).flatMap({ value(String(phrase[$0])) }) {
+            return count * 60 + (phrase.contains("半") ? 30 : 0)
+        }
+        if match("半(個)?(小時|鐘頭)(後|以後|之後|內)") != nil { return 30 }
+        if let phrase = match("(?<![點時:])" + number + "分鐘(後|以後|之後|內)"),
+           let count = phrase.range(of: number, options: .regularExpression).flatMap({ value(String(phrase[$0])) }) {
+            return count
+        }
+        return nil
+    }
+
+    /// 今天 0, 明天 1, 後天 2, 大後天 3; 10月30日 that day (next year once it has passed); 週六 the coming
+    /// Saturday; 下週一 Monday of next week.
     static func dayOffset(_ text: String, now: Date, calendar: Calendar) -> Int? {
         for (words, days) in [(["大後天"], 3), (["後天"], 2), (["明天", "明早", "明晚", "明日"], 1), (["今天", "今晚", "今早", "今日"], 0)]
             where words.contains(where: text.contains) { return days }
+        let number = "([0-9]{1,2}|[一二三四五六七八九十]{1,3})"
+        if let match = text.range(of: number + "月" + number + "(日|號)", options: .regularExpression) {
+            let phrase = String(text[match])
+            let parts = phrase.split(separator: "月").map { $0.replacingOccurrences(of: "日", with: "").replacingOccurrences(of: "號", with: "") }
+            if parts.count == 2, let month = value(parts[0]), let day = value(parts[1]), (1...12).contains(month), (1...31).contains(day) {
+                let today = calendar.startOfDay(for: now)
+                var year = calendar.component(.year, from: now)
+                for _ in 0..<2 {
+                    if let date = calendar.date(from: DateComponents(year: year, month: month, day: day)), date >= today,
+                       let days = calendar.dateComponents([.day], from: today, to: date).day {
+                        return days
+                    }
+                    year += 1
+                }
+            }
+        }
         guard let match = text.range(of: "(下下|下個|下|這個|這|本)?(週|周|星期|禮拜|礼拜)([一二三四五六日天1-7])", options: .regularExpression) else { return nil }
         let phrase = String(text[match])
         let last = phrase.last!
