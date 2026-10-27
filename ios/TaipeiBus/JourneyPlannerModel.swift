@@ -678,6 +678,10 @@ final class JourneyPlannerModel: ObservableObject {
         return labels
     }
     private func publishRecommendations() {
+        // The screen stalled up to a second while planning; work on the main thread that takes long is
+        // recorded with how long, so the next diagnostics show which step it was.
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { Self.recordSlow("publish", since: began) }
         alignToDeadline()
         let date = JourneyDuration.previewDate(Date())
         let ranked = recommendations(at: date)
@@ -1247,6 +1251,11 @@ final class JourneyPlannerModel: ObservableObject {
             egress: walks.last!.from.distance(to: walks.last!.to))
         return JourneyOption(id: aligned.id, trip: aligned, walks: walks)
     }
+    /// Main-thread work over 100 ms, for the troubleshooting history.
+    private static func recordSlow(_ step: String, since began: TimeInterval) {
+        let milliseconds = Int((ProcessInfo.processInfo.systemUptime - began) * 1000)
+        if milliseconds >= 100 { JourneyDiagnostics.shared.record("main_slow \(step) ms=\(milliseconds)") }
+    }
     func plan(metadata: TransitMetadata) {
         defer { onNavigationChange?() }
         durationCache.removeAll(keepingCapacity: true)
@@ -1315,8 +1324,10 @@ final class JourneyPlannerModel: ObservableObject {
             }
             if !complete { selected = Array(selected.filter { $0.bikeConnections.isEmpty }.prefix(1)) }
             if selected.isEmpty, !complete { selected = Array(ordered.filter { $0.bikeConnections.count <= 1 }.prefix(1)) }
+            let building = ProcessInfo.processInfo.systemUptime
             var pending = selected.filter { trip in !verifiedPool.contains { $0.id == trip.id } }
                 .map { option($0, metadata: metadata, origin: origin, destination: destination) }
+            Self.recordSlow("options count=\(pending.count)", since: building)
             connectionBases.merge(Dictionary(uniqueKeysWithValues: pending.map { ($0.id, $0) })) { _, new in new }
             if complete, !verifiedPool.contains(where: { $0.walkingOnly }), origin.coordinate.distance(to: destination.coordinate) <= max(preferences.walkingOnlyMeters, 2_000) {
                 pending.insert(JourneyOption(id: "walking", trip: nil,
