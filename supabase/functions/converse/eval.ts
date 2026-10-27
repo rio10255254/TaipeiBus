@@ -111,7 +111,7 @@ for (const provider of providers) {
     }
     const { reply } = answer;
     const problems = check(test, reply);
-    const actions = reply.actions.map((action) => `${action.type}${action.destination || action.stop || action.route ? `(${action.destination || action.stop || action.route})` : ''}${action.option ? `#${action.option}` : ''}${action.time ? `@${action.time}` : ''}${action.then ? `→${action.then}` : ''}${action.query ? `「${action.query}」` : ''}`).join(', ');
+    const actions = reply.actions.map((action) => `${action.type}${action.destination || action.stop || action.route ? `(${action.destination || action.stop || action.route})` : ''}${action.option ? `#${action.option}` : ''}${action.time ? `@${action.time}` : ''}${action.then ? `→${action.then}` : ''}${action.avoid && (action.avoid.bus || action.avoid.metro || action.avoid.bike || action.avoid.routes.length) ? `｜避開${[action.avoid.bus ? '公車' : '', action.avoid.metro ? '捷運' : '', action.avoid.bike ? 'YouBike' : '', ...action.avoid.routes].filter(Boolean).join('、')}` : ''}${action.preference && action.preference !== 'balanced' ? `｜${action.preference}` : ''}${action.query ? `「${action.query}」` : ''}`).join(', ');
     // A lookup the reply asked for is made once for real, so the search tool itself is tried too.
     const search = reply.actions.find((action) => action.type === 'web_search');
     if (search && provider.name === 'claude' && anthropicKey) {
