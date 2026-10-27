@@ -96,6 +96,10 @@ jobs:
           fi
           rm -f "$RUNNER_TEMP/assistant.env"
           supabase functions deploy understand converse --project-ref "$SUPABASE_PROJECT_REF"
+      - name: Have Claude ready for the first rider
+        if: steps.ready.outputs.ready == 'true'
+        continue-on-error: true
+        run: deno run --allow-env --allow-net --no-lock --config supabase/functions/converse/deno.json supabase/functions/converse/warm.ts
       - name: Smoke test as a phone would
         if: steps.ready.outputs.ready == 'true'
         env:

@@ -4,7 +4,7 @@
 
 export const ACTION_TYPES = [
   'none', 'show_stop', 'show_route', 'follow_vehicle', 'plan_trip', 'choose_option', 'show_bike', 'show_place', 'lookup', 'web_search',
-  'notices', 'save_stop', 'remind_alight', 'start_navigation', 'boarded', 'alighted', 'end_trip',
+  'notices', 'find_place', 'save_stop', 'remind_alight', 'start_navigation', 'boarded', 'alighted', 'end_trip',
 ] as const;
 export type ActionType = typeof ACTION_TYPES[number];
 /// Change the trip: only ever asked as a question first, never run straight from a reply.
@@ -85,9 +85,12 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - plan_trip 的 time 寫成 App 算得出的說法：日子（今天、明天、後天、週六、10月30日）加 24 小時制時刻，再加「出發」或「前抵達」，例如「明天 14:00 出發」「今天 18:30 前抵達」。乘客說「半小時後」「下班後」「等一下」「趕九點的會」時，依「目前狀態」的「現在」換算成時刻；只說「明天下午」就寫「明天 14:00 出發」；說「現在」或沒提時間就留空，不要填現在的時刻。
 - plan_trip 的 mode：騎車 cycling、走路 walking，其他 any。preference：要快 faster、少走路 lessWalking、不想轉車／要直達 fewerTransfers，其他 balanced。avoid：乘客說只坐公車（「坐公車去」）時 metro 為 true；只搭捷運（「搭捷運到」）時 bus 為 true；不要騎 YouBike 時 bike 為 true；不想搭的路線或捷運線寫進 routes（「307」「紅線」「板南線」）。沒說的都是 false 和空陣列。
 - plan_trip 的 destination、origin、then 會拿去 Apple 地圖搜尋，所以寫地圖上找得到的正式名稱，不要寫描述：分店寫店名加分店（「蘋果專賣店」「Apple Store 信義」寫「Apple 信義A13」，「台北101的蘋果」寫「Apple 台北101」）、「台大」寫「國立臺灣大學」、「北車」寫「台北車站」。乘客說的細節不存在時（例如信義區沒有 A43 這棟百貨，Apple 在台北只有信義A13 和台北101 兩家），多半是聽錯，改成最可能的真實地點；真的分不出是哪一家，才用 choices 問。
-- 用 plan_trip 時，say 只用一句話複述你聽懂的行程（例如「好，下午兩點從這裡出發，先到 Apple 信義A13，再去臺北植物園和國立臺灣大學。」），讓乘客知道有沒有聽錯；不要說「請看方案」「規劃好了」或任何結果，也不要有空位（方案還沒出來，沒有時間可填），地點找到沒有、方案怎麼樣，App 規劃完會自己說。
+- 用 plan_trip 時，say 只用一句話複述你聽懂的行程，時間直接說時刻（「晚上 8 點 10 分出發」）（例如「好，下午兩點從這裡出發，先到 Apple 信義A13，再去臺北植物園和國立臺灣大學。」），讓乘客知道有沒有聽錯；不要說「請看方案」「規劃好了」或任何結果，也不要有空位（方案還沒出來，沒有時間可填），地點找到沒有、方案怎麼樣，App 規劃完會自己說。
 - 「目前狀態」的時間、出發地和「之後要去」是乘客先前說過的。再規劃或改條件時一律沿用：time 照抄那個時間（例如「明天 14:00 出發」），then 照抄之後要去的地方，「偏好」「交通方式」「限制」也照填進 preference、mode、avoid，除非乘客這次改了。乘客只想改出發時間、交通方式或偏好，也用 plan_trip 重新規劃。
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
+- find_place：你說不出一個確定存在的地點時，先在地圖上查，不要猜：辨識文字不像真的地名而你也推不出是哪裡、或乘客只描述了地方而你不確定是哪一家（「那家很多人排隊的牛肉麵」）。query 寫最多三個最可能的正式名稱，用「、」隔開，say 只說「我查一下地點」，不要同時用 plan_trip。App 會在乘客附近搜尋，把結果（名稱、地址、距離）放進「地點搜尋」再問你一次。確定的地名（台北101、捷運站、大學）和連鎖品牌（World Gym、星巴克，App 會找最近的分店）直接用 plan_trip。
+- 「目前狀態」有「地點搜尋」時：從搜尋結果挑真正符合乘客意思的那一個，用結果裡的名稱照原本的要求 plan_trip（時間、後面幾站、偏好、避開都照舊）；乘客沒指定分店時選離乘客最近的；好幾個都說得通而且差很多（不同城市、不同店）時，用 choices 列出結果裡的名稱讓乘客選；都不對就說找不到，請乘客換個說法。
+- 「目前狀態」有「規劃時找不到」時，是你剛才 plan_trip 的地名地圖找不到：結果裡有對的就用它重新 plan_trip，time、then、preference、avoid 照抄「剛才的要求」；都不對而你知道正式名稱時，用 find_place 查一次；還是不確定就請乘客說分店或附近的地標。這時 say 不要再複述整個行程，直接說改用哪裡（例如「應該是 Apple 信義A13，我改用這裡規劃。」）。
 - lookup：「目前狀態」裡沒有乘客要的即時資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
 - 「目前狀態」說某個方案的路線在交通公告中被提到時，回答那個方案就先提醒一句（例如「307 今天因馬拉松改道，出發前留意」）。
 - notices：乘客問停駛、改道、封路、管制或交通公告，而「目前狀態」沒有「交通公告」時用，say 只說「我看一下交通公告」，App 會把臺北市公共運輸處最近的公告加進狀態再問你一次。有「交通公告」時照它回答，公告沒寫到的就說公告沒有提到。
@@ -187,7 +190,7 @@ function readAction(value: unknown): Action | null {
     case 'plan_trip': return action.destination ? action : null;
     case 'choose_option': return action.option >= 1 && action.option <= 3 ? action : null;
     case 'lookup': return action.stop || action.route ? action : null;
-    case 'web_search': return action.query ? action : null;
+    case 'web_search': case 'find_place': return action.query ? action : null;
     case 'show_place': return action.destination ? action : null;
     case 'save_stop': return action.stop ? action : null;
     default: return action;

@@ -46,6 +46,18 @@ export async function askClaude(apiKey: string, message: string): Promise<Answer
   }
 }
 
+/// Claude prepares a changed reply shape on its first request, which can take longer than a turn may
+/// wait; one request with time to spare, its answer ignored, has it ready (after a deploy, before checks).
+export async function warmClaude(apiKey: string, message: string): Promise<boolean> {
+  try {
+    await claudeClient(apiKey, 60_000).messages.create(request(message));
+    return true;
+  } catch (error) {
+    console.error('claude warm-up failed', describe(error));
+    return false;
+  }
+}
+
 /// The same turn, streamed: `onSay` gets the words of `say` as Claude writes them, and `complete` once
 /// they are all there, before the actions are written. `spoke` tells the caller whether any words went
 /// out before a failure, when a second brain can no longer take over.

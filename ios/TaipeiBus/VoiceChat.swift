@@ -426,6 +426,18 @@ final class VoiceConversation: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: Self.pauseKey) }
     }
 
+    /// Places looked up on the map for the model (find_place, or a planned place the map could not
+    /// find), shown to it in the next state; cleared when the rider says something new.
+    private var foundPlaces: [(query: String, places: [TravelPlace])] = []
+    private var unfoundPlace: String?
+    /// The model was asked once more about a place the planner could not find; once per turn.
+    private var placeRetried = false
+    /// The rider's last words, for asking about them again after a lookup.
+    private var lastUtterance = ""
+    /// The last trip asked for, so a place corrected after the map could not find it keeps its time,
+    /// later stops, preference and limits.
+    private var lastPlan: (time: String, then: String, mode: String, preference: String, avoid: TripAvoidance)?
+
     /// The recogniser's other readings of what was just said, and its audio for the server's recogniser,
     /// sent with it once.
     private var alternatives: [String] = []
@@ -468,13 +480,20 @@ final class VoiceConversation: ObservableObject {
             work = Task { await say(phrase("好，有需要再叫我。")); end() }
             return
         }
+        foundPlaces = []; unfoundPlace = nil; placeRetried = false
         work = Task { await turn(text, alternatives: others, audio: sound, lookups: 1) }
     }
 
-    private func turn(_ text: String, alternatives: [String] = [], audio: (sound: Data, vocabulary: [String])? = nil, lookups: Int) async {
+    /// `remember` is false when the same words are asked about again (after the planner could not find
+    /// a place), so they are not in the history twice.
+    private func turn(_ text: String, alternatives: [String] = [], audio: (sound: Data, vocabulary: [String])? = nil, lookups: Int,
+                      remember: Bool = true) async {
         phase = .thinking; choices = []; source = nil
         // Names and figures in the language the rider speaks, so the voice can say them.
-        let context = AppLanguage.$override.withValue(language) { VoiceStateBuilder(model: model).context(pending: pending, notices: notices) }
+        let context = AppLanguage.$override.withValue(language) {
+            VoiceStateBuilder(model: model).context(pending: pending, notices: notices, places: foundPlaces, unfound: unfoundPlace,
+                                                    asked: unfoundPlace == nil ? nil : lastPlanSummary)
+        }
         var body: [String: Any] = ["utterance": text, "alternatives": alternatives, "state": context.prompt(), "history": history.json,
                                    "consent": Self.consentVersion, "stream": true,
                                    "answerLength": VoiceSettings.answerLength.rawValue, "web": VoiceSettings.webLookups,
@@ -523,7 +542,7 @@ final class VoiceConversation: ObservableObject {
             // The state had no answer: look it up while 「我查一下」 is spoken, then ask once more.
             if lookups > 0, let lookup = reply.actions.first(where: Self.isLookup),
                await self.lookup(lookup) {
-                return await turn(text, lookups: lookups - 1)
+                return await turn(text, lookups: lookups - 1, remember: remember)
             }
             compact = reply.actions.contains { !Self.isLookup($0) }
             for action in reply.actions { run(action) }
@@ -544,7 +563,8 @@ final class VoiceConversation: ObservableObject {
                 speak(fallback)
                 said += fallback
             }
-            history.append(user: text, said: said)
+            if remember { history.append(user: text, said: said) } else { history.append(user: "", said: said) }
+            lastUtterance = text
             lastTurn = ["heard": text, "said": said, "state": context.prompt(), "model": (final["model"] as? String) ?? ""]
             reportable = true; reported = false
             // Off in Settings, the conversation ends after an answer unless it asked something back.
@@ -567,7 +587,7 @@ final class VoiceConversation: ObservableObject {
 
     private static func isLookup(_ action: VoiceAction) -> Bool {
         switch action {
-        case .lookup, .notices: true
+        case .lookup, .notices, .findPlace: true
         default: false
         }
     }
@@ -618,6 +638,15 @@ final class VoiceConversation: ObservableObject {
             try? await Task.sleep(for: .milliseconds(250)); waited += 1
         }
         guard !Task.isCancelled, active else { return }
+        // The map could not find the place Claude named: Claude sees what the search found and decides
+        // (another name, a branch, or a question), once, before the rider is asked.
+        if let problem = assistant.problem, !problem.keyword.isEmpty, !problem.unsaved, !placeRetried, !lastUtterance.isEmpty {
+            placeRetried = true
+            unfoundPlace = problem.keyword
+            foundPlaces = [(problem.keyword, Array(assistant.fixResults.prefix(4)))]
+            JourneyDiagnostics.shared.record("voice plan unsettled asking model places=\(assistant.fixResults.count)")
+            return await turn(lastUtterance, lookups: 1, remember: false)
+        }
         if let problem = assistant.problem, !problem.keyword.isEmpty {
             planPlaces = Array(assistant.fixResults.prefix(3))
             choices = planPlaces.map(\.localizedName)
@@ -732,7 +761,16 @@ final class VoiceConversation: ObservableObject {
                 guard let place = await Self.place(named: name) else { return }
                 panelRequest = .place(place)
             }
-        case .planTrip(let destination, let origin, let time, let mode, let preference, let then, let avoid):
+        case .planTrip(let destination, let origin, var time, var mode, var preference, var then, var avoid):
+            // A place corrected after the map could not find it: what Claude left out is the trip asked before.
+            if unfoundPlace != nil, let last = lastPlan {
+                if time.isEmpty { time = last.time }
+                if then.isEmpty { then = last.then }
+                if mode == "any" || mode.isEmpty { mode = last.mode }
+                if preference == "balanced" || preference.isEmpty { preference = last.preference }
+                if avoid.isEmpty { avoid = last.avoid }
+            }
+            lastPlan = (time, then, mode, preference, avoid)
             // The ordinary one-sentence planner takes it from here: places, times, later stops and questions.
             let limits = TripConstraints(avoidBus: avoid.bus, avoidMetro: avoid.metro, avoidBike: avoid.bike, avoidRoutes: avoid.routes)
             var sentence = time
@@ -781,9 +819,34 @@ final class VoiceConversation: ObservableObject {
             }
         case .remindAlight:
             if !model.alightReminderOn { model.toggleAlightReminder() } else { model.requestAlightReminderAccess() }
-        case .lookup, .notices:
+        case .lookup, .notices, .findPlace:
             break
         }
+    }
+
+    /// The last trip asked for in words, for the model when it corrects a place.
+    private var lastPlanSummary: String? {
+        guard let last = lastPlan else { return nil }
+        var parts = ["時間 " + (last.time.isEmpty ? "現在出發" : last.time)]
+        if !last.then.isEmpty { parts.append("之後要去 " + last.then) }
+        if last.mode != "any", !last.mode.isEmpty { parts.append("交通方式 " + last.mode) }
+        if last.preference != "balanced", !last.preference.isEmpty { parts.append("偏好 " + last.preference) }
+        let avoided = [last.avoid.bus ? "公車" : "", last.avoid.metro ? "捷運" : "", last.avoid.bike ? "YouBike" : ""].filter { !$0.isEmpty } + last.avoid.routes
+        if !avoided.isEmpty { parts.append("避開 " + avoided.joined(separator: "、")) }
+        return parts.joined(separator: "；")
+    }
+
+    /// Each name looked up near the rider, with the station of that name first, for the model to choose from.
+    private func findPlaces(_ names: [String]) async -> [(query: String, places: [TravelPlace])] {
+        let finder = PlaceSearch()
+        finder.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
+        finder.setContext(model.location.usableCoordinate)
+        var found: [(query: String, places: [TravelPlace])] = []
+        for name in names {
+            let places = ((try? await finder.find(text: name, queryLimit: 3, timeout: 4)) ?? []).filter { $0.coordinate.isInServiceArea }
+            found.append((name, Array(JourneyAssistantSession.withStations(places, words: name, metadata: model.metadata).prefix(4))))
+        }
+        return found
     }
 
     /// The Apple Maps place for a name said in Taipei, for its card.
@@ -798,6 +861,11 @@ final class VoiceConversation: ObservableObject {
 
     /// Puts what the rider asked about on screen so the next state includes it. False when nothing matched.
     private func lookup(_ action: VoiceAction) async -> Bool {
+        if case .findPlace(let names) = action {
+            foundPlaces = await findPlaces(names)
+            JourneyDiagnostics.shared.record("voice find_place names=\(names.count) results=\(foundPlaces.map { $0.places.count })")
+            return true
+        }
         if case .notices = action {
             guard notices == nil else { return false }
             notices = await model.refreshNotices() ? model.recentNotices : nil
@@ -842,7 +910,8 @@ struct VoiceStateBuilder {
         return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english), VoiceVocabulary.brands])
     }
 
-    func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil) -> VoiceContext {
+    func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil,
+                 places: [(query: String, places: [TravelPlace])] = [], unfound: String? = nil, asked: String? = nil) -> VoiceContext {
         let now = Date(), planner = model.planner
         var facts: [String] = [], items: [(meaning: String, value: String)] = [], names: [String] = []
         let screen: String
@@ -935,6 +1004,17 @@ struct VoiceStateBuilder {
                 let day = "\(parts.month ?? 0)/\(parts.day ?? 0)"
                 let body = notice.body.replacingOccurrences(of: "\n", with: " ").prefix(140)
                 facts.append("交通公告 \(index + 1)（臺北市公共運輸處，\(day)）：\(notice.title)。\(body)")
+            }
+        }
+        // What the map found for names the model was unsure of, with how far each is from the rider.
+        if let unfound { facts.append("規劃時找不到：\(unfound)") }
+        if let asked { facts.append("剛才的要求：\(asked)") }
+        let here = model.location.usableCoordinate
+        for (query, found) in places {
+            facts.append("地點搜尋「\(query)」：" + (found.isEmpty ? "沒有結果" : ""))
+            for (index, place) in found.enumerated() {
+                let distance = here.map { String(format: "｜距離 %.1f 公里", place.coordinate.distance(to: $0) / 1000) } ?? ""
+                facts.append("\(index + 1). \(place.localizedName)｜\(String(place.address.prefix(40)))\(distance)")
             }
         }
         let nearby = nearbyStations.map(\.localizedName)
