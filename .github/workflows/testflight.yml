@@ -6,7 +6,7 @@ on:
       operation:
         description: 'Check account, register App ID, upload, or finish an existing upload'
         type: choice
-        options: ['beta-audit', 'beta-metadata', 'check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-draft', 'store-prepare', 'store-assets', 'store-submit', 'store-pause', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels', 'collect-fares']
+        options: ['beta-audit', 'beta-metadata', 'check-only', 'billing-audit', 'billing-prepare', 'store-audit', 'store-draft', 'store-prepare', 'store-assets', 'store-submit', 'store-pause', 'store-verify', 'register-app-id', 'upload', 'finish-processing', 'collect-route-times', 'collect-metro-data', 'collect-metro-levels', 'collect-fares', 'collect-voice-places']
         default: 'check-only'
       metro_endpoints:
         description: 'Optional bounded metro metadata endpoint subset'
@@ -409,6 +409,25 @@ jobs:
           gh release view fare-data >/dev/null 2>&1 || gh release create fare-data --prerelease --latest=false \
             --title 'Official fare data' --notes 'MOTC TDX official fares (Open Government Data License 1.0).'
           gh release upload fare-data "$RUNNER_TEMP/fares/fares-raw.json.gz" "$RUNNER_TEMP/fares/fares-shape.json" --clobber
+
+  voice-places:
+    if: inputs.operation == 'collect-voice-places'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Collect official place names for voice recognition (Tourism Administration open data, no credentials)
+        run: python3 ios/release/collect-voice-places.py --out ios/TransitCore/Sources/TransitCore/Places/voice-places.json
+      - name: Commit the names to the branch this ran on
+        run: |
+          set -euo pipefail
+          git add ios/TransitCore/Sources/TransitCore/Places/voice-places.json
+          if git diff --cached --quiet; then echo 'No change'; exit 0; fi
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m 'Official place names for voice recognition (Tourism Administration open data)'
+          git push origin "HEAD:${GITHUB_REF_NAME}"
 
   metro-levels:
     if: inputs.operation == 'collect-metro-levels'

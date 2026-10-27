@@ -221,7 +221,19 @@ struct VoiceChatPanel: View {
                 Label(AppText.text("來源：%@", source), systemImage: "globe").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                     .transition(.opacity)
             }
-            if !chat.choices.isEmpty {
+            // Places found on the map: a card each, with where it is and how far, tapped to choose.
+            if !chat.choices.isEmpty, chat.choices.count <= 3, chat.choices.allSatisfy({ chat.place(for: $0) != nil }) {
+                VStack(spacing: 6) {
+                    ForEach(Array(chat.choices.enumerated()), id: \.element) { index, choice in
+                        if let place = chat.place(for: choice) {
+                            PlaceChoiceCard(place: place, from: chat.riderPosition, delay: Double(index) * 0.05, motion: motion) {
+                                chat.choose(choice)
+                            }
+                        }
+                    }
+                }
+                .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
+            } else if !chat.choices.isEmpty {
                 ChipFlow(spacing: 8) {
                     // One after another, a beat apart.
                     ForEach(Array(chat.choices.enumerated()), id: \.element) { index, choice in
@@ -281,6 +293,45 @@ private struct ChoiceChip: View {
             .buttonStyle(.bordered).buttonBorderShape(.capsule)
             .scaleEffect(shown ? 1 : 0.85).opacity(shown ? 1 : 0)
             .onAppear { withAnimation(motion?.delay(delay)) { shown = true } }
+    }
+}
+
+/// A place offered as a choice: its name, address and distance from the rider, tapped to choose it.
+private struct PlaceChoiceCard: View {
+    let place: TravelPlace
+    let from: Coordinate?
+    let delay: Double
+    let motion: Animation?
+    let action: () -> Void
+    @State private var shown = false
+
+    var body: some View {
+        let distance = from.map { distanceLabel($0.distance(to: place.coordinate)) }
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: place.isTransitPlace == true ? "tram.fill" : "mappin.circle.fill")
+                    .font(.title3).foregroundStyle(.tint).frame(width: 28)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(place.localizedName).font(.subheadline.weight(.semibold)).lineLimit(1)
+                    if !place.address.isEmpty {
+                        Text(place.address).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 4)
+                if let distance { Text(distance).font(.caption.weight(.medium)).foregroundStyle(.secondary).monospacedDigit() }
+                Image(systemName: "chevron.right").font(.caption.weight(.bold)).foregroundStyle(.tertiary)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(shown ? 1 : 0.94).opacity(shown ? 1 : 0)
+        .onAppear { withAnimation(motion?.delay(delay)) { shown = true } }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([place.localizedName, place.address, distance ?? ""].filter { !$0.isEmpty }.joined(separator: "，"))
+        .accessibilityHint(AppText.text("選這個地點"))
     }
 }
 

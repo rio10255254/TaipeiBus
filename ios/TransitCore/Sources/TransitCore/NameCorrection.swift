@@ -34,6 +34,14 @@ public struct NameCorrection: Sendable {
         .sorted { $0.text.count > $1.text.count }
     }
 
+    /// `nearby` indexed now, in front of `base`, an index of every other name built once and shared:
+    /// the city's names take a while to index, the ones around the rider very little.
+    public init(nearby: [String], adding base: NameCorrection) {
+        let near = NameCorrection(nearby: nearby)
+        let close = Set(near.names.map { String($0.text) })
+        names = (near.names + base.names.filter { !close.contains(String($0.text)) }).sorted { $0.text.count > $1.text.count }
+    }
+
     static func toneless(_ syllable: String) -> String { syllable.applyingTransform(.stripDiacritics, reverse: false) ?? syllable }
 
     /// Words before a place: a name right after one is a place, whatever its tones were heard as.

@@ -1,6 +1,6 @@
 import { assert, assertEquals } from 'jsr:@std/assert@1';
 import { searchWeb, streamClaude } from './brain.ts';
-import { SayReader } from './say.ts';
+import { PlacePeek, SayReader } from './say.ts';
 
 function readAll(chunks: string[]): string[] {
   const reader = new SayReader();
@@ -22,6 +22,27 @@ Deno.test('nothing after the closing quote, and the reader says it is complete',
   reader.push('。","actions"');
   assert(reader.complete);
   assertEquals(readAll(['{"say":"好。","choices":["say"]', '}']), ['好。', '']);
+});
+
+function peekAll(chunks: string[]): string[][] {
+  const peek = new PlacePeek();
+  return chunks.map((chunk) => peek.push(chunk));
+}
+
+const empty = '"stop":"","route":"",';
+
+Deno.test('a trip\'s places come out once both names are whole', () => {
+  assertEquals(peekAll(['{"say":"好，去南京復興。","actions":[{"type":"plan_trip",', empty + '"destination":"南京', '復興","origin":"', '台北車站","time":""', '}]}']),
+    [[], [], [], ['南京復興', '台北車站'], []]);
+  assertEquals(peekAll(['{"say":"好","actions":[{"type":"plan_trip",' + empty + '"destination":"Apple 信義A13","origin":"","time":"明天 14:00 出發"}]}']),
+    [['Apple 信義A13']]);
+});
+
+Deno.test('find_place names come out of its query; other actions and confirm give none', () => {
+  assertEquals(peekAll(['{"say":"我查一下","actions":[{"type":"find_place","stop":"","route":"","destination":"","origin":"","time":"","then":"","query":"永康牛肉麵、老王牛肉麵"}]}']),
+    [['永康牛肉麵', '老王牛肉麵']]);
+  assertEquals(peekAll(['{"say":"好","actions":[{"type":"show_route","stop":"","route":"307","destination":"板橋"}]}']), [[]]);
+  assertEquals(peekAll(['{"say":"要出發嗎？","actions":[],"confirm":{"type":"plan_trip",' + empty + '"destination":"板橋","origin":""}}']), [[]]);
 });
 
 Deno.test('a reply without say yields nothing', () => {

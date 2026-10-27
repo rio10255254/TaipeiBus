@@ -53,3 +53,52 @@ export class SayReader {
     return decoded;
   }
 }
+
+/// The places of the reply's first action, read out of the unfinished JSON as soon as each name is
+/// whole: a trip's destination and origin, or what find_place looks for. The phone starts looking them
+/// up on the map while the rest of the reply is still being written.
+export class PlacePeek {
+  private text = '';
+  private done = false;
+
+  /// The names, once, the first time they are all there; empty before and after.
+  push(chunk: string): string[] {
+    if (this.done) return [];
+    this.text += chunk;
+    const actions = this.text.indexOf('"actions"');
+    if (actions < 0) return [];
+    // No action at all: what follows is `confirm`, which is only asked.
+    if (/^"actions"\s*:\s*\[\s*\]/.test(this.text.slice(actions))) {
+      this.done = true;
+      return [];
+    }
+    const type = /"type"\s*:\s*"([a-z_]+)"/.exec(this.text.slice(actions));
+    if (!type) return [];
+    const rest = this.text.slice(actions + type.index);
+    if (type[1] === 'find_place') {
+      const query = PlacePeek.value(rest, 'query');
+      if (query === undefined) return [];
+      this.done = true;
+      return query.split('、').map((name) => name.trim()).filter(Boolean).slice(0, 3);
+    }
+    if (type[1] !== 'plan_trip') {
+      this.done = true;
+      return [];
+    }
+    const destination = PlacePeek.value(rest, 'destination'), origin = PlacePeek.value(rest, 'origin');
+    if (destination === undefined || origin === undefined) return [];
+    this.done = true;
+    return [destination, origin].map((name) => name.trim()).filter(Boolean);
+  }
+
+  /// The string value of `key` once its closing quote has arrived.
+  private static value(text: string, key: string): string | undefined {
+    const match = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`).exec(text);
+    if (!match) return undefined;
+    try {
+      return JSON.parse(`"${match[1]}"`);
+    } catch {
+      return undefined;
+    }
+  }
+}

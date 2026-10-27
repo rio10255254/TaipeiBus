@@ -314,18 +314,25 @@ public struct StationSearchIndex: Sendable {
         let metro: Bool
     }
     private let entries: [Entry]
+    /// Stations by their own name, normalized: the station named exactly as said, without
+    /// normalizing every name again for each search.
+    private let byName: [String: [Station]]
     public init(stations: [Station] = []) {
-        var names: [String: IndexedName] = [:], addresses: [String: String] = [:]
-        entries = stations.map { station in
+        var names: [String: IndexedName] = [:], addresses: [String: String] = [:], byName: [String: [Station]] = [:]
+        let entries = stations.map { station in
             let indexed = Array(Set([station.name] + station.searchNames)).sorted().map { text -> IndexedName in
                 if let existing = names[text] { return existing }
                 let value = IndexedName(text); names[text] = value; return value
             }
             let address = addresses[station.address] ?? StationSearch.normalize(station.address)
             addresses[station.address] = address
+            byName[names[station.name]?.full ?? StationSearch.normalize(station.name), default: []].append(station)
             return Entry(station: station, names: indexed, address: address, metro: indexed.contains { $0.metro })
         }
+        self.entries = entries; self.byName = byName
     }
+    /// The stations whose name, normalized, is exactly `key`.
+    public func stations(named key: String) -> [Station] { byName[key] ?? [] }
     public func search(_ query: String, near position: Coordinate, favorites: Set<String> = [], recent: [String] = [], limit: Int = 40,
                        vocabulary: SearchVocabulary = SearchVocabulary()) -> [Station] {
         guard limit > 0 else { return [] }

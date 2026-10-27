@@ -1,7 +1,7 @@
 // Who answers a turn: Claude with the reply schema enforced, or Groq in JSON mode when Claude cannot.
 import { Anthropic, claudeClient, claudeModel, describe } from '../_shared/claude.ts';
 import { readReply, REPLY_SCHEMA, type Reply, SYSTEM_PROMPT, WEB_PROMPT } from './reply.ts';
-import { SayReader } from './say.ts';
+import { PlacePeek, SayReader } from './say.ts';
 
 /// The phone waits about eight seconds for a turn; Claude gets most of it, leaving time for Groq.
 const CLAUDE_TIMEOUT_MS = 4500;
@@ -59,18 +59,25 @@ export async function warmClaude(apiKey: string, message: string): Promise<boole
 }
 
 /// The same turn, streamed: `onSay` gets the words of `say` as Claude writes them, and `complete` once
-/// they are all there, before the actions are written. `spoke` tells the caller whether any words went
-/// out before a failure, when a second brain can no longer take over.
-export async function streamClaude(apiKey: string, message: string, onSay: (words: string, complete: boolean) => void): Promise<Answer & { spoke: boolean }> {
+/// they are all there, before the actions are written; `onPlaces` the places of the first action as
+/// soon as they are written. `spoke` tells the caller whether any words went out before a failure,
+/// when a second brain can no longer take over.
+export async function streamClaude(apiKey: string, message: string, onSay: (words: string, complete: boolean) => void,
+  onPlaces?: (names: string[]) => void): Promise<Answer & { spoke: boolean }> {
   const controller = new AbortController();
   let spoke = false;
   const quiet = setTimeout(() => { if (!spoke) controller.abort(); }, FIRST_WORDS_MS);
   try {
     const stream = claudeClient(apiKey, STREAM_TIMEOUT_MS).messages.stream(request(message), { signal: controller.signal });
-    const say = new SayReader();
+    const say = new SayReader(), places = new PlacePeek();
     let complete = false;
     for await (const event of stream) {
-      if (event.type !== 'content_block_delta' || event.delta.type !== 'text_delta' || complete) continue;
+      if (event.type !== 'content_block_delta' || event.delta.type !== 'text_delta') continue;
+      if (onPlaces) {
+        const names = places.push(event.delta.text);
+        if (names.length) onPlaces(names);
+      }
+      if (complete) continue;
       const words = say.push(event.delta.text);
       complete = say.complete;
       if (words || complete) {
