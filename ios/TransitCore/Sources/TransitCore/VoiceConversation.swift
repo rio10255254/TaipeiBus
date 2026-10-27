@@ -18,6 +18,9 @@ public enum VoiceAction: Equatable, Sendable {
     case lookup(stop: String, route: String)
     /// Read the Public Transportation Office's latest notices and ask again with them.
     case notices
+    /// Look these names up on the map near the rider and ask again with what was found: a place the
+    /// model was not sure of (a misheard name, a chain with several branches).
+    case findPlace([String])
     /// Add a stop to the rider's favourites.
     case saveStop(String)
     /// Turn on the reminder to get off.
@@ -58,6 +61,14 @@ public enum VoiceAction: Equatable, Sendable {
             guard !text("stop").isEmpty || !text("route").isEmpty else { return nil }
             self = .lookup(stop: text("stop"), route: text("route"))
         case "notices": self = .notices
+        case "find_place":
+            var names: [String] = []
+            for part in text("query", limit: 100).split(whereSeparator: { "、,，;；".contains($0) }) {
+                let name = part.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty, !names.contains(name) { names.append(String(name.prefix(40))) }
+            }
+            guard !names.isEmpty else { return nil }
+            self = .findPlace(Array(names.prefix(3)))
         case "save_stop": guard !text("stop").isEmpty else { return nil }; self = .saveStop(text("stop"))
         case "remind_alight": self = .remindAlight
         case "start_navigation": self = .startNavigation
@@ -202,7 +213,7 @@ extension VoiceAction {
         case .showPlace(let place): "顯示 \(place)"
         case .planTrip(let destination, _, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
-        case .lookup, .notices: "查詢"
+        case .lookup, .notices, .findPlace: "查詢"
         case .saveStop(let stop): "收藏 \(stop)"
         case .remindAlight: "下車提醒"
         }
