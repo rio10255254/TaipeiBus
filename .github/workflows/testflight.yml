@@ -416,12 +416,9 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: write
-    env:
-      TDX_CLIENT_ID: ${{ secrets.TDX_CLIENT_ID }}
-      TDX_CLIENT_SECRET: ${{ secrets.TDX_CLIENT_SECRET }}
     steps:
       - uses: actions/checkout@v4
-      - name: Collect official place names for voice recognition
+      - name: Collect official place names for voice recognition (Tourism Administration open data, no credentials)
         run: python3 ios/release/collect-voice-places.py --out ios/TransitCore/Sources/TransitCore/Places/voice-places.json
       - name: Commit the names to the branch this ran on
         run: |
@@ -429,7 +426,7 @@ jobs:
           git add ios/TransitCore/Sources/TransitCore/Places/voice-places.json
           if git diff --cached --quiet; then echo 'No change'; exit 0; fi
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
-            commit -m 'Official place names for voice recognition (TDX tourism data)'
+            commit -m 'Official place names for voice recognition (Tourism Administration open data)'
           git push origin "HEAD:${GITHUB_REF_NAME}"
 
   metro-levels:

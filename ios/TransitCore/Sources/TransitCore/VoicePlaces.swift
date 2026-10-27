@@ -1,7 +1,7 @@
 import Foundation
 
-/// The official names of places riders say by voice, from TDX's tourism data (scenic spots,
-/// restaurants, hotels), with where each is (release/collect-voice-places.py). Misheard names are
+/// The official names of places riders say by voice, from the Tourism Administration's open data
+/// (attractions, restaurants, hotels), with where each is (release/collect-voice-places.py). Misheard names are
 /// corrected against them by sound, and the ones near the rider are given to the recogniser to expect.
 public struct VoicePlaces: Sendable {
     public struct Place: Sendable, Equatable {

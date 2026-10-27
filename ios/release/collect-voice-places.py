@@ -1,33 +1,39 @@
-"""Names of the places riders say by voice, from TDX's official tourism data: scenic spots, restaurants
-and hotels, with where each is. The app corrects misheard place names against them (by sound) and tells
-the recogniser to expect the ones near the rider. Credentials never enter output.
+"""Names of the places riders say by voice, from the Tourism Administration's open data (觀光資訊資料庫):
+attractions, restaurants and hotels, with where each is. The app corrects misheard place names against
+them (by sound) and tells the recogniser to expect the ones near the rider. No credentials are needed.
 
-The area kept is a parameter (the whole country is read), so covering more of Taiwan is a matter of widening it;
-the cities are asked one by one only when the country-wide list is unavailable."""
-import argparse, datetime, gzip, json, os, re, time, urllib.error, urllib.parse, urllib.request
+The files cover the whole country; the area kept is a parameter, so covering more of Taiwan is a matter
+of widening it."""
+import argparse, datetime, io, json, re, ssl, urllib.request, zipfile
 from pathlib import Path
 
-BASE = 'https://tdx.transportdata.tw'
-# (kind, list path, name field)
-KINDS = [('spot', 'ScenicSpot', 'ScenicSpotName'), ('food', 'Restaurant', 'RestaurantName'), ('hotel', 'Hotel', 'HotelName')]
-CITIES = ['Taipei', 'NewTaipei', 'Keelung']
+SOURCE = 'https://media.taiwan.net.tw/XMLReleaseAll_public/v2.0/Zh_tw/'
+# (kind, archive, list file, list key, name field)
+KINDS = [('spot', 'Attraction', 'AttractionList.json', 'Attractions', 'AttractionName'),
+         ('food', 'Restaurant', 'RestaurantList.json', 'Restaurants', 'RestaurantName'),
+         ('hotel', 'Hotel', 'HotelList.json', 'Hotels', 'HotelName')]
 # The app's service area (Geometry.swift isInServiceArea).
 AREA = (24.90, 25.25, 121.27, 121.72)
-LIMIT = 120 * 1024 * 1024
+LIMIT = 60 * 1024 * 1024
 MAX_PLACES = 6000
 
-def read(url, headers=None, data=None):
-    with urllib.request.urlopen(urllib.request.Request(url, data=data, headers=headers or {}), timeout=90) as response:
+def read(url):
+    # The certificate is verified, but not to Python 3.13's strict profile, which the site's chain fails
+    # (no Subject Key Identifier).
+    context = ssl.create_default_context()
+    context.verify_flags &= ~getattr(ssl, 'VERIFY_X509_STRICT', 0)
+    request = urllib.request.Request(url, headers={'User-Agent': 'OneRoad data collector'})
+    with urllib.request.urlopen(request, timeout=120, context=context) as response:
         raw = response.read(LIMIT + 1)
-        if len(raw) > LIMIT: raise ValueError('Tourism snapshot size limit')
-        if response.headers.get('Content-Encoding') == 'gzip' or raw[:2] == b'\x1f\x8b': raw = gzip.decompress(raw)
+        if len(raw) > LIMIT: raise ValueError('Tourism archive size limit')
         return raw
 
 def clean(name):
     """The name as it is said: no bracketed branch or note, 台 rather than 臺 (as speech is written)."""
     name = re.sub(r'[（(【\[].*?[）)】\]]', '', name or '')
-    name = re.sub(r'\s+', '', name).replace('臺', '台').strip('-－·・、,，')
-    return name
+    # 「台北典藏植物園_天使館」 is the garden; 「和逸．台北民生館」 is said without the dot.
+    name = re.sub(r'\s+', '', name).split('_')[0].replace('臺', '台')
+    return re.sub(r'[．·・]', '', name).strip('-－、,，')
 
 def usable(name):
     # Two to twelve characters, Chinese for the most part (台北101 is fine, an English hotel name is not).
@@ -38,60 +44,38 @@ def usable(name):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--cities', default=','.join(CITIES))
     args = parser.parse_args()
-    cid, secret = os.environ['TDX_CLIENT_ID'], os.environ['TDX_CLIENT_SECRET']
-    payload = urllib.parse.urlencode({'grant_type': 'client_credentials', 'client_id': cid, 'client_secret': secret}).encode()
-    answer = json.loads(read(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token', {'Content-Type': 'application/x-www-form-urlencoded'}, payload))
-    headers = {'Authorization': 'Bearer ' + answer['access_token'], 'Accept-Encoding': 'gzip', 'Accept': 'application/json'}; del cid, secret, answer, payload
     south, north, west, east = AREA
-    places, seen, counts, missing = [], set(), {}, []
-    def fetch(url):
-        """Rows, or None after one wait for a rate limit; the answer's first words are kept when it fails."""
-        for attempt in range(2):
-            try:
-                rows = json.loads(read(url, headers))
-                return rows if isinstance(rows, list) else []
-            except urllib.error.HTTPError as error:
-                body = error.read(300).decode('utf-8', 'replace').replace('\n', ' ')
-                if error.code == 429 and attempt == 0: time.sleep(30); continue
-                missing.append(f'{url.split("/Tourism/")[1].split("?")[0]} {error.code} {body[:160]}')
-                print(url.split('/Tourism/')[1].split('?')[0], 'unavailable', error.code, body[:160], flush=True)
-                return None
-        return None
-    cities = [c for c in args.cities.split(',') if c]
-    for index, (kind, path, field) in enumerate(KINDS):
-        if index: time.sleep(6.2)
-        # The whole country in one request, kept to the area; per city only when that fails.
-        batches = [fetch(f'{BASE}/api/basic/v2/Tourism/{path}?%24format=JSON')]
-        if batches[0] is None:
-            batches = []
-            for city in cities:
-                time.sleep(6.2)
-                batches.append(fetch(f'{BASE}/api/basic/v2/Tourism/{path}/{city}?%24format=JSON'))
-        kept = total = 0
-        for rows in batches:
-            for row in rows or []:
-                total += 1
-                position = row.get('Position') or {}
-                lat, lon = position.get('PositionLat'), position.get('PositionLon')
-                name = clean(row.get(field, ''))
-                if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)): continue
-                if not (south <= lat <= north and west <= lon <= east) or not usable(name) or name in seen: continue
+    places, seen, counts, updated = [], set(), {}, {}
+    for kind, archive, listed, key, field in KINDS:
+        with zipfile.ZipFile(io.BytesIO(read(f'{SOURCE}{archive}-json.zip'))) as files:
+            document = json.loads(files.read(listed).decode('utf-8-sig'))
+        rows = document.get(key) or []
+        updated[archive] = document.get('UpdateTime', '')
+        kept = 0
+        for row in rows:
+            lat, lon = row.get('PositionLat'), row.get('PositionLon')
+            if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)): continue
+            if not (south <= lat <= north and west <= lon <= east): continue
+            # Closed for good (ServiceStatus 0) is left out; other names it goes by count as well.
+            if row.get('ServiceStatus', 1) == 0: continue
+            for name in [row.get(field, '')] + [n for n in row.get('AlternateNames') or [] if isinstance(n, str)]:
+                name = clean(name)
+                if not usable(name) or name in seen: continue
                 seen.add(name); kept += 1
                 places.append([name, round(lat, 5), round(lon, 5), kind])
-        counts[path] = kept
-        print(path, total, 'kept', kept, flush=True)
+        counts[archive] = kept
+        print(archive, len(rows), 'kept', kept, flush=True)
     # Spots first: they are what riders name most; restaurants and hotels fill what room is left.
-    order = {kind: index for index, (kind, _, _) in enumerate(KINDS)}
+    order = {kind: index for index, (kind, *_) in enumerate(KINDS)}
     places.sort(key=lambda place: (order[place[3]], place[0]))
     places = places[:MAX_PLACES]
-    if sum(1 for place in places if place[3] == 'spot') < 100: raise ValueError(f'Too few scenic spots: {counts} {missing}')
-    document = {'schema': 1, 'generatedAt': datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
-                'source': 'MOTC TDX tourism data (ScenicSpot, Restaurant, Hotel)', 'license': 'Open Government Data License 1.0',
-                'places': places}
+    if sum(1 for place in places if place[3] == 'spot') < 100: raise ValueError(f'Too few attractions: {counts}')
+    output = {'schema': 1, 'generatedAt': datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat(),
+              'source': 'Tourism Administration, MOTC: 觀光資訊資料庫 (attractions, restaurants, hotels)', 'sourceUpdated': updated,
+              'license': 'Open Government Data License 1.0', 'places': places}
     args.out.parent.mkdir(parents=True, exist_ok=True)
-    args.out.write_text(json.dumps(document, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
-    print('Saved', len(places), 'place names', counts, 'missing', missing, flush=True)
+    args.out.write_text(json.dumps(output, ensure_ascii=False, separators=(',', ':')) + '\n', encoding='utf-8')
+    print('Saved', len(places), 'place names', counts, flush=True)
 
 if __name__ == '__main__': main()
