@@ -1,7 +1,7 @@
 // Asks the real model a fixed set of turns and checks each answer the way the app would: a usable
 // reply, the expected action, no number the rider has not seen, and short enough to speak.
 // deno run --allow-env --allow-net --config supabase/functions/converse/deno.json supabase/functions/converse/eval.ts
-import { askGroq, searchWeb, streamClaude } from './brain.ts';
+import { askGroq, searchWeb, streamClaude, warmClaude } from './brain.ts';
 import { check, type Expectation } from './checks.ts';
 import { type Reply, userMessage, webQuestion } from './reply.ts';
 
@@ -93,7 +93,7 @@ if (providers.length === 0) {
 
 // Claude prepares a changed reply shape on its first request, which can take longer than a turn may;
 // one warm-up turn, not counted, so the evaluation measures turns as riders get them.
-if (anthropicKey) await streamClaude(anthropicKey, userMessage({ utterance: '你好', state: map, history: [] }), () => {});
+if (anthropicKey) await warmClaude(anthropicKey, userMessage({ utterance: '你好', state: map, history: [] }));
 
 let failed = 0;
 for (const provider of providers) {

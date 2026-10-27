@@ -2,7 +2,7 @@
 // way the server does for a turn, and checks each comes back with the words that matter; the first is
 // then answered by Claude from what was heard. The recordings are synthesized voices in the phone's format (16 kHz mono AAC).
 // deno run --allow-env --allow-net --allow-read --config supabase/functions/converse/deno.json supabase/functions/converse/hear_check.ts
-import { streamClaude } from './brain.ts';
+import { streamClaude, warmClaude } from './brain.ts';
 import { type Audio, type Heard, heardTurn, transcribe, transcribeOpenAI } from './hear.ts';
 import { userMessage } from './reply.ts';
 
@@ -25,7 +25,7 @@ const recordings: { file: string; language: Audio['language']; expect: string[];
 const map = '現在：2026-10-25 19:40 星期日（台北）\n畫面：地圖\n附近站牌：忠孝復興站、大安路口';
 // Claude prepares a changed reply shape on its first request, which can take longer than a turn may;
 // one warm-up turn, not counted, so the check measures turns as riders get them.
-if (anthropicKey) await streamClaude(anthropicKey, userMessage({ utterance: '你好', state: map, history: [] }), () => {});
+if (anthropicKey) await warmClaude(anthropicKey, userMessage({ utterance: '你好', state: map, history: [] }));
 let failures = 0;
 // The account's own Whisper limits, as Groq reports them with each answer.
 let limits = '';
