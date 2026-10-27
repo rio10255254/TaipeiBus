@@ -34,6 +34,8 @@ struct JourneyPlanningView: View {
     @ObservedObject private var assistantRecents = AssistantRecents.shared
     @State private var assistantAvailable = OnDeviceJourneyAssistant.plannerUnavailableReason() == nil
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
          compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
@@ -103,20 +105,17 @@ struct JourneyPlanningView: View {
             }
             }
             .scrollDismissesKeyboard(.interactively)
-            .safeAreaInset(edge: .bottom) {
-                if !searchingPlaces, showingItinerary, !planner.started, planner.selected != nil, planner.scheduledDeparture == nil {
-                    Button {
-                        planner.begin()
-                        guard planner.started else { return }
-                        if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
-                        dismiss()
-                    } label: {
-                        Label(AppText.text("開始導航"), systemImage: "location.fill")
-                            .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
-                    }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
-                        .disabled(planner.selected.map { !planner.canUse($0) } ?? true)
-                        .padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial)
-                }
+            .bottomActionBar(!searchingPlaces && showingItinerary && !planner.started && planner.selected != nil && planner.scheduledDeparture == nil) {
+                Button {
+                    planner.begin()
+                    guard planner.started else { return }
+                    if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
+                    dismiss()
+                } label: {
+                    Label(AppText.text("開始導航"), systemImage: "location.fill")
+                        .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
+                }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
+                    .disabled(planner.selected.map { !planner.canUse($0) } ?? true)
             }
             .navigationTitle(editingOrigin ? AppText.text("出發地") : searchingPlaces ? AppText.text("目的地") : planner.started || showingItinerary ? AppText.text("行程") : AppText.text("路線"))
             .navigationBarTitleDisplayMode(.inline)
@@ -360,8 +359,12 @@ struct JourneyPlanningView: View {
                     .accessibilityIdentifier("journey-search-field")
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
                     .onSubmit { submit() }
-                if resolving || search.searching { ProgressView() }
-                else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
+                if resolving || search.searching { ProgressView().transition(.opacity) }
+                else if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) }
+                        .accessibilityLabel(live.text("清除搜尋"))
+                        .transition(.opacity.combined(with: .scale(scale: 0.6)))
+                }
                 else if speaksSentence {
                     // Say it, as in any search box: a trip or a place is planned right here, a question goes
                     // to the voice assistant.
@@ -370,10 +373,17 @@ struct JourneyPlanningView: View {
                     }
                     .buttonStyle(.borderless).disabled(assistant.busy)
                     .accessibilityLabel(AppText.text("用說的搜尋")).accessibilityIdentifier("journey-search-voice")
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
                 }
             }.padding(.horizontal, Metrics.inset).frame(minHeight: Metrics.field)
                 .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
-            if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
+                .animation(reduceMotion ? nil : InterfaceMotion.content, value: resolving || search.searching)
+                .animation(reduceMotion ? nil : InterfaceMotion.content, value: query.isEmpty)
+            if let error = searchError ?? search.error {
+                Label(live.text(error), systemImage: "magnifyingglass")
+                    .liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
             // One clear action for what was typed: plan the sentence, or search the place.
             if understandsSentence, !assistant.busy {
                 Button { openAssistant(query) } label: {
@@ -397,7 +407,7 @@ struct JourneyPlanningView: View {
                                     Label(text, systemImage: "clock.arrow.circlepath").font(.subheadline).lineLimit(1)
                                         .padding(.horizontal, 12).frame(minHeight: Metrics.chip)
                                         .background(Color(uiColor: .secondarySystemFill), in: Capsule())
-                                }.buttonStyle(.plain).foregroundStyle(.primary).accessibilityIdentifier("journey-recent-request")
+                                }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary).accessibilityIdentifier("journey-recent-request")
                                     .contextMenu { Button(AppText.text("從最近說過移除"), role: .destructive) { assistantRecents.remove(text) } }
                             }
                         }
@@ -448,7 +458,7 @@ struct JourneyPlanningView: View {
                         }
                         Spacer(minLength: 0); Image(systemName: "arrow.up.left").liveFont(.caption).foregroundStyle(.tertiary)
                     }.padding(.horizontal, Metrics.inset).frame(maxWidth: .infinity, minHeight: Metrics.row, alignment: .leading).contentShape(Rectangle())
-                }.buttonStyle(.plain).disabled(resolving)
+                }.buttonStyle(RowPressStyle(bleed: 0)).disabled(resolving)
                 Divider().padding(.leading, Metrics.inset + Metrics.icon + 12)
             }
             let stations = stationResultQuery == query ? stationResults : []
@@ -468,7 +478,7 @@ struct JourneyPlanningView: View {
                             Spacer(minLength: 4)
                             Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
                         }.frame(minHeight: 52).contentShape(Rectangle())
-                    }.buttonStyle(.plain).disabled(resolving)
+                    }.buttonStyle(RowPressStyle(bleed: 4)).disabled(resolving)
                 }
                 } label: {
                     HStack(spacing: 12) {
@@ -492,7 +502,7 @@ struct JourneyPlanningView: View {
                 }
                 Spacer(); Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
             }.padding(.horizontal, Metrics.inset).frame(minHeight: Metrics.row).contentShape(Rectangle())
-        }.buttonStyle(.plain).disabled(resolving)
+        }.buttonStyle(RowPressStyle(bleed: 0)).disabled(resolving)
     }
     private func edit(origin: Bool) {
         searchReturnToItinerary = showingItinerary || planner.started
@@ -517,13 +527,19 @@ struct JourneyPlanningView: View {
                         if !places.isEmpty { break }
                     }
                 }
-                resolving = false
-                if completion != nil, let place = places.first { choose(place) }
-                else if places.isEmpty { searchError = "找不到相符地點，試試地址或站牌" }
-                else { focused = false }
+                if completion != nil, let place = places.first { resolving = false; choose(place) }
+                else if places.isEmpty {
+                    // Said, not just shown: the field stays put, so a tap tells the rider to look.
+                    withAnimation(reduceMotion ? nil : InterfaceMotion.content) { resolving = false; searchError = "找不到相符地點，試試地址或站牌" }
+                    Haptics.warning()
+                }
+                else { resolving = false; focused = false }
             } catch {
                 guard !Task.isCancelled, token == resolveToken else { return }
-                resolving = false; searchError = "搜尋暫時無法連線，可改選站牌，或稍後重試。"
+                withAnimation(reduceMotion ? nil : InterfaceMotion.content) {
+                    resolving = false; searchError = "搜尋暫時無法連線，可改選站牌，或稍後重試。"
+                }
+                Haptics.warning()
             }
         }
     }
@@ -682,7 +698,7 @@ private struct BoardingVehicleRow: View {
     }
     var body: some View {
         Button {
-            if tracking { model.following = false }
+            if tracking { model.following = false; Haptics.toggle(false) }
             else { model.trackApproachingVehicle(approach.vehicle) }
         } label: {
             HStack(spacing: 12) {
@@ -699,6 +715,7 @@ private struct BoardingVehicleRow: View {
                     .foregroundStyle(tracking ? Color.white : Color(liveHex: live.appearance.accentColor))
                     .padding(.horizontal, 10).frame(minHeight: 30)
                     .background(Color(liveHex: live.appearance.accentColor).opacity(tracking ? 1 : 0.12), in: Capsule())
+                    .symbolBounce(tracking)
                     .smoothChanges(tracking)
             }.frame(minHeight: 48).padding(.vertical, 2 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 14).contentShape(Rectangle())
         }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary).accessibilityHint(tracking ? AppText.text("停止追蹤") : AppText.text("點一下追蹤這輛公車"))
@@ -877,7 +894,7 @@ private struct JourneyDockHeader: View {
     var body: some View {
         layout { heading; actions }
         .alert(AppText.text("結束這趟導航？"), isPresented: $confirmingEnd) {
-            Button(AppText.text("結束行程"), role: .destructive) { model.finishJourney() }
+            Button(AppText.text("結束行程"), role: .destructive) { Haptics.ended(); model.finishJourney() }
                 .accessibilityIdentifier("journey-confirm-end")
             Button(AppText.text("繼續導航"), role: .cancel) {}
         } message: { Text(AppText.text("行程資訊與下車提醒會一起停止。")) }
@@ -912,13 +929,39 @@ private struct JourneyDockHeader: View {
             .buttonStyle(MapActionStyle(tint: Color.primary))
             .accessibilityLabel(live.text(planner.started ? "行程" : "路線"))
             .accessibilityIdentifier("journey-options")
-            Button { if planner.arrived { model.finishJourney() } else { confirmingEnd = true } } label: {
+            Button {
+                if planner.arrived { Haptics.selection(); model.finishJourney() } else { Haptics.prompt(); confirmingEnd = true }
+            } label: {
                 Text(AppText.text("結束")).liveFont(.subheadline, weight: .bold).padding(.horizontal, 14).frame(minHeight: 48)
             }
             .buttonStyle(MapActionStyle(tint: MapChrome.destructive))
             .accessibilityLabel(live.text("結束行程"))
             .accessibilityIdentifier("journey-end")
         }.frame(maxWidth: dynamicTypeSize.isAccessibilitySize ? .infinity : nil, alignment: .trailing)
+    }
+}
+
+/// The one action that ends a scrolling page, pinned above the home indicator. On iOS 26 it is a
+/// bar the page scrolls under with the system's soft edge; earlier it sits on a material band.
+private struct BottomActionBar<Bar: View>: ViewModifier {
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    let presented: Bool
+    let bar: Bar
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26.0, *), !reduceTransparency {
+            content.safeAreaBar(edge: .bottom) {
+                if presented { bar.padding(.horizontal, 20).padding(.vertical, 10) }
+            }
+        } else {
+            content.safeAreaInset(edge: .bottom) {
+                if presented { bar.padding(.horizontal, 20).padding(.vertical, 10).background(.regularMaterial) }
+            }
+        }
+    }
+}
+private extension View {
+    func bottomActionBar<Bar: View>(_ presented: Bool, @ViewBuilder bar: () -> Bar) -> some View {
+        modifier(BottomActionBar(presented: presented, bar: bar()))
     }
 }
 
@@ -1161,13 +1204,16 @@ struct JourneyOptionsView: View {
                 HStack(spacing: 8) {
                     HStack(spacing: 0) {
                         ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
+                            let current = option.id == planner.selectedID
                             Button { planner.select(option) } label: {
-                                Circle().fill(option.id == planner.selectedID ? Color.primary : Color.secondary.opacity(0.3))
-                                    .frame(width: 6, height: 6).frame(width: 20, height: 44)
+                                Capsule().fill(current ? Color.primary : Color.secondary.opacity(0.3))
+                                    .frame(width: current ? 16 : 6, height: 6).frame(width: current ? 28 : 18, height: 44)
                             }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
+                                .accessibilityValue(current ? AppText.text("已選擇") : "")
                                 .accessibilityIdentifier("journey-page-\(index)")
                         }
                     }
+                    .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.chrome, value: planner.selectedID)
                     Button(action: expand) {
                         HStack(spacing: 4) {
                             Text(AppText.text("全部路線"))
@@ -1184,20 +1230,25 @@ struct JourneyOptionsView: View {
                                 .liveFont(.caption, weight: .semibold).padding(.horizontal, 10).frame(minHeight: 32)
                                 .background(Color.accentColor.opacity(0.12), in: Capsule())
                                 .frame(minHeight: 44)
-                        }.buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                        }.buttonStyle(PhonePressStyle()).foregroundStyle(Color.accentColor)
                             .accessibilityIdentifier("journey-refresh-options")
-                            .transition(.opacity)
+                            .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .leading)))
                     }
                     Spacer(minLength: 4)
 
                 }.padding(.top, 4)
+                .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.chrome,
+                           value: planner.comparisonChanged && !planner.checkingWalks)
             } else {
                 LazyVStack(spacing: 0) {
                     ForEach(planner.options) { option in
-                        optionRow(option, at: date)
-                        if option.id != planner.options.last?.id { Divider() }
+                        VStack(spacing: 0) {
+                            optionRow(option, at: date)
+                            if option.id != planner.options.last?.id { Divider() }
+                        }.transition(.opacity.combined(with: .move(edge: .bottom)))
                     }
                 }
+                .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.chrome, value: planner.options.map(\.id))
             }
             if planner.checkingWalks {
                 HStack(spacing: 8) {
@@ -1206,6 +1257,7 @@ struct JourneyOptionsView: View {
                         .liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
                 }.padding(.vertical, 8).accessibilityElement(children: .combine)
                     .accessibilityIdentifier("journey-comparing-alternatives")
+                    .transition(.opacity)
             }
             if planner.comparisonChanged, !planner.checkingWalks, !compact {
                 Button { planner.refreshRecommendations() } label: {
@@ -1246,7 +1298,7 @@ struct JourneyOptionsView: View {
             Text(AppText.text("出發")).liveFont(.body, weight: .bold)
                 .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 56)
         }.buttonStyle(MapTileStyle(prominent: true, tint: MapChrome.go))
-                    .disabled(!startable(option)).opacity(startable(option) ? 1 : 0.42)
+                    .disabled(!startable(option))
                     .accessibilityLabel(AppText.text("開始導航"))
                     .accessibilityIdentifier("journey-go-" + option.id)
     }
@@ -1297,8 +1349,9 @@ struct JourneyOptionsView: View {
                 summary(option, at: date, compact: false).frame(maxWidth: .infinity, alignment: .leading)
                 Image(systemName: option.id == planner.selectedID ? "checkmark.circle.fill" : "chevron.right")
                     .foregroundStyle(option.id == planner.selectedID ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
+                    .symbolSwap(option.id == planner.selectedID)
             }.padding(.vertical, 14).contentShape(Rectangle())
-        }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
+        }.buttonStyle(RowPressStyle()).foregroundStyle(.primary)
             .accessibilityIdentifier("journey-option-" + option.id)
             .accessibilityHint(AppText.text("預覽此路線"))
     }
@@ -1492,7 +1545,9 @@ private struct JourneyWalkingStep: View {
     private var target: String { option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地") }
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "figure.walk").liveFont(.title2).foregroundStyle(.primary).frame(width: 34)
+            Image(systemName: walked ? "checkmark.circle.fill" : "figure.walk").liveFont(.title2)
+                .foregroundStyle(walked ? MapChrome.positive : Color.primary).frame(width: 34)
+                .symbolSwap(walked)
             VStack(alignment: .leading, spacing: 5) {
                 Text(leg.internalTransfer ? AppText.text("站內轉乘 · %@",target) : (walked ? AppText.text("已走到 ") : AppText.text("步行至 ")) + target)
                     .liveFont(.headline).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("journey-walk-status-\(index)")
@@ -1532,7 +1587,9 @@ private struct JourneyCyclingStep: View {
     }
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            Image(systemName: "bicycle").liveFont(.title2).foregroundStyle(.primary).frame(width: 34)
+            Image(systemName: done ? "checkmark.circle.fill" : "bicycle").liveFont(.title2)
+                .foregroundStyle(done ? MapChrome.positive : Color.primary).frame(width: 34)
+                .symbolSwap(done)
             VStack(alignment: .leading, spacing: 5) {
                 Text((done ? AppText.text("已騎到 ") : AppText.text("騎 YouBike 至 ")) + target)
                     .liveFont(.headline).fixedSize(horizontal: false, vertical: true)
@@ -1630,6 +1687,10 @@ private struct JourneyRideStep: View {
             Image(systemName: ride.route.mode == .bus ? "bus.fill" : "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)
                 .frame(width: 34, height: 34)
                 .background(RouteTint.color(for: ride.route.name), in: live.shape(.badge))
+                // A ride already taken steps back; the one under way gets a soft ring.
+                .opacity(ridden ? 0.45 : 1)
+                .attentionPulse(aboard, color: tint, in: live.shape(.badge))
+                .smoothChanges(ridden)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 8) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -1775,6 +1836,8 @@ struct JourneyGuideCard: View {
     /// a step back ("返回等車") settles from above.
     @State private var shownStepIndex = 0
     @Namespace private var stageSpace
+    /// The stops sheet grows out of the button that opens it.
+    @Namespace private var sheetSpace
     /// Changes only when the card moves to another stage or another route.
     private var stageKey: String { (planner.selectedID ?? "") + ":" + String(planner.stepIndex) }
     private var stageTransition: AnyTransition {
@@ -1791,8 +1854,8 @@ struct JourneyGuideCard: View {
                     if planner.boardingRideIndex != nil {
                         JourneyWaitingStage(model: model, planner: planner)
                     } else if planner.arrived {
-                        Button { model.finishJourney() } label: {
-                            Text(live.text("完成")).liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 50)
+                        Button { Haptics.selection(); model.finishJourney() } label: {
+                            Label(live.text("完成"), systemImage: "checkmark").liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 50)
                         }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
@@ -1818,6 +1881,7 @@ struct JourneyGuideCard: View {
                             Button { model.toggleAlightReminder() } label: {
                                 Image(systemName: model.alightReminderActive ? "bell.badge.fill" : model.purchases.hasPro ? "bell.slash" : "bell")
                                     .liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                                    .symbolSwap(model.alightReminderActive).symbolBounce(model.alightReminderActive)
                             }.buttonStyle(MapActionStyle())
                                 .accessibilityLabel(model.alightReminderActive ? AppText.text("關閉下車提醒") : AppText.text("下車提醒"))
                                 .accessibilityValue(model.alightReminderStatus)
@@ -1828,6 +1892,7 @@ struct JourneyGuideCard: View {
                                 Image(systemName: "point.3.filled.connected.trianglepath.dotted").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
                             }
                             .buttonStyle(MapActionStyle(tint: Color.primary))
+                            .sheetSource("ride-stops", in: sheetSpace)
                             .accessibilityLabel(ride.route.mode == .bus ? AppText.text("沿途站牌") : AppText.text("沿線車站"))
                             .accessibilityIdentifier("journey-ride-stops")
                         }
@@ -1888,7 +1953,7 @@ struct JourneyGuideCard: View {
             .smoothChanges(model.language)
             .onChange(of: planner.stepIndex, initial: true) { _, step in shownStepIndex = step }
             .sheet(isPresented: $showRideStops) {
-                if let ride = planner.activeRide { OnboardStopsView(model: model, ride: ride) }
+                if let ride = planner.activeRide { OnboardStopsView(model: model, ride: ride).opensFromSource("ride-stops", in: sheetSpace) }
             }
             .sheet(isPresented: $chooseVehicle) {
                 if let ride = planner.activeRide { BoardedVehiclePicker(model: model, ride: ride) }
@@ -1989,9 +2054,12 @@ private struct WaitingBannerContent: View {
         let guide = BoardingGuide(ride: ride, metadata: model.metadata, snapshot: model.snapshot, at: date)
         let boarding = model.boardingInformation(ride, at: date)
         let access = model.planner.accessInstruction(at: model.planner.boardingRideIndex ?? 0, date: date)
+        let arriving = ride.route.mode == .bus && guide.arrivingSoon
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
-                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name).tripStageMatch("banner-lead")
+                RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
+                    .attentionPulse(arriving, color: Color(liveHex: "#6EE7A0"), in: live.shape(.badge))
+                    .tripStageMatch("banner-lead")
                     .accessibilityIdentifier("boarding-route")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(live.text("往 ") + ride.route.localizedDestination(direction: ride.direction))
@@ -2113,7 +2181,9 @@ private struct RidingBannerContent: View {
                         Image(systemName: "location.fill").font(.caption2.weight(.bold)).foregroundStyle(Color(liveHex: "#6EA8FF"))
                             .frame(width: 12).accessibilityLabel(AppText.text("依你的定位即時更新"))
                     } else {
-                        Circle().fill(Color(liveHex: "#6EA8FF")).frame(width: 8, height: 8).frame(width: 12)
+                        Circle().fill(Color(liveHex: alightNext ? "#FFD60A" : "#6EA8FF")).frame(width: 8, height: 8)
+                            .attentionPulse(alightNext, color: Color(liveHex: "#FFD60A"), in: Circle())
+                            .frame(width: 12)
                     }
                     VStack(alignment: .leading, spacing: 1) {
                         Text((next.id == ride.alighting.id ? AppText.text("下一站下車 · ") : AppText.text("下一站 · ")) + next.localizedName).lineLimit(1)
@@ -2228,6 +2298,7 @@ private struct WalkingBannerContent: View {
             Image(systemName: planner.arrived ? "checkmark.circle.fill" : cyclingInstruction != nil ? "bicycle" : "figure.walk")
                 .font(.system(size: 30, weight: .semibold))
                 .foregroundStyle(planner.arrived ? Color(liveHex: "#6EE7A0") : Color.white)
+                .symbolSwap(planner.arrived ? 2 : cyclingInstruction != nil ? 1 : 0).symbolBounce(planner.arrived)
                 .frame(width: 40).tripStageMatch("banner-lead")
             VStack(alignment: .leading, spacing: 2) {
                 Text(planner.arrived ? live.text("已抵達") : cyclingInstruction

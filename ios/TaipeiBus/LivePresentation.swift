@@ -93,6 +93,14 @@ enum InterfaceMotion {
 #endif
         return system
     }
+    /// A finger on a control: quick to press in, a touch of give on release.
+    static let press = Animation.spring(response: 0.24, dampingFraction: 0.74)
+    /// Floating map controls, chips and cards that appear, move or change size.
+    static let chrome = Animation.spring(response: 0.38, dampingFraction: 0.86)
+    /// Sheets and panels that change height or page.
+    static let panel = Animation.spring(response: 0.42, dampingFraction: 0.9)
+    /// Text, symbols and colours that change in place.
+    static let content = Animation.smooth(duration: 0.28)
 }
 private struct SmoothChange<Value: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -129,22 +137,110 @@ private struct LiveNumericText<Value: Equatable>: ViewModifier {
 
 /// The app's haptic vocabulary. Browsing stays a light selection tick so the firmer
 /// patterns keep their meaning during a trip.
+///
+/// Each generator is made on first use, kept, and primed again after it fires, so a run of
+/// taps (keys, pages, a trip's stages) lands on a Taptic Engine that is already awake instead
+/// of spinning one up every time. Every caller is on the main thread.
 enum Haptics {
-    /// Picking a stop, route, bus, key or map mode.
-    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+    nonisolated(unsafe) private static var selector: UISelectionFeedbackGenerator?
+    nonisolated(unsafe) private static var notifier: UINotificationFeedbackGenerator?
+    nonisolated(unsafe) private static var impacts: [UIImpactFeedbackGenerator.FeedbackStyle: UIImpactFeedbackGenerator] = [:]
+    private static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle, intensity: CGFloat = 1) {
+        let generator = impacts[style] ?? UIImpactFeedbackGenerator(style: style)
+        impacts[style] = generator
+        generator.impactOccurred(intensity: intensity); generator.prepare()
+    }
+    private static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        let generator = notifier ?? UINotificationFeedbackGenerator()
+        notifier = generator
+        generator.notificationOccurred(type); generator.prepare()
+    }
+    /// Picking a stop, route, bus, key, page or map mode.
+    static func selection() {
+        let generator = selector ?? UISelectionFeedbackGenerator()
+        selector = generator
+        generator.selectionChanged(); generator.prepare()
+    }
     /// A deliberate step: starting a trip, boarding, alighting, a changed station, or starting
     /// and finishing a spoken request.
-    static func stage() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+    static func stage() { impact(.medium) }
     /// Something finished: the destination reached, or a spoken trip planned.
-    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-    /// Something needs attention: the assistant could not continue.
-    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+    static func success() { notify(.success) }
+    /// Something needs attention: the assistant could not continue, a search found nothing.
+    static func warning() { notify(.warning) }
     /// The microphone opened.
-    static func listening() { UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9) }
+    static func listening() { impact(.soft, intensity: 0.9) }
     /// The sentence was heard and is being understood.
-    static func heard() { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7) }
+    static func heard() { impact(.rigid, intensity: 0.7) }
     /// A question for the rider, such as consent to go online.
-    static func prompt() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    static func prompt() { impact(.light) }
+    /// A trip or a walk put away before its end: softer than a stage, so it never reads as arriving.
+    static func ended() { impact(.soft, intensity: 0.6) }
+    /// Something switched on or off in place: a favourite, the alighting reminder, following a bus.
+    static func toggle(_ on: Bool) { if on { impact(.light, intensity: 0.8) } else { selection() } }
+}
+
+extension View {
+    /// Swaps one SF Symbol for the next with the system Replace effect (Magic Replace from iOS 18,
+    /// so a slash or a badge draws onto the same glyph), and animates the colour that comes with
+    /// it. Symbol changes from data updates arrive outside an animation, so this supplies one.
+    func symbolSwap<Value: Equatable>(_ value: Value) -> some View { modifier(SymbolSwap(value: value)) }
+    /// One bounce of the symbols inside when `value` changes: the visible echo of a tap or of a
+    /// moment worth noticing, such as arriving.
+    func symbolBounce<Value: Equatable>(_ value: Value) -> some View { modifier(SymbolBounce(value: value)) }
+    /// A soft ring that keeps breathing out of `shape` while `active`: a bus about to arrive, the
+    /// rider's stop coming next. With Reduce Motion the ring stays still and the colour alone says it.
+    func attentionPulse<S: Shape>(_ active: Bool, color: Color, in shape: S) -> some View {
+        modifier(AttentionPulse(active: active, color: color, shape: shape))
+    }
+}
+private struct SymbolSwap<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let value: Value
+    @ViewBuilder func body(content: Content) -> some View {
+        if InterfaceMotion.reduced(systemReduceMotion) {
+            content.contentTransition(.identity)
+        } else if #available(iOS 18.0, *) {
+            content.contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
+                .animation(InterfaceMotion.content, value: value)
+        } else {
+            content.contentTransition(.symbolEffect(.replace)).animation(InterfaceMotion.content, value: value)
+        }
+    }
+}
+private struct SymbolBounce<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let value: Value
+    @ViewBuilder func body(content: Content) -> some View {
+        if InterfaceMotion.reduced(systemReduceMotion) { content }
+        else { content.symbolEffect(.bounce, value: value) }
+    }
+}
+private struct AttentionPulse<S: Shape>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let active: Bool
+    let color: Color
+    let shape: S
+    func body(content: Content) -> some View {
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        content.background {
+            ZStack {
+                if active {
+                    if reduced {
+                        shape.stroke(color.opacity(0.8), lineWidth: 2).padding(-3)
+                    } else {
+                        // Out and fading, then back in a single frame, again and again.
+                        shape.stroke(color, lineWidth: 2)
+                            .phaseAnimator([false, true]) { ring, out in
+                                ring.scaleEffect(out ? 1.32 : 1).opacity(out ? 0 : 0.85)
+                            } animation: { out in out ? .easeOut(duration: 1.3) : nil }
+                    }
+                }
+            }
+            .animation(reduced ? nil : InterfaceMotion.content, value: active)
+            .allowsHitTesting(false).accessibilityHidden(true)
+        }
+    }
 }
 
 private struct NativeActionSurface: ViewModifier {
@@ -293,13 +389,15 @@ struct MapActionStyle: ButtonStyle {
             .contentShape(Capsule())
             .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.42)
             .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
-            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.press, value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
     }
 }
 
 /// Apple Maps place-card action tiles: icon above a short label.
 struct MapTileStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     var prominent = false
     var tint: Color? = nil
@@ -313,9 +411,45 @@ struct MapTileStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 58)
             .background(prominent ? AnyShapeStyle(accent) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: shape)
             .contentShape(shape)
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.42)
             .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
-            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.press, value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
+    }
+}
+
+/// A row in a list or search results: a soft rounded highlight under the finger, as iOS
+/// lists do, instead of shrinking the whole row. The highlight shows at once on touch and
+/// fades out on release; a disabled row (a search still resolving) dims.
+struct RowPressStyle: ButtonStyle {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// How far the highlight reaches past the row's own edges, for rows without inner padding.
+    var bleed: CGFloat = 8
+    func makeBody(configuration: Configuration) -> some View {
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        return configuration.label
+            .contentShape(Rectangle())
+            .background {
+                live.shape(.row).fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0))
+                    .padding(.horizontal, -bleed)
+            }
+            .opacity(isEnabled ? 1 : 0.5)
+            .animation(configuration.isPressed || reduced ? nil : .easeOut(duration: 0.3), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
+    }
+}
+
+extension View {
+    /// The control a sheet opens from, so the sheet can grow out of it (the iOS 18 zoom; on iOS 26
+    /// the sheet morphs out of the control's glass). Earlier systems keep the standard slide up.
+    @ViewBuilder func sheetSource(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) { matchedTransitionSource(id: id, in: namespace) } else { self }
+    }
+    /// Presents this sheet out of the control marked with the same `sheetSource` id.
+    @ViewBuilder func opensFromSource(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) { navigationTransition(.zoom(sourceID: id, in: namespace)) } else { self }
     }
 }
 

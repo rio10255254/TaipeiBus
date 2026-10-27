@@ -91,6 +91,7 @@ struct MapContextLabels: View {
                         model.recordMapTap(expanded ? "station-collapse" : "station-expand")
 #endif
                         expandedStationID = expanded ? nil : model.mapLabelStation?.id
+                        Haptics.selection()
                     }, showDetails: showDetails)
                     .equatable().frame(width: width).fixedSize(horizontal: false, vertical: true)
                     .background { GeometryReader { body in Color.clear.preference(key: MapLabelSizeKey.self, value: body.size) } }
@@ -139,7 +140,9 @@ private struct MapContextLabelContent: View, Equatable {
                                     Text(station.mode == .bus ? station.localizedBearing : model.metadata.metro.station(station.id)?.code ?? "").font(.caption).foregroundStyle(Color(uiColor: .secondaryLabel))
                                 }
                             }
-                            Image(systemName: expanded ? "chevron.up" : "chevron.down").font(.system(size: 10, weight: .semibold))
+                            // One chevron that turns over, so opening and closing read as the same motion.
+                            Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold))
+                                .rotationEffect(.degrees(expanded ? 180 : 0))
                         }.frame(minHeight: 44).contentShape(Rectangle()).mapLabelSurface()
                     }.buttonStyle(.plain).accessibilityIdentifier("map-station-expand")
                         .accessibilityValue(expanded ? AppText.text("已展開") : AppText.text("已收合"))

@@ -36,6 +36,8 @@ struct TransitHomeView: View {
     @State private var lastJourneyStep: JourneyStep?
     // Retain the reference here; only the label/probe children observe frame updates.
     @State private var selectionOverlay = MapSelectionOverlay()
+    /// Sheets that grow out of the control that opened them.
+    @Namespace private var sheetSpace
 
     init(model: TransitAppModel) {
         self.model = model
@@ -153,17 +155,23 @@ struct TransitHomeView: View {
                 }
 #endif
 
-                selectionCapsules
+                ZStack(alignment: .top) { selectionCapsules }
+                    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: capsuleState)
                 if !showDetails && !showSearch && !showJourney && !pendingJourneyDetail {
                     bottomChrome
                 }
-                if model.metadata.routes.isEmpty, model.loadError != nil {
-                    // Without any route data the app cannot plan; say it plainly instead of "updating".
-                    Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
-                        .background(.regularMaterial, in: live.shape(.label))
-                        .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
+                ZStack(alignment: .top) {
+                    if model.metadata.routes.isEmpty, model.loadError != nil {
+                        // Without any route data the app cannot plan; say it plainly instead of "updating".
+                        Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
+                            .background(.regularMaterial, in: live.shape(.label))
+                            .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
+                            .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
                 }
-            }.onChange(of: geometry.size.height, initial: true) { _, height in
+                .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.metadata.routes.isEmpty && model.loadError != nil)
+            }
+            .onChange(of: geometry.size.height, initial: true) { _, height in
                 if abs(viewportHeight - height) > 1 { viewportHeight = height }
             }
         }
@@ -201,7 +209,7 @@ struct TransitHomeView: View {
             }
             Spacer(minLength: 0)
             MapControlStack(model: model, location: location, showsCityFleet: planner.selected == nil && !stationWalk.isActive,
-                            showsLocation: !routeMapPreview) {
+                            showsLocation: !routeMapPreview, sheetSpace: sheetSpace) {
                 showInformation = true
             }
         }
@@ -210,9 +218,17 @@ struct TransitHomeView: View {
             ProNoteBanner(model: model).padding(.top, 8).offset(y: 64).padding(.horizontal, 2)
         }
         .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.top, 8 * CGFloat(live.appearance.spacingScale))
-        .animation(reduceMotion ? nil : .spring(response: 0.34, dampingFraction: 0.86), value: model.cityFleetMode)
-        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: model.proNote)
+        .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.cityFleetMode)
+        .animation(reduceMotion ? nil : InterfaceMotion.content, value: model.proNote)
         .animation(reduceMotion ? nil : .spring(response: 0.44, dampingFraction: 0.88), value: showsBanner)
+        .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: !model.hasProAccess && metroInView && !stationWalk.isActive)
+    }
+
+    /// What decides which capsule is on the map, so one slides away as the next arrives.
+    private var capsuleState: String {
+        [model.selectedRouteID ?? "", model.selectedVehicleID ?? "", model.selectedStationID ?? "", planner.selectedID ?? "",
+         String(model.selectedVehicle == nil), String(showDetails), String(showSearch), String(stationWalk.isActive), String(planner.started)]
+            .joined(separator: "|")
     }
 
     @ViewBuilder private var selectionCapsules: some View {
@@ -222,7 +238,9 @@ struct TransitHomeView: View {
                 Text(AppText.text("往 %@", route.localizedDestination(direction: model.direction))).liveFont(.subheadline, weight: .medium).lineLimit(1)
                 Spacer(minLength: 0)
                 if model.routeDirections.count > 1 {
-                    Button { model.switchDirection() } label: { Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44) }
+                    Button { model.switchDirection() } label: {
+                        Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44).symbolBounce(model.direction)
+                    }
                         .accessibilityLabel(AppText.text("切換路線方向"))
                 }
                 Button { showDetails = true } label: {
@@ -240,6 +258,7 @@ struct TransitHomeView: View {
                     .liveFont(.subheadline).padding(.horizontal, 14 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 12 * CGFloat(live.appearance.spacingScale))
             }
             .phoneGlass(in: Capsule()).padding(.leading, 16).padding(.trailing, 76).padding(.top, 60 * CGFloat(live.appearance.spacingScale) + bannerOffset)
+            .transition(.opacity.combined(with: .move(edge: .top)))
         }
     }
 
@@ -251,6 +270,7 @@ struct TransitHomeView: View {
         if let message = location.message, !hasSelection {
             Text(live.text(message)).liveFont(.caption).padding(.horizontal, 14).padding(.vertical, 9)
                 .phoneGlass(in: Capsule())
+                .transition(.opacity.combined(with: .move(edge: .bottom)))
         }
         Group {
         if stationWalk.isActive {
@@ -331,9 +351,11 @@ struct TransitHomeView: View {
     }
     }
     .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 10 * CGFloat(live.appearance.spacingScale))
-    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: nearbyStations.map(\.id))
-    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.tappedPlace)
-    .animation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86), value: model.selectedBikeStationID)
+    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: nearbyStations.map(\.id))
+    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.tappedPlace)
+    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.selectedBikeStationID)
+    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: location.message)
+    .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: commutes.journeys.map(\.id))
     }
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
@@ -382,8 +404,8 @@ struct TransitHomeView: View {
             JourneyPlanningView(model: model, planner: planner, location: location,
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent == journeyPreviewDetent,
-                                expand: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { journeyDetent = journeyPreviewDetent } })
+                                expand: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = .large } },
+                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } })
                 .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
@@ -398,7 +420,7 @@ struct TransitHomeView: View {
                     if height > 0, abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height }
                 }
         }
-        .sheet(isPresented: $showInformation) { AppInformationView(model: model) }
+        .sheet(isPresented: $showInformation) { AppInformationView(model: model).opensFromSource("settings", in: sheetSpace) }
         .onChange(of: model.resumeJourneyRequested) { _, requested in
             guard requested else { return }
             model.resumeJourneyRequested = false
@@ -560,7 +582,7 @@ struct TransitHomeView: View {
             selectionOverlay.update(nil)
             if showJourney { showDetails = false; pendingJourneyDetail = true; showJourney = false }
             else if showSearch {
-                withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.9)) { model.sheetDetent = .height(330) }
+                withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { model.sheetDetent = .height(330) }
             }
             else { showDetails = planner.started || wasShowingDetails }
 #if DEBUG
@@ -640,12 +662,21 @@ private struct PhoneGlassBackground<S: Shape>: ViewModifier {
     /// Interactive glass reacts to touches itself, so it is only used on a single
     /// control. Groups of buttons keep plain glass and let each button take its tap.
     var interactive = true
+    /// Glass with an id flows out of, and back into, its neighbours in the same glass
+    /// container as controls appear, leave or change size, instead of fading on its own.
+    var glassID: String? = nil
+    var namespace: Namespace.ID? = nil
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ViewBuilder func body(content: Content) -> some View {
         if reduceTransparency || live.appearance.solidSurfaces {
             content.background(Color(uiColor: .systemBackground), in: shape)
         } else if #available(iOS 26.0, *) {
-            content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            if let glassID, let namespace {
+                content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+                    .glassEffectID(glassID, in: namespace)
+            } else {
+                content.glassEffect(interactive ? .regular.interactive() : .regular, in: shape)
+            }
         } else {
             content.background(.regularMaterial, in: shape)
         }
@@ -655,6 +686,10 @@ private struct PhoneGlassBackground<S: Shape>: ViewModifier {
 
 extension View {
     func phoneGlass<S: Shape>(in shape: S, interactive: Bool = true) -> some View { modifier(PhoneGlassBackground(shape: shape, interactive: interactive)) }
+    /// Glass that morphs with the other glass of its container (iOS 26) when controls come and go.
+    func phoneGlass<S: Shape>(in shape: S, id: String, namespace: Namespace.ID) -> some View {
+        modifier(PhoneGlassBackground(shape: shape, glassID: id, namespace: namespace))
+    }
 }
 
 struct PhoneGlassGroup<Content: View>: View {
@@ -701,7 +736,7 @@ struct PhonePressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label.contentShape(Rectangle()).scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.78 : 1)
-            .animation(reduceMotion ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+            .animation(reduceMotion ? nil : InterfaceMotion.press, value: configuration.isPressed)
     }
 }
 
@@ -710,6 +745,7 @@ struct PhonePressStyle: ButtonStyle {
 private struct SourceStatusView: View {
     @Environment(\.liveSettings) private var live
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     let snapshot: TransitSnapshot
     let arrivalFeed: EstimateFeed
     let positionsNeeded: Bool
@@ -722,8 +758,10 @@ private struct SourceStatusView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { timeline in
-            if let status = BusDataStatus.evaluate(snapshot, positions: positionsNeeded, arrivals: arrivalsNeeded,
-                                                   at: timeline.date, arrivalFeed: arrivalFeed) {
+            let current = BusDataStatus.evaluate(snapshot, positions: positionsNeeded, arrivals: arrivalsNeeded,
+                                                 at: timeline.date, arrivalFeed: arrivalFeed)
+            ZStack(alignment: .topLeading) {
+            if let status = current {
                 let waiting = status.state == .updating
                 let age = status.updatedAt.map { timeline.date.timeIntervalSince($0) }
                 Button(action: refresh) {
@@ -749,6 +787,10 @@ private struct SourceStatusView: View {
                 .accessibilityHint(AppText.text("點一下重新取得定位與到站資料"))
                 .transition(.opacity.combined(with: .scale(scale: 0.94, anchor: .topLeading)))
             }
+            }
+            // Keyed on what the capsule says, not its age, so the clock ticking does not animate it.
+            .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.chrome,
+                       value: current.map { "\($0.source)\($0.state)" })
         }
     }
     private func label(_ status: BusDataStatus) -> String {
@@ -821,6 +863,9 @@ private struct HomeSearchRow: View {
     let browse: (BrowseMode) -> Void
     /// Speak instead of type: the first thing on the home screen, like a voice assistant.
     var voice: (() -> Void)? = nil
+    /// The search field and the round controls are one family of glass: as a selection shrinks
+    /// the field and adds follow or close, the shapes flow into one another (iOS 26).
+    @Namespace private var glassSpace
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     private func circle(_ symbol: String) -> some View {
         Image(systemName: symbol).liveFont(.title3).frame(width: 56, height: 56).contentShape(Circle())
@@ -840,7 +885,7 @@ private struct HomeSearchRow: View {
                 .contentShape(Capsule())
             }
             .buttonStyle(PhonePressStyle())
-            .phoneGlass(in: Capsule())
+            .phoneGlass(in: Capsule(), id: "search", namespace: glassSpace)
             .accessibilityLabel(live.text("搜尋目的地"))
             .accessibilityIdentifier("home-destination-search")
             if !hasSelection, let voice {
@@ -867,23 +912,25 @@ private struct HomeSearchRow: View {
             HStack(spacing: 0) {
                 if live.display.stationShortcut || hasSelection {
                     Button { browse(.stops) } label: { circle("mappin.and.ellipse") }
-                        .foregroundStyle(.primary).phoneGlass(in: Circle()).accessibilityLabel(live.text("站牌"))
+                        .foregroundStyle(.primary).phoneGlass(in: Circle(), id: "stops", namespace: glassSpace)
+                        .accessibilityLabel(live.text("站牌"))
                 }
+                // Follow and routes take turns in one slot, so they share one piece of glass.
                 if let bus = model.selectedVehicle {
                     Button {
                         model.following.toggle()
-                        Haptics.selection()
+                        Haptics.toggle(model.following)
                         if model.following { model.focusMap(.vehicle(bus.id)) }
                     } label: {
-                        circle(model.following ? "scope" : "bus.fill")
-                            .contentTransition(reduceMotion ? .identity : .symbolEffect(.replace))
+                        circle(model.following ? "scope" : "bus.fill").symbolSwap(model.following)
                     }
                     .foregroundStyle(model.following ? accent : Color.primary)
-                    .phoneGlass(in: Circle())
+                    .phoneGlass(in: Circle(), id: "secondary", namespace: glassSpace)
                     .accessibilityLabel(model.following ? AppText.text("停止跟車") : AppText.text("跟車"))
                 } else if live.display.routeShortcut || hasSelection {
                     Button { browse(.routes) } label: { circle("point.topleft.down.to.point.bottomright.curvepath") }
-                        .foregroundStyle(.primary).phoneGlass(in: Circle()).accessibilityLabel(live.text("路線"))
+                        .foregroundStyle(.primary).phoneGlass(in: Circle(), id: "secondary", namespace: glassSpace)
+                        .accessibilityLabel(live.text("路線"))
                 }
                 if model.selectedRouteID != nil || model.selectedStationID != nil {
                     Button {
@@ -894,15 +941,16 @@ private struct HomeSearchRow: View {
                         Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 56, height: 56).contentShape(Circle())
                     }
                     .foregroundStyle(.secondary)
-                    .phoneGlass(in: Circle())
+                    .phoneGlass(in: Circle(), id: "close", namespace: glassSpace)
                     .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("關閉選取"))
                     .transition(.opacity.combined(with: .scale(scale: 0.8)))
                 }
             }
         }
         .shadow(color: .black.opacity(0.08), radius: 14, y: 6)
-        .animation(reduceMotion ? nil : .spring(response: 0.36, dampingFraction: 0.86), value: hasSelection)
-        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.86), value: model.selectedVehicleID)
+        .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: hasSelection)
+        .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.selectedVehicleID)
+        .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: model.selectedRouteID != nil || model.selectedStationID != nil)
     }
 }
 
@@ -916,6 +964,8 @@ private struct MapControlStack: View {
     @ObservedObject var location: LocationService
     let showsCityFleet: Bool
     var showsLocation = true
+    /// The settings sheet grows out of the map button.
+    let sheetSpace: Namespace.ID
     let showInformation: () -> Void
     private var accent: Color { Color(liveHex: live.appearance.accentColor) }
     var body: some View {
@@ -927,25 +977,35 @@ private struct MapControlStack: View {
                 }
                 .foregroundStyle(.primary)
                 .phoneGlass(in: Circle())
+                .sheetSource("settings", in: sheetSpace)
                 .accessibilityLabel(live.text("資料來源與地圖設定"))
                 if showsCityFleet {
                     Button { model.toggleCityFleet() } label: {
                         Image(systemName: model.cityFleetMode ? "globe.asia.australia.fill" : "globe.asia.australia")
                             .liveFont(.title3).frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
+                            .symbolSwap(model.cityFleetMode).symbolBounce(model.cityFleetMode)
                     }
                     .foregroundStyle(model.cityFleetMode ? accent : Color.primary)
                     .phoneGlass(in: Circle())
                     .accessibilityIdentifier("city-fleet-toggle")
                     .accessibilityLabel(model.cityFleetMode ? AppText.text("離開全城公車") : AppText.text("查看全城公車"))
                     .accessibilityValue(model.cityFleetMode ? AppText.text("已開啟") : AppText.text("已關閉"))
+                    .transition(.opacity.combined(with: .scale(scale: 0.6)))
                 }
-                if showsLocation { MapLocationControl(model:model,location:location) }
+                if showsLocation {
+                    MapLocationControl(model:model,location:location)
+                        .transition(.opacity.combined(with: .scale(scale: 0.6)))
+                }
             }
+            .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: showsCityFleet)
+            .animation(reduceMotion ? nil : InterfaceMotion.chrome, value: showsLocation)
     }
 }
 
 private struct MapLocationControl: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
     private var accent: Color { Color(liveHex:live.appearance.accentColor) }
@@ -953,13 +1013,15 @@ private struct MapLocationControl: View {
                 Button {
                     model.cycleUserTracking()
                 } label: {
-                    Group {
-                        if location.requesting { ProgressView() }
+                    ZStack {
+                        if location.requesting { ProgressView().transition(.opacity) }
                         else {
                             Image(systemName: model.userMapMode == .heading ? "location.north.line.fill" : model.userMapMode == .north ? "location.fill" : "location")
-                                .liveFont(.title3)
+                                .liveFont(.title3).symbolSwap(model.userMapMode)
+                                .transition(.opacity)
                         }
                     }.frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
+                    .animation(reduceMotion ? nil : InterfaceMotion.content, value: location.requesting)
                 }
                 .foregroundStyle(model.userMapMode == .free ? Color.primary : accent)
                 .phoneGlass(in: Circle())
@@ -973,6 +1035,7 @@ private struct MapLocationControl: View {
 private struct TransitPanel: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.liveSettings) private var live
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
     @Binding var showInformation: Bool
@@ -1118,8 +1181,10 @@ private struct TransitPanel: View {
                 if !model.query.isEmpty {
                     Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                         .frame(width: 36, height: 40).accessibilityLabel(live.text("清除搜尋"))
+                        .transition(.opacity.combined(with: .scale(scale: 0.6)))
                 }
             }
+            .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.content, value: model.query.isEmpty)
             .padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
             .background(Color(uiColor: .tertiarySystemFill), in: live.shape(.row))
             Picker(AppText.text("查詢類型"), selection: $model.mode) {
@@ -1141,14 +1206,17 @@ private struct TransitPanel: View {
                 else { Text(live.text("路線動態")).liveFont(.caption).foregroundStyle(.secondary) }
             }
             Spacer(minLength: 4)
+            if let station = model.selectedStation {
+                let saved = model.favorites.contains(station.id)
+                Button { model.toggleFavorite(station) } label: {
+                    Image(systemName: saved ? "star.fill" : "star")
+                        .liveFont(.title3).frame(width: 44, height: 44)
+                        .foregroundStyle(saved ? Color.yellow : Color.accentColor)
+                        .symbolSwap(saved).symbolBounce(saved)
+                }.accessibilityLabel(saved ? AppText.text("移除收藏站牌") : AppText.text("收藏站牌"))
+            }
             Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
                 .accessibilityLabel(AppText.text("返回地圖")).accessibilityIdentifier("transit-details-close")
-            if let station = model.selectedStation {
-                Button { model.toggleFavorite(station) } label: {
-                    Image(systemName: model.favorites.contains(station.id) ? "star.fill" : "star")
-                        .liveFont(.title3).frame(width: 44, height: 44)
-                }.accessibilityLabel(model.favorites.contains(station.id) ? AppText.text("移除收藏站牌") : AppText.text("收藏站牌"))
-            }
         }.padding(.leading, 6 * CGFloat(live.appearance.spacingScale)).padding(.trailing, 12 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
     }
 
@@ -1179,7 +1247,7 @@ private struct TransitPanel: View {
                         }
                         Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
                     }.padding(.vertical, 15 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-                }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("station-result-" + station.id)
+                }.buttonStyle(RowPressStyle()).accessibilityIdentifier("station-result-" + station.id)
                 Divider()
             }
         } else if model.mode == .routes {
@@ -1204,7 +1272,7 @@ private struct TransitPanel: View {
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
                     }.padding(.vertical, 12 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-                }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-result-" + route.id)
+                }.buttonStyle(RowPressStyle()).accessibilityIdentifier("route-result-" + route.id)
                 Divider()
             }
         }
@@ -1323,8 +1391,8 @@ private struct StationDetails: View {
                                     .liveFont(.body, weight: .semibold).monospacedDigit().liveNumericText(wait, countsDown: true)
                                     .foregroundStyle((row.estimateSeconds ?? -1) >= 0 ? Color(liveHex: live.appearance.accentColor) : Color.secondary)
                                 Image(systemName: "chevron.right").liveFont(.caption, weight: .semibold).foregroundStyle(.tertiary)
-                            }.contentShape(Rectangle())
-                        }.buttonStyle(.plain).frame(minHeight: 44).accessibilityIdentifier("station-route-" + row.stop.routeID)
+                            }.frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(RowPressStyle()).accessibilityIdentifier("station-route-" + row.stop.routeID)
                         if row.stop.mode != .bus, let window = model.metadata.metro.boardingWindow(routeID: row.stop.serviceID, direction: row.stop.direction, stationID: row.stop.stationID) {
                             Text(AppText.text("首班 %@ · 末班 %@", String(format:"%02d:%02d",window.firstMinute / 60,window.firstMinute % 60), String(format:"%02d:%02d",window.lastMinute / 60,window.lastMinute % 60)))
                                 .liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
@@ -1340,7 +1408,7 @@ private struct StationDetails: View {
                                                  ?? AppText.text("GPS 直線 %@", distanceLabel(approach.directDistance))).liveFont(.caption2).foregroundStyle(.secondary)
                                         }.padding(.horizontal, 12 * CGFloat(live.appearance.spacingScale)).padding(.vertical, 6 * CGFloat(live.appearance.spacingScale)).frame(minHeight: 48)
                                             .background(Color(uiColor: .tertiarySystemFill), in: Capsule())
-                                    }.buttonStyle(.plain)
+                                    }.buttonStyle(PhonePressStyle())
                                 }
                             }
                         }
@@ -1447,7 +1515,7 @@ private struct RouteDetails: View {
                                             Text(otherReason(entry.reason)).liveFont(.caption).foregroundStyle(.secondary)
                                             Image(systemName: "chevron.right").liveFont(.caption)
                                         }.frame(minHeight: 44).contentShape(Rectangle())
-                                    }.buttonStyle(.plain)
+                                    }.buttonStyle(RowPressStyle())
                                 }
                             }
                         }.liveFont(.subheadline).accessibilityIdentifier("route-other-vehicles")
@@ -1473,12 +1541,13 @@ private struct RouteDetails: View {
                     } label: {
                         HStack(spacing: 10) {
                             Image(systemName: model.routeBoardingStopID == stop.id ? "checkmark.circle.fill" : "circle").foregroundStyle(model.routeBoardingStopID == stop.id ? Color.accentColor : .secondary).frame(width: 26)
+                                .symbolSwap(model.routeBoardingStopID == stop.id)
                             BilingualName(stop).liveFont(.subheadline)
                             Spacer(minLength: 8)
                             Text(route.mode == .bus ? EstimateFeed.label(model.snapshot.estimates.value(routeID: route.parentID, stopID: stop.id, at: timeline.date)) : model.metadata.metro.station(stop.stationID)?.code ?? "")
                                 .liveFont(.caption, weight: .semibold).foregroundStyle(.secondary)
                         }.frame(minHeight: 50).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityIdentifier("route-boarding-stop-" + stop.id)
+                    }.buttonStyle(RowPressStyle()).accessibilityIdentifier("route-boarding-stop-" + stop.id)
                     Divider()
                 }
             }
@@ -1519,7 +1588,7 @@ private struct RouteDetails: View {
                 }
                 Image(systemName: "scope").foregroundStyle(Color.accentColor)
             }.frame(minHeight: 54).contentShape(Rectangle())
-        }.buttonStyle(PhonePressStyle()).accessibilityIdentifier("route-approaching-" + approach.vehicle.plate)
+        }.buttonStyle(RowPressStyle()).accessibilityIdentifier("route-approaching-" + approach.vehicle.plate)
     }
     private func otherReason(_ reason: RouteBoardingVehicles.OtherReason) -> String {
         switch reason {
@@ -1559,7 +1628,8 @@ private struct VehicleDetails: View {
                 let fresh = vehicle.hasReliablePosition(at: timeline.date)
                 HStack(alignment: .top, spacing: 20) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Label { Text(fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—").monospacedDigit() } icon: {
+                        let speed = fresh && vehicle.hasSpeed ? "\(Int(vehicle.speed))" : "—"
+                        Label { Text(speed).monospacedDigit().liveNumericText(speed) } icon: {
                             Image(systemName: "speedometer").foregroundStyle(.secondary)
                         }.liveFont(.subheadline, weight: .semibold, design: .rounded)
                         Text(live.text("GPS 回報 km/h")).liveFont(.caption).foregroundStyle(.secondary)
@@ -1569,6 +1639,7 @@ private struct VehicleDetails: View {
                             Text(fresh ? vehicle.statusLabel : vehicle.trackingLabel(at: timeline.date) ?? AppText.text("定位已延遲"))
                         } icon: {
                             Image(systemName: fresh ? "dot.radiowaves.left.and.right" : "exclamationmark.triangle.fill").foregroundStyle(fresh ? Color.green : Color.orange)
+                                .symbolSwap(fresh)
                         }.liveFont(.subheadline, weight: .semibold).foregroundStyle(fresh ? Color.primary : Color.orange)
                         Text(AppText.text("%@ 秒前回報", max(0, Int(timeline.date.timeIntervalSince(vehicle.observedAt))))).liveFont(.caption).foregroundStyle(.secondary).monospacedDigit()
                         if vehicle.lowFloor { Label(live.text("低底盤"), systemImage: "figure.roll").liveFont(.caption) }
@@ -1578,14 +1649,21 @@ private struct VehicleDetails: View {
             if let provider = vehicle.localizedProvider { Label(provider, systemImage: "building.2").liveFont(.subheadline).foregroundStyle(.secondary) }
             Toggle(AppText.text("淡化建築、凸顯這輛車"), isOn: $model.highlightVehicle).liveFont(.subheadline)
             HStack(spacing: 10) {
+                // One button follows and stops following, as the follow circle on the map does.
                 Button {
-                    model.following = model.beginFollowing(vehicle.id); model.focusMap(.vehicle(vehicle.id))
-                } label: { Label(live.text("跟隨公車"), systemImage: "scope").frame(maxWidth: .infinity, minHeight: 36) }
-                    .buttonStyle(.borderedProminent)
+                    if model.following { model.following = false }
+                    else { model.following = model.beginFollowing(vehicle.id); model.focusMap(.vehicle(vehicle.id)) }
+                    Haptics.toggle(model.following)
+                } label: {
+                    Label(model.following ? AppText.text("追蹤中") : live.text("跟隨公車"), systemImage: "scope")
+                        .frame(maxWidth: .infinity, minHeight: 48).smoothChanges(model.following)
+                }
+                    .buttonStyle(MapActionStyle(prominent: !model.following))
+                    .accessibilityHint(model.following ? AppText.text("停止跟車") : "")
                 Button {
                     if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction, variantOnly: true) }
-                } label: { Text(live.text("查看路線")).frame(maxWidth: .infinity, minHeight: 36) }.buttonStyle(.bordered)
-            }
+                } label: { Text(live.text("查看路線")).frame(maxWidth: .infinity, minHeight: 48) }.buttonStyle(MapActionStyle())
+            }.liveFont(.subheadline, weight: .semibold)
             if !vehicle.aligned { Text(live.text("目前顯示原始 GPS，尚未匹配道路軌跡")).liveFont(.caption).foregroundStyle(.secondary) }
             let upcoming = model.upcomingStops
             if !upcoming.isEmpty {
@@ -1603,7 +1681,7 @@ private struct VehicleDetails: View {
                             Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: progress.stop.id, at: timeline.date)))
                                 .foregroundStyle(.secondary).monospacedDigit().accessibilityIdentifier("browse-official-arrival-" + progress.stop.id)
                         }.liveFont(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
+                    }.buttonStyle(RowPressStyle())
                 }
                 }
                 Text(live.text("官方時間為路線下一班，未指定車牌。")).liveFont(.caption).foregroundStyle(.secondary)
@@ -1647,7 +1725,7 @@ struct VehicleRow: View {
                 }
                 Image(systemName: "chevron.right").liveFont(.caption).foregroundStyle(.tertiary)
             }.padding(.vertical, 14 * CGFloat(live.appearance.spacingScale)).contentShape(Rectangle())
-        }.buttonStyle(.plain)
+        }.buttonStyle(RowPressStyle())
     }
 }
 

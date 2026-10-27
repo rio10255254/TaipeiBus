@@ -144,7 +144,7 @@ struct StationWalkingDock: View {
                         Text(station.localizedBearing).liveFont(.subheadline).foregroundStyle(.secondary)
                     }
                     Spacer(minLength: 4)
-                    Button { model.finishStationWalk() } label: {
+                    Button { Haptics.ended(); model.finishStationWalk() } label: {
                         Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 40, height: 40)
                     }
                     .buttonStyle(MapActionStyle(tint: Color.primary))
@@ -165,9 +165,10 @@ struct StationWalkingDock: View {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
                         HStack(alignment: .firstTextBaseline, spacing: 18) {
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(navigation.remainingSeconds.map { AppText.text("約 %@ 分", max(1, Int(ceil($0 / 60)))) } ?? "—")
-                                    .liveFont(.title3, weight: .bold).monospacedDigit().contentTransition(.numericText())
-                                Text(navigation.remainingDistance.map(distanceLabel) ?? "—").liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit()
+                                let minutes = navigation.remainingSeconds.map { AppText.text("約 %@ 分", max(1, Int(ceil($0 / 60)))) } ?? "—"
+                                let distance = navigation.remainingDistance.map(distanceLabel) ?? "—"
+                                Text(minutes).liveFont(.title3, weight: .bold).monospacedDigit().liveNumericText(minutes, countsDown: true)
+                                Text(distance).liveFont(.subheadline).foregroundStyle(.secondary).monospacedDigit().liveNumericText(distance, countsDown: true)
                             }
                             if !navigation.locationConfirmed { Text(AppText.text("定位確認中")).liveFont(.caption).foregroundStyle(.secondary) }
                         }.accessibilityElement(children: .combine).accessibilityIdentifier("station-walk-progress")
@@ -176,12 +177,14 @@ struct StationWalkingDock: View {
                         Button { model.showStationWalkOverview() } label: {
                             Label(AppText.text("全程"), systemImage: "map").lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
                         }.buttonStyle(MapActionStyle()).accessibilityIdentifier("station-walk-overview")
-                        Button { model.finishStationWalk() } label: {
+                        Button { Haptics.success(); model.finishStationWalk() } label: {
                             Text(AppText.text("已到站牌")).lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
                         }.buttonStyle(MapActionStyle(prominent: true)).accessibilityIdentifier("station-walk-arrive")
                     }.liveFont(.body, weight: .semibold)
                 }
             }
+            .smoothChanges(navigation.calculating)
+            .smoothChanges(navigation.issue)
             .journeyDockSurface()
                 .accessibilityElement(children: .contain).accessibilityIdentifier("station-walk-navigation")
         }
@@ -196,6 +199,7 @@ struct StationWalkBanner: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 14) {
                     Image(systemName: "figure.walk").font(.system(size: 30, weight: .semibold)).frame(width: 40)
+                        .symbolBounce(navigation.currentInstruction)
                     Text(navigation.currentInstruction).liveFont(.title3, weight: .bold).lineLimit(3).minimumScaleFactor(0.8)
                         .accessibilityIdentifier("station-walk-instruction")
                     Spacer(minLength: 0)
