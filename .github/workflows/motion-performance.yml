@@ -80,19 +80,20 @@ jobs:
           ruby ios/usability/setup.rb
           python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
           location_fixture=$!
-          # Watchdog: whenever the app holds a core for long, sample its threads so a stall
-          # shows where the main thread is. The CPU timeline is kept as well.
+          # Watchdog: sample the app's threads whenever it holds a core, and once a minute in any
+          # case (a stall can also be a wait), so a stall shows where the main thread is.
           (
-            samples=0
+            samples=0; ticks=0
             while true; do
               sleep 15
+              ticks=$((ticks + 1))
               pid=$(pgrep -f 'TaipeiBus\.app/TaipeiBus( |$)' | head -1 || true)
               [ -n "$pid" ] || continue
               cpu=$(ps -o %cpu= -p "$pid" | tr -d ' ' || echo 0)
               echo "$(date +%T) pid=$pid cpu=$cpu" >> "$RUNNER_TEMP/app-cpu.log"
-              if [ "${cpu%.*}" -ge 85 ] && [ "$samples" -lt 6 ]; then
+              if { [ "${cpu%.*}" -ge 85 ] || [ $((ticks % 4)) -eq 0 ]; } && [ "$samples" -lt 40 ]; then
                 samples=$((samples + 1))
-                sudo sample "$pid" 3 -file "$RUNNER_TEMP/app-sample-$samples.txt" > /dev/null 2>&1 || true
+                sudo sample "$pid" 2 -file "$RUNNER_TEMP/app-sample-$(date +%H%M%S)-cpu${cpu%.*}.txt" > /dev/null 2>&1 || true
               fi
             done
           ) &
