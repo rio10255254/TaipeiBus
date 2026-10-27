@@ -338,12 +338,9 @@ struct TransitHomeView: View {
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
     /// The home microphone: the voice conversation, which Pro riders talk things through with (others
-    /// see the plans). 「用一句話規劃」 answers it only while the live settings turn it on.
+    /// see the plans). Planning from one sentence lives in the search box's own small microphone.
     private var microphone: (() -> Void)? {
-        if model.liveSettings.display.sentencePlanning, OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
-            return { if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() } }
-        }
-        return VoiceConversation.available ? { model.voiceChat.start() } : nil
+        VoiceConversation.available ? { model.voiceChat.start() } : nil
     }
 
     private func routeToPlace(_ place: MapPlaceSelection) {
@@ -847,18 +844,22 @@ private struct HomeSearchRow: View {
             .accessibilityLabel(live.text("搜尋目的地"))
             .accessibilityIdentifier("home-destination-search")
             if !hasSelection, let voice {
-                // Speaking is the first way to plan: a tinted glass button of its own, never content
-                // inside the search glass (there it rendered as a blurred glow on phones).
+                // The voice assistant: the moving colours of its own screen, in a button of its own, never
+                // content inside the search glass (there it rendered as a blurred glow on phones). The
+                // orb is drawn larger and clipped, so its colour fills the circle edge to edge.
                 Button {
                     Haptics.stage()
                     voice()
                 } label: {
-                    Image(systemName: "mic.fill").font(.system(size: 21, weight: .semibold)).foregroundStyle(.white)
-                        .frame(width: 56, height: 56).contentShape(Circle())
+                    VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true)
+                        .frame(width: 72, height: 72).frame(width: 56, height: 56)
+                        .clipShape(Circle())
+                        .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5))
+                        .shadow(color: Color(red: 0.5, green: 0.4, blue: 1).opacity(0.35), radius: 8, y: 3)
+                        .contentShape(Circle())
                 }
                 .buttonStyle(VoicePressStyle())
-                .modifier(TintedGlassCircle(tint: accent))
-                .accessibilityLabel(live.text("用說的規劃"))
+                .accessibilityLabel(live.text("語音助理"))
                 .accessibilityIdentifier("home-voice")
             }
             if hasSelection { Spacer(minLength: 0) }
@@ -1947,19 +1948,6 @@ private struct DebugZoomPerformanceControls: View {
     }
 }
 #endif
-
-/// A solid accent circle: tinted Liquid Glass on iOS 26, plain colour before or with reduced transparency.
-private struct TintedGlassCircle: ViewModifier {
-    let tint: Color
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-    @ViewBuilder func body(content: Content) -> some View {
-        if #available(iOS 26.0, *), !reduceTransparency {
-            content.glassEffect(.regular.tint(tint).interactive(), in: Circle())
-        } else {
-            content.background(tint, in: Circle())
-        }
-    }
-}
 
 /// How the voice assistant looks: a glow around the edge over the map, or a full screen.
 private struct VoiceStyleSettings: View {

@@ -561,7 +561,7 @@ final class JourneyAssistantSession: ObservableObject {
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
-                                      nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: conversation?.credit)
+                                      nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: forVoice ? conversation?.credit : nil)
         findStops()
         Haptics.success()
         conversation = nil; clarification = nil; problem = nil; message = nil
@@ -1746,41 +1746,6 @@ private struct VoiceSwell: ViewModifier {
         content
             .scaleEffect(1 + amount * level.value)
             .animation(.spring(response: 0.2, dampingFraction: 0.65), value: level.value)
-    }
-}
-
-/// The way in on the search screen: tap once and say where to go.
-struct VoiceStartCard: View {
-    let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        Button {
-            Haptics.stage()
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true).frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(AppText.text("按一下，說出要去哪裡")).font(.headline).foregroundStyle(.primary)
-                    Text(AppText.text("例如：明天九點前到台大、騎單車去101")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, Metrics.gap).padding(.leading, Metrics.inset - 4).padding(.trailing, Metrics.inset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: MapChrome.shape(.panel))
-            .overlay(
-                MapChrome.shape(.panel)
-                    .strokeBorder(LinearGradient(colors: [Color(red: 0.28, green: 0.48, blue: 1).opacity(0.6),
-                                                          Color(red: 0.66, green: 0.36, blue: 1).opacity(0.5),
-                                                          Color(red: 0.18, green: 0.82, blue: 0.96).opacity(0.5)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            )
-            .contentShape(MapChrome.shape(.panel))
-        }
-        .buttonStyle(VoicePressStyle())
-        .accessibilityLabel(AppText.text("用說的規劃"))
-        .accessibilityIdentifier("journey-voice")
     }
 }
 

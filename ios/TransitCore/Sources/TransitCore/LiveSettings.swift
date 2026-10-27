@@ -92,10 +92,10 @@ public struct LiveSettings: Codable, Equatable, Sendable {
         public var stationShortcut = true
         public var routeShortcut = true
         public var bikeStations = true
-        /// 「用一句話規劃」 from the home microphone and a sentence typed in search. Off for now: Pro riders
-        /// talk it through with the voice conversation instead. Builds before this field reject settings
-        /// that name it, so turning it back on remotely needs a higher minimumAppVersion.
-        public var sentencePlanning = false
+        /// A trip said into the search box's small microphone, or typed there as a sentence, is planned
+        /// straight away. The home microphone is always the voice conversation. Builds before this field
+        /// reject settings that name it, so turning it off remotely needs a higher minimumAppVersion.
+        public var sentencePlanning = true
         public init() {}
     }
 
