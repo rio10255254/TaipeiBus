@@ -1749,41 +1749,6 @@ private struct VoiceSwell: ViewModifier {
     }
 }
 
-/// The voice assistant's way in on the search screen: tap once and talk.
-struct VoiceStartCard: View {
-    let action: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    var body: some View {
-        Button {
-            Haptics.stage()
-            action()
-        } label: {
-            HStack(spacing: 14) {
-                VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true).frame(width: 48, height: 48)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(AppText.text("按一下，跟語音助理說")).font(.headline).foregroundStyle(.primary)
-                    Text(AppText.text("例如：307 還要多久、明天九點前到台大怎麼去")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.vertical, Metrics.gap).padding(.leading, Metrics.inset - 4).padding(.trailing, Metrics.inset)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .secondarySystemFill).opacity(0.6), in: MapChrome.shape(.panel))
-            .overlay(
-                MapChrome.shape(.panel)
-                    .strokeBorder(LinearGradient(colors: [Color(red: 0.28, green: 0.48, blue: 1).opacity(0.6),
-                                                          Color(red: 0.66, green: 0.36, blue: 1).opacity(0.5),
-                                                          Color(red: 0.18, green: 0.82, blue: 0.96).opacity(0.5)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
-            )
-            .contentShape(MapChrome.shape(.panel))
-        }
-        .buttonStyle(VoicePressStyle())
-        .accessibilityLabel(AppText.text("用說的規劃"))
-        .accessibilityIdentifier("journey-voice")
-    }
-}
-
 // MARK: - Edge glow
 
 /// A window above the app for the edge glow. Only the card takes touches; everything else falls

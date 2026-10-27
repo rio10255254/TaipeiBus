@@ -361,10 +361,6 @@ struct JourneyPlanningView: View {
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
-                if !editingOrigin, !planner.started, VoiceConversation.available {
-                    // The voice assistant: talk it through, ask about buses, fares or a place (Pro).
-                    VoiceStartCard { focused = false; model.voiceChat.start() }
-                }
                 if speaksSentence, !assistantRecents.items.isEmpty {
                     // Zero typing: one row of what was said before.
                     ScrollView(.horizontal, showsIndicators: false) {
