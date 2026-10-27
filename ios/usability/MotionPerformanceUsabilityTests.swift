@@ -52,7 +52,7 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
     func testDecorationLeavesTheMainThreadFree() {
         var rows: [[String: Any]] = []
         var device: [String: Any] = [:]
-        for component in ["idle", "pulse", "symbols", "loading", "orb", "orb-large", "glow"] {
+        for component in ["idle", "pulse", "symbols", "loading", "orb", "orb-large", "glow", "preview"] {
             let moving = measure(component, still: false)
             let still = measure(component, still: true)
             if device.isEmpty {
@@ -71,7 +71,7 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         publish("motion-cost", ["device": device, "results": rows])
         // Pieces animated by Core Animation run in the render server: moving costs the app's main
         // thread no more than holding still does, within measurement noise.
-        for row in rows where ["pulse", "symbols"].contains(row["component"] as? String) {
+        for row in rows where ["pulse", "symbols", "orb", "orb-large", "glow", "preview"].contains(row["component"] as? String) {
             XCTAssertLessThanOrEqual(row["main_cpu_extra_pct"] as? Double ?? 99, 1.5, "\(row)")
         }
     }

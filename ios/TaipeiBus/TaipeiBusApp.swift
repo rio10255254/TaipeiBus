@@ -209,6 +209,18 @@ private struct MotionLabView: View {
                 VoiceOrb(mood: .listening).frame(width: 250, height: 250)
             case "glow":
                 EdgeGlow(mood: .listening)
+            case "preview":
+                // The voice style card in Settings: glow and orb inside a clipped, composited,
+                // faded group, as the unchosen card shows them.
+                ZStack {
+                    Color(uiColor: .secondarySystemBackground)
+                    EdgeGlow(mood: .listening, corner: 22, scale: 0.28)
+                    VoiceOrb(mood: .listening, compact: true).frame(width: 52, height: 52)
+                }
+                .frame(width: 150, height: 300)
+                .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .compositingGroup()
+                .opacity(0.75)
             case "pulse":
                 // The waiting banner's route sign with a bus arriving, and the riding banner's next-stop dot.
                 VStack(spacing: 28) {
