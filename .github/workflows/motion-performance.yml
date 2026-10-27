@@ -73,6 +73,9 @@ jobs:
           xcrun simctl bootstatus "$device" -b
           xcrun simctl privacy "$device" grant location com.example.TaipeiBus || true
       - name: Measure and walk through
+        id: measure
+        # Main's app is the control: how it fares is reported, not held against this branch.
+        continue-on-error: ${{ matrix.app == 'main' }}
         run: |
           set -euo pipefail
           gem install xcodeproj -v 1.27.0 --no-document --user-install
@@ -119,7 +122,8 @@ jobs:
         if: always()
         run: |
           {
-            echo "### iOS ${{ matrix.ios }} · ${{ matrix.name }}"
+            echo "### iOS ${{ matrix.ios }} · ${{ matrix.name }} (${{ matrix.app }} app: ${{ steps.measure.outcome }})"
+            grep -E "^Test Case .*(passed|failed)|: error: " "$RUNNER_TEMP/motion-tests.log" | sed 's/^/    /' || true
             echo '```'
             grep -h 'MOTION-COST-RESULT' "$RUNNER_TEMP/motion-tests.log" | sed 's/^.*MOTION-COST-RESULT //' | sort -u || echo 'No measurements recorded.'
             echo '```'
