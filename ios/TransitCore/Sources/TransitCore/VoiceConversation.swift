@@ -9,9 +9,9 @@ public enum VoiceAction: Equatable, Sendable {
     case showBike(near: String)
     /// A place's Apple Maps card, with its opening hours, phone and website.
     case showPlace(String)
-    /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words; `transit` is bus or metro when
-    /// the rider asked to go by that alone (「坐公車去」), otherwise any.
-    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String, transit: String)
+    /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words; `avoid` what the trip must
+    /// not use (「坐公車去」 avoids the MRT).
+    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String, avoid: TripAvoidance)
     /// The first, second or third option on screen.
     case chooseOption(Int)
     /// The state had no answer: look these up and ask again.
@@ -50,7 +50,7 @@ public enum VoiceAction: Equatable, Sendable {
             guard !text("destination").isEmpty else { return nil }
             self = .planTrip(destination: text("destination"), origin: text("origin"), time: text("time", limit: 40),
                              mode: text("mode"), preference: text("preference"), then: text("then"),
-                             transit: ["bus", "metro"].contains(text("transit")) ? text("transit") : "any")
+                             avoid: TripAvoidance(json: json["avoid"]))
         case "choose_option":
             guard let option = json["option"] as? Int, (1...3).contains(option) else { return nil }
             self = .chooseOption(option)
@@ -66,6 +66,33 @@ public enum VoiceAction: Equatable, Sendable {
         case "end_trip": self = .endTrip
         default: return nil
         }
+    }
+}
+
+/// What a trip must not use, as the rider asked: buses, the MRT, YouBike, or named lines (307, 紅線).
+public struct TripAvoidance: Equatable, Sendable {
+    public var bus = false
+    public var metro = false
+    public var bike = false
+    public var routes: [String] = []
+    public var isEmpty: Bool { !bus && !metro && !bike && routes.isEmpty }
+
+    public init(bus: Bool = false, metro: Bool = false, bike: Bool = false, routes: [String] = []) {
+        self.bus = bus; self.metro = metro; self.bike = bike; self.routes = routes
+    }
+
+    /// The server's `{"bus": false, "metro": true, "bike": false, "routes": ["紅線"]}`; anything else is nothing.
+    public init(json: Any?) {
+        guard let value = json as? [String: Any] else { return }
+        bus = value["bus"] as? Bool ?? false
+        metro = value["metro"] as? Bool ?? false
+        bike = value["bike"] as? Bool ?? false
+        var names: [String] = []
+        for case let route as String in (value["routes"] as? [Any]) ?? [] {
+            let name = String(route.trimmingCharacters(in: .whitespacesAndNewlines).prefix(12))
+            if !name.isEmpty, !names.contains(name) { names.append(name) }
+        }
+        routes = Array(names.prefix(4))
     }
 }
 

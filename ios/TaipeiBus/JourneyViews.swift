@@ -320,6 +320,32 @@ struct JourneyPlanningView: View {
     private var speaksSentence: Bool {
         assistantAvailable && model.liveSettings.display.sentencePlanning && !editingOrigin && !planner.started
     }
+    /// A typed question goes to the voice assistant (Pro) as a said one does; a sentence is planned; the rest is searched.
+    private func submit() {
+        if speaksSentence, AssistantSentence.asksQuestion(query), model.voiceChat.handlesMicrophone {
+            let value = query; focused = false; query = ""
+            model.voiceChat.start(saying: value)
+        } else if understandsSentence { openAssistant(query) } else { resolve(text: query) }
+    }
+    /// What was said into the search box goes where it belongs: a question about buses, stops or the
+    /// city (「307 還要多久」) to the voice assistant, which opens with it; a trip or a place is planned at
+    /// once, with the other ways it was heard for the model to weigh; without the planner it is searched.
+    private func hearSearch(_ text: String, others: [String]) {
+        let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        if AssistantSentence.asksQuestion(value), VoiceConversation.available, VoiceConversation.consent != false {
+            JourneyDiagnostics.shared.record("voice search to assistant")
+            model.voiceChat.start(saying: value, heard: others)
+            return
+        }
+        query = value
+        if assistantAvailable {
+            JourneyDiagnostics.shared.record("voice search to planner")
+            focused = false; assistant.run(value, heard: others)
+        } else {
+            resolve(text: value)
+        }
+    }
     /// A sentence is understood right here; only a question or a problem opens the sheet.
     private func openAssistant(_ text: String?) {
         focused = false
@@ -333,12 +359,13 @@ struct JourneyPlanningView: View {
                           : assistantAvailable && !planner.started ? AppText.text("地點，或一句話：騎單車去台大") : AppText.text("地點、地址或站名"), text: $query)
                     .accessibilityIdentifier("journey-search-field")
                     .focused($focused).submitLabel(.search).autocorrectionDisabled()
-                    .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
+                    .onSubmit { submit() }
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
                 else if speaksSentence {
-                    // Say where to go, as in any search box: the sentence is planned right here.
-                    Button { focused = false; assistant.listen(inline: true) } label: {
+                    // Say it, as in any search box: a trip or a place is planned right here, a question goes
+                    // to the voice assistant.
+                    Button { focused = false; assistant.listen(inline: true) { text, others in hearSearch(text, others: others) } } label: {
                         Image(systemName: "mic.fill").foregroundStyle(MapChrome.secondaryText).frame(width: 32, height: 32)
                     }
                     .buttonStyle(.borderless).disabled(assistant.busy)

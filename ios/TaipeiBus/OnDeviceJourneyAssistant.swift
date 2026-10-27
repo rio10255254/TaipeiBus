@@ -1016,7 +1016,7 @@ enum OnlineJourneyReader {
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
     目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；地區加店家種類寫成「西門町附近的網咖」；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
-    需求是語音辨識的文字時可能有同音錯字（南京住行→南京復興），地名寫成最可能的正確名稱；有「其他聽法」時是同一句話的另一種辨識，綜合判斷，以地名真實存在、說得通的為準。說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。好幾個目的地時第一個填 destination，後面的依序用「、」隔開填 next，一個都不能漏。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid；說坐或搭某種車去（坐捷運去、搭公車去）就是只搭那種：坐捷運 avoid.bus=true，坐公車 avoid.metro=true。不要編造。
+    需求是語音辨識的文字時可能有同音錯字（南京住行→南京復興），地名寫成最可能的正確名稱；有「其他聽法」時是同一句話的另一種辨識，綜合判斷，以地名真實存在、說得通的為準。說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。要快 faster、少走路 lessWalking、不想轉車或要直達 fewerTransfers。「半小時後」「20分鐘後」依現在換算成時刻。好幾個目的地時第一個填 destination，後面的依序用「、」隔開填 next，一個都不能漏。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid；說坐或搭某種車去（坐捷運去、搭公車去）就是只搭那種：坐捷運 avoid.bus=true，坐公車 avoid.metro=true。不要編造。
     """
 
     /// `others` are the same words heard another way (the phone's reading beside the server's), for the

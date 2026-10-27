@@ -9,8 +9,10 @@ export type Expectation = {
   time?: string; then?: string;
   /// Every later stop the plan must keep, in any order.
   later?: string[];
-  /// The only kind of transit the rider asked for.
-  transit?: 'bus' | 'metro';
+  /// What the trip must not use, as the rider asked: the kinds named here must be true, and each route listed.
+  limits?: { bus?: boolean; metro?: boolean; bike?: boolean; routes?: string[] };
+  /// For plan_trip: the preference the rider asked for.
+  preference?: string;
   avoid?: string;
   /// Amounts of money must not come from memory.
   noAmounts?: boolean;
@@ -62,7 +64,16 @@ export function problems(test: Expectation, reply: Reply): Problem[] {
   for (const stop of plan ? test.later ?? [] : []) {
     if (!plain(plan!.then).includes(plain(stop))) add('wrong_action', `漏了後面的「${stop}」（${plan!.then || '空'}）`);
   }
-  if (plan && test.transit && plan.transit !== test.transit) add('wrong_action', `沒有照指定的交通工具（${plan.transit}）`);
+  if (plan && test.limits) {
+    const wanted = test.limits;
+    for (const kind of ['bus', 'metro', 'bike'] as const) {
+      if (wanted[kind] !== undefined && plan.avoid[kind] !== wanted[kind]) add('wrong_action', `避開${kind}應為 ${wanted[kind]}`);
+    }
+    for (const route of wanted.routes ?? []) {
+      if (!plan.avoid.routes.some((named) => named.includes(route))) add('wrong_action', `沒有避開「${route}」`);
+    }
+  }
+  if (plan && test.preference && plan.preference !== test.preference) add('wrong_action', `偏好應為 ${test.preference}（${plan.preference}）`);
   // The app says how the planning went once it has; the reply must not claim it first.
   if (plan && /請看方案|規劃好了|已經規劃|已規劃|方案如下/.test(reply.say)) add('wrong_action', '規劃前就說有結果');
   if (plan && test.origin && !plan.origin.includes(test.origin)) add('misheard', `出發地沒有改正（${plan.origin || '空'}）`);

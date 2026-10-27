@@ -28,6 +28,17 @@ final class SpokenTimeTests: XCTestCase {
         XCTAssertEqual(read("禮拜天去動物園")?.date, at("2026-10-25T01:00:00Z"))
         XCTAssertEqual(read("十點一刻出發")?.date, at("2026-10-23T02:15:00Z"))
     }
+    func testTimeFromNowAndDatesAreRead() {
+        XCTAssertEqual(read("半小時後出發去台北車站"), SpokenTime(date: at("2026-10-22T04:30:00Z"), kind: .departure, exact: true))
+        XCTAssertEqual(read("20分鐘後出發"), SpokenTime(date: at("2026-10-22T04:20:00Z"), kind: .departure, exact: true))
+        XCTAssertEqual(read("一個半小時內到台大"), SpokenTime(date: at("2026-10-22T05:30:00Z"), kind: .arrival, exact: true))
+        XCTAssertEqual(read("十分鐘後去公司")?.date, at("2026-10-22T04:10:00Z"))
+        XCTAssertEqual(read("10月30日 14:00 出發"), SpokenTime(date: at("2026-10-30T06:00:00Z"), kind: .departure, exact: true))
+        XCTAssertEqual(read("十一月三號早上去淡水")?.date, at("2026-11-03T01:00:00Z"))
+        XCTAssertEqual(read("1月2日 09:00 前抵達")?.date, at("2027-01-02T01:00:00Z"), "A date already past this year is next year's")
+        XCTAssertEqual(read("明天 14:00 出發"), SpokenTime(date: at("2026-10-23T06:00:00Z"), kind: .departure, exact: true))
+        XCTAssertEqual(read("今天 18:30 前抵達"), SpokenTime(date: at("2026-10-22T10:30:00Z"), kind: .arrival, exact: true))
+    }
     func testNoTimeMeansNow() {
         XCTAssertNil(read("現在去台大"))
         XCTAssertNil(read("騎單車去台大"))

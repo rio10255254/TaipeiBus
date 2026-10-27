@@ -115,13 +115,16 @@ final class JourneyAssistantSession: ObservableObject {
     }
     /// One tap, then speak: understanding starts when the rider stops talking. On the route screen
     /// (`refining`), what is said changes the trip shown instead of starting a new one.
-    /// `inline` listens inside the typing sheet without the full voice screen.
-    func listen(refining: Bool = false, inline: Bool = false) {
-        guard unavailable == nil else { present(); return }
+    /// `inline` listens where the tap was (the search box, the typing sheet) without the full voice
+    /// screen; `heard`, when given, receives what was said instead of planning it, for the search box
+    /// to decide where it belongs.
+    func listen(refining: Bool = false, inline: Bool = false, heard: ((_ text: String, _ others: [String]) -> Void)? = nil) {
+        guard unavailable == nil || heard != nil else { present(); return }
         // The voice screen replaces the keyboard.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
         cancel(); speech.reset(); prepare(); forVoice = false
-        refiningVoice = refining
+        refiningVoice = refining; heardElsewhere = heard
+        prepareNames()
         guard !inline else { startSpeech(); return }
         voiceRound += 1; voiceClosing = false; celebrating = false
         if !voiceActive { setVoice(true) }
@@ -136,28 +139,60 @@ final class JourneyAssistantSession: ObservableObject {
         Haptics.stage()
         startSpeech()
     }
+    private var heardElsewhere: ((String, [String]) -> Void)?
+    /// Stop and place names put back into what was heard (忠孝敦華 → 忠孝敦化), as the voice assistant does;
+    /// built in the background when listening starts and used once ready. Chinese only.
+    private var names: NameCorrection?
+    private func prepareNames() {
+        guard names == nil, AppLanguage.current != .english else { return }
+        let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
+        let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
+        Task { [weak self] in
+            let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
+            self?.names = built
+        }
+    }
+
+    /// A sentence is heard the way the voice assistant hears a turn, wherever it was said: the newer
+    /// recogniser with the names to expect, names put back, and, with Pro and server recognition on, the
+    /// recording written down again on the server, the phone's readings going with it for the model to
+    /// weigh. 「只用雲端」 waits for the server and says so when it cannot answer; otherwise the phone's
+    /// words stand in.
     private func startSpeech() {
-        let refining = refiningVoice
-        // 「只用雲端」 for Pro: the server writes the sentence down too.
-        let cloudOnly = VoiceSettings.cloudOnly && model.purchases.hasPro && VoiceConversation.consent == true
+        let refining = refiningVoice, elsewhere = heardElsewhere
+        let server = model.purchases.hasPro && VoiceConversation.consent == true && (VoiceSettings.cloudRecognition || VoiceSettings.cloudOnly)
+        let cloudOnly = server && VoiceSettings.cloudOnly
+        let hints = VoiceStateBuilder(model: model).hints(language: .current)
         Task {
-            await speech.start(record: cloudOnly) { [weak self] text in
+            await speech.start(language: .current, hints: hints, modern: true, record: server) { [weak self] text in
                 guard let self else { return }
-                guard cloudOnly else { return refining ? self.refine(text) : self.run(text) }
-                guard let sound = self.speech.audio else {
-                    self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                let fix = { (words: String) in self.names?.correct(words) ?? words }
+                let heard = fix(text)
+                var others: [String] = []
+                for reading in [text] + self.speech.alternatives.map(fix) where !reading.isEmpty && reading != heard && !others.contains(reading) {
+                    others.append(reading)
                 }
-                // What the phone heard stays on screen while the server writes it down, and goes with the
-                // server's words to the model, which weighs the two (南京住行 against 南京復興).
-                self.busy = true; self.source = text; self.startedAt = Date(); self.activity = AppText.text("正在辨識你說的話…")
-                let vocabulary = Array(VoiceStateBuilder(model: self.model).hints(language: .current).prefix(60))
+                if heard != text { JourneyDiagnostics.shared.record("speech names corrected") }
+                let deliver = { (words: String, readings: [String]) in
+                    if let elsewhere { elsewhere(words, readings) }
+                    else if refining { self.refine(words) }
+                    else { self.run(words, heard: readings) }
+                }
+                guard server, let sound = self.speech.audio else {
+                    if cloudOnly { self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); self.present(); return }
+                    return deliver(heard, others)
+                }
+                // What the phone heard stays on screen while the server writes it down.
+                self.busy = true; self.source = heard; self.startedAt = Date(); self.activity = AppText.text("正在辨識你說的話…")
                 Task { @MainActor in
-                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: vocabulary)
+                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: Array(hints.prefix(60)),
+                                                                  timeout: cloudOnly ? 8 : 5)
                     self.busy = false
-                    guard let words else {
-                        self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
+                    if let words { return deliver(words, Array(([heard] + others).filter { $0 != words }.prefix(4))) }
+                    guard !cloudOnly else {
+                        self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); self.present(); return
                     }
-                    if refining { self.refine(words) } else { self.run(words, heard: [text]) }
+                    deliver(heard, others)
                 }
             }
         }

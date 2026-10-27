@@ -4,7 +4,7 @@ import { askClaude } from './brain.ts';
 import { readInput, readReply, userMessage } from './reply.ts';
 
 const action = (type: string, extra: Record<string, unknown> = {}) => ({
-  type, stop: '', route: '', destination: '', origin: '', time: '', then: '', mode: 'any', preference: 'balanced', transit: 'any', option: 0, ...extra,
+  type, stop: '', route: '', destination: '', origin: '', time: '', then: '', mode: 'any', preference: 'balanced', avoid: { bus: false, metro: false, bike: false, routes: [] }, option: 0, ...extra,
 });
 const none = action('none');
 
@@ -19,11 +19,11 @@ Deno.test('a trip with later stops keeps them', () => {
   assertEquals(reply?.actions[0].time, '明天 14:00 出發');
 });
 
-Deno.test('a trip by bus or metro alone says so; anything else is any', () => {
-  const bus = readReply({ say: '好。', actions: [action('plan_trip', { destination: '南京復興', transit: 'bus' })], confirm: none, choices: [], followUp: false });
-  assertEquals(bus?.actions[0].transit, 'bus');
-  const odd = readReply({ say: '好。', actions: [action('plan_trip', { destination: '南京復興', transit: 'ferry' })], confirm: none, choices: [], followUp: false });
-  assertEquals(odd?.actions[0].transit, 'any');
+Deno.test('what a trip must not use is kept, bounded and only as yes or no', () => {
+  const bus = readReply({ say: '好。', actions: [action('plan_trip', { destination: '南京復興', avoid: { bus: false, metro: true, bike: 'yes', routes: [' 紅線 ', '紅線', 5, '307', 'a', 'b', 'c'] } })], confirm: none, choices: [], followUp: false });
+  assertEquals(bus?.actions[0].avoid, { bus: false, metro: true, bike: false, routes: ['紅線', '307', 'a', 'b'] });
+  const none_ = readReply({ say: '好。', actions: [action('plan_trip', { destination: '南京復興', avoid: null })], confirm: none, choices: [], followUp: false });
+  assertEquals(none_?.actions[0].avoid, { bus: false, metro: false, bike: false, routes: [] });
 });
 
 Deno.test('a plain answer passes with its slots untouched', () => {
