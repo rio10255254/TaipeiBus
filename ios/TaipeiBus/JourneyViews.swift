@@ -315,9 +315,10 @@ struct JourneyPlanningView: View {
         .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
     }
     /// A sentence such as 「騎單車去台大」 typed in the ordinary search box is understood, not searched.
-    private var understandsSentence: Bool {
+    private var understandsSentence: Bool { speaksSentence && AssistantSentence.looksLikeRequest(query) }
+    /// The search box plans a sentence, said into its microphone or typed.
+    private var speaksSentence: Bool {
         assistantAvailable && model.liveSettings.display.sentencePlanning && !editingOrigin && !planner.started
-            && AssistantSentence.looksLikeRequest(query)
     }
     /// A sentence is understood right here; only a question or a problem opens the sheet.
     private func openAssistant(_ text: String?) {
@@ -335,6 +336,14 @@ struct JourneyPlanningView: View {
                     .onSubmit { understandsSentence ? openAssistant(query) : resolve(text: query) }
                 if resolving || search.searching { ProgressView() }
                 else if !query.isEmpty { Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) } }
+                else if speaksSentence {
+                    // Say where to go, as in any search box: the sentence is planned right here.
+                    Button { focused = false; assistant.listen(inline: true) } label: {
+                        Image(systemName: "mic.fill").foregroundStyle(MapChrome.secondaryText).frame(width: 32, height: 32)
+                    }
+                    .buttonStyle(.borderless).disabled(assistant.busy)
+                    .accessibilityLabel(AppText.text("用說的搜尋")).accessibilityIdentifier("journey-search-voice")
+                }
             }.padding(.horizontal, Metrics.inset).frame(minHeight: Metrics.field)
                 .background(Color(uiColor: .tertiarySystemFill), in: fieldShape)
             if let error = searchError ?? search.error { Text(live.text(error)).liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText) }
@@ -352,19 +361,14 @@ struct JourneyPlanningView: View {
                 }.secondaryAction().disabled(resolving)
             }
             if query.isEmpty {
-                if !editingOrigin, !planner.started, assistantAvailable {
-                    // Most people don't type a whole sentence: speaking is the first, largest choice.
-                    VoiceStartCard { focused = false; assistant.listen() }
+                if !editingOrigin, !planner.started, VoiceConversation.available {
+                    // The voice assistant: talk it through, ask about buses, fares or a place (Pro).
+                    VoiceStartCard { focused = false; model.voiceChat.start() }
                 }
-                if !editingOrigin, !planner.started, assistantAvailable {
-                    // Zero typing: one row of what was said before, after the way in to type a sentence.
+                if speaksSentence, !assistantRecents.items.isEmpty {
+                    // Zero typing: one row of what was said before.
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: Metrics.tight) {
-                            Button { openAssistant(nil) } label: {
-                                Label(AppText.text("一句話規劃"), systemImage: "sparkles").font(.subheadline.weight(.semibold))
-                                    .padding(.horizontal, 12).frame(minHeight: Metrics.chip)
-                                    .background(Color.accentColor.opacity(0.16), in: Capsule())
-                            }.buttonStyle(.plain).foregroundStyle(.tint).accessibilityIdentifier("journey-ai-assistant")
                             ForEach(assistantRecents.items.prefix(6), id: \.self) { text in
                                 Button { openAssistant(text) } label: {
                                     Label(text, systemImage: "clock.arrow.circlepath").font(.subheadline).lineLimit(1)

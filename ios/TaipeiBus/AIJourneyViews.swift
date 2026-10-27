@@ -561,7 +561,7 @@ final class JourneyAssistantSession: ObservableObject {
         let alternatives = chosenDestination == nil ? Array(turn.destinationCandidates.dropFirst()) : []
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
-                                      nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: conversation?.credit)
+                                      nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: forVoice ? conversation?.credit : nil)
         findStops()
         Haptics.success()
         conversation = nil; clarification = nil; problem = nil; message = nil
@@ -1749,7 +1749,7 @@ private struct VoiceSwell: ViewModifier {
     }
 }
 
-/// The way in on the search screen: tap once and say where to go.
+/// The voice assistant's way in on the search screen: tap once and talk.
 struct VoiceStartCard: View {
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -1761,8 +1761,8 @@ struct VoiceStartCard: View {
             HStack(spacing: 14) {
                 VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true).frame(width: 48, height: 48)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(AppText.text("按一下，說出要去哪裡")).font(.headline).foregroundStyle(.primary)
-                    Text(AppText.text("例如：明天九點前到台大、騎單車去101")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+                    Text(AppText.text("按一下，跟語音助理說")).font(.headline).foregroundStyle(.primary)
+                    Text(AppText.text("例如：307 還要多久、明天九點前到台大怎麼去")).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
                 }
                 Spacer(minLength: 0)
             }

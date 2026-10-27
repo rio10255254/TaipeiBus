@@ -338,12 +338,9 @@ struct TransitHomeView: View {
 
     /// A tapped place becomes the trip destination, like Apple Maps' Directions button.
     /// The home microphone: the voice conversation, which Pro riders talk things through with (others
-    /// see the plans). 「用一句話規劃」 answers it only while the live settings turn it on.
+    /// see the plans). Planning from one sentence lives in the search box's own small microphone.
     private var microphone: (() -> Void)? {
-        if model.liveSettings.display.sentencePlanning, OnDeviceJourneyAssistant.plannerUnavailableReason() == nil {
-            return { if model.voiceChat.handlesMicrophone { model.voiceChat.start() } else { model.assistant.listen() } }
-        }
-        return VoiceConversation.available ? { model.voiceChat.start() } : nil
+        VoiceConversation.available ? { model.voiceChat.start() } : nil
     }
 
     private func routeToPlace(_ place: MapPlaceSelection) {
