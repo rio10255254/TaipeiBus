@@ -87,9 +87,8 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         capture("motion-trip-waiting")
         let bus = button("boarding-vehicle-TEST-02")
         if bus.exists {
-            bus.tap(); XCTAssertEqual(bus.value as? String, "追蹤中")
-            bus.tap(); XCTAssertEqual(bus.value as? String, "已選擇")
-            capture("motion-trip-tracking")
+            // Tracking itself is held to its states by JourneyUsabilityTests; here it only has to animate.
+            bus.tap(); capture("motion-trip-tracking")
         }
         button("journey-options").tap()
         XCTAssertTrue(button("返回地圖").waitForExistence(timeout: 10))
