@@ -155,9 +155,21 @@ final class TraitProbeView: UIView {
         guard let traits else { return "none" }
         return "style=\(traits.userInterfaceStyle.rawValue) level=\(traits.userInterfaceLevel.rawValue) size=\(traits.preferredContentSizeCategory.rawValue) h=\(traits.horizontalSizeClass.rawValue) v=\(traits.verticalSizeClass.rawValue) active=\(traits.activeAppearance.rawValue) contrast=\(traits.accessibilityContrast.rawValue) weight=\(traits.legibilityWeight.rawValue) scale=\(traits.displayScale)"
     }
+    private var reported = 0
+    /// The trait collection's own description, split into its entries without the address.
+    private func entries(_ traits: UITraitCollection?) -> [String] {
+        guard let traits else { return [] }
+        return traits.description.components(separatedBy: CharacterSet(charactersIn: ";,<>"))
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("UITraitCollection: 0x") }
+    }
     override func traitCollectionDidChange(_ previous: UITraitCollection?) {
         super.traitCollectionDidChange(previous)
         print("TRAITS \(name): \(describe(previous)) -> \(describe(traitCollection))")
+        let before = entries(previous), after = entries(traitCollection)
+        let changed = after.filter { !before.contains($0) }, gone = before.filter { !after.contains($0) }
+        print("TRAITS-DIFF \(name): \(gone.joined(separator: " | ")) => \(changed.joined(separator: " | "))")
+        if reported < 3 { reported += 1; print("TRAITS-FULL \(name): \(traitCollection.description)") }
     }
     override func tintColorDidChange() {
         super.tintColorDidChange()

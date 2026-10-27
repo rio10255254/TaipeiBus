@@ -19,8 +19,19 @@ extension UIColor {
     }
 }
 extension Color {
+    /// One colour per hex value: a fresh dynamic UIColor never equals the last one, so tints and
+    /// accents made anew on every update read to SwiftUI and UIKit as a change each time.
+    private static let liveHexLock = NSLock()
+    nonisolated(unsafe) private static var liveHexColors: [String: Color] = [:]
     init(liveHex: String) {
-        self.init(uiColor: UIColor { traits in
+        Color.liveHexLock.lock(); defer { Color.liveHexLock.unlock() }
+        if let known = Color.liveHexColors[liveHex] { self = known; return }
+        let made = Color.dynamic(liveHex: liveHex)
+        Color.liveHexColors[liveHex] = made
+        self = made
+    }
+    private static func dynamic(liveHex: String) -> Color {
+        Color(uiColor: UIColor { traits in
             let base = UIColor(liveHex: liveHex)
             guard traits.userInterfaceStyle == .dark else { return base }
             if liveHex.uppercased() == "#007AFF" { return UIColor.systemBlue.resolvedColor(with: traits) }
