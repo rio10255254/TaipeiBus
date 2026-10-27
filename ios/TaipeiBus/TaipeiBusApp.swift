@@ -135,6 +135,47 @@ enum ViewChangeLog {
     static func note<V: View>(_ view: V.Type) { if enabled { V._printChanges() } }
 }
 
+/// With --test-view-changes, logs the UIKit traits and tint dimming a spot of the interface
+/// receives, so a presentation that keeps changing them shows which one.
+private struct TraitProbe: UIViewRepresentable {
+    let name: String
+    func makeUIView(context: Context) -> TraitProbeView { TraitProbeView(name: name) }
+    func updateUIView(_ view: TraitProbeView, context: Context) {}
+}
+
+final class TraitProbeView: UIView {
+    private let name: String
+    init(name: String) {
+        self.name = name
+        super.init(frame: .zero)
+        isUserInteractionEnabled = false
+    }
+    required init?(coder: NSCoder) { nil }
+    private func describe(_ traits: UITraitCollection?) -> String {
+        guard let traits else { return "none" }
+        return "style=\(traits.userInterfaceStyle.rawValue) level=\(traits.userInterfaceLevel.rawValue) size=\(traits.preferredContentSizeCategory.rawValue) h=\(traits.horizontalSizeClass.rawValue) v=\(traits.verticalSizeClass.rawValue) active=\(traits.activeAppearance.rawValue) contrast=\(traits.accessibilityContrast.rawValue) weight=\(traits.legibilityWeight.rawValue) scale=\(traits.displayScale)"
+    }
+    override func traitCollectionDidChange(_ previous: UITraitCollection?) {
+        super.traitCollectionDidChange(previous)
+        print("TRAITS \(name): \(describe(previous)) -> \(describe(traitCollection))")
+    }
+    override func tintColorDidChange() {
+        super.tintColorDidChange()
+        print("TINT \(name): adjustment=\(tintAdjustmentMode.rawValue)")
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        print("WINDOW \(name): \(window == nil ? "removed" : "added")")
+    }
+}
+
+extension View {
+    /// See TraitProbe; nothing is added unless --test-view-changes is on.
+    @ViewBuilder func traitProbe(_ name: String) -> some View {
+        if ViewChangeLog.enabled { background { TraitProbe(name: name).frame(width: 1, height: 1) } } else { self }
+    }
+}
+
 /// For measurements only (`--test-motion-cost`, `--test-motion-lab`): how much of the main thread
 /// the interface takes and how evenly frames arrive, in five-second windows. UI tests read the
 /// windows from a hidden label once, after they have passed, so reading never lands inside one.

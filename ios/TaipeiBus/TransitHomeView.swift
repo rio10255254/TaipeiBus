@@ -54,6 +54,9 @@ struct TransitHomeView: View {
             model.selectedRoute.map { $0.mode != .bus } == true
     }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
+    private var journeyDetents: Set<PresentationDetent> {
+        planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large]
+    }
     private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
@@ -174,6 +177,9 @@ struct TransitHomeView: View {
             .onChange(of: geometry.size.height, initial: true) { _, height in
                 if abs(viewportHeight - height) > 1 { viewportHeight = height }
             }
+#if DEBUG
+            .traitProbe("home-map")
+#endif
         }
     }
 
@@ -409,8 +415,10 @@ struct TransitHomeView: View {
                                 dismiss: { showJourney = false })
                 .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
-                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
-                .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
+                .presentationDetents(journeyDetents, selection: $journeyDetent)
+                // Only up through a height the sheet offers: during a trip it is large alone, and
+                // naming a missing detent there kept iOS 17 re-dimming the map on every layout pass.
+                .presentationBackgroundInteraction(journeyDetents.contains(.height(560)) ? .enabled(upThrough: .height(560)) : .automatic)
                 .presentationContentInteraction(.scrolls)
                 .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)

@@ -111,6 +111,9 @@ struct JourneyPlanningView: View {
             }
             }
             .scrollDismissesKeyboard(.interactively)
+#if DEBUG
+            .traitProbe("journey-sheet")
+#endif
             .bottomActionBar(!searchingPlaces && showingItinerary && !planner.started && planner.selected != nil && planner.scheduledDeparture == nil) {
                 Button {
                     planner.begin()
