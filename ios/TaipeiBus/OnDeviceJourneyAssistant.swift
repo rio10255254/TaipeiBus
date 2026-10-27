@@ -611,7 +611,8 @@ final class JourneyAssistantContext {
         // the sentence's own words decide, as they do for the rules and the on-device model.
         let modelDate = departAt ?? (hour >= 0 ? Self.date(day: day, hour: hour, minute: minute) : nil)
         var modelTimeUsable = modelTime && modelDate.map { $0 > now.addingTimeInterval(-300) && $0 < now.addingTimeInterval(60 * 86_400) } == true
-        let spokenTime = SpokenTime.read(source, now: now)
+        // Leaving within a few minutes (「今天 19:40 出發」 written at 19:40) is leaving now, on live arrivals.
+        let spokenTime = SpokenTime.read(source, now: now).flatMap { $0.kind == .departure && abs($0.date.timeIntervalSince(now)) < 300 ? nil : $0 }
         // The words win over the model whenever they are clear: a clock time always, and a part of the
         // day unless the model only refines it (下班 → 18:00). On a phone 「我明天早上要去台大」 came back
         // from the online model as tomorrow 00:00 and was planned for midnight.
