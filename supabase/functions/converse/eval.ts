@@ -61,7 +61,7 @@ const cases: Case[] = [
   { name: '英文店名', state: map, utterance: '我要去word jim', expect: 'plan_trip', destination: 'World Gym' },
   { name: '其他聽法', state: map, utterance: '我要去世界真', alternatives: ['我要去world 真', '我要去 World Gym'], expect: 'plan_trip', destination: 'World Gym' },
   { name: '雜音與更正', state: map, utterance: '我們要一起我是說我要去原山站', expect: 'plan_trip', destination: '圓山' },
-  { name: '分店與聽錯', state: map, utterance: '我今天下午想先去蘋果專賣店A43，然後再去臺北植物園，最後去臺大。', expect: 'plan_trip', destination: 'A13', later: ['植物園', '大'] },
+  { name: '分店與聽錯', state: map, utterance: '我等一下想先去蘋果專賣店A43，然後再去臺北植物園，最後去臺大。', expect: 'plan_trip', destination: 'A13', later: ['植物園', '大'] },
   { name: '三站', state: map, utterance: '先去西門町再去龍山寺最後去大稻埕', expect: 'plan_trip', destination: '西門', later: ['龍山寺', '大稻埕'] },
   { name: '指定公車', state: map, utterance: '我要坐公車去南京復興', expect: 'plan_trip', destination: '南京復興', limits: { metro: true, bus: false } },
   { name: '同音地名', state: map, utterance: '我要坐捷運去南京住行', alternatives: ['我要坐捷運去南京復興'], expect: 'plan_trip', destination: '南京復興', limits: { bus: true, metro: false } },
