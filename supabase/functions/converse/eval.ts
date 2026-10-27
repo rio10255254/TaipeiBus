@@ -24,7 +24,7 @@ const waiting = `${now}\n畫面：導航中：在 忠孝復興站 等 307 往板
 const onboard = `${now}\n畫面：導航中：在 307 往板橋 的車上\n目的地：板橋車站\n上車站：忠孝復興站\n下車站：板橋車站\n可用資料（念的時候寫成 {代號}）：\n[r1] 預計抵達下車站 板橋車站`;
 
 const searched = `${map}\n地點搜尋「蘋果專賣店」：\n1. Apple 信義A13｜臺北市信義區松壽路13號｜距離 2.1 公里\n2. Apple 台北101｜臺北市信義區市府路45號｜距離 2.6 公里`;
-const unfound = `${map}\n規劃時找不到：蘋果專賣店A43\n地點搜尋「蘋果專賣店A43」：\n1. 滿誠蜂蜜 A13遠百店｜臺北市信義區松仁路58號｜距離 2.2 公里\n地點搜尋「Apple 信義A13」：\n1. Apple 信義A13｜臺北市信義區松壽路13號｜距離 2.1 公里`;
+const unfound = `${map}\n規劃時找不到：蘋果專賣店A43\n剛才的要求：時間 今天 14:00 出發\n地點搜尋「蘋果專賣店A43」：\n1. 滿誠蜂蜜 A13遠百店｜臺北市信義區松仁路58號｜距離 2.2 公里\n地點搜尋「Apple 信義A13」：\n1. Apple 信義A13｜臺北市信義區松壽路13號｜距離 2.1 公里`;
 const tomorrow = `${now}\n畫面：路線方案：到 西門町\n出發地：目前位置\n時間：明天 14:00 出發\n行程：西門町 → 淡水，現在是第 1 段\n之後要去：淡水\n第 1 個方案：板南線\n第 2 個方案：307\n可用資料（念的時候寫成 {代號}）：\n[r1] 第 1 個方案的全程時間\n[r2] 第 1 個方案的抵達時間\n[r3] 第 2 個方案的全程時間\n[r4] 第 2 個方案的抵達時間`;
 const earlier = [
   { user: '我明天下午兩點要去西門町，然後再去淡水', say: '好，幫你規劃明天下午兩點出發到西門町，之後再去淡水。' },
@@ -96,6 +96,7 @@ if (providers.length === 0) {
 if (anthropicKey) await warmClaude(anthropicKey, userMessage({ utterance: '你好', state: map, history: [] }));
 
 let failed = 0;
+const slow: string[] = [];
 for (const provider of providers) {
   console.log(`\n## ${provider.name}`);
   const times: number[] = [], firstWords: number[] = [];
@@ -104,8 +105,14 @@ for (const provider of providers) {
     if (provider.name === 'groq') await new Promise((resolve) => setTimeout(resolve, 9000));
     const started = performance.now();
     let first = 0;
-    const answer = await provider.ask(userMessage({ utterance: test.utterance, alternatives: test.alternatives, state: test.state, history: test.history ?? [] }, test.web ?? '今天還能用 3 次'),
-      () => { first ||= Math.round(performance.now() - started); });
+    const message = userMessage({ utterance: test.utterance, alternatives: test.alternatives, state: test.state, history: test.history ?? [] }, test.web ?? '今天還能用 3 次');
+    let answer = await provider.ask(message, () => { first ||= Math.round(performance.now() - started); });
+    // A rare slow start (no words in 5.5 s) is the service, not the answer: on the phone Groq answers
+    // that turn. It is reported and asked once more, so the check judges what Claude says.
+    if (!('reply' in answer) && answer.failure === 'no words in time') {
+      slow.push(test.name);
+      answer = await provider.ask(message, () => { first ||= Math.round(performance.now() - started); });
+    }
     const ms = Math.round(performance.now() - started);
     times.push(ms);
     if (first) firstWords.push(first);
@@ -136,6 +143,7 @@ for (const provider of providers) {
   const median = (values: number[]) => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
   console.log(`延遲 p50 ${median(times)} ms，最慢 ${Math.max(...times)} ms${firstWords.length ? `；開始說話 p50 ${median(firstWords)} ms` : ''}`);
 }
+if (slow.length) console.log(`\n開始說話超過 5.5 秒、重問一次：${slow.join('、')}（手機上這種情況由 Groq 接手）`);
 // Claude is the brain riders hear; Groq is listed for comparison only.
 if (failed > 0) {
   console.log(`\n${failed} 個 Claude 回答沒有通過檢查。`);
