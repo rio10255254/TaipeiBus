@@ -2,7 +2,8 @@
 and hotels, with where each is. The app corrects misheard place names against them (by sound) and tells
 the recogniser to expect the ones near the rider. Credentials never enter output.
 
-Cities and the area kept are parameters, so covering more of Taiwan is a matter of naming its cities."""
+The area kept is a parameter (the whole country is read), so covering more of Taiwan is a matter of widening it;
+the cities are asked one by one only when the country-wide list is unavailable."""
 import argparse, datetime, gzip, json, os, re, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
@@ -12,7 +13,7 @@ KINDS = [('spot', 'ScenicSpot', 'ScenicSpotName'), ('food', 'Restaurant', 'Resta
 CITIES = ['Taipei', 'NewTaipei', 'Keelung']
 # The app's service area (Geometry.swift isInServiceArea).
 AREA = (24.90, 25.25, 121.27, 121.72)
-LIMIT = 40 * 1024 * 1024
+LIMIT = 120 * 1024 * 1024
 MAX_PLACES = 6000
 
 def read(url, headers=None, data=None):
@@ -42,22 +43,36 @@ def main():
     cid, secret = os.environ['TDX_CLIENT_ID'], os.environ['TDX_CLIENT_SECRET']
     payload = urllib.parse.urlencode({'grant_type': 'client_credentials', 'client_id': cid, 'client_secret': secret}).encode()
     answer = json.loads(read(BASE + '/auth/realms/TDXConnect/protocol/openid-connect/token', {'Content-Type': 'application/x-www-form-urlencoded'}, payload))
-    headers = {'Authorization': 'Bearer ' + answer['access_token'], 'Accept-Encoding': 'gzip'}; del cid, secret, answer, payload
+    headers = {'Authorization': 'Bearer ' + answer['access_token'], 'Accept-Encoding': 'gzip', 'Accept': 'application/json'}; del cid, secret, answer, payload
     south, north, west, east = AREA
     places, seen, counts, missing = [], set(), {}, []
-    first = True
-    for kind, path, field in KINDS:
-        for city in [c for c in args.cities.split(',') if c]:
-            if not first: time.sleep(6.2)
-            first = False
-            query = urllib.parse.urlencode({'$select': f'{field},Position', '$format': 'JSON'})
+    def fetch(url):
+        """Rows, or None after one wait for a rate limit; the answer's first words are kept when it fails."""
+        for attempt in range(2):
             try:
-                rows = json.loads(read(f'{BASE}/api/basic/v2/Tourism/{path}/{city}?{query}', headers))
+                rows = json.loads(read(url, headers))
+                return rows if isinstance(rows, list) else []
             except urllib.error.HTTPError as error:
-                missing.append(f'{path}/{city} {error.code}'); print(path, city, 'unavailable', error.code, flush=True)
-                continue
-            kept = 0
-            for row in rows if isinstance(rows, list) else []:
+                body = error.read(300).decode('utf-8', 'replace').replace('\n', ' ')
+                if error.code == 429 and attempt == 0: time.sleep(30); continue
+                missing.append(f'{url.split("/Tourism/")[1].split("?")[0]} {error.code} {body[:160]}')
+                print(url.split('/Tourism/')[1].split('?')[0], 'unavailable', error.code, body[:160], flush=True)
+                return None
+        return None
+    cities = [c for c in args.cities.split(',') if c]
+    for index, (kind, path, field) in enumerate(KINDS):
+        if index: time.sleep(6.2)
+        # The whole country in one request, kept to the area; per city only when that fails.
+        batches = [fetch(f'{BASE}/api/basic/v2/Tourism/{path}?%24format=JSON')]
+        if batches[0] is None:
+            batches = []
+            for city in cities:
+                time.sleep(6.2)
+                batches.append(fetch(f'{BASE}/api/basic/v2/Tourism/{path}/{city}?%24format=JSON'))
+        kept = total = 0
+        for rows in batches:
+            for row in rows or []:
+                total += 1
                 position = row.get('Position') or {}
                 lat, lon = position.get('PositionLat'), position.get('PositionLon')
                 name = clean(row.get(field, ''))
@@ -65,8 +80,8 @@ def main():
                 if not (south <= lat <= north and west <= lon <= east) or not usable(name) or name in seen: continue
                 seen.add(name); kept += 1
                 places.append([name, round(lat, 5), round(lon, 5), kind])
-            counts[f'{path}/{city}'] = kept
-            print(path, city, len(rows) if isinstance(rows, list) else 0, 'kept', kept, flush=True)
+        counts[path] = kept
+        print(path, total, 'kept', kept, flush=True)
     # Spots first: they are what riders name most; restaurants and hotels fill what room is left.
     order = {kind: index for index, (kind, _, _) in enumerate(KINDS)}
     places.sort(key=lambda place: (order[place[3]], place[0]))
