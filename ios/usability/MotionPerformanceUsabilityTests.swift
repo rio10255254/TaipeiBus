@@ -81,7 +81,7 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
     func testTripInteractionsOnThisSystem() {
         // A fixed midday plan and no live poll: route 307 has no service after midnight in Taipei,
         // and the trip must be the same at any hour the workflow runs.
-        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-motion-cost"])
+        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-motion-cost", "--test-view-changes"])
         let board = button("journey-board")
         XCTAssertTrue(board.waitForExistence(timeout: 90))
         capture("motion-trip-waiting")

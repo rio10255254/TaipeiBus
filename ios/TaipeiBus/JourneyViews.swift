@@ -59,6 +59,9 @@ struct JourneyPlanningView: View {
         planner.usingLocation ? location.usableCoordinate ?? location.displayCoordinate : planner.origin?.coordinate
     }
     var body: some View {
+#if DEBUG
+        let _ = ViewChangeLog.note(Self.self)
+#endif
         NavigationStack {
             ScrollViewReader { scroll in
             ScrollView {
@@ -1482,6 +1485,9 @@ struct JourneyItineraryView: View {
     var showMap: () -> Void = {}
     @State private var showTimingInfo = false
     var body: some View {
+#if DEBUG
+        let _ = ViewChangeLog.note(Self.self)
+#endif
         if let option = planner.selected {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
@@ -1544,6 +1550,9 @@ private struct JourneyWalkingStep: View {
     private var walked: Bool { planner.started && (planner.steps.firstIndex(of: .walk(index)) ?? .max) < planner.stepIndex }
     private var target: String { option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地") }
     var body: some View {
+#if DEBUG
+        let _ = ViewChangeLog.note(Self.self)
+#endif
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: walked ? "checkmark.circle.fill" : "figure.walk").liveFont(.title2)
                 .foregroundStyle(walked ? MapChrome.positive : Color.primary).frame(width: 34)
@@ -1682,6 +1691,9 @@ private struct JourneyRideStep: View {
     private var ridden: Bool { planner.started && (planner.steps.firstIndex(of: .ride(index)) ?? .max) < planner.stepIndex }
     private var tint: Color { RouteTint.accent(for: ride.route.name) }
     var body: some View {
+#if DEBUG
+        let _ = ViewChangeLog.note(Self.self)
+#endif
         HStack(alignment: .top, spacing: 14) {
             // The route's own sign colour, as on its badge and map line.
             Image(systemName: ride.route.mode == .bus ? "bus.fill" : "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)

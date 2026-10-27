@@ -474,6 +474,9 @@ struct TransitHomeView: View {
     }
 
     var body: some View {
+#if DEBUG
+        let _ = ViewChangeLog.note(Self.self)
+#endif
         presentedMap
         // Set on the windows rather than with preferredColorScheme, whose return to the system
         // appearance is unreliable once it has forced dark; this covers sheets as well.

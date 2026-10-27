@@ -15,7 +15,12 @@ struct TaipeiBusApp: App {
     private let tuning = ForecastTuningService(cacheDirectory: FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         .appendingPathComponent("ForecastTuning"))
 
-    init() { AskTaipeiBusIntent.connect() }
+    init() {
+#if DEBUG
+        ViewChangeLog.start()
+#endif
+        AskTaipeiBusIntent.connect()
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -118,6 +123,18 @@ private struct RequiredUpdateView: View {
 }
 
 #if DEBUG
+/// For finding a layout that never settles (`--test-view-changes`): what made each trip view
+/// evaluate again, in SwiftUI's own words, written to view-changes.log in the app's tmp folder.
+enum ViewChangeLog {
+    static let enabled = ProcessInfo.processInfo.arguments.contains("--test-view-changes")
+    static func start() {
+        guard enabled else { return }
+        let descriptor = open(NSTemporaryDirectory() + "view-changes.log", O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        if descriptor >= 0 { dup2(descriptor, STDOUT_FILENO); close(descriptor) }
+    }
+    static func note<V: View>(_ view: V.Type) { if enabled { V._printChanges() } }
+}
+
 /// For measurements only (`--test-motion-cost`, `--test-motion-lab`): how much of the main thread
 /// the interface takes and how evenly frames arrive, in five-second windows. UI tests read the
 /// windows from a hidden label once, after they have passed, so reading never lands inside one.
