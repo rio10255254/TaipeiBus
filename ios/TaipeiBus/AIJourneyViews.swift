@@ -91,7 +91,7 @@ final class JourneyAssistantSession: ObservableObject {
         if key.hasPrefix("捷運") { key.removeFirst(2) }
         if key.hasSuffix("站"), key.count > 2 { key.removeLast() }
         guard key.count >= 2 else { return [] }
-        let found = metadata.stations.values.filter { StationSearch.normalize($0.name) == key }
+        let found = metadata.stationSearch.stations(named: key)
             .sorted { ($0.mode == .metro ? 0 : 1, $0.id) < ($1.mode == .metro ? 0 : 1, $1.id) }
         guard let first = found.first else { return [] }
         // Named as the station is, so it is the exact match that needs no further choosing.
@@ -145,10 +145,8 @@ final class JourneyAssistantSession: ObservableObject {
     private var names: NameCorrection?
     private func prepareNames() {
         guard names == nil, AppLanguage.current != .english else { return }
-        let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
-        let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
-        Task { [weak self] in
-            let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
+        Task { [weak self, model = self.model] in
+            let built = await SpokenNames.correction(model: model)
             self?.names = built
         }
     }
@@ -508,16 +506,44 @@ final class JourneyAssistantSession: ObservableObject {
 
     // MARK: Model
 
-    private func makeContext() -> JourneyAssistantContext {
+    /// The place search a request uses: around the rider, with the station of that name first.
+    private func placeSearch() -> @MainActor (String) async throws -> [TravelPlace] {
         let vocabulary = model.vocabulary, settings = model.liveSettings.search, revision = model.liveSettings.revision
         let coordinate = model.location.usableCoordinate
         let metadata = model.metadata
-        let context = JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { query in
+        return { query in
             let toolSearch = PlaceSearch()
             toolSearch.setRules(vocabulary: vocabulary, settings: settings, revision: revision)
             toolSearch.setContext(coordinate)
             let found = try await toolSearch.find(text: query, queryLimit: 3, timeout: 4)
             return Self.withStations(found, words: query, metadata: metadata)
+        }
+    }
+
+    /// Places the voice answer named before it was finished, already being found, so the plan or the
+    /// lookup that follows starts from the results instead of searching again.
+    private var earlyPlaces: [String: (at: Date, search: Task<[TravelPlace], Error>)] = [:]
+    func lookAhead(_ names: [String]) {
+        earlyPlaces = earlyPlaces.filter { Date().timeIntervalSince($0.value.at) < 30 }
+        let search = placeSearch()
+        for name in names.map({ $0.trimmingCharacters(in: .whitespacesAndNewlines) })
+        where !name.isEmpty && earlyPlaces[name] == nil && JourneyAssistantContext.category(of: name) == nil {
+            earlyPlaces[name] = (Date(), Task { @MainActor in try await search(name) })
+        }
+        JourneyDiagnostics.shared.record("voice looking ahead places=\(names.count)")
+    }
+    /// The search started early for these words, once; nil when there is none or it is stale.
+    func lookedAhead(_ query: String) -> Task<[TravelPlace], Error>? {
+        let key = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let early = earlyPlaces.removeValue(forKey: key), Date().timeIntervalSince(early.at) < 30 else { return nil }
+        return early.search
+    }
+
+    private func makeContext() -> JourneyAssistantContext {
+        let search = placeSearch()
+        let context = JourneyAssistantContext(journeys: model.commutes.journeys, matches: Self.matches) { [weak self] query in
+            if let early = self?.lookedAhead(query), let found = try? await early.value { return found }
+            return try await search(query)
         }
         // Asked at the moment of choosing, so a consent given after this context was made counts.
         if OnlineJourneyReader.configured {
@@ -617,12 +643,14 @@ final class JourneyAssistantSession: ObservableObject {
     /// leg is planned, each near the stop before it, so their numbers appear on the map and tapping one
     /// only switches legs. A name the search cannot match is looked up again by its official name.
     private func findStops() {
-        stopSearch?.cancel(); stopCandidates = [:]
+        stopSearch?.cancel(); stopCandidates = [:]; findingStops = false
         guard let trip = model.assistantTrip, trip.stops.count > 1 else { return }
         let pro = model.purchases.hasPro, sentence = trip.request
         let finder = PlaceSearch()
         finder.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
+        findingStops = true
         stopSearch = Task { @MainActor in
+            defer { if !Task.isCancelled { findingStops = false } }
             var near = trip.stops[0].place?.coordinate
             for index in trip.stops.indices.dropFirst() {
                 if let place = trip.stops[index].place { near = place.coordinate; continue }
@@ -653,6 +681,10 @@ final class JourneyAssistantSession: ObservableObject {
     }
     private var stopSearch: Task<Void, Never>?
     private var stopCandidates: [Int: [TravelPlace]] = [:]
+    /// The later stops of the trip are still being looked up.
+    private(set) var findingStops = false
+    /// What the search found for a later stop it could not settle, for the rider to choose from.
+    func candidates(forLeg index: Int) -> [TravelPlace] { stopCandidates[index] ?? [] }
     private var pendingLeg: Int?
     /// The numbered stops above the routes: show that leg, or ask which place when unsure.
     func showLeg(_ index: Int) {

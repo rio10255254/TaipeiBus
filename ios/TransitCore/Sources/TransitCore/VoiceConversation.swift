@@ -14,6 +14,8 @@ public enum VoiceAction: Equatable, Sendable {
     case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String, avoid: TripAvoidance)
     /// The first, second or third option on screen.
     case chooseOption(Int)
+    /// One leg of a trip with several stops: the routes to its Nth stop (1 is the first).
+    case showLeg(Int)
     /// The state had no answer: look these up and ask again.
     case lookup(stop: String, route: String)
     /// Read the Public Transportation Office's latest notices and ask again with them.
@@ -57,6 +59,9 @@ public enum VoiceAction: Equatable, Sendable {
         case "choose_option":
             guard let option = json["option"] as? Int, (1...3).contains(option) else { return nil }
             self = .chooseOption(option)
+        case "show_leg":
+            guard let leg = json["option"] as? Int, (1...10).contains(leg) else { return nil }
+            self = .showLeg(leg)
         case "lookup":
             guard !text("stop").isEmpty || !text("route").isEmpty else { return nil }
             self = .lookup(stop: text("stop"), route: text("route"))
@@ -213,6 +218,7 @@ extension VoiceAction {
         case .showPlace(let place): "顯示 \(place)"
         case .planTrip(let destination, _, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
+        case .showLeg(let leg): "看第 \(leg) 段"
         case .lookup, .notices, .findPlace: "查詢"
         case .saveStop(let stop): "收藏 \(stop)"
         case .remindAlight: "下車提醒"

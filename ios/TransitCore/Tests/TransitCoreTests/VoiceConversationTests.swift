@@ -61,6 +61,13 @@ final class VoiceConversationTests: XCTestCase {
         XCTAssertEqual(VoiceReply(json: ["say": "我查一下地點。", "actions": [action("find_place")]])?.actions, [], "Nothing to look up is dropped")
     }
 
+    func testShowLegNamesOneLegOfTheTrip() {
+        let decoded = VoiceReply(json: ["say": "好，看第 2 段。", "actions": [action("show_leg", ["option": 2]), action("show_leg", ["option": 0]),
+                                                                       action("show_leg", ["option": 11])]])
+        XCTAssertEqual(decoded?.actions, [.showLeg(2)], "A leg number outside the trip is dropped")
+        XCTAssertEqual(VoiceAction.showLeg(3).question, "看第 3 段")
+    }
+
     func testPlanTripKeepsWhatTheTripMustNotUse() {
         let bus = VoiceReply(json: ["say": "好。", "actions": [action("plan_trip", ["destination": "南京復興",
             "avoid": ["bus": false, "metro": true, "bike": true, "routes": [" 紅線 ", "紅線", 5, "307"] as [Any]] as [String: Any]])]])

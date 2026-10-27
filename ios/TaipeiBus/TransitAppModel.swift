@@ -623,12 +623,17 @@ final class TransitAppModel: ObservableObject {
     }
     /// Shows one leg of a trip with several stops. A later leg leaves when the leg before it is
     /// expected to arrive (it used to restart at 現在出發).
+    /// Once the leg before it has been followed to its end, the next leg leaves now, from that stop.
     func showAssistantLeg(_ index: Int) {
         guard var trip = assistantTrip, trip.stops.indices.contains(index), index != trip.leg,
-              let destination = trip.stops[index].place, !planner.started else { return }
+              let destination = trip.stops[index].place, !planner.started || planner.arrived else { return }
+        let arrived = planner.started
+        if arrived { alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; rideActivity.endAll() }
         let origin = index == 0 ? trip.start : trip.stops[index - 1].place
         var departure: Date?, arriveBy: Date?
-        if index == 0 {
+        if arrived {
+            trip.legDepartures[index] = nil
+        } else if index == 0 {
             departure = trip.startDeparture; arriveBy = trip.startArriveBy
         } else if index == trip.leg + 1, let arrival = planner.expectedArrival ?? planner.scheduledDeparture?.addingTimeInterval(45 * 60) {
             // No timing for the leg before (待確認): a typical trip length rather than 現在.
@@ -1177,6 +1182,8 @@ final class TransitAppModel: ObservableObject {
                     planner.updateBikes(network: bikeNetwork, availability: cached)
                 }
                 pollBikesInBackground()
+                // The fare table is decoded on first use; off the main thread now, not while the first routes appear.
+                Task.detached(priority: .utility) { _ = FareTable.shared }
                 if let cached = await service.cachedMetadata() { metadata = cached; loading = false; loadError = nil }
                 else if let offline = await service.offlineMetroMetadata() { metadata = offline; loading = false; loadError = nil }
 #if DEBUG

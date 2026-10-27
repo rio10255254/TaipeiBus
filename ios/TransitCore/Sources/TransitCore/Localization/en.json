@@ -1152,5 +1152,9 @@
   "說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。手機先理解，需要時由線上 AI（Claude）協助；地點與路線由 Apple 地圖處理。": "Say or type one sentence to plan right away; anything left out means from here, leaving now. Your phone reads it first, with online AI (Claude) helping when needed; places and routes come from Apple Maps.",
   "用說的搜尋": "Search by voice",
   "語音助理": "Voice assistant",
-  "沒有完全符合「%@」的路線，先用一般推薦。": "No route keeps to “%@”, so here is the usual recommendation. "
+  "沒有完全符合「%@」的路線，先用一般推薦。": "No route keeps to “%@”, so here is the usual recommendation. ",
+  "選這個地點": "Choose this place",
+  "導航中，到了「%@」再看下一段。": "Navigating now; the next leg comes once you reach “%@”.",
+  "這是第 %@ 段，接著要去%@，說「下一段」就能看。": " This is leg %@; %@ comes next — say “next leg” to see it.",
+  "已到達「%@」。下一站是「%@」，要規劃過去的路線嗎？": "You've arrived at “%@”. Next is “%@” — shall I plan the way there?"
 }

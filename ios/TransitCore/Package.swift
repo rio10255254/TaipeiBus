@@ -6,7 +6,7 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v13)],
     products: [.library(name: "TransitCore", targets: ["TransitCore"])],
     targets: [
-        .target(name: "TransitCore", resources: [.process("Localization"), .process("Fares")]),
+        .target(name: "TransitCore", resources: [.process("Localization"), .process("Fares"), .process("Places")]),
         .testTarget(name: "TransitCoreTests", dependencies: ["TransitCore"], resources: [.process("Fixtures")])
     ]
 )

@@ -187,6 +187,11 @@ final class VoiceConversation: ObservableObject {
     /// The planner's places or options offered as choices, in the order shown.
     private var planPlaces: [TravelPlace] = []
     private var planOptions: [String] = []
+    /// A later leg of the trip was asked for (「下一段」); `planLeg` is the one whose place is being chosen.
+    private var legRequest: Int?
+    private var planLeg: Int?
+    /// Asked by the app when the conversation opens (arrived at a stop, the next one waiting).
+    private var openingQuestion: (question: String, action: VoiceAction)?
     /// The Public Transportation Office's latest notices, once the conversation asked for them.
     private var notices: [OfficialNotice]?
     /// The last answer, as the rider may report it: what was heard, what was said, the state it came from.
@@ -196,6 +201,18 @@ final class VoiceConversation: ObservableObject {
     @Published private(set) var reported = false
 
     init(model: TransitAppModel) { self.model = model }
+
+    /// The place a choice names, when it is one found on the map, so it is shown as a card with its
+    /// address and distance rather than a bare name.
+    func place(for choice: String) -> TravelPlace? {
+        if let index = choices.firstIndex(of: choice), planPlaces.indices.contains(index) { return planPlaces[index] }
+        guard choice.count >= 2 else { return nil }
+        let found = foundPlaces.flatMap(\.places)
+        return found.first { $0.localizedName == choice }
+            ?? found.first { $0.localizedName.contains(choice) || choice.contains($0.localizedName) }
+    }
+    /// Where the rider is, for the distance on a place card.
+    var riderPosition: Coordinate? { model.location.usableCoordinate }
 
     static var consentKey: String { AIConsent.key }
     /// The voice consent the server's data use matches.
@@ -243,19 +260,32 @@ final class VoiceConversation: ObservableObject {
         names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []; notices = nil
         lastTurn = nil; reportable = false; reported = false
         // Built for Chinese even when listening in English, so switching languages needs no wait.
-        let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese)
-        let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
-        Task { [weak self] in
-            let built = await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, others: others) }.value
+        Task { [weak self, model = self.model] in
+            let built = await SpokenNames.correction(model: model)
             self?.names = built
         }
         openingTurn = first.map { ($0, readings) }
+        legRequest = nil; planLeg = nil
         if Self.consent == true { beginTalking() } else { askingConsent = true }
+    }
+
+    /// The app asks first, e.g. on arriving at one stop of a trip with several: the question is spoken
+    /// and a yes, said or tapped, runs `action`. Only when the rider already talks to the assistant.
+    func offer(_ question: String, action: VoiceAction) {
+        guard !active, Self.available, model.purchases.hasPro, Self.consent == true else { return }
+        openingQuestion = (question, action)
+        start()
     }
     /// What was said before the conversation opened, waiting for it.
     private var openingTurn: (text: String, others: [String])?
 
     private func beginTalking() {
+        if let asked = openingQuestion {
+            openingQuestion = nil
+            pending = asked.action
+            history.append(user: "", said: asked.question)
+            return respond(asked.question, followUp: true)
+        }
         guard let first = openingTurn else { return listen(firstTurn: true) }
         openingTurn = nil
         alternatives = first.others
@@ -265,7 +295,7 @@ final class VoiceConversation: ObservableObject {
     func answerConsent(_ allowed: Bool) {
         AIConsent.answer(allowed)
         askingConsent = false
-        if allowed { beginTalking() } else { openingTurn = nil; end() }
+        if allowed { beginTalking() } else { openingTurn = nil; openingQuestion = nil; end() }
     }
 
     func end() {
@@ -461,7 +491,7 @@ final class VoiceConversation: ObservableObject {
             // One place offered: 「好」 takes it.
             if choices.count == 1, VoiceConfirmation.read(text) == .yes { return choosePlan(0) }
         }
-        planPlaces = []; planOptions = []
+        planPlaces = []; planOptions = []; planLeg = nil
         if let pending {
             switch VoiceConfirmation.read(text) {
             case .yes:
@@ -527,6 +557,8 @@ final class VoiceConversation: ObservableObject {
                     if words != text { JourneyDiagnostics.shared.record("voice server heard \(words.count) chars") }
                     text = words; heard = words
                 }
+                // The places of the answer's trip or lookup, found on the map while the rest is written.
+                if let names = event["looking"] as? [String], !names.isEmpty { model.assistant.lookAhead(names) }
                 if let words = event["say"] as? String { answer.receive(words).forEach(speak) }
                 if event["said"] as? Bool == true { answer.finishWords().forEach(speak) }
                 if event["reply"] != nil || event["error"] != nil { final = event; break }
@@ -632,6 +664,10 @@ final class VoiceConversation: ObservableObject {
     /// understood: what came of it is said here, from the planner's own result. A place it could not
     /// settle is asked about, with what it found to say or tap; the sheet stays closed.
     private func followPlan() async {
+        if let leg = legRequest {
+            legRequest = nil
+            return await followLeg(leg)
+        }
         let assistant = model.assistant
         var waited = 0
         while (assistant.busy || assistant.fixSearching), waited < 48 {
@@ -681,6 +717,36 @@ final class VoiceConversation: ObservableObject {
         }
     }
 
+    /// A later leg asked for by voice: shown and said once its place is known. A place the map could
+    /// not settle is offered as the places it found.
+    private func followLeg(_ index: Int) async {
+        guard let trip = model.assistantTrip, trip.stops.indices.contains(index) else { return }
+        let name = trip.stops[index].place?.localizedName ?? trip.stops[index].name
+        if index == trip.leg, model.planner.destination != nil { return await sayPlan() }
+        if model.planner.started, !model.planner.arrived {
+            compact = false
+            return await say(phrase("導航中，到了「%@」再看下一段。", model.planner.destination?.localizedName ?? phrase("目的地")))
+        }
+        var waited = 0
+        while model.assistantTrip?.stops[index].place == nil, model.assistant.findingStops, waited < 16 {
+            try? await Task.sleep(for: .milliseconds(250)); waited += 1
+        }
+        guard !Task.isCancelled, active else { return }
+        guard model.assistantTrip?.stops[index].place != nil else {
+            planPlaces = Array(model.assistant.candidates(forLeg: index).prefix(3)); planLeg = index
+            choices = planPlaces.map(\.localizedName)
+            compact = false
+            JourneyDiagnostics.shared.record("voice leg=\(index + 1) unsettled places=\(planPlaces.count)")
+            await say(planPlaces.isEmpty ? phrase("找不到「%@」，請換個說法，例如加上分店或附近的地標。", name)
+                : phrase("「%@」要去哪一個？可以直接說或點選。", name))
+            return
+        }
+        model.showAssistantLeg(index)
+        guard model.assistantTrip?.leg == index else { return }
+        JourneyDiagnostics.shared.record("voice leg=\(index + 1)")
+        await sayPlan()
+    }
+
     /// The planner's routes once it has some: the first option's time and arrival, which the app
     /// vouches for, and the stops still to come of a trip with several.
     private func sayPlan() async {
@@ -703,7 +769,7 @@ final class VoiceConversation: ObservableObject {
         }
         if let trip = model.assistantTrip, trip.stops.count > trip.leg + 1 {
             let later = trip.stops.dropFirst(trip.leg + 1).map { $0.place?.localizedName ?? $0.name }
-            sentence += phrase("這是第 %@ 段，接著的%@點路線上方的編號就能看。", "\(trip.leg + 1)", later.joined(separator: "、"))
+            sentence += phrase("這是第 %@ 段，接著要去%@，說「下一段」就能看。", "\(trip.leg + 1)", later.joined(separator: "、"))
         }
         JourneyDiagnostics.shared.record("voice plan said options=\(planner.options.count) unmet=\(planner.constraintsUnmet)")
         history.append(user: "", said: sentence)
@@ -723,8 +789,14 @@ final class VoiceConversation: ObservableObject {
     }
 
     private func choosePlan(_ index: Int) {
-        let places = planPlaces, options = planOptions
-        planPlaces = []; planOptions = []; choices = []
+        let places = planPlaces, options = planOptions, leg = planLeg
+        planPlaces = []; planOptions = []; choices = []; planLeg = nil
+        if let leg, places.indices.contains(index) {
+            model.resolveAssistantStop(leg, place: places[index])
+            legRequest = leg; planning = true; compact = true
+            panelRequest = .routes
+            return respond(phrase("好，改到%@。", places[index].localizedName), followUp: true)
+        }
         if places.indices.contains(index) {
             model.assistant.chooseFix(places[index])
         } else if options.indices.contains(index) {
@@ -793,6 +865,10 @@ final class VoiceConversation: ObservableObject {
             model.assistant.plan(reading, sentence: sentence)
             planning = true
             panelRequest = .routes
+        case .showLeg(let number):
+            guard let trip = model.assistantTrip, trip.stops.indices.contains(number - 1) else { return }
+            legRequest = number - 1; planning = true
+            panelRequest = .routes
         case .chooseOption(let index):
             guard planner.options.indices.contains(index - 1), !planner.started else { return }
             planner.select(planner.options[index - 1])
@@ -843,6 +919,10 @@ final class VoiceConversation: ObservableObject {
         finder.setContext(model.location.usableCoordinate)
         var found: [(query: String, places: [TravelPlace])] = []
         for name in names {
+            if let early = model.assistant.lookedAhead(name), let places = try? await early.value {
+                found.append((name, Array(places.filter { $0.coordinate.isInServiceArea }.prefix(4))))
+                continue
+            }
             let places = ((try? await finder.find(text: name, queryLimit: 3, timeout: 4)) ?? []).filter { $0.coordinate.isInServiceArea }
             found.append((name, Array(JourneyAssistantSession.withStations(places, words: name, metadata: model.metadata).prefix(4))))
         }
@@ -884,6 +964,30 @@ final class VoiceConversation: ObservableObject {
     }
 }
 
+/// The names misheard words are corrected to: every stop and station, the city's scenic spots and
+/// landmarks, indexed once off the main thread and shared; in front of them, compared more loosely,
+/// what is on screen and around the rider, including the restaurants and hotels nearby.
+@MainActor
+enum SpokenNames {
+    private static var base: (count: Int, task: Task<NameCorrection, Never>)?
+
+    static func correction(model: TransitAppModel) async -> NameCorrection {
+        let position = model.location.usableCoordinate
+        let nearby = VoiceStateBuilder(model: model).hints(language: .traditionalChinese) + VoicePlaces.shared.near(position, within: 3000, limit: 60)
+        let count = model.metadata.stations.count
+        let task: Task<NameCorrection, Never>
+        if let base, base.count == count {
+            task = base.task
+        } else {
+            let others = model.metadata.stations.values.map(\.name) + VoiceVocabulary.landmarks.map(\.chinese)
+            task = Task.detached(priority: .userInitiated) { NameCorrection(nearby: [], others: others + VoicePlaces.shared.spots) }
+            base = (count, task)
+        }
+        let all = await task.value
+        return await Task.detached(priority: .userInitiated) { NameCorrection(nearby: nearby, adding: all) }.value
+    }
+}
+
 /// The app's state in words for the server, the values behind each `{r1}`, and the names the rider can see.
 @MainActor
 struct VoiceStateBuilder {
@@ -906,8 +1010,10 @@ struct VoiceStateBuilder {
         var own = model.favorites.compactMap { model.metadata.stations[$0] }.map { name($0.name, $0.englishName) }
         for journey in model.commutes.journeys { own += [journey.title, place(journey.destination)] + (journey.origin.map { [place($0)] } ?? []) }
         own += model.planner.recentPlaces.map(place)
+        // Official place names around the rider (Chinese only), then the city's best-known places.
+        let around = english ? [] : VoicePlaces.shared.near(model.location.usableCoordinate, within: 1500, limit: 15)
         let city = VoiceVocabulary.landmarks.map { english ? $0.english : $0.chinese }
-        return VoiceVocabulary.hints([screen, own, city, VoiceVocabulary.appWords(english: english), VoiceVocabulary.brands])
+        return VoiceVocabulary.hints([screen, own, around, city, VoiceVocabulary.appWords(english: english), VoiceVocabulary.brands])
     }
 
     func context(pending: VoiceAction?, notices: [OfficialNotice]? = nil,
@@ -1043,6 +1149,9 @@ struct VoiceStateBuilder {
         }
         if let trip = model.assistantTrip, trip.stops.count > 1 {
             facts.append("行程：\(trip.stops.map(\.name).joined(separator: " → "))，現在是第 \(trip.leg + 1) 段")
+            facts.append("行程各段：" + trip.stops.enumerated().map { index, stop in
+                "第 \(index + 1) 段到 \(stop.place?.localizedName ?? stop.name)\(index == trip.leg ? "（畫面上這段）" : "")"
+            }.joined(separator: "、"))
             let later = trip.stops.dropFirst(trip.leg + 1).map(\.name)
             if !later.isEmpty { facts.append("之後要去：" + later.joined(separator: "、")) }
         }
@@ -1110,7 +1219,17 @@ final class NavigationVoice {
         guard planner.started else { said = []; step = nil; return }
         guard Self.enabled, model.purchases.hasPro, !model.voiceChat.active else { return }
         if planner.arrived {
-            say("arrived", AppText.text("已到達「%@」。", planner.destination?.localizedName ?? AppText.text("目的地")))
+            let here = planner.destination?.localizedName ?? AppText.text("目的地")
+            // One stop of several: the next leg is offered, and a yes plans it from here.
+            if let trip = model.assistantTrip, trip.stops.count > trip.leg + 1, VoiceConversation.consent == true,
+               said.insert("arrived").inserted {
+                let next = trip.stops[trip.leg + 1]
+                JourneyDiagnostics.shared.record("navigation voice next-leg")
+                model.voiceChat.offer(AppText.text("已到達「%@」。下一站是「%@」，要規劃過去的路線嗎？", here, next.place?.localizedName ?? next.name),
+                                      action: .showLeg(trip.leg + 2))
+                return
+            }
+            say("arrived", AppText.text("已到達「%@」。", here))
             return
         }
         if step != planner.stepIndex {

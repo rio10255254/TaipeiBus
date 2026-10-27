@@ -203,7 +203,7 @@ final class JourneyPlannerModel: ObservableObject {
         } else {
             scheduledDeparture = departure.flatMap { $0.timeIntervalSinceNow > 5 * 60 ? $0 : nil }
         }
-        durationCache.removeAll(keepingCapacity: true)
+        durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true)
     }
     /// Timetable waits jump at each departure, so a few corrections, each to the whole minute.
     private func alignToDeadline() {
@@ -215,7 +215,7 @@ final class JourneyPlannerModel: ObservableObject {
             if abs(shift) < 90 { return }
             let next = max(earliest, Date(timeIntervalSince1970: floor((departure.timeIntervalSince1970 + shift) / 60) * 60))
             if next == departure { return }
-            departure = next; scheduledDeparture = next; durationCache.removeAll(keepingCapacity: true)
+            departure = next; scheduledDeparture = next; durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true)
         }
     }
     /// When the shown route is expected to arrive, from the planned departure.
@@ -233,7 +233,7 @@ final class JourneyPlannerModel: ObservableObject {
     /// it are listed first. Cleared when the trip is finished.
     var preferredMode = AssistantTravelMode.any
     /// 「不要搭公車」, 「只搭捷運」, 「避開紅線」: routes that break them are left out while others exist.
-    var constraints = TripConstraints() { didSet { if constraints != oldValue { durationCache.removeAll(keepingCapacity: true) } } }
+    var constraints = TripConstraints() { didSet { if constraints != oldValue { durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true) } } }
     /// No route kept the constraints, so the usual ones are shown with a note.
     @Published private(set) var constraintsUnmet = false
     /// A rider who asked to cycle gets a whole-trip YouBike route up to 20 km; otherwise rides stay
@@ -279,6 +279,9 @@ final class JourneyPlannerModel: ObservableObject {
         let value: JourneyDuration
     }
     private var durationCache: [String: CachedDuration] = [:]
+    /// The vehicles coming to each boarding stop at one moment: asked many times while one option's
+    /// time is worked out (each ride's wait looks at every ride), and scanning the city's buses each time.
+    private var departuresCache: [String: [BoardingDeparture]] = [:]
     private var verifiedPool: [JourneyOption] = []
     private var walkingCache: [String: (leg: WalkingLeg, date: Date)] = [:]
     // Briefly share unavailable endpoints across combinations, while allowing a
@@ -476,7 +479,16 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func boardingDepartures(_ rides: [TransitRide], at date: Date) -> [[BoardingDeparture]] {
         guard let metadata = lastMetadata else { return [] }
-        return rides.map { forecast.departures(for: $0, metadata: metadata, snapshot: latestSnapshot, at: date) }
+        let second = Int(date.timeIntervalSince1970), scheduled = scheduledDeparture == nil ? "now" : "planned"
+        return rides.map { ride in
+            guard ride.route.mode == .bus else { return [] }
+            let key = "\(ride.id)|\(second)|\(scheduled)"
+            if let cached = departuresCache[key] { return cached }
+            let value = forecast.departures(for: ride, metadata: metadata, snapshot: latestSnapshot, at: date)
+            if departuresCache.count >= 400 { departuresCache.removeAll(keepingCapacity: true) }
+            departuresCache[key] = value
+            return value
+        }
     }
     private func contextualTrip(_ option: JourneyOption, at date: Date, riding: [Double]? = nil) -> TransitTrip? {
         guard let trip = option.trip else { return nil }
@@ -521,7 +533,7 @@ final class JourneyPlannerModel: ObservableObject {
            cached.riding == option.trip?.rideSeconds ?? [], cached.cycling == option.cyclingSeconds,
            cached.station == station, cached.handling == handling { return cached.value }
         guard let value = calculateDuration(option, at: date) else { return nil }
-        if durationCache.count >= 100 { durationCache.removeAll(keepingCapacity: true) }
+        if durationCache.count >= 100 { durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true) }
         durationCache[option.id] = CachedDuration(bucket: bucket, walks: walks, from: from, to: to,
             riding: option.trip?.rideSeconds ?? [], cycling: option.cyclingSeconds, station: station, handling: handling, value: value)
         return value
@@ -763,7 +775,9 @@ final class JourneyPlannerModel: ObservableObject {
         return nil
     }
     func updateSnapshot(_ snapshot: TransitSnapshot, forecast: VehicleArrivalForecast = .init()) {
-        durationCache.removeAll(keepingCapacity: true)
+        let began = ProcessInfo.processInfo.systemUptime
+        defer { Self.recordSlow("snapshot", since: began) }
+        durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true)
         receivedSnapshot = snapshot; self.forecast = forecast
         // Refresh the order without changing an inspected route or its map camera.
         if !started, !planning, !checkingWalks, !verifiedPool.isEmpty {
@@ -776,7 +790,7 @@ final class JourneyPlannerModel: ObservableObject {
         }
     }
     func updateSettings(_ settings: LiveSettings) {
-        durationCache.removeAll(keepingCapacity: true); preferences = settings.planning
+        durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true); preferences = settings.planning
         if !started, !verifiedPool.isEmpty { publishRecommendations() }
     }
     private var bikeNetwork = BikeNetwork.empty
@@ -1258,7 +1272,7 @@ final class JourneyPlannerModel: ObservableObject {
     }
     func plan(metadata: TransitMetadata) {
         defer { onNavigationChange?() }
-        durationCache.removeAll(keepingCapacity: true)
+        durationCache.removeAll(keepingCapacity: true); departuresCache.removeAll(keepingCapacity: true)
         lastMetadata = metadata; selectionConfirmed = false; selectionChosen = false
         cancelRequests()
         hadTemporaryStreetFailure = false
@@ -1691,7 +1705,7 @@ final class JourneyPlannerModel: ObservableObject {
                           bikes: BikeNetwork, availability: BikeAvailability?, cacheFrom: JourneyPlannerModel,
                           maximumWait: Double = 18) async -> JourneyOption? {
         cancelRequests(); origin = start; destination = end; usingLocation = false
-        preferences = settings.planning; receivedSnapshot = snapshot; self.forecast = forecast
+        preferences = settings.planning; receivedSnapshot = snapshot; self.forecast = forecast; departuresCache.removeAll(keepingCapacity: true)
         bikeNetwork = bikes; bikeAvailability = availability
         walkingCache.merge(cacheFrom.walkingCache) { a, b in a.date > b.date ? a : b }
         evaluatingRemainingJourney = true

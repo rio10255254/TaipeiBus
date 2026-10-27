@@ -133,7 +133,8 @@ type Turn = {
 /// Server-sent events, one JSON object each: first `{"heard": words}` when the turn's audio was written
 /// down again on the server, so the phone shows and keeps that; `{"say": words}` as the spoken sentence is written, so the
 /// phone can start speaking at the first full stop; `{"said": true}` once it is whole, so a last sentence
-/// without a full stop need not wait for the actions; then `{"reply": ..., "model", "provider", "used",
+/// without a full stop need not wait for the actions; `{"looking": [names]}` once the first action's
+/// places are written, so the phone starts finding them on the map; then `{"reply": ..., "model", "provider", "used",
 /// "limit"}` with the checked reply, or `{"error": ...}`. Groq answers in one piece, and only while
 /// nothing has been said. Event streams pass through proxies as they are written rather than buffered.
 ///
@@ -176,7 +177,7 @@ function streamed(turn: Turn): Response {
       }
       const input = turn.input;
       const message = userMessage(input, webLeft > 0 ? `今天還能用 ${webLeft} 次` : turn.noWeb);
-      const claude = anthropicKey ? await streamClaude(anthropicKey, message, speak) : { failure: 'not configured', spoke: false };
+      const claude = anthropicKey ? await streamClaude(anthropicKey, message, speak, (looking) => send({ looking })) : { failure: 'not configured', spoke: false };
       if ('reply' in claude) {
         const search = claude.reply.actions.find((action) => action.type === 'web_search');
         if (!search) {

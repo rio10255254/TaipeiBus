@@ -46,4 +46,21 @@ final class NameCorrectionTests: XCTestCase {
         XCTAssertEqual(names.correct("遠山很美"), "遠山很美")
         XCTAssertEqual(names.correct("公關部門"), "公關部門")
     }
+
+    func testNamesNearbyGoInFrontOfASharedIndex() {
+        let city = NameCorrection(nearby: [], others: ["市政府", "忠孝敦化"])
+        let names = NameCorrection(nearby: ["市政府"], adding: city)
+        XCTAssertEqual(names.correct("到四政府"), "到市政府", "Nearby, three characters are compared loosely")
+        XCTAssertEqual(names.correct("去宗孝敦化"), "去忠孝敦化", "The shared names still count")
+        XCTAssertEqual(city.correct("到四政府"), "到四政府", "The shared index itself is unchanged")
+    }
+
+    func testOfficialPlaceNamesReadFromTheirFile() {
+        let data = Data(#"{"places":[["國立故宮博物院",25.1024,121.5485,"spot"],["鼎泰豐",25.0336,121.5299,"food"],["",1,2],["太長的名字太長的名字太長的名字",25,121]]}"#.utf8)
+        let places = VoicePlaces(data: data)
+        XCTAssertEqual(places.places.map(\.name), ["國立故宮博物院", "鼎泰豐"])
+        XCTAssertEqual(places.spots, ["國立故宮博物院"])
+        XCTAssertEqual(places.near(Coordinate(latitude: 25.033, longitude: 121.53), within: 2000), ["鼎泰豐"])
+        XCTAssertEqual(places.near(nil), [])
+    }
 }
