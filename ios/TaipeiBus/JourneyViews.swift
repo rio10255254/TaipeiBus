@@ -1689,7 +1689,7 @@ private struct JourneyRideStep: View {
                 .background(RouteTint.color(for: ride.route.name), in: live.shape(.badge))
                 // A ride already taken steps back; the one under way gets a soft ring.
                 .opacity(ridden ? 0.45 : 1)
-                .attentionPulse(aboard, color: tint, in: live.shape(.badge))
+                .attentionPulse(aboard, color: tint, cornerRadius: live.radius(.badge))
                 .smoothChanges(ridden)
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .top, spacing: 8) {
@@ -2058,7 +2058,7 @@ private struct WaitingBannerContent: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .center, spacing: 12) {
                 RouteBadge(name: ride.route.mode == .bus ? ride.route.localizedName : ride.route.lineCode, tintName: ride.route.name)
-                    .attentionPulse(arriving, color: Color(liveHex: "#6EE7A0"), in: live.shape(.badge))
+                    .attentionPulse(arriving, color: Color(liveHex: "#6EE7A0"), cornerRadius: live.radius(.badge))
                     .tripStageMatch("banner-lead")
                     .accessibilityIdentifier("boarding-route")
                 VStack(alignment: .leading, spacing: 2) {
@@ -2182,7 +2182,7 @@ private struct RidingBannerContent: View {
                             .frame(width: 12).accessibilityLabel(AppText.text("依你的定位即時更新"))
                     } else {
                         Circle().fill(Color(liveHex: alightNext ? "#FFD60A" : "#6EA8FF")).frame(width: 8, height: 8)
-                            .attentionPulse(alightNext, color: Color(liveHex: "#FFD60A"), in: Circle())
+                            .attentionPulse(alightNext, color: Color(liveHex: "#FFD60A"))
                             .frame(width: 12)
                     }
                     VStack(alignment: .leading, spacing: 1) {

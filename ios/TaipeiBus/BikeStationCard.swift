@@ -7,7 +7,6 @@ import TransitCore
 struct BikeStationCard: View {
     @Environment(\.liveSettings) private var live
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @ObservedObject var model: TransitAppModel
     let station: BikeStation
     let distance: Double?
@@ -79,8 +78,10 @@ struct BikeStationCard: View {
                 if let nearest = alternative(at: now) {
                     Button { model.selectBikeStation(nearest.station.id, returning: returning) } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: "figure.walk").liveFont(.caption, weight: .semibold)
-                                .symbolEffect(.pulse, options: .repeating, isActive: !InterfaceMotion.reduced(systemReduceMotion))
+                            ContinuousMotion { running in
+                                Image(systemName: "figure.walk").liveFont(.caption, weight: .semibold)
+                                    .symbolEffect(.pulse, options: .repeating, isActive: running)
+                            }
                             Text(AppText.text(returning ? "附近可還 %@ · %@" : "最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
                                 .liveFont(.subheadline, weight: .semibold).lineLimit(1)
                         }.padding(.horizontal, 14).frame(minHeight: 40)

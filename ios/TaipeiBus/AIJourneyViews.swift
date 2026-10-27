@@ -1678,12 +1678,14 @@ private struct LiveDot: View {
     let reduceMotion: Bool
     @State private var on = false
     var body: some View {
-        Circle().fill(Color.red).frame(width: 8, height: 8)
-            .overlay(Circle().stroke(Color.red.opacity(0.5), lineWidth: 2).scaleEffect(on ? 2.2 : 1).opacity(on ? 0 : 1))
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true }
-            }
+        ContinuousMotion { running in
+            Circle().fill(Color.red).frame(width: 8, height: 8)
+                .overlay(Circle().stroke(Color.red.opacity(0.5), lineWidth: 2).scaleEffect(on ? 2.2 : 1).opacity(on ? 0 : 1))
+                .onChange(of: running && !reduceMotion, initial: true) { _, run in
+                    if run { withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true } }
+                    else { var still = Transaction(); still.disablesAnimations = true; withTransaction(still) { on = false } }
+                }
+        }
     }
 }
 
@@ -1691,7 +1693,10 @@ private struct LiveDot: View {
 private struct Shimmer: ViewModifier {
     let active: Bool
     @State private var sweep = false
-    @ViewBuilder func body(content: Content) -> some View {
+    func body(content: Content) -> some View {
+        ContinuousMotion { running in shimmer(content, active: active && running) }
+    }
+    @ViewBuilder private func shimmer(_ content: Content, active: Bool) -> some View {
         if active {
             content.overlay {
                 GeometryReader { box in
@@ -1705,6 +1710,8 @@ private struct Shimmer: ViewModifier {
                 .allowsHitTesting(false)
             }
             .onAppear { withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { sweep = true } }
+            // Back at the start, so the next time something is being understood the light sweeps again.
+            .onDisappear { sweep = false }
         } else {
             content
         }
@@ -1762,6 +1769,19 @@ struct VoiceOrb: View {
     }
 
     var body: some View {
+        ContinuousMotion { running in orb.onChange(of: running && !reduceMotion, initial: true) { _, run in turn(run) } }
+    }
+    /// Starts the turning and breathing, or stops them in place (Reduce Motion, Low Power Mode, a hot phone).
+    private func turn(_ run: Bool) {
+        guard run else {
+            var still = Transaction(); still.disablesAnimations = true
+            withTransaction(still) { spin = false; breathe = false }
+            return
+        }
+        withAnimation(.linear(duration: compact ? 9 : 6).repeatForever(autoreverses: false)) { spin = true }
+        withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { breathe = true }
+    }
+    private var orb: some View {
         GeometryReader { box in
             let side = min(box.size.width, box.size.height)
             let colors = Self.colors(mood)
@@ -1801,11 +1821,6 @@ struct VoiceOrb: View {
             .frame(width: box.size.width, height: box.size.height)
         }
         .animation(.easeInOut(duration: 0.45), value: mood)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: compact ? 9 : 6).repeatForever(autoreverses: false)) { spin = true }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { breathe = true }
-        }
     }
 }
 
@@ -1874,6 +1889,18 @@ struct EdgeGlow: View {
         self.mood = mood; self.level = level; self.reduceMotion = reduceMotion; self.corner = corner; self.scale = scale
     }
     var body: some View {
+        ContinuousMotion { running in glow.onChange(of: running && !reduceMotion, initial: true) { _, run in turn(run) } }
+    }
+    private func turn(_ run: Bool) {
+        guard run else {
+            var still = Transaction(); still.disablesAnimations = true
+            withTransaction(still) { spin = false; pulse = false }
+            return
+        }
+        withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { spin = true }
+        withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { pulse = true }
+    }
+    private var glow: some View {
         GeometryReader { box in
             // Rounded like the display on Face ID iPhones; the blur hides small differences.
             let corner: CGFloat = self.corner ?? (box.safeAreaInsets.bottom > 0 ? 54 : 0)
@@ -1902,11 +1929,6 @@ struct EdgeGlow: View {
         }
         .allowsHitTesting(false)
         .animation(.easeInOut(duration: 0.5), value: mood)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { spin = true }
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { pulse = true }
-        }
     }
 }
 
