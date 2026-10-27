@@ -66,7 +66,7 @@ const cases: Case[] = [
   { name: '同音地名', state: map, utterance: '我要坐捷運去南京住行', alternatives: ['我要坐捷運去南京復興'], expect: 'plan_trip', destination: '南京復興', limits: { bus: true, metro: false } },
   { name: '避開與直達', state: map, utterance: '去士林夜市，不要騎YouBike也不要搭紅線，最好不用轉車', expect: 'plan_trip', destination: '士林', limits: { bike: true, routes: ['紅'] }, preference: 'fewerTransfers' },
   { name: '相對時間', state: map, utterance: '半小時後出發去台北車站', expect: 'plan_trip', destination: '台北車站', time: '20:10' },
-  { name: '不確定的店', state: map, utterance: '帶我去蘋果專賣店', expect: 'find_place', avoid: 'plan_trip' },
+  { name: '不確定的店', state: map, utterance: '帶我去永康街那家很多人排隊的牛肉麵', expect: 'find_place', avoid: 'plan_trip' },
   { name: '查到再規劃', state: searched, utterance: '帶我去蘋果專賣店', history: [{ user: '帶我去蘋果專賣店', say: '我查一下地點。' }], expect: 'plan_trip', destination: 'Apple 信義A13' },
   { name: '規劃失敗再選', state: unfound, utterance: '我今天下午想先去蘋果專賣店A43', history: [{ user: '我今天下午想先去蘋果專賣店A43', say: '好，今天下午先到蘋果專賣店A43。' }], expect: 'plan_trip', destination: 'Apple 信義A13', time: '今天' },
   { name: '中英夾雜', state: map, utterance: '我要去 Taipei 一零一', expect: 'plan_trip', destination: '101' },
