@@ -18,8 +18,10 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
     private func summary(_ windows: [[String: Any]]) -> [String: Any] {
         func values(_ key: String) -> [Double] { windows.compactMap { ($0[key] as? NSNumber)?.doubleValue }.sorted() }
         func median(_ key: String) -> Double { let all = values(key); return all.isEmpty ? -1 : all[all.count / 2] }
+        // Typed, so `last` is the property and not the `last(where:)` method boxed as Any.
+        let longest: Double = values("longest_ms").last ?? -1
         return ["main_cpu_pct": median("main_cpu_pct"), "process_cpu_pct": median("process_cpu_pct"), "fps": median("fps"),
-                "delayed_frames": Int(values("delayed").reduce(0, +)), "longest_ms": values("longest_ms").last ?? -1,
+                "delayed_frames": Int(values("delayed").reduce(0, +)), "longest_ms": longest,
                 "windows": windows.count]
     }
     /// One launch of the lab: wait until it shows, then leave it alone for `seconds` before one read.
