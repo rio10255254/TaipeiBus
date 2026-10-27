@@ -83,8 +83,10 @@ struct TaipeiBusApp: App {
                 .environment(\.liveSettings, model.presentationSettings)
                 .environment(\.locale, model.language.locale)
                 .modifier(AuditTextSize())
-                .accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
-                .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
+                .diagnostic("no-tint", {
+                    $0.accentColor(Color(liveHex: model.liveSettings.appearance.accentColor))
+                        .tint(Color(liveHex: model.liveSettings.appearance.accentColor))
+                }, instead: { $0 })
     }
 }
 
@@ -129,8 +131,14 @@ enum ViewChangeLog {
     static let enabled = ProcessInfo.processInfo.arguments.contains("--test-view-changes")
     static func start() {
         guard enabled else { return }
-        let descriptor = open(NSTemporaryDirectory() + "view-changes.log", O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        let suffix = DiagnosticVariant.name.isEmpty ? "" : "-" + DiagnosticVariant.name
+        let descriptor = open(NSTemporaryDirectory() + "view-changes\(suffix).log", O_WRONLY | O_CREAT | O_TRUNC, 0o644)
         if descriptor >= 0 { dup2(descriptor, STDOUT_FILENO); close(descriptor) }
+        setvbuf(stdout, nil, _IOLBF, 0)
+        // A main thread held in one layout pass stops these; the workflow reads the longest gap.
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            print("HEARTBEAT \(ProcessInfo.processInfo.systemUptime)")
+        }
     }
     static func note<V: View>(_ view: V.Type) { if enabled { V._printChanges() } }
 }
@@ -313,3 +321,24 @@ private struct MotionLabView: View {
     }
 }
 #endif
+
+/// `--diag-variant <name>` (debug builds) leaves one part of the trip sheet out, to find which part
+/// keeps iOS 17 laying it out without end. Release builds always take the normal path.
+enum DiagnosticVariant {
+    static let name: String = {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "--diag-variant"), arguments.indices.contains(index + 1) else { return "" }
+        return arguments[index + 1]
+#else
+        return ""
+#endif
+    }()
+}
+
+extension View {
+    /// Applies `normal` unless the diagnostic variant is `variant`, then `instead`.
+    @ViewBuilder func diagnostic<A: View, B: View>(_ variant: String, _ normal: (Self) -> A, instead: (Self) -> B) -> some View {
+        if DiagnosticVariant.name == variant { instead(self) } else { normal(self) }
+    }
+}

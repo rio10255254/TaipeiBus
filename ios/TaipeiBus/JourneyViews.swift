@@ -51,6 +51,9 @@ struct JourneyPlanningView: View {
     }
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
+    @ViewBuilder private func tripNavigation<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        if DiagnosticVariant.name == "no-nav" { content() } else { NavigationStack { content() } }
+    }
     private var scale: CGFloat { CGFloat(live.appearance.spacingScale) }
     private var fieldShape: RoundedRectangle { RoundedRectangle(cornerRadius: Metrics.fieldRadius * CGFloat(live.appearance.cornerScale), style: .continuous) }
     /// A titled group in search results; it lines up with the text inside the fields above.
@@ -65,7 +68,7 @@ struct JourneyPlanningView: View {
 #if DEBUG
         let _ = ViewChangeLog.note(Self.self)
 #endif
-        NavigationStack {
+        tripNavigation {
             ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: (searchingPlaces || compact ? Metrics.gap : Metrics.margin) * scale) {
@@ -1490,11 +1493,13 @@ struct JourneyItineraryView: View {
     @ObservedObject var planner: JourneyPlannerModel
     var showMap: () -> Void = {}
     @State private var showTimingInfo = false
+    private var omitted: Bool { DiagnosticVariant.name == "no-itinerary" }
     var body: some View {
 #if DEBUG
         let _ = ViewChangeLog.note(Self.self)
 #endif
-        if let option = planner.selected {
+        if omitted { Text("diagnostic").accessibilityIdentifier("diag-sheet") }
+        else if let option = planner.selected {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(planner.destination?.localizedName ?? AppText.text("目的地"))

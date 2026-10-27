@@ -413,24 +413,29 @@ struct TransitHomeView: View {
                                 expand: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = .large } },
                                 collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } },
                                 dismiss: { showJourney = false })
-                .environment(\.dynamicTypeSize, dynamicTypeSize)
+                .diagnostic("no-type-env", { $0.environment(\.dynamicTypeSize, dynamicTypeSize) }, instead: { $0 })
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
-                .presentationDetents(journeyDetents, selection: $journeyDetent)
+                .diagnostic("no-detent-selection", { $0.presentationDetents(journeyDetents, selection: $journeyDetent) },
+                            instead: { $0.presentationDetents(journeyDetents) })
                 // Only up through a height the sheet offers: during a trip it is large alone, and
                 // naming a missing detent there kept iOS 17 re-dimming the map on every layout pass.
-                .presentationBackgroundInteraction(journeyDetents.contains(.height(560)) ? .enabled(upThrough: .height(560)) : .automatic)
-                .presentationContentInteraction(.scrolls)
-                .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
+                .diagnostic("plain-sheet", {
+                    $0.presentationBackgroundInteraction(journeyDetents.contains(.height(560)) ? .enabled(upThrough: .height(560)) : .automatic)
+                        .presentationContentInteraction(.scrolls)
+                        .presentationDragIndicator(.visible).presentationCornerRadius(30).presentationBackground(.regularMaterial)
+                }, instead: { $0 })
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
-                .background {
-                    GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
-                }
-                .onPreferenceChange(JourneyPanelHeightKey.self) { height in
-                    // Applied after the layout pass that measured it: changing the map's inset inside
-                    // the sheet's own layout re-laid the sheet, which on iOS 17 never settled.
-                    guard height > 0, abs(height - journeyPanelHeight) > 1 else { return }
-                    DispatchQueue.main.async { if abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height } }
-                }
+                .diagnostic("no-panel-height", {
+                    $0.background {
+                        GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
+                    }
+                    .onPreferenceChange(JourneyPanelHeightKey.self) { height in
+                        // Applied after the layout pass that measured it: changing the map's inset inside
+                        // the sheet's own layout re-laid the sheet, which on iOS 17 never settled.
+                        guard height > 0, abs(height - journeyPanelHeight) > 1 else { return }
+                        DispatchQueue.main.async { if abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height } }
+                    }
+                }, instead: { $0 })
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model).opensFromSource("settings", in: sheetSpace) }
         .onChange(of: model.resumeJourneyRequested) { _, requested in
