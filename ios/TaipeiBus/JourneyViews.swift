@@ -13,10 +13,7 @@ struct JourneyPlanningView: View {
     let expand: () -> Void
     let collapse: () -> Void
     @StateObject private var search = PlaceSearch()
-    /// Closes the sheet. Passed in rather than read from the environment: on iOS 17 the sheet's
-    /// dismiss action changed on every layout pass while the itinerary opened, so the sheet
-    /// re-evaluated this view and laid itself out again without end.
-    let dismiss: () -> Void
+    @Environment(\.dismiss) private var dismiss
     @FocusState private var focused: Bool
     @State private var query = ""
     @State private var editingOrigin = false
@@ -41,19 +38,16 @@ struct JourneyPlanningView: View {
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
-         compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void, dismiss: @escaping () -> Void) {
+         compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
         self.model = model; self.planner = planner; self.location = location; assistant = model.assistant
         _showingItinerary = showingItinerary
-        self.compact = compact; self.expand = expand; self.collapse = collapse; self.dismiss = dismiss
+        self.compact = compact; self.expand = expand; self.collapse = collapse
         // Start on the page the sheet will actually show. Starting on place search and flipping
         // in onAppear animated a squeezed search page into every itinerary opening.
         _editingDestination = State(initialValue: planner.destination == nil)
     }
 
     private var searchingPlaces: Bool { editingOrigin || editingDestination }
-    @ViewBuilder private func tripNavigation<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        if DiagnosticVariant.name == "no-nav" { content() } else { NavigationStack { content() } }
-    }
     private var scale: CGFloat { CGFloat(live.appearance.spacingScale) }
     private var fieldShape: RoundedRectangle { RoundedRectangle(cornerRadius: Metrics.fieldRadius * CGFloat(live.appearance.cornerScale), style: .continuous) }
     /// A titled group in search results; it lines up with the text inside the fields above.
@@ -65,10 +59,7 @@ struct JourneyPlanningView: View {
         planner.usingLocation ? location.usableCoordinate ?? location.displayCoordinate : planner.origin?.coordinate
     }
     var body: some View {
-#if DEBUG
-        let _ = ViewChangeLog.note(Self.self)
-#endif
-        tripNavigation {
+        NavigationStack {
             ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: (searchingPlaces || compact ? Metrics.gap : Metrics.margin) * scale) {
@@ -114,9 +105,6 @@ struct JourneyPlanningView: View {
             }
             }
             .scrollDismissesKeyboard(.interactively)
-#if DEBUG
-            .traitProbe("journey-sheet")
-#endif
             .bottomActionBar(!searchingPlaces && showingItinerary && !planner.started && planner.selected != nil && planner.scheduledDeparture == nil) {
                 Button {
                     planner.begin()
@@ -1493,13 +1481,8 @@ struct JourneyItineraryView: View {
     @ObservedObject var planner: JourneyPlannerModel
     var showMap: () -> Void = {}
     @State private var showTimingInfo = false
-    private var omitted: Bool { DiagnosticVariant.name == "no-itinerary" }
     var body: some View {
-#if DEBUG
-        let _ = ViewChangeLog.note(Self.self)
-#endif
-        if omitted { Text("diagnostic").accessibilityIdentifier("diag-sheet") }
-        else if let option = planner.selected {
+        if let option = planner.selected {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text(planner.destination?.localizedName ?? AppText.text("目的地"))
@@ -1561,9 +1544,6 @@ private struct JourneyWalkingStep: View {
     private var walked: Bool { planner.started && (planner.steps.firstIndex(of: .walk(index)) ?? .max) < planner.stepIndex }
     private var target: String { option.rides.indices.contains(index) ? option.rides[index].boarding.localizedName : planner.destination?.localizedName ?? AppText.text("目的地") }
     var body: some View {
-#if DEBUG
-        let _ = ViewChangeLog.note(Self.self)
-#endif
         HStack(alignment: .top, spacing: 14) {
             Image(systemName: walked ? "checkmark.circle.fill" : "figure.walk").liveFont(.title2)
                 .foregroundStyle(walked ? MapChrome.positive : Color.primary).frame(width: 34)
@@ -1702,9 +1682,6 @@ private struct JourneyRideStep: View {
     private var ridden: Bool { planner.started && (planner.steps.firstIndex(of: .ride(index)) ?? .max) < planner.stepIndex }
     private var tint: Color { RouteTint.accent(for: ride.route.name) }
     var body: some View {
-#if DEBUG
-        let _ = ViewChangeLog.note(Self.self)
-#endif
         HStack(alignment: .top, spacing: 14) {
             // The route's own sign colour, as on its badge and map line.
             Image(systemName: ride.route.mode == .bus ? "bus.fill" : "tram.fill").font(.system(size: 17, weight: .semibold)).foregroundStyle(.white)

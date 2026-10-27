@@ -54,9 +54,6 @@ struct TransitHomeView: View {
             model.selectedRoute.map { $0.mode != .bus } == true
     }
     private var hasSelection: Bool { hasTransitSelection || planner.selected != nil || stationWalk.isActive }
-    private var journeyDetents: Set<PresentationDetent> {
-        planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large]
-    }
     private var routeMapPreview: Bool { showJourney && !planner.started && planner.selected != nil }
     /// The navigation instruction sits above the map whenever a trip is on the map itself.
     private var showsBanner: Bool {
@@ -177,9 +174,6 @@ struct TransitHomeView: View {
             .onChange(of: geometry.size.height, initial: true) { _, height in
                 if abs(viewportHeight - height) > 1 { viewportHeight = height }
             }
-#if DEBUG
-            .traitProbe("home-map")
-#endif
         }
     }
 
@@ -411,32 +405,23 @@ struct TransitHomeView: View {
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } },
-                                dismiss: { showJourney = false })
-                .diagnostic("no-type-env", { $0.environment(\.dynamicTypeSize, dynamicTypeSize) }, instead: { $0 })
+                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } })
+                .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
-                .diagnostic("no-detent-selection", { $0.presentationDetents(journeyDetents, selection: $journeyDetent) },
-                            instead: { $0.presentationDetents(journeyDetents) })
-                // Only up through a height the sheet offers: during a trip it is large alone, and
-                // naming a missing detent there kept iOS 17 re-dimming the map on every layout pass.
-                .diagnostic("no-background-interaction", {
-                    $0.presentationBackgroundInteraction(journeyDetents.contains(.height(560)) ? .enabled(upThrough: .height(560)) : .automatic)
-                }, instead: { $0 })
-                .diagnostic("no-content-interaction", { $0.presentationContentInteraction(.scrolls) }, instead: { $0 })
-                .diagnostic("no-sheet-chrome", { $0.presentationDragIndicator(.visible).presentationCornerRadius(30) }, instead: { $0 })
-                .diagnostic("no-material", { $0.presentationBackground(.regularMaterial) }, instead: { $0 })
+                .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
+                .presentationBackgroundInteraction(.enabled(upThrough: .height(560)))
+                .presentationContentInteraction(.scrolls)
+                .presentationDragIndicator(.visible).presentationCornerRadius(30).modifier(TripSheetBackground())
                 .interactiveDismissDisabled(!planner.started && planner.destination != nil)
-                .diagnostic("no-panel-height", {
-                    $0.background {
-                        GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
-                    }
-                    .onPreferenceChange(JourneyPanelHeightKey.self) { height in
-                        // Applied after the layout pass that measured it: changing the map's inset inside
-                        // the sheet's own layout re-laid the sheet, which on iOS 17 never settled.
-                        guard height > 0, abs(height - journeyPanelHeight) > 1 else { return }
-                        DispatchQueue.main.async { if abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height } }
-                    }
-                }, instead: { $0 })
+                .background {
+                    GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
+                }
+                .onPreferenceChange(JourneyPanelHeightKey.self) { height in
+                    // Applied after the layout pass that measured it, so the map's inset never changes
+                    // inside the sheet's own layout.
+                    guard height > 0, abs(height - journeyPanelHeight) > 1 else { return }
+                    DispatchQueue.main.async { if abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height } }
+                }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model).opensFromSource("settings", in: sheetSpace) }
         .onChange(of: model.resumeJourneyRequested) { _, requested in
@@ -489,9 +474,6 @@ struct TransitHomeView: View {
     }
 
     var body: some View {
-#if DEBUG
-        let _ = ViewChangeLog.note(Self.self)
-#endif
         presentedMap
         // Set on the windows rather than with preferredColorScheme, whose return to the system
         // appearance is unreliable once it has forced dark; this covers sheets as well.
@@ -657,6 +639,16 @@ struct TransitHomeView: View {
         if mode == .stops { model.beginStationBrowsing() }
         else { model.stationBrowsing = false; model.sheetDetent = .large }
         showSearch = true
+    }
+}
+
+/// The trip sheet's material. On iOS 17 a material presentation background on this sheet, which
+/// holds a navigation stack, had UIKit hand the sheet new traits on every layout pass, so the
+/// itinerary never finished opening (found by leaving each part of the sheet out in turn). There
+/// the sheet keeps the system's own background.
+private struct TripSheetBackground: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) { content.presentationBackground(.regularMaterial) } else { content }
     }
 }
 

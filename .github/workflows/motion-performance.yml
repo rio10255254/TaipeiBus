@@ -33,9 +33,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # For now only the iOS 17 itinerary diagnosis; the full matrix comes back with its fix.
         include:
+          - { ios: '26', download: '', name: 'iPhone 17 Pro', device: 'iPhone-17-Pro', app: 'branch' }
+          - { ios: '18', download: '', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
           - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          # The same trip on the app as it is on main, for telling a new problem from an old one.
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'main' }
     steps:
       - uses: actions/checkout@v4
       - name: App sources from main
@@ -100,7 +103,7 @@ jobs:
           ) &
           watchdog=$!
           trap 'kill "$location_fixture" "$watchdog" 2>/dev/null || true' EXIT
-          selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testDiagnoseItineraryStall'
+          selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests'
           if [ '${{ matrix.app }}' = 'main' ]; then
             # Main has no motion lab; it walks the same trip (its cost probe is simply absent there).
             selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'
@@ -125,24 +128,6 @@ jobs:
             grep -h 'MOTION-COST-RESULT' "$RUNNER_TEMP/motion-tests.log" | sed 's/^.*MOTION-COST-RESULT //' | sort -u || echo 'No measurements recorded.'
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          # What made the trip views evaluate again (--test-view-changes), most frequent first.
-          # Per diagnostic variant: the longest time the app's main thread stayed away.
-          find ~/Library/Developer/CoreSimulator/Devices/"$BUS_SIM_DEVICE"/data/Containers/Data/Application -name 'view-changes-*.log' 2>/dev/null \
-            | while read -r variant_log; do
-                python3 -c 'import sys,re,os
-          beats=[float(m.group(1)) for m in re.finditer(r"HEARTBEAT ([0-9.]+)", open(sys.argv[1], errors="ignore").read())]
-          gaps=[b-a for a,b in zip(beats,beats[1:])]
-          print(os.path.basename(sys.argv[1]), "beats", len(beats), "longest_gap_s", round(max(gaps or [0]),1), "first", round(beats[0] if beats else 0,1), "last", round(beats[-1] if beats else 0,1))' "$variant_log"
-              done | tee "$RUNNER_TEMP/diag-summary.txt"
-          grep -h '^DIAG ' "$RUNNER_TEMP/motion-tests.log" | tee -a "$RUNNER_TEMP/diag-summary.txt" || true
-          { echo '#### Diagnosis (app heartbeats; a last beat before the end means the main thread never came back)'; echo '```'; cat "$RUNNER_TEMP/diag-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-          log=$(find ~/Library/Developer/CoreSimulator/Devices/"$BUS_SIM_DEVICE"/data/Containers/Data/Application -name view-changes.log 2>/dev/null | head -1)
-          if [ -n "$log" ]; then
-            ls -l "$log"
-            head -c 20000000 "$log" > "$RUNNER_TEMP/view-changes.log"
-            { echo '#### View changes'; echo '```'; sort "$RUNNER_TEMP/view-changes.log" | uniq -c | sort -rn | head -40; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
-            sort "$RUNNER_TEMP/view-changes.log" | uniq -c | sort -rn | head -60
-          fi
           if [ -d "$RUNNER_TEMP/motion.xcresult" ]; then
             xcrun xcresulttool export attachments --path "$RUNNER_TEMP/motion.xcresult" --output-path "$RUNNER_TEMP/motion-attachments" || true
           fi
@@ -155,7 +140,5 @@ jobs:
             ${{ runner.temp }}/motion-attachments
             ${{ runner.temp }}/app-cpu.log
             ${{ runner.temp }}/app-sample-*.txt
-            ${{ runner.temp }}/view-changes.log
-            ${{ runner.temp }}/diag-summary.txt
           retention-days: 14
           if-no-files-found: ignore

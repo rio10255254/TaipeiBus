@@ -76,35 +76,12 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         }
     }
 
-    /// Which part of the trip sheet keeps iOS 17 laying it out without end: the itinerary opened
-    /// once per variant, each leaving one part out. Nothing is asked of the app after the tap; the
-    /// app's heartbeat log (--test-view-changes) tells whether its main thread came back.
-    func testDiagnoseItineraryStall() {
-        continueAfterFailure = true
-        // The first round: only leaving out the navigation stack or the sheet's presentation
-        // styling (background interaction, content interaction, drag indicator, corner radius,
-        // material) let the main thread come back. This round takes the styling apart.
-        for variant in ["baseline", "no-material", "no-content-interaction", "no-background-interaction", "no-sheet-chrome"] {
-            launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-view-changes",
-                    "--diag-variant", variant])
-            guard button("journey-board").waitForExistence(timeout: 90) else {
-                print("DIAG \(variant) no-board"); app.terminate(); continue
-            }
-            Thread.sleep(forTimeInterval: 2)
-            let tapped = ProcessInfo.processInfo.systemUptime
-            button("journey-options").tap()
-            Thread.sleep(forTimeInterval: 15)
-            print("DIAG \(variant) tapped \(tapped) ended \(ProcessInfo.processInfo.systemUptime)")
-            app.terminate()
-        }
-    }
-
     /// The trip with the new feedback, walked through on this system and screen size: pages,
     /// tracking, the itinerary, boarding, the stops sheet, alighting, arriving and a favourite.
     func testTripInteractionsOnThisSystem() {
         // A fixed midday plan and no live poll: route 307 has no service after midnight in Taipei,
         // and the trip must be the same at any hour the workflow runs.
-        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-motion-cost", "--test-view-changes"])
+        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-motion-cost"])
         let board = button("journey-board")
         XCTAssertTrue(board.waitForExistence(timeout: 90))
         capture("motion-trip-waiting")
