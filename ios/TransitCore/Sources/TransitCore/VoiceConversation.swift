@@ -9,8 +9,9 @@ public enum VoiceAction: Equatable, Sendable {
     case showBike(near: String)
     /// A place's Apple Maps card, with its opening hours, phone and website.
     case showPlace(String)
-    /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words.
-    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String)
+    /// `then` holds the later stops of 「先去 A 再去 B」, in the rider's words; `transit` is bus or metro when
+    /// the rider asked to go by that alone (「坐公車去」), otherwise any.
+    case planTrip(destination: String, origin: String, time: String, mode: String, preference: String, then: String, transit: String)
     /// The first, second or third option on screen.
     case chooseOption(Int)
     /// The state had no answer: look these up and ask again.
@@ -48,7 +49,8 @@ public enum VoiceAction: Equatable, Sendable {
         case "plan_trip":
             guard !text("destination").isEmpty else { return nil }
             self = .planTrip(destination: text("destination"), origin: text("origin"), time: text("time", limit: 40),
-                             mode: text("mode"), preference: text("preference"), then: text("then"))
+                             mode: text("mode"), preference: text("preference"), then: text("then"),
+                             transit: ["bus", "metro"].contains(text("transit")) ? text("transit") : "any")
         case "choose_option":
             guard let option = json["option"] as? Int, (1...3).contains(option) else { return nil }
             self = .chooseOption(option)
@@ -171,7 +173,7 @@ extension VoiceAction {
         case .showRoute(let route), .followVehicle(let route): "顯示 \(route)"
         case .showBike: "顯示 YouBike"
         case .showPlace(let place): "顯示 \(place)"
-        case .planTrip(let destination, _, _, _, _, _): "規劃到 \(destination)"
+        case .planTrip(let destination, _, _, _, _, _, _): "規劃到 \(destination)"
         case .chooseOption(let option): "選第 \(option) 個方案"
         case .lookup, .notices: "查詢"
         case .saveStop(let stop): "收藏 \(stop)"

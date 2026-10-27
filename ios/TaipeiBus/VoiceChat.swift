@@ -370,10 +370,11 @@ final class VoiceConversation: ObservableObject {
                 self.work = Task { await self.say(problem); self.end() }
             }, finished: { [weak self] text in
                 guard let self else { return }
-                // 「只用雲端」: the phone's reading only showed the words live and found the end of the turn;
-                // what was said is the server's, written down before anything is decided.
+                // 「只用雲端」: what was said is the server's, written down before anything is decided; the
+                // phone's live words go with it as another reading for Claude to weigh, never in its place.
                 if VoiceSettings.cloudOnly {
                     guard let sound = self.speech.audio else { return self.respond(self.phrase("伺服器沒有聽清楚，請再說一次。"), followUp: true) }
+                    self.alternatives = Array(([text] + self.speech.alternatives).filter { !$0.isEmpty }.prefix(4))
                     return self.hearOnServer(sound, vocabulary: Array(hints.prefix(60)))
                 }
                 let corrected = self.language == .traditionalChinese ? self.names?.correct(text) ?? text : text
@@ -709,10 +710,12 @@ final class VoiceConversation: ObservableObject {
                 guard let place = await Self.place(named: name) else { return }
                 panelRequest = .place(place)
             }
-        case .planTrip(let destination, let origin, let time, let mode, let preference, let then):
+        case .planTrip(let destination, let origin, let time, let mode, let preference, let then, let transit):
             // The ordinary one-sentence planner takes it from here: places, times, later stops and questions.
+            // 「坐公車去」 becomes 只搭公車, which the rules read as a limit on the routes.
             var sentence = time
             if !origin.isEmpty { sentence += "從\(origin)" }
+            sentence += ["bus": "只搭公車", "metro": "只搭捷運"][transit] ?? ""
             sentence += (mode == "cycling" ? "騎單車" : mode == "walking" ? "走路" : "") + "去\(destination)"
             if !then.isEmpty { sentence += "，再去\(then)" }
             sentence += ["faster": "，快一點", "lessWalking": "，少走路", "fewerTransfers": "，少轉乘"][preference] ?? ""
@@ -725,6 +728,8 @@ final class VoiceConversation: ObservableObject {
             reading.originKind = origin.isEmpty ? .none : JourneyAssistantContext.category(of: origin) ?? .place
             if !then.isEmpty { reading.next = then }
             reading.travelMode = mode == "cycling" ? .cycling : mode == "walking" ? .walking : reading.travelMode
+            if transit == "bus" { reading.avoid.avoidMetro = true }
+            if transit == "metro" { reading.avoid.avoidBus = true }
             model.assistant.plan(reading, sentence: sentence)
             planning = true
             panelRequest = .routes
@@ -928,6 +933,8 @@ struct VoiceStateBuilder {
         } else {
             facts.append("時間：現在出發")
         }
+        // 只搭公車 and other limits the rider asked for, so a later turn keeps them.
+        if let trip = model.assistantTrip, !trip.constraints.isEmpty { facts.append("限制：\(trip.constraints.summary)") }
         if let trip = model.assistantTrip, trip.stops.count > 1 {
             facts.append("行程：\(trip.stops.map(\.name).joined(separator: " → "))，現在是第 \(trip.leg + 1) 段")
             let later = trip.stops.dropFirst(trip.leg + 1).map(\.name)

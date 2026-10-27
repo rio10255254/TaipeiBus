@@ -147,14 +147,17 @@ final class JourneyAssistantSession: ObservableObject {
                 guard let sound = self.speech.audio else {
                     self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
                 }
-                self.busy = true; self.activity = AppText.text("正在辨識你說的話…")
+                // What the phone heard stays on screen while the server writes it down, and goes with the
+                // server's words to the model, which weighs the two (南京住行 against 南京復興).
+                self.busy = true; self.source = text; self.startedAt = Date(); self.activity = AppText.text("正在辨識你說的話…")
+                let vocabulary = Array(VoiceStateBuilder(model: self.model).hints(language: .current).prefix(60))
                 Task { @MainActor in
-                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: [])
+                    let words = try? await CloudSpeech.transcribe(sound, language: .current, vocabulary: vocabulary)
                     self.busy = false
                     guard let words else {
                         self.message = AppText.text("伺服器沒有聽清楚，請再說一次，或直接打字。"); return
                     }
-                    if refining { self.refine(words) } else { self.run(words) }
+                    if refining { self.refine(words) } else { self.run(words, heard: [text]) }
                 }
             }
         }
@@ -250,7 +253,8 @@ final class JourneyAssistantSession: ObservableObject {
         return "從\(trip.origin?.name ?? "目前位置")到\(trip.destination.name)；交通方式 \(trip.mode.rawValue)；偏好 \(trip.preference.rawValue)；\(time)；限制 \(limits)"
     }
     /// Understands the sentence and plans it, without opening anything when nothing needs asking.
-    func run(_ text: String) {
+    /// `others` are the same words heard another way, for the online model to weigh.
+    func run(_ text: String, heard others: [String] = []) {
         let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard unavailable == nil else { input = value; present(); return }
         guard !value.isEmpty, value.count <= 600 else { return }
@@ -271,7 +275,7 @@ final class JourneyAssistantSession: ObservableObject {
             do {
                 let session = try ready?.conversation ?? OnDeviceJourneyAssistant.conversation(context: context, pro: model.purchases.hasPro)
                 conversation = session
-                let result = try await session.begin(value, at: Date())
+                let result = try await session.begin(value, heard: others, at: Date())
                 try Task.checkCancellation()
                 deadlineTask?.cancel()
                 record("understand", outcome: "ok", context: context)

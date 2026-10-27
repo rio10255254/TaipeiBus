@@ -9,6 +9,8 @@ export type Expectation = {
   time?: string; then?: string;
   /// Every later stop the plan must keep, in any order.
   later?: string[];
+  /// The only kind of transit the rider asked for.
+  transit?: 'bus' | 'metro';
   avoid?: string;
   /// Amounts of money must not come from memory.
   noAmounts?: boolean;
@@ -60,6 +62,7 @@ export function problems(test: Expectation, reply: Reply): Problem[] {
   for (const stop of plan ? test.later ?? [] : []) {
     if (!plain(plan!.then).includes(plain(stop))) add('wrong_action', `漏了後面的「${stop}」（${plan!.then || '空'}）`);
   }
+  if (plan && test.transit && plan.transit !== test.transit) add('wrong_action', `沒有照指定的交通工具（${plan.transit}）`);
   // The app says how the planning went once it has; the reply must not claim it first.
   if (plan && /請看方案|規劃好了|已經規劃|已規劃|方案如下/.test(reply.say)) add('wrong_action', '規劃前就說有結果');
   if (plan && test.origin && !plan.origin.includes(test.origin)) add('misheard', `出發地沒有改正（${plan.origin || '空'}）`);

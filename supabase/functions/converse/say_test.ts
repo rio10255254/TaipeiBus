@@ -29,7 +29,7 @@ Deno.test('a reply without say yields nothing', () => {
 });
 
 Deno.test('a streamed Claude turn hands over the words before the reply', async () => {
-  const none = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', mode: 'any', preference: 'balanced', option: 0 };
+  const none = { type: 'none', stop: '', route: '', destination: '', origin: '', time: '', mode: 'any', preference: 'balanced', transit: 'any', option: 0 };
   const json = JSON.stringify({ say: '307 往板橋，{r1}。', actions: [], confirm: none, choices: [], followUp: true });
   const pieces = [json.slice(0, 12), json.slice(12, 20), json.slice(20)];
   const events = [
