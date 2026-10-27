@@ -79,7 +79,9 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
     /// The trip with the new feedback, walked through on this system and screen size: pages,
     /// tracking, the itinerary, boarding, the stops sheet, alighting, arriving and a favourite.
     func testTripInteractionsOnThisSystem() {
-        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-motion-cost"])
+        // A fixed midday plan and no live poll: route 307 has no service after midnight in Taipei,
+        // and the trip must be the same at any hour the workflow runs.
+        launch(["--preview-boarding-fixture", "--usability-fixture", "--test-ai-ui", "--test-motion-cost"])
         let board = button("journey-board")
         XCTAssertTrue(board.waitForExistence(timeout: 90))
         capture("motion-trip-waiting")

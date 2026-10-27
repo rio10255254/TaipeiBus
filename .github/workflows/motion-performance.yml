@@ -102,10 +102,8 @@ jobs:
           trap 'kill "$location_fixture" "$watchdog" 2>/dev/null || true' EXIT
           selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests'
           if [ '${{ matrix.app }}' = 'main' ]; then
-            # Main has no motion lab; it walks the existing trip test that has the same steps.
-            selection='TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip'
-          elif [ '${{ matrix.ios }}' = '17' ]; then
-            selection="$selection TaipeiBusUsabilityTests/JourneyUsabilityTests/testWaitingTrackingAndCompleteTrip"
+            # Main has no motion lab; it walks the same trip (its cost probe is simply absent there).
+            selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'
           fi
           if [ -n '${{ inputs.test }}' ]; then
             [[ '${{ inputs.test }}' =~ ^MotionPerformanceUsabilityTests(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid test name'; exit 1; }
