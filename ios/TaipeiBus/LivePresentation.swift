@@ -110,9 +110,26 @@ enum InterfaceMotion {
 @MainActor
 final class MotionBudget: ObservableObject {
     static let shared = MotionBudget()
-    /// True while the phone asks apps to save energy or cool down.
+    /// True while the phone asks apps to save energy or cool down, or the map is dropping frames.
     @Published private(set) var conserving = MotionBudget.evaluate()
     private var observers: [NSObjectProtocol] = []
+    /// Until when measured frame drops keep the decoration still; it comes back on its own.
+    private var stutterUntil = Date.distantPast
+    private var resume: Task<Void, Never>?
+    /// The map's display pacing over the last minute. Every iPhone keeps the full design; only
+    /// when frames are actually being dropped does the never-ending decoration rest for a few
+    /// minutes, giving the main thread back to the map and the trip.
+    func notePacing(frames: Int, delayed: Int) {
+        guard frames > 120, Double(delayed) / Double(frames) > 0.08 else { return }
+        stutterUntil = Date().addingTimeInterval(180)
+        refresh()
+        resume?.cancel()
+        resume = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(181))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
+    }
     private init() {
         for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
@@ -129,8 +146,32 @@ final class MotionBudget: ObservableObject {
         return info.isLowPowerModeEnabled || info.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
     }
     func refresh() {
-        let value = Self.evaluate()
+        let value = Self.evaluate() || Date() < stutterUntil
         if value != conserving { conserving = value }
+    }
+}
+
+/// What this iPhone is, for the diagnostics that tell how the app runs on each model. Nothing here
+/// lowers the design by model name; the budget above reacts to what is measured on the phone.
+enum DeviceProfile {
+    /// The hardware identifier, such as iPhone17,3 (the simulator reports the model it stands for).
+    static let model: String = {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return simulated }
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: &system.machine) { bytes in
+            String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+    }()
+    /// The A-series generation: iPhone11,x is A12 through iPhone18,x for A19.
+    static let chip: Int? = {
+        guard model.hasPrefix("iPhone"), let major = Int(model.dropFirst(6).prefix(while: \.isNumber)) else { return nil }
+        return major + 1
+    }()
+    static let memoryGB = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+    /// One line for the shared diagnostics: model, chip, memory, screen rate and system.
+    static var summary: String {
+        "device=\(model) chip=\(chip.map { "A\($0)" } ?? "?") memory_gb=\(memoryGB) max_hz=\(UIScreen.main.maximumFramesPerSecond) ios=\(UIDevice.current.systemVersion)"
     }
 }
 

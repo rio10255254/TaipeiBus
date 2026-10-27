@@ -17,9 +17,10 @@ on:
 permissions:
   contents: read
 
+# A newer push waits for the running measurement instead of throwing its results away.
 concurrency:
   group: motion-performance-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
