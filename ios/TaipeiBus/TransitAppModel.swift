@@ -1702,7 +1702,22 @@ final class TransitAppModel: ObservableObject {
         return "悠遊卡\(fareClass.ticketName)，已扣捷運公車轉乘優惠"
     }
 
+    /// Several views ask for the same trip's duration in the same second, and a sheet's layout can
+    /// ask many times in one pass: presenting the itinerary on iOS 17 asked until the main thread was
+    /// never free. The answer only changes with its inputs, so it is worked out once per second.
+    private var durationMemo: [String: JourneyDuration?] = [:]
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
+        let key = [option.id, String(Int(suppliedDate.timeIntervalSince1970)), planner.selectedID ?? "",
+                   String(planner.started), String(planner.stepIndex), String(walkingMapIndex ?? -1),
+                   String(planner.mapRevision), String(planner.walkingRevision), String(snapshot.revision),
+                   String(location.revision), String(metroRevision), String(anchorRevision)].joined(separator: "|")
+        if let known = durationMemo[key] { return known }
+        let value = computeJourneyDuration(option, at: suppliedDate)
+        if durationMemo.count > 48 { durationMemo.removeAll(keepingCapacity: true) }
+        durationMemo[key] = value
+        return value
+    }
+    private func computeJourneyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
 #if DEBUG
         let date = ProcessInfo.processInfo.arguments.contains("--preview-mixed-planning")
             ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : planner.started ? suppliedDate : JourneyDuration.previewDate(suppliedDate)

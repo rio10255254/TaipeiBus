@@ -417,7 +417,10 @@ struct TransitHomeView: View {
                     GeometryReader { panel in Color.clear.preference(key: JourneyPanelHeightKey.self, value: panel.size.height) }
                 }
                 .onPreferenceChange(JourneyPanelHeightKey.self) { height in
-                    if height > 0, abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height }
+                    // Applied after the layout pass that measured it: changing the map's inset inside
+                    // the sheet's own layout re-laid the sheet, which on iOS 17 never settled.
+                    guard height > 0, abs(height - journeyPanelHeight) > 1 else { return }
+                    DispatchQueue.main.async { if abs(height - journeyPanelHeight) > 1 { journeyPanelHeight = height } }
                 }
         }
         .sheet(isPresented: $showInformation) { AppInformationView(model: model).opensFromSource("settings", in: sheetSpace) }
