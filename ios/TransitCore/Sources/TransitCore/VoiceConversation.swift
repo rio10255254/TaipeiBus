@@ -509,6 +509,39 @@ public enum VoicePatience {
     }
 }
 
+/// Sounds that are not words (「嗯」「呃…」): a breath, a cough or the answer trailing off, heard as a
+/// turn of its own. Not sent on; a 「嗯」 that answers a question is read as a yes before this.
+public enum VoiceNoise {
+    private static let fillers = Set("嗯恩呃啊阿喔哦噢欸誒唉哎呀哈嘿呵mhu")
+    public static func isFiller(_ text: String) -> Bool {
+        let plain = text.lowercased().filter { !$0.isWhitespace && !$0.isPunctuation && !$0.isSymbol }
+        return plain.count <= 4 && plain.allSatisfy { fillers.contains($0) }
+    }
+}
+
+/// The later stops of 「先去 A，再去 B，最後去 C」, one name each: as Claude lists them (「B、C」) or as
+/// they were said (「B然後再去C」).
+public enum TripStops {
+    public static let limit = 5
+    private static let joins = ["然後再去", "然後去", "然後到", "然後", "最後再去", "最後去", "最後到", "接著去", "接著到", "接著",
+                                "之後再去", "之後去", "再去", "再到", "->", " and then ", " then "]
+
+    public static func split(_ text: String) -> [String] {
+        var value = text
+        for join in joins { value = value.replacingOccurrences(of: join, with: "、", options: .caseInsensitive) }
+        var names: [String] = []
+        for part in value.split(whereSeparator: { "、，,;；→\n".contains($0) }) {
+            var name = part.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+            for lead in ["最後", "去", "到"] where name.hasPrefix(lead) && name.count > lead.count + 1 {
+                name = String(name.dropFirst(lead.count)).trimmingCharacters(in: .whitespaces)
+            }
+            guard !name.isEmpty, !names.contains(name) else { continue }
+            names.append(name)
+        }
+        return Array(names.prefix(limit))
+    }
+}
+
 public enum VoiceEcho {
     /// `strict` asks for more new words, for the loudspeaker, whose sound reaches the microphone.
     public static func interrupts(heard: String, spoken: String, strict: Bool = false) -> Bool {

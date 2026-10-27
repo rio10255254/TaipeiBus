@@ -7,6 +7,8 @@ export type Expectation = {
   state: string; utterance: string; history?: { user: string; say: string }[]; expect?: string; confirm?: string;
   /// For plan_trip: words its time must contain, and the later stop it must keep.
   time?: string; then?: string;
+  /// Every later stop the plan must keep, in any order.
+  later?: string[];
   avoid?: string;
   /// Amounts of money must not come from memory.
   noAmounts?: boolean;
@@ -54,6 +56,12 @@ export function problems(test: Expectation, reply: Reply): Problem[] {
   const plan = reply.actions.find((action) => action.type === 'plan_trip');
   if (plan && test.time && !plan.time.includes(test.time)) add('wrong_action', `時間沒有沿用（${plan.time || '空'}）`);
   if (plan && test.then && !plan.then.includes(test.then)) add('wrong_action', `之後要去的地方不見了（${plan.then || '空'}）`);
+  const plain = (text: string) => text.replaceAll('臺', '台');
+  for (const stop of plan ? test.later ?? [] : []) {
+    if (!plain(plan!.then).includes(plain(stop))) add('wrong_action', `漏了後面的「${stop}」（${plan!.then || '空'}）`);
+  }
+  // The app says how the planning went once it has; the reply must not claim it first.
+  if (plan && /請看方案|規劃好了|已經規劃|已規劃|方案如下/.test(reply.say)) add('wrong_action', '規劃前就說有結果');
   if (plan && test.origin && !plan.origin.includes(test.origin)) add('misheard', `出發地沒有改正（${plan.origin || '空'}）`);
   if (plan && test.destination && !plan.destination.includes(test.destination)) add('misheard', `目的地沒有改正（${plan.destination}）`);
   if (test.slot && !/\{r[0-9]+\}/.test(reply.say)) add('invented_fact', '沒有用空位回答即時資料');

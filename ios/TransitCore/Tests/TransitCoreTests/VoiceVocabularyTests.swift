@@ -77,6 +77,27 @@ final class VoiceVocabularyTests: XCTestCase {
         XCTAssertEqual(VoicePatience.next(1.3, after: "307 還要多久"), VoicePatience.usual)
     }
 
+    func testABreathIsNotATurn() {
+        XCTAssertTrue(VoiceNoise.isFiller("嗯。"))
+        XCTAssertTrue(VoiceNoise.isFiller("呃…"))
+        XCTAssertTrue(VoiceNoise.isFiller("Mmm"))
+        XCTAssertTrue(VoiceNoise.isFiller(" "))
+        XCTAssertFalse(VoiceNoise.isFiller("好"))
+        XCTAssertFalse(VoiceNoise.isFiller("對啊"))
+        XCTAssertFalse(VoiceNoise.isFiller("307"))
+    }
+
+    func testEveryLaterStopIsKept() {
+        XCTAssertEqual(TripStops.split("臺北植物園、國立臺灣大學"), ["臺北植物園", "國立臺灣大學"])
+        XCTAssertEqual(TripStops.split("臺北植物園，最後去臺大。"), ["臺北植物園", "臺大"])
+        XCTAssertEqual(TripStops.split("淡水然後再去士林"), ["淡水", "士林"])
+        XCTAssertEqual(TripStops.split("去淡水"), ["淡水"])
+        XCTAssertEqual(TripStops.split("Tamsui, Shilin Night Market"), ["Tamsui", "Shilin Night Market"])
+        XCTAssertEqual(TripStops.split("和平醫院"), ["和平醫院"])
+        XCTAssertEqual(TripStops.split("淡水、淡水"), ["淡水"])
+        XCTAssertEqual(TripStops.split(""), [])
+    }
+
     func testTheAnswersOwnWordsAreLeftOutOfWhatTheRiderSaid() {
         // Exactly as heard before the rider spoke.
         XCTAssertEqual(VoiceEcho.removing(echo: "307往板橋", from: "307往板橋我是說圓山的酒吧"), "我是說圓山的酒吧")

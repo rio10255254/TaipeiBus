@@ -29,7 +29,7 @@ public enum VoiceVocabulary {
     public static let brands = [
         "World Gym", "Starbucks", "7-Eleven", "FamilyMart", "IKEA", "Costco", "Uniqlo", "MUJI", "McDonald's",
         "MOS Burger", "Louisa", "SOGO", "ATT 4 FUN", "Breeze", "Eslite", "Carrefour", "PX Mart", "Decathlon",
-        "Apple Store", "H&M", "Zara", "Mitsukoshi", "Q Square", "Bellavita", "Miramar", "Global Mall",
+        "Apple Store", "Apple 信義A13", "Apple 台北101", "H&M", "Zara", "Mitsukoshi", "Q Square", "Bellavita", "Miramar", "Global Mall",
     ]
 
     /// Words of the app itself, said in almost every conversation.

@@ -491,6 +491,7 @@ final class JourneyAssistantContext {
         do {
             var places = try await searchPlaces(text).filter { $0.coordinate.isInServiceArea }
             try Task.checkCancellation()
+            let foundAny = !places.isEmpty
             // Nothing found: the place's official name (台大機械館 → 國立臺灣大學機械工程學系館) is searched instead.
             if places.isEmpty, let rewrite {
                 for query in await rewrite(text, source).prefix(2) where !query.isEmpty && query != text {
@@ -522,6 +523,20 @@ final class JourneyAssistantContext {
                     let place = ordered.remove(at: index); ordered.insert(place, at: 0); picked.insert(place.id)
                 case .some(-1): rejected.insert(text)
                 default: break
+                }
+            }
+            // Results that are not the place (「蘋果專賣店 A43」 found a honey shop in A13): the words were
+            // probably misheard or not what the map calls it, so its official name is searched as well.
+            let settled = !rejected.contains(text) && (ordered.first.map { picked.contains($0.id) } == true || !named.isEmpty)
+            if !settled, foundAny, let rewrite {
+                for query in await rewrite(text, source).prefix(2) where !query.isEmpty && query != text {
+                    toolCalls.append("searchPlaces: \(query)")
+                    let more = ((try? await searchPlaces(query)) ?? []).filter { $0.coordinate.isInServiceArea && matches($0, query) }
+                    guard !more.isEmpty else { continue }
+                    for place in more { picked.insert(place.id) }
+                    rejected.remove(text)
+                    ordered = more + ordered.filter { place in !more.contains { $0.id == place.id } }
+                    break
                 }
             }
             return Array(ordered.prefix(Self.resultLimit))
@@ -993,7 +1008,7 @@ enum OnlineJourneyReader {
     "time":{"kind":"none|departure|arrival","day":"yyyy-MM-dd","hour":0,"minute":0},"next":"",\
     "avoid":{"bus":false,"metro":false,"bike":false,"routes":[]}}
     目的地照原文完整保留（台大機械館、北車M3出口不要簡化）；地區加店家種類寫成「西門町附近的網咖」；只有單獨的暱稱才換全名（北車→台北車站、台大→國立臺灣大學）；家=home，公司/上班=work，學校=school，有名字的學校或系館一律是 place；沒說從哪出發就留空。
-    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。兩個目的地時第一個填 destination、第二個填 next。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
+    說了幾點但沒說「出發」是 arrival；只說早上、晚上等時段是 departure，時間填該時段的常見時刻（凌晨6、清晨7、早上9、中午12、下午14、傍晚17:30、晚上19、半夜22），絕不要填 00:00；句子沒提到時間時 time.kind 一定是 none，不要用現在時間。好幾個目的地時第一個填 destination，後面的依序用「、」隔開填 next，一個都不能漏。不要搭公車/只搭捷運/不騎車/避開某條線（如307、紅線）填 avoid。不要編造。
     """
 
     static func read(_ text: String, now: Date, pro: Bool, session: URLSession = .shared) async throws -> JourneyReading {
@@ -1006,7 +1021,7 @@ enum OnlineJourneyReader {
         for model in models(pro: pro) {
             do {
                 let reading = try await read(text, at: formatter.string(from: now), model: model, session: session)
-                JourneyDiagnostics.shared.record(String(format: "ai-online ok model=%@ %@ %.1fs", model, AssistantServer.served, Date().timeIntervalSince(began)))
+                JourneyDiagnostics.shared.record(String(format: "ai-online ok %@ %.1fs", AssistantServer.served, Date().timeIntervalSince(began)))
                 return reading
             } catch Failure.http(let status) where [400, 404, 413, 498].contains(status) || status >= 500 {
                 // A retired model (404) or a refused option (400): try the next. A used-up allowance (429)
@@ -1047,7 +1062,7 @@ enum OnlineJourneyReader {
                                                    model: model, limit: 300, session: session) else { continue }
             if let data = content.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let index = value["index"] as? Int {
-                JourneyDiagnostics.shared.record("ai-online choose model=\(model) \(AssistantServer.served) index=\(index)")
+                JourneyDiagnostics.shared.record("ai-online choose \(AssistantServer.served) index=\(index)")
                 return index
             }
         }
@@ -1082,7 +1097,7 @@ enum OnlineJourneyReader {
                   let data = content.data(using: .utf8),
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let indices = value["indices"] as? [Int], !indices.isEmpty else { continue }
-            JourneyDiagnostics.shared.record("ai-online notice model=\(model)")
+            JourneyDiagnostics.shared.record("ai-online notice \(AssistantServer.served)")
             return Array(indices.prefix(3))
         }
         return nil
@@ -1098,7 +1113,7 @@ enum OnlineJourneyReader {
                   let data = content.data(using: .utf8),
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let text = (value["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty else { continue }
-            JourneyDiagnostics.shared.record("ai-online compare model=\(model)")
+            JourneyDiagnostics.shared.record("ai-online compare \(AssistantServer.served)")
             return (text: String(text.prefix(120)), credit: AssistantCredit.online)
         }
         return nil
@@ -1107,14 +1122,14 @@ enum OnlineJourneyReader {
     /// Other names to search when the words found nothing: the official or full name, or a nearby landmark.
     static func rewrite(_ words: String, sentence: String, pro: Bool, session: URLSession = .shared) async -> [String] {
         guard enabled else { return [] }
-        let prompt = "使用者說：「\(sentence)」\n在台北地圖上找不到：「\(words)」\n只輸出 JSON {\"queries\": [最多兩個字串]}：這個地點在地圖上的正式全名或常見名稱；不知道就輸出空陣列。"
+        let prompt = "使用者說：「\(sentence)」\n在台北地圖上找不到「\(words)」，或找到的都不是。這可能是語音聽錯（同音字、數字、分店名）或不是地圖上的名稱。\n只輸出 JSON {\"queries\": [最多兩個字串]}：最可能的真實地點在 Apple 地圖上的正式名稱（例如「蘋果專賣店 A43」→「Apple 信義A13」，「台大機械館」→「國立臺灣大學機械工程學系館」）；不知道就輸出空陣列。"
         for model in models(pro: pro) {
             guard let content = try? await complete(system: "你熟悉台北的地名、學校、建築與店家。不要解釋。", user: prompt,
                                                    model: model, limit: 300, session: session),
                   let data = content.data(using: .utf8),
                   let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
             let queries = ((value["queries"] as? [String]) ?? []).map { String($0.prefix(40)) }.filter { !$0.isEmpty }
-            JourneyDiagnostics.shared.record("ai-online rewrite model=\(model) \(AssistantServer.served) count=\(queries.count)")
+            JourneyDiagnostics.shared.record("ai-online rewrite \(AssistantServer.served) count=\(queries.count)")
             return Array(queries.prefix(2))
         }
         return []
@@ -1140,7 +1155,7 @@ enum OnlineJourneyReader {
                 let content = try await complete(system: system, user: user, model: model, limit: 500, session: session)
                 guard let data = content.data(using: .utf8), let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
                 else { lastError = Failure.invalid; continue }
-                JourneyDiagnostics.shared.record("ai-online refine model=\(model)")
+                JourneyDiagnostics.shared.record("ai-online refine \(AssistantServer.served)")
                 return change(value, now: now)
             } catch Failure.http(let status) { lastError = Failure.http(status) }
         }

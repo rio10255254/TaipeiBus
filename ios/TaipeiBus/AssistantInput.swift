@@ -248,7 +248,12 @@ final class SpeechInput: ObservableObject {
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         let (sequence, input) = AsyncStream.makeStream(of: AnalyzerInput.self)
         do {
-            try activateSession()
+            try await Self.activate(duplex: duplex)
+            guard current == attempt else {
+                // Stopped meanwhile: let go of the session unless the conversation keeps it or listening started again.
+                if !duplex, !preparing, !listening { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
+                input.finish(); return true
+            }
             let node = engine.inputNode
             let microphone = node.outputFormat(forBus: 0)
             guard microphone.sampleRate > 0, microphone.channelCount > 0,
@@ -347,7 +352,15 @@ final class SpeechInput: ObservableObject {
         if value > noiseFloor + 0.18 { lastVoice = Date() }
     }
 
-    private func activateSession() throws {
+    private func activateSession() throws { try Self.configure(duplex: duplex) }
+
+    /// The same off the main thread: activating the session can take a few hundred milliseconds (more
+    /// with a Bluetooth headset), and on the main thread the screen stalled each time listening began.
+    nonisolated private static func activate(duplex: Bool) async throws {
+        try await Task.detached(priority: .userInitiated) { try SpeechInput.configure(duplex: duplex) }.value
+    }
+
+    nonisolated private static func configure(duplex: Bool) throws {
         let session = AVAudioSession.sharedInstance()
         if duplex {
             // A headset's own microphone is the one near the mouth: with earbuds in and the phone in a
