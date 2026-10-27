@@ -33,10 +33,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Narrowed for now to the iOS 17 itinerary that never settles; the full matrix comes back
-        # with its fix.
         include:
+          - { ios: '26', download: '', name: 'iPhone 17 Pro', device: 'iPhone-17-Pro', app: 'branch' }
+          - { ios: '18', download: '', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
           - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          # The same trip on the app as it is on main, for telling a new problem from an old one.
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'main' }
     steps:
       - uses: actions/checkout@v4
       - name: App sources from main
@@ -101,7 +103,7 @@ jobs:
           ) &
           watchdog=$!
           trap 'kill "$location_fixture" "$watchdog" 2>/dev/null || true' EXIT
-          selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'
+          selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests'
           if [ '${{ matrix.app }}' = 'main' ]; then
             # Main has no motion lab; it walks the same trip (its cost probe is simply absent there).
             selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'

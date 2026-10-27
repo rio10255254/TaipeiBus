@@ -13,7 +13,10 @@ struct JourneyPlanningView: View {
     let expand: () -> Void
     let collapse: () -> Void
     @StateObject private var search = PlaceSearch()
-    @Environment(\.dismiss) private var dismiss
+    /// Closes the sheet. Passed in rather than read from the environment: on iOS 17 the sheet's
+    /// dismiss action changed on every layout pass while the itinerary opened, so the sheet
+    /// re-evaluated this view and laid itself out again without end.
+    let dismiss: () -> Void
     @FocusState private var focused: Bool
     @State private var query = ""
     @State private var editingOrigin = false
@@ -38,10 +41,10 @@ struct JourneyPlanningView: View {
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
 
     init(model: TransitAppModel, planner: JourneyPlannerModel, location: LocationService, showingItinerary: Binding<Bool>,
-         compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void) {
+         compact: Bool, expand: @escaping () -> Void, collapse: @escaping () -> Void, dismiss: @escaping () -> Void) {
         self.model = model; self.planner = planner; self.location = location; assistant = model.assistant
         _showingItinerary = showingItinerary
-        self.compact = compact; self.expand = expand; self.collapse = collapse
+        self.compact = compact; self.expand = expand; self.collapse = collapse; self.dismiss = dismiss
         // Start on the page the sheet will actually show. Starting on place search and flipping
         // in onAppear animated a squeezed search page into every itinerary opening.
         _editingDestination = State(initialValue: planner.destination == nil)

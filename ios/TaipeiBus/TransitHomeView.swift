@@ -405,7 +405,8 @@ struct TransitHomeView: View {
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } })
+                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } },
+                                dismiss: { showJourney = false })
                 .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
