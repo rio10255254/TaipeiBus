@@ -149,8 +149,17 @@ export function chinesePunctuation(text: string): string {
 /// Whisper's habit on silence or noise: the closing lines of the videos it learned from.
 const HALLUCINATIONS = ['謝謝觀看', '謝謝收看', '感謝觀看', '字幕', '訂閱', '點贊', '按讚', '明鏡', 'Amara', 'Thank you for watching', 'Subscribe'];
 
+/// Sounds that are not words (「嗯」「呃…」): what Whisper writes for a breath, a cough or the app's own
+/// voice trailing off. The phone's reading is used instead.
+const FILLERS = new Set([...'嗯恩呃啊阿喔哦噢欸誒唉哎呀哈嘿呵mhu']);
+
+export function filler(text: string): boolean {
+  const plain = [...text.toLowerCase().replace(/[\p{P}\p{S}\s]/gu, '')];
+  return plain.length > 0 && plain.length <= 4 && plain.every((character) => FILLERS.has(character));
+}
+
 export function hallucinated(text: string): boolean {
-  return HALLUCINATIONS.some((phrase) => text.includes(phrase));
+  return HALLUCINATIONS.some((phrase) => text.includes(phrase)) || filler(text) || !text.replace(/[\p{P}\p{S}\s]/gu, '');
 }
 
 /// The turn with Whisper's reading as what was said; the phone's own readings follow as alternatives.

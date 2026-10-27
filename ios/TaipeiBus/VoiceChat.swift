@@ -258,6 +258,8 @@ final class VoiceConversation: ObservableObject {
 
     func end() {
         work?.cancel(); work = nil
+        // A place or question about a trip it was planning stays on screen, in the planner's sheet.
+        if active { model.assistant.voiceEnded() }
         speech.duplex = false
         speech.stop(); output.stop()
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
@@ -423,9 +425,16 @@ final class VoiceConversation: ObservableObject {
         // A tapped choice can arrive while the last answer is still being spoken; that answer's wait
         // must not go on to open the microphone over this one.
         work?.cancel(); work = nil
+        // A breath, a cough or the answer trailing off (「嗯」) is not a turn: listen on without asking anyone.
+        if pending == nil, choices.isEmpty, VoiceNoise.isFiller(text) {
+            JourneyDiagnostics.shared.record("voice noise ignored")
+            return listen(firstTurn: false)
+        }
         heard = text
-        if let index = VoiceChoice.pick(text, among: choices), !planPlaces.isEmpty || !planOptions.isEmpty {
-            return choosePlan(index)
+        if !planPlaces.isEmpty || !planOptions.isEmpty {
+            if let index = VoiceChoice.pick(text, among: choices) { return choosePlan(index) }
+            // One place offered: 「好」 takes it.
+            if choices.count == 1, VoiceConfirmation.read(text) == .yes { return choosePlan(0) }
         }
         planPlaces = []; planOptions = []
         if let pending {
@@ -586,8 +595,9 @@ final class VoiceConversation: ObservableObject {
 
     // MARK: Following the planner
 
-    /// The planner finds the places after the answer was spoken. When it could not settle one, say so and
-    /// offer what it found, to say or tap, instead of leaving 「我幫你規劃」 standing over 「找不到」.
+    /// The planner finds the places after the answer was spoken, and the answer only said what was
+    /// understood: what came of it is said here, from the planner's own result. A place it could not
+    /// settle is asked about, with what it found to say or tap; the sheet stays closed.
     private func followPlan() async {
         let assistant = model.assistant
         var waited = 0
@@ -600,8 +610,22 @@ final class VoiceConversation: ObservableObject {
             choices = planPlaces.map(\.localizedName)
             compact = false
             JourneyDiagnostics.shared.record("voice plan unsettled places=\(planPlaces.count)")
-            await say(planPlaces.isEmpty ? phrase("找不到「%@」，請換個說法再說一次。", problem.keyword)
-                      : phrase("「%@」要去哪一個？可以直接說或點選。", problem.keyword))
+            let named = planPlaces.filter { JourneyAssistantSession.matches($0, problem.keyword) }
+            let sentence: String
+            if planPlaces.isEmpty {
+                sentence = phrase("找不到「%@」，請換個說法，例如加上分店或附近的地標。", problem.keyword)
+            } else if named.isEmpty {
+                // What the search found is not what was said (a honey shop for an Apple store): shown, not offered as the answer.
+                sentence = phrase("找不到「%@」，畫面上是名字相近的地點；也可以換個說法，例如加上分店或附近的地標。", problem.keyword)
+            } else if planPlaces.count == 1 {
+                sentence = phrase("是「%@」嗎？說「好」就規劃，或換個說法。", planPlaces[0].localizedName)
+            } else {
+                sentence = phrase("「%@」要去哪一個？可以直接說或點選。", problem.keyword)
+            }
+            await say(sentence)
+        } else if assistant.problem == .location {
+            compact = false
+            await say(phrase("要從目前位置出發需要定位，請開啟定位，或說從哪裡出發。"))
         } else if let clarification = assistant.clarification {
             planOptions = clarification.options
             choices = Array(planOptions.prefix(3))
@@ -610,7 +634,40 @@ final class VoiceConversation: ObservableObject {
         } else if let message = assistant.message {
             compact = false
             await say(message)
+        } else if model.planner.destination != nil, !model.planner.started {
+            await sayPlan()
         }
+    }
+
+    /// The planner's routes once it has some: the first option's time and arrival, which the app
+    /// vouches for, and the stops still to come of a trip with several.
+    private func sayPlan() async {
+        let planner = model.planner
+        var waited = 0
+        // The first options come within a few seconds; walking checks may still refine them afterwards.
+        while planner.options.isEmpty, waited < 40, planner.planning || waited < 8 {
+            try? await Task.sleep(for: .milliseconds(250)); waited += 1
+        }
+        guard !Task.isCancelled, active, let destination = planner.destination else { return }
+        let now = Date()
+        var sentence = AppLanguage.$override.withValue(language) { () -> String in
+            let name = destination.localizedName
+            guard let option = planner.options.first else {
+                return planner.message ?? phrase("到「%@」暫時找不到可搭的路線，可以換個時間或交通方式。", name)
+            }
+            guard let timing = model.journeyDuration(option, at: now), timing.unknownWaits == 0 else {
+                return phrase("到「%@」的路線好了，候車時間要看當天班次，請看畫面。", name)
+            }
+            let arrival = VoiceClock.label(timing.referenceDate.addingTimeInterval(timing.totalSeconds), now: now)
+            return phrase("到「%@」的路線好了：第一個方案%@，%@抵達。", name, timing.comparisonLabel, arrival)
+        }
+        if let trip = model.assistantTrip, trip.stops.count > trip.leg + 1 {
+            let later = trip.stops.dropFirst(trip.leg + 1).map { $0.place?.localizedName ?? $0.name }
+            sentence += phrase("這是第 %@ 段，接著的%@點路線上方的編號就能看。", "\(trip.leg + 1)", later.joined(separator: "、"))
+        }
+        JourneyDiagnostics.shared.record("voice plan said options=\(planner.options.count)")
+        history.append(user: "", said: sentence)
+        await say(sentence)
     }
 
     private func choosePlan(_ index: Int) {

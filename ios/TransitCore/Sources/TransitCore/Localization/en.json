@@ -1140,5 +1140,14 @@
   "今天的線上 AI 次數用完了，明天再聊，或改用打字搜尋。": "Today's online AI uses are used up. Let's talk tomorrow, or type a search instead.",
   "正在規劃路線…": "Planning routes…",
   "只用雲端：手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的辨識為準，句子也只由 Claude 理解，不用手機上的規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。": "Cloud only: the phone only shows your words live, tells when you have finished and notices you cutting in; what you said is always what the server heard, and only Claude understands it, never the phone's rules. If the server has a problem you are told so, rather than the phone stepping in, so you can see how the cloud service itself performs. Each sentence waits a little for the server; answers are still read aloud by your iPhone.",
-  "隱私與資料": "Privacy and data"
+  "隱私與資料": "Privacy and data",
+  "找不到「%@」，請換個說法，例如加上分店或附近的地標。": "Couldn’t find “%@”. Try saying it another way, for example with the branch or a nearby landmark.",
+  "找不到「%@」，畫面上是名字相近的地點；也可以換個說法，例如加上分店或附近的地標。": "Couldn’t find “%@”. The places on screen have similar names; or say it another way, for example with the branch or a nearby landmark.",
+  "是「%@」嗎？說「好」就規劃，或換個說法。": "Is it “%@”? Say yes to plan, or say it another way.",
+  "要從目前位置出發需要定位，請開啟定位，或說從哪裡出發。": "To start from where you are I need your location. Turn on Location, or say where to start from.",
+  "到「%@」暫時找不到可搭的路線，可以換個時間或交通方式。": "No routes to “%@” right now. Try another time or way of travelling.",
+  "到「%@」的路線好了，候車時間要看當天班次，請看畫面。": "Routes to “%@” are ready. Waits depend on that day’s timetable; see the screen.",
+  "到「%@」的路線好了：第一個方案%@，%@抵達。": "Routes to “%@” are ready: the first option, %@, arrives %@.",
+  "這是第 %@ 段，接著的%@點路線上方的編號就能看。": "This is leg %@. For %@ next, tap their numbers above the routes.",
+  "說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。手機先理解，需要時由線上 AI（Claude）協助；地點與路線由 Apple 地圖處理。": "Say or type one sentence to plan right away; anything left out means from here, leaving now. Your phone reads it first, with online AI (Claude) helping when needed; places and routes come from Apple Maps."
 }

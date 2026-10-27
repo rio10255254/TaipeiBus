@@ -46,6 +46,13 @@ Deno.test("Whisper's failures and its words for silence fall back to the phone's
   assertEquals(await transcribe('key', { bytes: new Uint8Array(2000), language: 'zh', vocabulary: [] }, silence), { failure: 'whisper unusable' });
   assert(hallucinated('請不吝點贊訂閱'));
   assert(!hallucinated('我要去 World Gym'));
+  // A breath or the app's own voice trailing off is not a turn; a short real answer is.
+  assert(hallucinated('嗯。'));
+  assert(hallucinated('呃…'));
+  assert(hallucinated('Mmm'));
+  assert(hallucinated('。'));
+  assert(!hallucinated('好'));
+  assert(!hallucinated('對'));
   assertEquals(traditional('World Gym'), 'World Gym');
 });
 

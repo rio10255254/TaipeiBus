@@ -592,7 +592,7 @@ final class TransitAppModel: ObservableObject {
         var arriveBy: Date? = nil
         /// Set when a requested preference could not be applied, e.g. without Pro.
         var note: String?
-        /// The second stop of 「先去…然後再去…」, offered as 接著去 once this leg is planned.
+        /// The later stops of 「先去…然後再去…」 in the rider's words (「B、C」), offered once this leg is planned.
         var nextStop: String? = nil
         var constraints = TripConstraints()
         /// Who read the sentence, e.g. Claude Haiku 5.5, shown in small print under the routes.
@@ -683,12 +683,18 @@ final class TransitAppModel: ObservableObject {
             preference: preference, departure: planner.scheduledDeparture,
             arriveBy: planner.arrivalDeadline, note: note, nextStop: next,
             constraints: constraints, answeredBy: answeredBy,
-            stops: next.map { [AssistantTrip.Stop(name: destination.localizedName, place: destination), AssistantTrip.Stop(name: $0, place: nil)] } ?? [],
+            stops: Self.stops(destination, then: next),
             start: origin, startDeparture: planner.scheduledDeparture, startArriveBy: planner.arrivalDeadline)
         assistantStopsRevision += 1
         if let origin { planner.setOrigin(origin, metadata: metadata) }
         else { planner.useLocation(location.usableCoordinate, metadata: metadata); if location.usableCoordinate == nil { location.request() } }
         planner.setDestination(destination, metadata: metadata, currentLocation: location.usableCoordinate)
+    }
+    /// Every stop of the trip: the first place, then each later one by name until it is found.
+    private static func stops(_ first: TravelPlace, then later: String?) -> [AssistantTrip.Stop] {
+        let names = TripStops.split(later ?? "")
+        guard !names.isEmpty else { return [] }
+        return [AssistantTrip.Stop(name: first.localizedName, place: first)] + names.map { AssistantTrip.Stop(name: $0, place: nil) }
     }
     /// 「不是這裡？」: plan the same request to another of its search results.
     func switchAssistantDestination(_ place: TravelPlace) {
@@ -717,7 +723,14 @@ final class TransitAppModel: ObservableObject {
         case nil: break
         }
         trip.departure = planner.scheduledDeparture; trip.arriveBy = planner.arrivalDeadline
-        if !change.next.isEmpty { trip.nextStop = change.next }
+        // New later stops replace the ones after this leg; the stops already passed stay numbered.
+        if !change.next.isEmpty {
+            trip.nextStop = change.next
+            let kept = trip.stops.isEmpty ? [AssistantTrip.Stop(name: trip.destination.localizedName, place: trip.destination)]
+                : Array(trip.stops.prefix(trip.leg + 1))
+            trip.stops = kept + TripStops.split(change.next).map { AssistantTrip.Stop(name: $0, place: nil) }
+            assistantStopsRevision += 1
+        }
         trip.request = request
         assistantTrip = trip
         planner.plan(metadata: metadata)

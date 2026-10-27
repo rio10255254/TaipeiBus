@@ -650,7 +650,8 @@ final class JourneyPlannerModel: ObservableObject {
     private func labels(for result: [JourneyOption], recommendedOption: JourneyOption?, at date: Date) -> [String: String] {
         let recommended = recommendedOption.flatMap { duration($0, at: date) }
         let durations = result.compactMap { duration($0, at: date) }
-        let fastest = durations.map(\.totalSeconds).min() ?? .infinity
+        // A total without its unknown waits looks short; only known totals are compared.
+        let fastest = durations.filter { $0.unknownWaits == 0 }.map(\.totalSeconds).min() ?? .infinity
         let shortestWalk = durations.map { max(0, $0.walkingSeconds - $0.cyclingSeconds) }.min() ?? .infinity
         var labels: [String: String] = [:]
         for option in result {
@@ -666,7 +667,8 @@ final class JourneyPlannerModel: ObservableObject {
             if option.cycles { labels[option.id] = "YouBike 接駁"; continue }
             if recommendedOption?.cycles == true { labels[option.id] = "免騎車"; continue }
             if let timing = duration(option, at: date), let recommended {
-                if timing.totalSeconds < recommended.totalSeconds - 60, timing.totalSeconds <= fastest + 30 { labels[option.id] = "較快" }
+                if timing.unknownWaits == 0, recommended.unknownWaits == 0,
+                   timing.totalSeconds < recommended.totalSeconds - 60, timing.totalSeconds <= fastest + 30 { labels[option.id] = "較快" }
                 else if timing.walkingSeconds - timing.cyclingSeconds < recommended.walkingSeconds - recommended.cyclingSeconds - 120,
                         timing.walkingSeconds - timing.cyclingSeconds <= shortestWalk + 30 { labels[option.id] = "少走路" }
                 else if option.rides.count == 1 { labels[option.id] = "直達" }

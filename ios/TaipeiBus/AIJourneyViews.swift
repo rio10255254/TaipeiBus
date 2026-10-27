@@ -57,6 +57,9 @@ final class JourneyAssistantSession: ObservableObject {
     private var waitingForConsent = ""
     /// Counts requests that reached the route screen, so the panel can step aside.
     @Published private(set) var plannedCount = 0
+    /// Planning what the voice conversation understood: a question or problem is asked there, out loud
+    /// and as choices on its panel, instead of opening the sheet over it.
+    private(set) var forVoice = false
     let speech = SpeechInput()
 
     private unowned let model: TransitAppModel
@@ -108,7 +111,7 @@ final class JourneyAssistantSession: ObservableObject {
 
     /// Typing from scratch, with examples and recent requests.
     func open() {
-        cancel(); input = ""; prepare(); present()
+        cancel(); forVoice = false; input = ""; prepare(); present()
     }
     /// One tap, then speak: understanding starts when the rider stops talking. On the route screen
     /// (`refining`), what is said changes the trip shown instead of starting a new one.
@@ -117,7 +120,7 @@ final class JourneyAssistantSession: ObservableObject {
         guard unavailable == nil else { present(); return }
         // The voice screen replaces the keyboard.
         UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
-        cancel(); speech.reset(); prepare()
+        cancel(); speech.reset(); prepare(); forVoice = false
         refiningVoice = refining
         guard !inline else { startSpeech(); return }
         voiceRound += 1; voiceClosing = false; celebrating = false
@@ -167,7 +170,7 @@ final class JourneyAssistantSession: ObservableObject {
             speech.stop(); waitingForConsent = value; waitingToRefine = true; source = value; askingConsent = true
             return
         }
-        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel(); forVoice = false
         busy = true; message = nil; source = value; startedAt = Date(); activity = AppText.text("正在理解你的修改…")
         let pro = model.purchases.hasPro
         let now = Date()
@@ -197,6 +200,7 @@ final class JourneyAssistantSession: ObservableObject {
                 await replace(trip, with: change, request: value, credit: credit)
             } else {
                 model.applyAssistantChange(change, request: value, answeredBy: credit)
+                if !change.next.isEmpty { findStops() }
                 Haptics.success()
                 finishVoice()
             }
@@ -232,6 +236,7 @@ final class JourneyAssistantSession: ObservableObject {
                                       mode: change.mode ?? trip.mode, departure: departure, arriveBy: arriveBy,
                                       nextStop: change.next.isEmpty ? trip.nextStop : change.next,
                                       constraints: change.constraints ?? trip.constraints, answeredBy: credit)
+        findStops()
         Haptics.success()
         plannedCount += 1; finishVoice()
     }
@@ -253,7 +258,7 @@ final class JourneyAssistantSession: ObservableObject {
             speech.stop(); waitingForConsent = value; input = value; source = value; askingConsent = true
             return
         }
-        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel(); forVoice = false
         input = value; source = value
         busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
         chosenDestination = nil; chosenOrigin = nil
@@ -284,7 +289,7 @@ final class JourneyAssistantSession: ObservableObject {
     /// Claude read the rider's words there, so asking it (or the rules) once more would only cost
     /// time and a second allowance. `sentence` is that request in words, for the screen.
     func plan(_ reading: JourneyReading, sentence: String) {
-        speech.stop(); operation?.cancel(); deadlineTask?.cancel()
+        speech.stop(); operation?.cancel(); deadlineTask?.cancel(); forVoice = true
         input = sentence; source = sentence
         busy = true; message = nil; clarification = nil; conversation = nil; problem = nil; turn = nil
         chosenDestination = nil; chosenOrigin = nil; prepared = nil
@@ -390,9 +395,18 @@ final class JourneyAssistantSession: ObservableObject {
         cancel()
         closeVoice { [weak self] in guard let self else { return }; input = ""; prepare(); presented = true }
     }
-    /// Questions and problems need the sheet; the voice screen closes first.
+    /// Questions and problems need the sheet; the voice screen closes first. The voice conversation
+    /// asks them itself.
     private func present() {
+        guard !forVoice else { return }
         if voiceActive { closeVoice { [weak self] in self?.presented = true } } else { presented = true }
+    }
+    /// The voice conversation ended with its question unanswered: the sheet keeps it, with the same
+    /// choices, so the trip is not lost.
+    func voiceEnded() {
+        guard forVoice else { return }
+        forVoice = false
+        if problem != nil || clarification != nil || message != nil { presented = true }
     }
     func cancel() {
         operation?.cancel(); deadlineTask?.cancel(); search.cancel(); speech.stop()
@@ -548,7 +562,7 @@ final class JourneyAssistantSession: ObservableObject {
         model.previewAssistantJourney(request: source, origin: from, destination: target, alternatives: alternatives,
                                       preference: preference, mode: turn.mode, departure: turn.departAt, arriveBy: arriveBy,
                                       nextStop: turn.nextStop, constraints: turn.avoid, answeredBy: conversation?.credit)
-        if !turn.nextStop.isEmpty { findStop(1, words: turn.nextStop, near: target) }
+        findStops()
         Haptics.success()
         conversation = nil; clarification = nil; problem = nil; message = nil
         presented = false; input = ""; plannedCount += 1; finishVoice()
@@ -560,20 +574,41 @@ final class JourneyAssistantSession: ObservableObject {
         return StationSearch.placeRank(name: place.name, address: place.address, query: text) != nil
     }
 
-    /// A later stop of 「先去 A 再去 B」 is looked up in the background as soon as the first leg is
-    /// planned, so its number appears on the map and tapping it only switches legs.
-    private func findStop(_ index: Int, words: String, near: TravelPlace) {
-        stopSearch?.cancel()
+    /// The later stops of 「先去 A 再去 B，最後去 C」 are looked up in the background as soon as the first
+    /// leg is planned, each near the stop before it, so their numbers appear on the map and tapping one
+    /// only switches legs. A name the search cannot match is looked up again by its official name.
+    private func findStops() {
+        stopSearch?.cancel(); stopCandidates = [:]
+        guard let trip = model.assistantTrip, trip.stops.count > 1 else { return }
+        let pro = model.purchases.hasPro, sentence = trip.request
         let finder = PlaceSearch()
         finder.setRules(vocabulary: model.vocabulary, settings: model.liveSettings.search, revision: model.liveSettings.revision)
-        finder.setContext(near.coordinate)
         stopSearch = Task { @MainActor in
-            let found = ((try? await finder.find(text: words, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
-            guard !Task.isCancelled else { return }
-            stopCandidates[index] = found
-            if let place = found.first(where: { Self.matches($0, words) }) {
-                model.resolveAssistantStop(index, place: place)
-                JourneyDiagnostics.shared.record("ai-plan stop=\(index + 1) found")
+            var near = trip.stops[0].place?.coordinate
+            for index in trip.stops.indices.dropFirst() {
+                if let place = trip.stops[index].place { near = place.coordinate; continue }
+                let words = trip.stops[index].name
+                finder.setContext(near)
+                var found = ((try? await finder.find(text: words, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
+                var place = found.first(where: { Self.matches($0, words) })
+                if place == nil, OnlineJourneyReader.enabled {
+                    let queries = await OnlineJourneyReader.rewrite(words, sentence: sentence, pro: pro)
+                    for query in queries where !Task.isCancelled {
+                        let more = ((try? await finder.find(text: query, queryLimit: 3)) ?? []).filter { $0.coordinate.isInServiceArea }
+                        found = more + found
+                        place = more.first(where: { Self.matches($0, query) })
+                        if place != nil { break }
+                    }
+                }
+                guard !Task.isCancelled else { return }
+                stopCandidates[index] = Array(found.prefix(6))
+                if let place {
+                    model.resolveAssistantStop(index, place: place)
+                    near = place.coordinate
+                    JourneyDiagnostics.shared.record("ai-plan stop=\(index + 1) found")
+                } else {
+                    JourneyDiagnostics.shared.record("ai-plan stop=\(index + 1) unsure places=\(found.count)")
+                }
             }
         }
     }
@@ -591,6 +626,7 @@ final class JourneyAssistantSession: ObservableObject {
         }
         let words = trip.stops[index].name
         pendingLeg = index; turn = nil; input = AppText.text("接著去%@", words); source = input
+        forVoice = false
         problem = .destination(words); fixQuery = words; fixResults = Array((stopCandidates[index] ?? []).prefix(6)); present()
         if fixResults.isEmpty { findFix() }
     }
@@ -687,7 +723,7 @@ struct AIJourneyAssistantView: View {
                     if let message = session.message { Section { Text(message).accessibilityIdentifier("ai-error") } }
                 }
             }
-            .navigationTitle(AppText.text("用一句話規劃")).navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(idle ? AppText.text("用一句話規劃") : AppText.text("規劃行程")).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button(AppText.text("關閉")) { dismiss() } } }
         }
         .modifier(OnlineConsentAlert(session: session, inSheet: true))
@@ -729,7 +765,9 @@ struct AIJourneyAssistantView: View {
                 .disabled(session.busy || trimmed.isEmpty || trimmed.count > 600)
                 .accessibilityIdentifier("ai-extract")
         } footer: {
-            Text(AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。文字只在手機上理解，地點與路線由 Apple 地圖處理。"))
+            Text(OnlineJourneyReader.enabled
+                 ? AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。手機先理解，需要時由線上 AI（Claude）協助；地點與路線由 Apple 地圖處理。")
+                 : AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。文字只在手機上理解，地點與路線由 Apple 地圖處理。"))
         }
     }
 
