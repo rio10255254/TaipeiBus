@@ -47,6 +47,8 @@ struct BikeStationCard: View {
                 HStack(spacing: 12) {
                     Image(systemName: returning ? "parkingsign.circle.fill" : "bicycle").liveFont(.subheadline, weight: .semibold).foregroundStyle(.white)
                         .frame(width: 36, height: 36).background(Circle().fill(tint(returning ? docks : bikes)))
+                        // A new station bounces its mark; the colour follows its supply.
+                        .symbolBounce(station.id).smoothChanges(returning ? docks : bikes)
                     VStack(alignment: .leading, spacing: 2) {
                         BilingualName(chinese: station.name, english: station.englishName)
                             .liveFont(.headline, weight: .semibold).lineLimit(2)
@@ -76,13 +78,17 @@ struct BikeStationCard: View {
                 if let nearest = alternative(at: now) {
                     Button { model.selectBikeStation(nearest.station.id, returning: returning) } label: {
                         HStack(spacing: 8) {
-                            Image(systemName: "figure.walk").liveFont(.caption, weight: .semibold)
+                            ContinuousMotion { running in
+                                Image(systemName: "figure.walk").liveFont(.caption, weight: .semibold)
+                                    .symbolEffect(.pulse, options: .repeating, isActive: running)
+                            }
                             Text(AppText.text(returning ? "附近可還 %@ · %@" : "最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
                                 .liveFont(.subheadline, weight: .semibold).lineLimit(1)
                         }.padding(.horizontal, 14).frame(minHeight: 40)
                     }
                     .buttonStyle(MapActionStyle())
                     .accessibilityIdentifier("bike-station-alternative")
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)

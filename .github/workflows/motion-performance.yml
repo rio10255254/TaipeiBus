@@ -1,0 +1,144 @@
+name: Motion performance
+# What the interface's never-ending decoration costs the main thread, and the trip interactions
+# walked through, on each supported iOS generation and on a small and a large iPhone
+# (ios/usability/MotionPerformanceUsabilityTests.swift). Simulator figures compare
+# moving with still on the same machine and are not a phone's absolute numbers.
+on:
+  # Runs by hand, or on a pull request that changes the measurement itself.
+  pull_request:
+    paths: ['.github/workflows/motion-performance.yml', 'ios/usability/MotionPerformanceUsabilityTests.swift']
+  workflow_dispatch:
+    inputs:
+      test:
+        description: 'Optional single test, e.g. MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+# A newer push waits for the running measurement instead of throwing its results away.
+concurrency:
+  group: motion-performance-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+
+jobs:
+  measure:
+    name: iOS ${{ matrix.ios }} · ${{ matrix.name }}${{ matrix.app == 'main' && ' · main app' || '' }}
+    runs-on: macos-15
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ios: '26', download: '', name: 'iPhone 17 Pro', device: 'iPhone-17-Pro', app: 'branch' }
+          - { ios: '18', download: '', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'branch' }
+          # The same trip on the app as it is on main, for telling a new problem from an old one.
+          - { ios: '17', download: '17.5', name: 'iPhone SE (3rd generation)', device: 'iPhone-SE-3rd-generation', app: 'main' }
+    steps:
+      - uses: actions/checkout@v4
+      - name: App sources from main
+        if: matrix.app == 'main'
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main
+          git checkout FETCH_HEAD -- ios/TaipeiBus
+          git status --short | head -20
+      - name: Simulator for iOS ${{ matrix.ios }}
+        run: |
+          set -euo pipefail
+          pick() {
+            xcrun simctl list runtimes -j | python3 -c 'import json,sys
+          want = sys.argv[1]
+          found = [r for r in json.load(sys.stdin)["runtimes"] if r["isAvailable"] and r["name"].startswith("iOS") and r["version"].split(".")[0] == want]
+          found.sort(key=lambda r: tuple(map(int, r["version"].split("."))))
+          print(found[-1]["identifier"] if found else "")' "${{ matrix.ios }}"
+          }
+          runtime=$(pick)
+          if [ -z "$runtime" ] && [ -n "${{ matrix.download }}" ]; then
+            # Not on the hosted image: download the runtime for this run only.
+            xcodebuild -downloadPlatform iOS -buildVersion "${{ matrix.download }}" \
+              || sudo xcodes runtimes install "iOS ${{ matrix.download }}"
+            runtime=$(pick)
+          fi
+          if [ -z "$runtime" ]; then xcrun simctl list runtimes; echo "No iOS ${{ matrix.ios }} simulator runtime"; exit 1; fi
+          echo "Runtime: $runtime"
+          device=$(xcrun simctl create TaipeiBus-motion "com.apple.CoreSimulator.SimDeviceType.${{ matrix.device }}" "$runtime")
+          echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device" -b
+          xcrun simctl privacy "$device" grant location com.example.TaipeiBus || true
+      - name: Measure and walk through
+        id: measure
+        # Main's app is the control: how it fares is reported, not held against this branch.
+        continue-on-error: ${{ matrix.app == 'main' }}
+        run: |
+          set -euo pipefail
+          gem install xcodeproj -v 1.27.0 --no-document --user-install
+          export GEM_HOME="$(ruby -e 'print Gem.user_dir')"
+          export GEM_PATH="$GEM_HOME:$(ruby -e 'print Gem.path.join(":")')"
+          ruby ios/usability/setup.rb
+          python3 ios/usability/fresh-location.py "$BUS_SIM_DEVICE" > "$RUNNER_TEMP/fresh-location.log" 2>&1 &
+          location_fixture=$!
+          # Watchdog: sample the app's threads whenever it holds a core, and once a minute in any
+          # case (a stall can also be a wait), so a stall shows where the main thread is.
+          (
+            samples=0; ticks=0
+            while true; do
+              sleep 15
+              ticks=$((ticks + 1))
+              pid=$(pgrep -f 'TaipeiBus\.app/TaipeiBus( |$)' | head -1 || true)
+              [ -n "$pid" ] || continue
+              cpu=$(ps -o %cpu= -p "$pid" | tr -d ' ' || echo 0)
+              echo "$(date +%T) pid=$pid cpu=$cpu" >> "$RUNNER_TEMP/app-cpu.log"
+              if { [ "${cpu%.*}" -ge 85 ] || [ $((ticks % 4)) -eq 0 ]; } && [ "$samples" -lt 40 ]; then
+                samples=$((samples + 1))
+                sudo sample "$pid" 2 -file "$RUNNER_TEMP/app-sample-$(date +%H%M%S)-cpu${cpu%.*}.txt" > /dev/null 2>&1 || true
+              fi
+            done
+          ) &
+          watchdog=$!
+          trap 'kill "$location_fixture" "$watchdog" 2>/dev/null || true' EXIT
+          selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests'
+          if [ '${{ matrix.app }}' = 'main' ]; then
+            # Main has no motion lab; it walks the same trip (its cost probe is simply absent there).
+            selection='TaipeiBusUsabilityTests/MotionPerformanceUsabilityTests/testTripInteractionsOnThisSystem'
+          fi
+          if [ -n '${{ inputs.test }}' ]; then
+            [[ '${{ inputs.test }}' =~ ^MotionPerformanceUsabilityTests(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid test name'; exit 1; }
+            selection='TaipeiBusUsabilityTests/${{ inputs.test }}'
+          fi
+          xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
+            -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
+            -derivedDataPath "$RUNNER_TEMP/BusBuild" -resultBundlePath "$RUNNER_TEMP/motion.xcresult" \
+            $(printf -- '-only-testing:%s ' $selection) \
+            -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO test \
+            | tee "$RUNNER_TEMP/motion-tests.log"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### iOS ${{ matrix.ios }} · ${{ matrix.name }} (${{ matrix.app }} app: ${{ steps.measure.outcome }})"
+            grep -E "^Test Case .*(passed|failed)|: error: " "$RUNNER_TEMP/motion-tests.log" | sed 's/^/    /' || true
+            echo '```'
+            grep -h 'MOTION-COST-RESULT' "$RUNNER_TEMP/motion-tests.log" | sed 's/^.*MOTION-COST-RESULT //' | sort -u || echo 'No measurements recorded.'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -d "$RUNNER_TEMP/motion.xcresult" ]; then
+            xcrun xcresulttool export attachments --path "$RUNNER_TEMP/motion.xcresult" --output-path "$RUNNER_TEMP/motion-attachments" || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: motion-ios${{ matrix.ios }}-${{ matrix.device }}-${{ matrix.app }}
+          path: |
+            ${{ runner.temp }}/motion-tests.log
+            ${{ runner.temp }}/motion-attachments
+            ${{ runner.temp }}/app-cpu.log
+            ${{ runner.temp }}/app-sample-*.txt
+          retention-days: 14
+          if-no-files-found: ignore

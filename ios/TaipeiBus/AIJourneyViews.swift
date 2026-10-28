@@ -1678,12 +1678,14 @@ private struct LiveDot: View {
     let reduceMotion: Bool
     @State private var on = false
     var body: some View {
-        Circle().fill(Color.red).frame(width: 8, height: 8)
-            .overlay(Circle().stroke(Color.red.opacity(0.5), lineWidth: 2).scaleEffect(on ? 2.2 : 1).opacity(on ? 0 : 1))
-            .onAppear {
-                guard !reduceMotion else { return }
-                withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true }
-            }
+        ContinuousMotion { running in
+            Circle().fill(Color.red).frame(width: 8, height: 8)
+                .overlay(Circle().stroke(Color.red.opacity(0.5), lineWidth: 2).scaleEffect(on ? 2.2 : 1).opacity(on ? 0 : 1))
+                .onChange(of: running && !reduceMotion, initial: true) { _, run in
+                    if run { withAnimation(.easeOut(duration: 1.1).repeatForever(autoreverses: false)) { on = true } }
+                    else { var still = Transaction(); still.disablesAnimations = true; withTransaction(still) { on = false } }
+                }
+        }
     }
 }
 
@@ -1691,7 +1693,10 @@ private struct LiveDot: View {
 private struct Shimmer: ViewModifier {
     let active: Bool
     @State private var sweep = false
-    @ViewBuilder func body(content: Content) -> some View {
+    func body(content: Content) -> some View {
+        ContinuousMotion { running in shimmer(content, active: active && running) }
+    }
+    @ViewBuilder private func shimmer(_ content: Content, active: Bool) -> some View {
         if active {
             content.overlay {
                 GeometryReader { box in
@@ -1705,6 +1710,8 @@ private struct Shimmer: ViewModifier {
                 .allowsHitTesting(false)
             }
             .onAppear { withAnimation(.linear(duration: 1.6).repeatForever(autoreverses: false)) { sweep = true } }
+            // Back at the start, so the next time something is being understood the light sweeps again.
+            .onDisappear { sweep = false }
         } else {
             content
         }
@@ -1732,8 +1739,6 @@ struct VoiceOrb: View {
     var reduceMotion = false
     /// The small orb in cards and on the search screen.
     var compact = false
-    @State private var spin = false
-    @State private var breathe = false
 
     static func colors(_ mood: Mood) -> [Color] {
         switch mood {
@@ -1762,25 +1767,17 @@ struct VoiceOrb: View {
     }
 
     var body: some View {
+        ContinuousMotion { running in orb(turning: running && !reduceMotion) }
+    }
+    private func orb(turning: Bool) -> some View {
         GeometryReader { box in
             let side = min(box.size.width, box.size.height)
             let colors = Self.colors(mood)
             ZStack {
-                // Two layers of blurred colour turning opposite ways read as moving liquid.
-                Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
-                    .frame(width: side * 0.78, height: side * 0.78)
-                    // Room for the blur inside the flattened layer, or its edges show as a square.
-                    .padding(side * 0.25)
-                    .blur(radius: side * (compact ? 0.08 : 0.12))
-                    .drawingGroup()
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))
-                    .frame(width: side * 0.6, height: side * 0.6)
-                    .padding(side * 0.2)
-                    .blur(radius: side * (compact ? 0.06 : 0.1))
-                    .drawingGroup()
-                    .rotationEffect(.degrees(spin ? -540 : 0))
-                    .opacity(0.75)
+                // Two layers of blurred colour turning opposite ways read as moving liquid. They are
+                // drawn once and turned by Core Animation, so the orb costs no main-thread work per frame.
+                OrbDiscs(colors: colors, side: side, compact: compact, turning: turning)
+                    .frame(width: side, height: side)
                 Circle().fill(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0)], center: .center,
                                              startRadius: 0, endRadius: side * 0.3))
                     .frame(width: side * 0.6, height: side * 0.6)
@@ -1797,14 +1794,115 @@ struct VoiceOrb: View {
                     .contentTransition(.symbolEffect(.replace))
             }
             .modifier(VoiceSwell(level: level, amount: mood == .listening ? 0.22 : 0))
-            .scaleEffect(breathe ? 1.03 : 0.97)
             .frame(width: box.size.width, height: box.size.height)
         }
         .animation(.easeInOut(duration: 0.45), value: mood)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: compact ? 9 : 6).repeatForever(autoreverses: false)) { spin = true }
-            withAnimation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true)) { breathe = true }
+    }
+}
+
+/// The orb's colour: two blurred conic discs drawn once into images by SwiftUI, then turned in
+/// opposite directions and breathed by Core Animation in the render server. A new mood fades the
+/// images over; nothing is redrawn per frame and a busy main thread never makes the orb stutter.
+private struct OrbDiscs: UIViewRepresentable {
+    let colors: [Color]
+    let side: CGFloat
+    let compact: Bool
+    let turning: Bool
+    func makeUIView(context: Context) -> OrbDiscsView { OrbDiscsView() }
+    func updateUIView(_ view: OrbDiscsView, context: Context) {
+        view.configure(colors: colors, side: side, compact: compact, turning: turning, scale: context.environment.displayScale)
+    }
+}
+
+final class OrbDiscsView: UIView {
+    private let discs = CALayer()
+    private let outer = CALayer()
+    private let inner = CALayer()
+    private var drawn = ""
+    private var compact = false
+    private var turning = false
+    private var side: CGFloat = 0
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        inner.opacity = 0.75
+        discs.addSublayer(outer)
+        discs.addSublayer(inner)
+        layer.addSublayer(discs)
+        // Returning from the background, Core Animation may have dropped a repeating animation.
+        NotificationCenter.default.addObserver(self, selector: #selector(returnedToForeground),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+    @objc private func returnedToForeground() { applyMotion() }
+    func configure(colors: [Color], side: CGFloat, compact: Bool, turning: Bool, scale: CGFloat) {
+        self.compact = compact
+        let key = "\(colors)|\(side)|\(compact)|\(scale)"
+        if side > 0, key != drawn {
+            drawn = key
+            let resized = side != self.side
+            self.side = side
+            draw(colors: colors, side: side, scale: scale)
+            if resized { setNeedsLayout(); discs.removeAllAnimations(); outer.removeAllAnimations(); inner.removeAllAnimations() }
+        }
+        if turning != self.turning || discs.animation(forKey: "breathe") == nil { self.turning = turning; applyMotion() }
+    }
+    private func draw(colors: [Color], side: CGFloat, scale: CGFloat) {
+        let blur = side * (compact ? 0.08 : 0.12), innerBlur = side * (compact ? 0.06 : 0.1)
+        let outerImage = Self.image(Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
+            .frame(width: side * 0.78, height: side * 0.78).padding(side * 0.25).blur(radius: blur), scale: scale)
+        let innerImage = Self.image(Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))
+            .frame(width: side * 0.6, height: side * 0.6).padding(side * 0.2).blur(radius: innerBlur), scale: scale)
+        if outer.contents != nil {
+            // A new mood fades in, as the colours did before.
+            let fade = CATransition(); fade.type = .fade; fade.duration = 0.45
+            outer.add(fade, forKey: "recolour"); inner.add(fade, forKey: "recolour")
+        }
+        outer.contents = outerImage; outer.contentsScale = scale
+        inner.contents = innerImage; inner.contentsScale = scale
+    }
+    private static func image(_ view: some View, scale: CGFloat) -> CGImage? {
+        let renderer = ImageRenderer(content: view)
+        renderer.scale = scale
+        return renderer.cgImage
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        discs.bounds = bounds; discs.position = center
+        outer.bounds = CGRect(x: 0, y: 0, width: side * 1.28, height: side * 1.28); outer.position = center
+        inner.bounds = CGRect(x: 0, y: 0, width: side, height: side); inner.position = center
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { applyMotion() }
+    }
+    private func applyMotion() {
+        guard turning, window != nil else {
+            outer.removeAnimation(forKey: "turn"); inner.removeAnimation(forKey: "turn"); discs.removeAnimation(forKey: "breathe")
+            discs.transform = CATransform3DMakeScale(0.97, 0.97, 1)
+            return
+        }
+        discs.transform = CATransform3DIdentity
+        let period = compact ? 9.0 : 6.0
+        // The outer colour turns once a period, the inner one and a half times the other way.
+        for (disc, turns) in [(outer, 1.0), (inner, -1.5)] where disc.animation(forKey: "turn") == nil {
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0; turn.toValue = turns * 2 * Double.pi
+            turn.duration = period; turn.repeatCount = .infinity; turn.isRemovedOnCompletion = false
+            turn.timingFunction = CAMediaTimingFunction(name: .linear)
+            turn.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            disc.add(turn, forKey: "turn")
+        }
+        if discs.animation(forKey: "breathe") == nil {
+            let breathe = CABasicAnimation(keyPath: "transform.scale")
+            breathe.fromValue = 0.97; breathe.toValue = 1.03
+            breathe.duration = 1.8; breathe.autoreverses = true; breathe.repeatCount = .infinity
+            breathe.isRemovedOnCompletion = false
+            breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            breathe.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+            discs.add(breathe, forKey: "breathe")
         }
     }
 }
@@ -1867,64 +1965,180 @@ struct EdgeGlow: View {
     /// For the small preview in Settings: its own corner and thinner, tighter glow.
     var corner: CGFloat?
     var scale: CGFloat = 1
-    @State private var spin = false
-    @State private var pulse = false
-    /// Spelled out so other files can make one; the private animation state keeps its own defaults.
+    /// Spelled out so other files can make one.
     init(mood: VoiceOrb.Mood, level: VoiceLevel = .silent, reduceMotion: Bool = false, corner: CGFloat? = nil, scale: CGFloat = 1) {
         self.mood = mood; self.level = level; self.reduceMotion = reduceMotion; self.corner = corner; self.scale = scale
     }
     var body: some View {
-        GeometryReader { box in
-            // Rounded like the display on Face ID iPhones; the blur hides small differences.
-            let corner: CGFloat = self.corner ?? (box.safeAreaInsets.bottom > 0 ? 54 : 0)
-            let width = box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing
-            let height = box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom
-            let shape = RoundedRectangle(cornerRadius: corner, style: .continuous)
-            let colors = VoiceOrb.colors(mood)
-            let wheel = Rectangle()
-                .fill(AngularGradient(colors: colors + [colors[0]], center: .center))
-                .frame(width: hypot(width, height), height: hypot(width, height))
-                .rotationEffect(.degrees(spin ? 360 : 0))
+        ContinuousMotion { running in
+            GeometryReader { box in
+                // Rounded like the display on Face ID iPhones; the blur hides small differences.
+                let corner: CGFloat = self.corner ?? (box.safeAreaInsets.bottom > 0 ? 54 : 0)
+                let width = box.size.width + box.safeAreaInsets.leading + box.safeAreaInsets.trailing
+                let height = box.size.height + box.safeAreaInsets.top + box.safeAreaInsets.bottom
+                GlowLevelReader(level: level) { voice in
+                    EdgeGlowLayers(colors: VoiceOrb.colors(mood), corner: corner, scale: scale,
+                                   wide: Self.wideOpacity(mood, voice), thinking: mood == .thinking,
+                                   turning: running && !reduceMotion)
+                }
                 .frame(width: width, height: height)
-            ZStack {
-                // Wide soft glow: follows the voice.
-                wheel.mask { shape.strokeBorder(lineWidth: 56 * scale).blur(radius: 34 * scale).drawingGroup() }
-                    .modifier(GlowLevel(level: level, mood: mood))
-                // Middle glow: breathes while thinking.
-                wheel.mask { shape.strokeBorder(lineWidth: 18 * scale).blur(radius: 10 * scale).drawingGroup() }
-                    .opacity(mood == .thinking ? (pulse ? 1 : 0.55) : 0.9)
-                // Crisp edge.
-                wheel.mask { shape.strokeBorder(lineWidth: max(1.5, 3 * scale)) }
+                .offset(x: -box.safeAreaInsets.leading, y: -box.safeAreaInsets.top)
             }
-            .compositingGroup()
-            .frame(width: width, height: height)
-            .offset(x: -box.safeAreaInsets.leading, y: -box.safeAreaInsets.top)
+            .allowsHitTesting(false)
         }
-        .allowsHitTesting(false)
-        .animation(.easeInOut(duration: 0.5), value: mood)
-        .onAppear {
-            guard !reduceMotion else { return }
-            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) { spin = true }
-            withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { pulse = true }
+    }
+    /// The wide glow's brightness: the voice while listening, steady otherwise.
+    static func wideOpacity(_ mood: VoiceOrb.Mood, _ voice: Double) -> Double {
+        switch mood {
+        case .listening: 0.25 + 0.75 * voice
+        case .thinking: 0.7
+        case .done: 0.85
+        // Calm also while an answer is spoken: its words lift it a little.
+        case .warning, .calm: 0.35 + 0.4 * voice
         }
     }
 }
 
-/// The wide glow's brightness: the voice while listening, steady otherwise.
-private struct GlowLevel: ViewModifier {
+/// Only this small view follows the microphone level.
+private struct GlowLevelReader<Content: View>: View {
     @ObservedObject var level: VoiceLevel
-    let mood: VoiceOrb.Mood
-    func body(content: Content) -> some View {
-        let value: Double = switch mood {
-        case .listening: 0.25 + 0.75 * level.value
-        case .thinking: 0.7
-        case .done: 0.85
-        // Calm also while an answer is spoken: its words lift it a little.
-        case .warning, .calm: 0.35 + 0.4 * level.value
+    @ViewBuilder let content: (Double) -> Content
+    var body: some View { content(level.value) }
+}
+
+/// The glow around the screen edge, Apple Intelligence style, built in Core Animation: three
+/// conic colour wheels, each masked by an edge drawn once (wide and soft, middle, crisp), turn in
+/// the render server. The voice changes only the wide glow's opacity; the main thread does no work
+/// per frame and the glow keeps its pace while the app is busy understanding or planning.
+private struct EdgeGlowLayers: UIViewRepresentable {
+    let colors: [Color]
+    let corner: CGFloat
+    let scale: CGFloat
+    let wide: Double
+    let thinking: Bool
+    let turning: Bool
+    func makeUIView(context: Context) -> EdgeGlowView { EdgeGlowView() }
+    func updateUIView(_ view: EdgeGlowView, context: Context) {
+        view.configure(colors: colors, corner: corner, scale: scale,
+                       wide: Float(wide), thinking: thinking, turning: turning)
+    }
+}
+
+final class EdgeGlowView: UIView {
+    /// Wide soft glow, middle glow, crisp edge.
+    private let bands = [CALayer(), CALayer(), CALayer()]
+    private let wheels = [CAGradientLayer(), CAGradientLayer(), CAGradientLayer()]
+    private let crisp = CAShapeLayer()
+    private var colorKey = ""
+    private var corner: CGFloat = 0
+    private var scale: CGFloat = 1
+    private var masked = ""
+    private var thinking = false
+    private var turning = false
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        for (band, wheel) in zip(bands, wheels) {
+            wheel.type = .conic
+            wheel.startPoint = CGPoint(x: 0.5, y: 0.5); wheel.endPoint = CGPoint(x: 1, y: 0.5)
+            band.addSublayer(wheel)
+            layer.addSublayer(band)
         }
-        content
-            .opacity(value)
-            .animation(.easeOut(duration: 0.15), value: level.value)
+        bands[1].opacity = 0.9
+        crisp.fillColor = nil; crisp.strokeColor = UIColor.black.cgColor
+        bands[2].mask = crisp
+        NotificationCenter.default.addObserver(self, selector: #selector(returnedToForeground),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+    @objc private func returnedToForeground() { applyMotion() }
+    func configure(colors: [Color], corner: CGFloat, scale: CGFloat, wide: Float, thinking: Bool, turning: Bool) {
+        let key = "\(colors)"
+        if key != colorKey, let first = colors.first {
+            let wheelColors = (colors + [first]).map { UIColor($0).cgColor }
+            for wheel in wheels {
+                if !colorKey.isEmpty {
+                    let blend = CABasicAnimation(keyPath: "colors")
+                    blend.fromValue = wheel.colors; blend.toValue = wheelColors; blend.duration = 0.5
+                    wheel.add(blend, forKey: "recolour")
+                }
+                wheel.colors = wheelColors
+            }
+            colorKey = key
+        }
+        if corner != self.corner || scale != self.scale { self.corner = corner; self.scale = scale; setNeedsLayout() }
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(0.15)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeOut))
+        bands[0].opacity = wide
+        CATransaction.commit()
+        if thinking != self.thinking || turning != self.turning {
+            self.thinking = thinking; self.turning = turning; applyMotion()
+        }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let side = hypot(bounds.width, bounds.height)
+        let center = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        for (band, wheel) in zip(bands, wheels) {
+            band.frame = bounds
+            wheel.bounds = CGRect(x: 0, y: 0, width: side, height: side); wheel.position = center
+        }
+        let line = max(1.5, 3 * scale)
+        crisp.frame = bounds; crisp.lineWidth = line
+        crisp.path = UIBezierPath(roundedRect: bounds.insetBy(dx: line / 2, dy: line / 2),
+                                  cornerRadius: max(0, corner - line / 2)).cgPath
+        let key = "\(bounds.size)|\(corner)|\(scale)"
+        if bounds.width > 0, key != masked {
+            masked = key
+            // The soft edges are blurred once, at one pixel per point: the blur hides the resolution.
+            bands[0].mask = Self.edge(size: bounds.size, corner: corner, line: 56 * scale, blur: 34 * scale)
+            bands[1].mask = Self.edge(size: bounds.size, corner: corner, line: 18 * scale, blur: 10 * scale)
+        }
+        CATransaction.commit()
+    }
+    private static func edge(size: CGSize, corner: CGFloat, line: CGFloat, blur: CGFloat) -> CALayer {
+        let renderer = ImageRenderer(content: RoundedRectangle(cornerRadius: corner, style: .continuous)
+            .strokeBorder(lineWidth: line).blur(radius: blur).frame(width: size.width, height: size.height))
+        renderer.scale = 1
+        let mask = CALayer()
+        mask.frame = CGRect(origin: .zero, size: size)
+        mask.contents = renderer.cgImage
+        return mask
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { applyMotion() }
+    }
+    private func applyMotion() {
+        let rate = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        guard turning, window != nil else {
+            wheels.forEach { $0.removeAnimation(forKey: "turn") }
+            bands[1].removeAnimation(forKey: "think")
+            return
+        }
+        for wheel in wheels where wheel.animation(forKey: "turn") == nil {
+            let turn = CABasicAnimation(keyPath: "transform.rotation.z")
+            turn.fromValue = 0; turn.toValue = 2 * Double.pi
+            turn.duration = 4; turn.repeatCount = .infinity; turn.isRemovedOnCompletion = false
+            turn.timingFunction = CAMediaTimingFunction(name: .linear)
+            turn.preferredFrameRateRange = rate
+            wheel.add(turn, forKey: "turn")
+        }
+        // The middle glow breathes while thinking.
+        if thinking, bands[1].animation(forKey: "think") == nil {
+            let think = CABasicAnimation(keyPath: "opacity")
+            think.fromValue = 0.55; think.toValue = 1
+            think.duration = 0.6; think.autoreverses = true; think.repeatCount = .infinity
+            think.isRemovedOnCompletion = false
+            think.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            think.preferredFrameRateRange = rate
+            bands[1].add(think, forKey: "think")
+        } else if !thinking {
+            bands[1].removeAnimation(forKey: "think")
+        }
     }
 }
 

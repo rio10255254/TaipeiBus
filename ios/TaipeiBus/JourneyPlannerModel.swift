@@ -1419,6 +1419,8 @@ final class JourneyPlannerModel: ObservableObject {
         guard selectedID != current.id else { return }
         endWalkingGuidance()
         selectedID = current.id; started = false; stepIndex = 0; mapRevision += 1
+        // Every caller is the rider choosing a card, page, row or a spoken option.
+        Haptics.selection()
     }
     /// Once a usable card has appeared, later results may improve the list but cannot
     /// replace its Go button or map underneath the reader's finger.
@@ -1757,6 +1759,7 @@ final class JourneyPlannerModel: ObservableObject {
               let target = steps.firstIndex(of: .walk(index)) else { return }
         defer { onNavigationChange?() }
         started = true; stepIndex = target; mapRevision += 1
+        Haptics.selection()
     }
     func finish() {
         defer { onNavigationChange?() }

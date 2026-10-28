@@ -19,8 +19,19 @@ extension UIColor {
     }
 }
 extension Color {
+    /// One colour per hex value: a fresh dynamic UIColor never equals the last one, so tints and
+    /// accents made anew on every update read to SwiftUI and UIKit as a change each time.
+    private static let liveHexLock = NSLock()
+    nonisolated(unsafe) private static var liveHexColors: [String: Color] = [:]
     init(liveHex: String) {
-        self.init(uiColor: UIColor { traits in
+        Color.liveHexLock.lock(); defer { Color.liveHexLock.unlock() }
+        if let known = Color.liveHexColors[liveHex] { self = known; return }
+        let made = Color.dynamic(liveHex: liveHex)
+        Color.liveHexColors[liveHex] = made
+        self = made
+    }
+    private static func dynamic(liveHex: String) -> Color {
+        Color(uiColor: UIColor { traits in
             let base = UIColor(liveHex: liveHex)
             guard traits.userInterfaceStyle == .dark else { return base }
             if liveHex.uppercased() == "#007AFF" { return UIColor.systemBlue.resolvedColor(with: traits) }
@@ -93,6 +104,96 @@ enum InterfaceMotion {
 #endif
         return system
     }
+    /// A finger on a control: quick to press in, a touch of give on release.
+    static let press = Animation.spring(response: 0.24, dampingFraction: 0.74)
+    /// Floating map controls, chips and cards that appear, move or change size.
+    static let chrome = Animation.spring(response: 0.38, dampingFraction: 0.86)
+    /// Sheets and panels that change height or page.
+    static let panel = Animation.spring(response: 0.42, dampingFraction: 0.9)
+    /// Text, symbols and colours that change in place.
+    static let content = Animation.smooth(duration: 0.28)
+}
+
+/// Whether decorative motion that never stops (a turning orb, a glow, a breathing ring, a loading
+/// pulse) may run. In Low Power Mode or once the phone runs hot it holds still, as the map drops to
+/// 60 Hz then; Reduce Motion stills it too (`ContinuousMotion` adds that). Motion that answers a
+/// touch (a press, a transition, one bounce) is short and always allowed.
+@MainActor
+final class MotionBudget: ObservableObject {
+    static let shared = MotionBudget()
+    /// True while the phone asks apps to save energy or cool down, or the map is dropping frames.
+    @Published private(set) var conserving = MotionBudget.evaluate()
+    private var observers: [NSObjectProtocol] = []
+    /// Until when measured frame drops keep the decoration still; it comes back on its own.
+    private var stutterUntil = Date.distantPast
+    private var resume: Task<Void, Never>?
+    /// The map's display pacing over the last minute. Every iPhone keeps the full design; only
+    /// when frames are actually being dropped does the never-ending decoration rest for a few
+    /// minutes, giving the main thread back to the map and the trip.
+    func notePacing(frames: Int, delayed: Int) {
+        guard frames > 120, Double(delayed) / Double(frames) > 0.08 else { return }
+        stutterUntil = Date().addingTimeInterval(180)
+        refresh()
+        resume?.cancel()
+        resume = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(181))
+            guard !Task.isCancelled else { return }
+            self?.refresh()
+        }
+    }
+    private init() {
+        for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
+            observers.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                Task { @MainActor in MotionBudget.shared.refresh() }
+            })
+        }
+    }
+    nonisolated private static func evaluate() -> Bool {
+#if DEBUG
+        // Measurements compare the same screen with its never-ending decoration held still.
+        if ProcessInfo.processInfo.arguments.contains("--test-still-decor") { return true }
+#endif
+        let info = ProcessInfo.processInfo
+        return info.isLowPowerModeEnabled || info.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
+    }
+    func refresh() {
+        let value = Self.evaluate() || Date() < stutterUntil
+        if value != conserving { conserving = value }
+    }
+}
+
+/// What this iPhone is, for the diagnostics that tell how the app runs on each model. Nothing here
+/// lowers the design by model name; the budget above reacts to what is measured on the phone.
+enum DeviceProfile {
+    /// The hardware identifier, such as iPhone17,3 (the simulator reports the model it stands for).
+    static let model: String = {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] { return simulated }
+        var system = utsname()
+        uname(&system)
+        return withUnsafeBytes(of: &system.machine) { bytes in
+            String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+    }()
+    /// The A-series generation: iPhone11,x is A12 through iPhone18,x for A19.
+    static let chip: Int? = {
+        guard model.hasPrefix("iPhone"), let major = Int(model.dropFirst(6).prefix(while: \.isNumber)) else { return nil }
+        return major + 1
+    }()
+    static let memoryGB = Int((Double(ProcessInfo.processInfo.physicalMemory) / 1_073_741_824).rounded())
+    /// One line for the shared diagnostics: model, chip, memory, screen rate and system.
+    static var summary: String {
+        "device=\(model) chip=\(chip.map { "A\($0)" } ?? "?") memory_gb=\(memoryGB) max_hz=\(UIScreen.main.maximumFramesPerSecond) ios=\(UIDevice.current.systemVersion)"
+    }
+}
+
+/// Hands its content whether never-ending decorative motion may run right now: not with Reduce
+/// Motion, in Low Power Mode or on a hot phone. The content holds still and keeps its colours.
+struct ContinuousMotion<Content: View>: View {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @ObservedObject private var budget = MotionBudget.shared
+    private let content: (Bool) -> Content
+    init(@ViewBuilder content: @escaping (_ running: Bool) -> Content) { self.content = content }
+    var body: some View { content(!InterfaceMotion.reduced(systemReduceMotion) && !budget.conserving) }
 }
 private struct SmoothChange<Value: Equatable>: ViewModifier {
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -129,22 +230,178 @@ private struct LiveNumericText<Value: Equatable>: ViewModifier {
 
 /// The app's haptic vocabulary. Browsing stays a light selection tick so the firmer
 /// patterns keep their meaning during a trip.
+///
+/// Each generator is made on first use, kept, and primed again after it fires, so a run of
+/// taps (keys, pages, a trip's stages) lands on a Taptic Engine that is already awake instead
+/// of spinning one up every time. Every caller is on the main thread.
 enum Haptics {
-    /// Picking a stop, route, bus, key or map mode.
-    static func selection() { UISelectionFeedbackGenerator().selectionChanged() }
+    nonisolated(unsafe) private static var selector: UISelectionFeedbackGenerator?
+    nonisolated(unsafe) private static var notifier: UINotificationFeedbackGenerator?
+    nonisolated(unsafe) private static var impacts: [UIImpactFeedbackGenerator.FeedbackStyle: UIImpactFeedbackGenerator] = [:]
+    private static func impact(_ style: UIImpactFeedbackGenerator.FeedbackStyle, intensity: CGFloat = 1) {
+        let generator = impacts[style] ?? UIImpactFeedbackGenerator(style: style)
+        impacts[style] = generator
+        generator.impactOccurred(intensity: intensity); generator.prepare()
+    }
+    private static func notify(_ type: UINotificationFeedbackGenerator.FeedbackType) {
+        let generator = notifier ?? UINotificationFeedbackGenerator()
+        notifier = generator
+        generator.notificationOccurred(type); generator.prepare()
+    }
+    /// Picking a stop, route, bus, key, page or map mode.
+    static func selection() {
+        let generator = selector ?? UISelectionFeedbackGenerator()
+        selector = generator
+        generator.selectionChanged(); generator.prepare()
+    }
     /// A deliberate step: starting a trip, boarding, alighting, a changed station, or starting
     /// and finishing a spoken request.
-    static func stage() { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+    static func stage() { impact(.medium) }
     /// Something finished: the destination reached, or a spoken trip planned.
-    static func success() { UINotificationFeedbackGenerator().notificationOccurred(.success) }
-    /// Something needs attention: the assistant could not continue.
-    static func warning() { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
+    static func success() { notify(.success) }
+    /// Something needs attention: the assistant could not continue, a search found nothing.
+    static func warning() { notify(.warning) }
     /// The microphone opened.
-    static func listening() { UIImpactFeedbackGenerator(style: .soft).impactOccurred(intensity: 0.9) }
+    static func listening() { impact(.soft, intensity: 0.9) }
     /// The sentence was heard and is being understood.
-    static func heard() { UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.7) }
+    static func heard() { impact(.rigid, intensity: 0.7) }
     /// A question for the rider, such as consent to go online.
-    static func prompt() { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+    static func prompt() { impact(.light) }
+    /// A trip or a walk put away before its end: softer than a stage, so it never reads as arriving.
+    static func ended() { impact(.soft, intensity: 0.6) }
+    /// Something switched on or off in place: a favourite, the alighting reminder, following a bus.
+    static func toggle(_ on: Bool) { if on { impact(.light, intensity: 0.8) } else { selection() } }
+}
+
+extension View {
+    /// Swaps one SF Symbol for the next with the system Replace effect (Magic Replace from iOS 18,
+    /// so a slash or a badge draws onto the same glyph), and animates the colour that comes with
+    /// it. Symbol changes from data updates arrive outside an animation, so this supplies one.
+    func symbolSwap<Value: Equatable>(_ value: Value) -> some View { modifier(SymbolSwap(value: value)) }
+    /// One bounce of the symbols inside when `value` changes: the visible echo of a tap or of a
+    /// moment worth noticing, such as arriving.
+    func symbolBounce<Value: Equatable>(_ value: Value) -> some View { modifier(SymbolBounce(value: value)) }
+    /// A soft ring that keeps breathing out of the view while `active`: a bus about to arrive, the
+    /// rider's stop coming next. `cornerRadius` nil follows a circle or capsule. With Reduce Motion,
+    /// in Low Power Mode or on a hot phone the ring holds still and the colour alone says it.
+    func attentionPulse(_ active: Bool, color: Color, cornerRadius: CGFloat? = nil) -> some View {
+        modifier(AttentionPulse(active: active, color: color, cornerRadius: cornerRadius))
+    }
+}
+private struct SymbolSwap<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let value: Value
+    @ViewBuilder func body(content: Content) -> some View {
+        if InterfaceMotion.reduced(systemReduceMotion) {
+            content.contentTransition(.identity)
+        } else if #available(iOS 18.0, *) {
+            content.contentTransition(.symbolEffect(.replace.magic(fallback: .replace)))
+                .animation(InterfaceMotion.content, value: value)
+        } else {
+            content.contentTransition(.symbolEffect(.replace)).animation(InterfaceMotion.content, value: value)
+        }
+    }
+}
+private struct SymbolBounce<Value: Equatable>: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    let value: Value
+    @ViewBuilder func body(content: Content) -> some View {
+        if InterfaceMotion.reduced(systemReduceMotion) { content }
+        else { content.symbolEffect(.bounce, value: value) }
+    }
+}
+private struct AttentionPulse: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    let active: Bool
+    let color: Color
+    /// nil: a circle or capsule.
+    let cornerRadius: CGFloat?
+    func body(content: Content) -> some View {
+        ContinuousMotion { running in
+            content.background {
+                if active {
+                    PulseRing(color: UIColor(color), cornerRadius: cornerRadius, running: running, dark: colorScheme == .dark)
+                        .transition(.opacity)
+                }
+            }
+        }
+    }
+}
+
+/// The attention ring, drawn and animated by Core Animation. Once added, the animation runs in
+/// the render server: it costs the app no work per frame, keeps its pace while the main thread is
+/// busy planning or decoding, and asks for no more than 60 Hz on a 120 Hz screen.
+private struct PulseRing: UIViewRepresentable {
+    let color: UIColor
+    let cornerRadius: CGFloat?
+    let running: Bool
+    let dark: Bool
+    func makeUIView(context: Context) -> PulseRingView { PulseRingView() }
+    func updateUIView(_ view: PulseRingView, context: Context) {
+        view.configure(color: color.resolvedColor(with: UITraitCollection(userInterfaceStyle: dark ? .dark : .light)),
+                       cornerRadius: cornerRadius, running: running)
+    }
+}
+
+final class PulseRingView: UIView {
+    private let ring = CAShapeLayer()
+    private var cornerRadius: CGFloat?
+    private var running = false
+    private static let key = "attention-pulse"
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+        ring.fillColor = nil
+        ring.lineWidth = 2
+        layer.addSublayer(ring)
+        // Returning from the background, Core Animation may have dropped a repeating animation.
+        NotificationCenter.default.addObserver(self, selector: #selector(returnedToForeground),
+                                               name: UIApplication.willEnterForegroundNotification, object: nil)
+    }
+    required init?(coder: NSCoder) { nil }
+    @objc private func returnedToForeground() { applyMotion() }
+    func configure(color: UIColor, cornerRadius: CGFloat?, running: Bool) {
+        ring.strokeColor = color.cgColor
+        let reshape = cornerRadius != self.cornerRadius
+        self.cornerRadius = cornerRadius
+        if running != self.running { self.running = running; applyMotion() }
+        if reshape { setNeedsLayout() }
+    }
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        ring.frame = bounds
+        // Still, the ring sits just outside the mark; moving, it starts on its edge.
+        let rect = running ? bounds : bounds.insetBy(dx: -3, dy: -3)
+        let radius = cornerRadius.map { $0 + (running ? 0 : 3) } ?? min(rect.width, rect.height) / 2
+        ring.path = UIBezierPath(roundedRect: rect, cornerRadius: radius).cgPath
+    }
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        if window != nil { applyMotion() }
+    }
+    private func applyMotion() {
+        setNeedsLayout()
+        guard running, window != nil else {
+            ring.removeAnimation(forKey: Self.key)
+            ring.opacity = running ? 0 : 0.8
+            return
+        }
+        ring.opacity = 0
+        guard ring.animation(forKey: Self.key) == nil else { return }
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 1; grow.toValue = 1.32
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.85; fade.toValue = 0
+        let pulse = CAAnimationGroup()
+        pulse.animations = [grow, fade]
+        pulse.duration = 1.3
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        pulse.repeatCount = .infinity
+        pulse.isRemovedOnCompletion = false
+        pulse.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+        ring.add(pulse, forKey: Self.key)
+    }
 }
 
 private struct NativeActionSurface: ViewModifier {
@@ -272,8 +529,10 @@ extension MapChrome {
 extension LiveSettings {
     /// The continuous rounded shape for `corner`, scaled by the remote corner setting.
     func shape(_ corner: MapChrome.Corner) -> RoundedRectangle {
-        RoundedRectangle(cornerRadius: corner.rawValue * CGFloat(appearance.cornerScale), style: .continuous)
+        RoundedRectangle(cornerRadius: radius(corner), style: .continuous)
     }
+    /// The radius of `corner`, scaled by the remote corner setting.
+    func radius(_ corner: MapChrome.Corner) -> CGFloat { corner.rawValue * CGFloat(appearance.cornerScale) }
 }
 
 /// Filled or tinted capsule actions used by the trip cards, matching the
@@ -293,13 +552,15 @@ struct MapActionStyle: ButtonStyle {
             .contentShape(Capsule())
             .opacity(isEnabled ? (configuration.isPressed ? 0.82 : 1) : 0.42)
             .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
-            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.press, value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
     }
 }
 
 /// Apple Maps place-card action tiles: icon above a short label.
 struct MapTileStyle: ButtonStyle {
     @Environment(\.liveSettings) private var live
+    @Environment(\.isEnabled) private var isEnabled
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     var prominent = false
     var tint: Color? = nil
@@ -313,9 +574,48 @@ struct MapTileStyle: ButtonStyle {
             .frame(maxWidth: .infinity, minHeight: 58)
             .background(prominent ? AnyShapeStyle(accent) : AnyShapeStyle(Color(uiColor: .tertiarySystemFill)), in: shape)
             .contentShape(shape)
-            .opacity(configuration.isPressed ? 0.8 : 1)
+            .opacity(isEnabled ? (configuration.isPressed ? 0.8 : 1) : 0.42)
             .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
-            .animation(reduced ? nil : .spring(response: 0.24, dampingFraction: 0.74), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.press, value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
+    }
+}
+
+/// A row in a list or search results: a soft rounded highlight under the finger, as iOS
+/// lists do, instead of shrinking the whole row. The highlight shows at once on touch and
+/// fades out on release; a disabled row (a search still resolving) dims.
+struct RowPressStyle: ButtonStyle {
+    @Environment(\.liveSettings) private var live
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    /// How far the highlight reaches past the row's own edges, for rows without inner padding.
+    var bleed: CGFloat = 8
+    func makeBody(configuration: Configuration) -> some View {
+        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        return configuration.label
+            .contentShape(Rectangle())
+            // Only a pressed row carries a highlight layer; long lists stay as light as before.
+            .background {
+                if configuration.isPressed {
+                    live.shape(.row).fill(Color.primary.opacity(0.08)).padding(.horizontal, -bleed)
+                        .transition(.opacity)
+                }
+            }
+            .opacity(isEnabled ? 1 : 0.5)
+            .animation(configuration.isPressed || reduced ? nil : .easeOut(duration: 0.3), value: configuration.isPressed)
+            .animation(reduced ? nil : InterfaceMotion.content, value: isEnabled)
+    }
+}
+
+extension View {
+    /// The control a sheet opens from, so the sheet can grow out of it (the iOS 18 zoom; on iOS 26
+    /// the sheet morphs out of the control's glass). Earlier systems keep the standard slide up.
+    @ViewBuilder func sheetSource(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) { matchedTransitionSource(id: id, in: namespace) } else { self }
+    }
+    /// Presents this sheet out of the control marked with the same `sheetSource` id.
+    @ViewBuilder func opensFromSource(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 18.0, *) { navigationTransition(.zoom(sourceID: id, in: namespace)) } else { self }
     }
 }
 
@@ -368,13 +668,14 @@ extension EmptyStateView where Actions == EmptyView {
 /// and nothing jumps when the content arrives. They pulse gently unless Reduce Motion is on.
 struct LoadingRows: View {
     @Environment(\.liveSettings) private var live
-    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     var count = 3
     /// Spoken in place of the placeholder rows, already localized.
     let label: String
     @State private var dimmed = false
     var body: some View {
-        let reduced = InterfaceMotion.reduced(systemReduceMotion)
+        ContinuousMotion { running in rows(running) }
+    }
+    private func rows(_ running: Bool) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             ForEach(0..<count, id: \.self) { index in
                 HStack(spacing: 12) {
@@ -392,8 +693,8 @@ struct LoadingRows: View {
         }
         .foregroundStyle(Color(uiColor: .systemFill))
         .opacity(dimmed ? 0.5 : 1)
-        .animation(reduced ? nil : .easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: dimmed)
-        .onAppear { dimmed = !reduced }
+        .animation(running ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : nil, value: dimmed)
+        .onChange(of: running, initial: true) { _, run in dimmed = run }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
     }

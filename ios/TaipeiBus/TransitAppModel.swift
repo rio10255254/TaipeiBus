@@ -131,8 +131,8 @@ final class TransitAppModel: ObservableObject {
     /// The bell on the riding card: Pro turns the reminder on or off; otherwise it shows Pro.
     func toggleAlightReminder() {
         guard purchases.hasPro else { showingProPlans = true; return }
-        if alightReminderActive { alightReminderOn = false }
-        else { alightReminderOn = true; requestAlightReminderAccess() }
+        if alightReminderActive { alightReminderOn = false; Haptics.toggle(false) }
+        else { alightReminderOn = true; requestAlightReminderAccess(); Haptics.toggle(true) }
     }
 
     // MARK: Live Activity and Home Screen widget (Pro)
@@ -508,6 +508,7 @@ final class TransitAppModel: ObservableObject {
     func dismissJourneySuggestion() {
         if let suggestion = journeySuggestion { dismissedJourneySuggestions[suggestion.id] = Date() }
         journeySuggestion = nil
+        Haptics.selection()
     }
     private func considerJourneyAlternative(force: Bool = false) {
 #if DEBUG
@@ -564,6 +565,7 @@ final class TransitAppModel: ObservableObject {
         clearJourneySuggestion(); activeSavedJourneyID = nil
         alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false
         clearSelection(); anchorBoardedVehicle(); updateLiveSurfaces()
+        Haptics.stage()
     }
     func applyPersonalPreferences() {
         var settings = liveSettings
@@ -999,6 +1001,7 @@ final class TransitAppModel: ObservableObject {
                 address:station.address,bearing:station.bearing,stopIDs:station.stopIDs,englishName:station.englishName + " · " + exit.englishName,mode:station.mode)
         }
         stationWalk.begin(target, location: location)
+        Haptics.stage()
     }
     func showStationWalkOverview() {
         guard !stationWalk.coordinates.isEmpty else { return }
@@ -1528,7 +1531,7 @@ final class TransitAppModel: ObservableObject {
     func toggleFavorite(_ station: Station) {
         if favorites.contains(station.id) { favorites.remove(station.id) } else { favorites.insert(station.id) }
         defaults.set(Array(favorites), forKey: "favoriteStations")
-        Haptics.selection()
+        Haptics.toggle(favorites.contains(station.id))
     }
 
     func stations(query: String) -> [Station] {
@@ -1699,7 +1702,22 @@ final class TransitAppModel: ObservableObject {
         return "悠遊卡\(fareClass.ticketName)，已扣捷運公車轉乘優惠"
     }
 
+    /// Several views ask for the same trip's duration in the same second, and a sheet's layout can
+    /// ask many times in one pass: presenting the itinerary on iOS 17 asked until the main thread was
+    /// never free. The answer only changes with its inputs, so it is worked out once per second.
+    private var durationMemo: [String: JourneyDuration?] = [:]
     func journeyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
+        let key = [option.id, String(Int(suppliedDate.timeIntervalSince1970)), planner.selectedID ?? "",
+                   String(planner.started), String(planner.stepIndex), String(walkingMapIndex ?? -1),
+                   String(planner.mapRevision), String(planner.walkingRevision), String(snapshot.revision),
+                   String(location.revision), String(metroRevision), String(anchorRevision)].joined(separator: "|")
+        if let known = durationMemo[key] { return known }
+        let value = computeJourneyDuration(option, at: suppliedDate)
+        if durationMemo.count > 48 { durationMemo.removeAll(keepingCapacity: true) }
+        durationMemo[key] = value
+        return value
+    }
+    private func computeJourneyDuration(_ option: JourneyOption, at suppliedDate: Date) -> JourneyDuration? {
 #if DEBUG
         let date = ProcessInfo.processInfo.arguments.contains("--preview-mixed-planning")
             ? ISO8601DateFormatter().date(from:"2026-10-09T04:00:00Z")! : planner.started ? suppliedDate : JourneyDuration.previewDate(suppliedDate)

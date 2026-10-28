@@ -1531,7 +1531,8 @@ struct NativeBusMap: UIViewRepresentable {
             guard model.isActive, let map else { return }
             if let sample = pacing.observe(timestamp: link.timestamp, targetInterval: link.targetTimestamp-link.timestamp) {
                 UIDevice.current.isBatteryMonitoringEnabled = true
-                JourneyDiagnostics.shared.record("display fps=\(Int(sample.framesPerSecond.rounded())) delayed=\(sample.delayedFrames)/\(sample.frames) longest_ms=\(Int(sample.longestGapMilliseconds.rounded())) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) battery_pct=\(Int(UIDevice.current.batteryLevel*100)) low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled)")
+                JourneyDiagnostics.shared.record("display fps=\(Int(sample.framesPerSecond.rounded())) delayed=\(sample.delayedFrames)/\(sample.frames) longest_ms=\(Int(sample.longestGapMilliseconds.rounded())) thermal=\(ProcessInfo.processInfo.thermalState.rawValue) battery_pct=\(Int(UIDevice.current.batteryLevel*100)) low_power=\(ProcessInfo.processInfo.isLowPowerModeEnabled) decor_still=\(MotionBudget.shared.conserving) \(DeviceProfile.summary)")
+                MotionBudget.shared.notePacing(frames: sample.frames, delayed: sample.delayedFrames)
             }
 #if DEBUG
             let tickStarted = CACurrentMediaTime()
