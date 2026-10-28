@@ -486,7 +486,7 @@ struct TransitHomeView: View {
             // Checked once a minute while navigating, so a trip that runs past sunset darkens.
             guard planner.started || stationWalk.isActive else { sunDown = false; return }
             while !Task.isCancelled {
-                sunDown = Daylight.isNight(at: Date(), coordinate: location.usableCoordinate ?? .taipei)
+                sunDown = Daylight.isNight(at: Date(), coordinate: location.usableCoordinate ?? .serviceCenter)
                 try? await Task.sleep(for: .seconds(60))
             }
         }

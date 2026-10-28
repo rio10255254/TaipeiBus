@@ -7,9 +7,9 @@ app reads the live half at runtime. No credentials and no live counts are writte
 import argparse, datetime, hashlib, json, urllib.request
 from pathlib import Path
 
+import service_area
+
 FEED = 'https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json'
-# The app's service area (Coordinate.isInServiceArea).
-BOUNDS = (24.90, 25.25, 121.27, 121.72)
 LIMIT = 12 * 1024 * 1024
 
 
@@ -45,7 +45,7 @@ def main():
         except (KeyError, TypeError, ValueError):
             skipped += 1; continue
         if not identifier or identifier in stations: skipped += 1; continue
-        if not (BOUNDS[0] <= latitude <= BOUNDS[1] and BOUNDS[2] <= longitude <= BOUNDS[3]): skipped += 1; continue
+        if not service_area.contains(latitude, longitude): skipped += 1; continue
         if not 0 <= capacity <= 200: skipped += 1; continue
         title = name(row.get('sna'))
         if not title: skipped += 1; continue

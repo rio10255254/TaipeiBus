@@ -4,12 +4,13 @@ The map shows the better known places first; nobody's searches are needed. Wikid
 credentials. One query and one download: Wikimedia limits per-article pageview requests too tightly to ask for
 thousands of places.
 
-The area kept is a parameter, so covering more of Taiwan is a matter of widening it."""
+The area kept is the app's service area (service_area.py), so covering more of Taiwan is a matter of adding
+a region."""
 import argparse, csv, datetime, gzip, io, json, re, time, urllib.error, urllib.parse, urllib.request
 from pathlib import Path
 
-# The app's service area (Geometry.swift isInServiceArea).
-AREA = (24.90, 25.25, 121.27, 121.72)
+import service_area
+
 AGENT = 'OneRoad data collector (https://github.com/rio10255254/TaipeiBus)'
 QUERY = '''SELECT ?item ?loc (SAMPLE(?zh) AS ?label) (GROUP_CONCAT(DISTINCT ?alias; separator="|") AS ?aliases) WHERE {
   SERVICE wikibase:box { ?item wdt:P625 ?loc .
@@ -66,7 +67,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
-    south, north, west, east = AREA
+    south, north, west, east = service_area.envelope()
     query = QUERY % {'south': south, 'north': north, 'west': west, 'east': east}
     # POST: the query is too long to send in a URL reliably.
     rows = read('https://query.wikidata.org/sparql', 'application/sparql-results+json', {'query': query})['results']['bindings']
@@ -75,7 +76,7 @@ def main():
         match = re.match(r'Point\(([-\d.]+) ([-\d.]+)\)', row['loc']['value'])
         if not match: continue
         lon, lat = float(match.group(1)), float(match.group(2))
-        if not (south <= lat <= north and west <= lon <= east): continue
+        if not service_area.contains(lat, lon): continue
         entry = items.setdefault(row['item']['value'].rsplit('/', 1)[-1], {'points': set(), 'names': []})
         entry['points'].add((round(lat, 5), round(lon, 5)))
         for name in map(clean, [row['label']['value']] + row.get('aliases', {}).get('value', '').split('|')):

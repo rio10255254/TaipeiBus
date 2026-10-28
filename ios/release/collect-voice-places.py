@@ -2,18 +2,18 @@
 attractions, restaurants and hotels, with where each is. The app corrects misheard place names against
 them (by sound) and tells the recogniser to expect the ones near the rider. No credentials are needed.
 
-The files cover the whole country; the area kept is a parameter, so covering more of Taiwan is a matter
-of widening it."""
+The files cover the whole country; the area kept is the app's service area (service_area.py), so covering
+more of Taiwan is a matter of adding a region."""
 import argparse, datetime, io, json, re, ssl, urllib.request, zipfile
 from pathlib import Path
+
+import service_area
 
 SOURCE = 'https://media.taiwan.net.tw/XMLReleaseAll_public/v2.0/Zh_tw/'
 # (kind, archive, list file, list key, name field)
 KINDS = [('spot', 'Attraction', 'AttractionList.json', 'Attractions', 'AttractionName'),
          ('food', 'Restaurant', 'RestaurantList.json', 'Restaurants', 'RestaurantName'),
          ('hotel', 'Hotel', 'HotelList.json', 'Hotels', 'HotelName')]
-# The app's service area (Geometry.swift isInServiceArea).
-AREA = (24.90, 25.25, 121.27, 121.72)
 LIMIT = 60 * 1024 * 1024
 MAX_PLACES = 6000
 
@@ -45,7 +45,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
-    south, north, west, east = AREA
     places, seen, counts, updated = [], set(), {}, {}
     for kind, archive, listed, key, field in KINDS:
         with zipfile.ZipFile(io.BytesIO(read(f'{SOURCE}{archive}-json.zip'))) as files:
@@ -56,7 +55,7 @@ def main():
         for row in rows:
             lat, lon = row.get('PositionLat'), row.get('PositionLon')
             if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)): continue
-            if not (south <= lat <= north and west <= lon <= east): continue
+            if not service_area.contains(lat, lon): continue
             # Closed for good (ServiceStatus 0) is left out; other names it goes by count as well.
             if row.get('ServiceStatus', 1) == 0: continue
             for name in [row.get(field, '')] + [n for n in row.get('AlternateNames') or [] if isinstance(n, str)]:

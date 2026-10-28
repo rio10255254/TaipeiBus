@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "home": "taipei",
+  "regions": [
+    {
+      "id": "taipei",
+      "name": "台北",
+      "englishName": "Taipei",
+      "center": [25.0377, 121.56],
+      "bounds": [[24.90, 121.27, 25.25, 121.72]],
+      "sources": ["tpe", "bike-tpe"]
+    }
+  ],
+  "sources": [
+    {
+      "id": "tpe",
+      "name": "臺北市公車",
+      "kind": "bus",
+      "feed": "https://tcgbusfs.blob.core.windows.net/blobbus/",
+      "idPrefix": ""
+    },
+    {
+      "id": "bike-tpe",
+      "name": "臺北市 YouBike 2.0",
+      "kind": "bike",
+      "feed": "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json"
+    }
+  ]
+}

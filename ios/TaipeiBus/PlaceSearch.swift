@@ -64,7 +64,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
     private var query = ""
     private var generation = UUID()
     private var searchRegion = PlaceSearch.region
-    private var preferredPosition = Coordinate.taipei
+    private var preferredPosition = Coordinate.serviceCenter
     private var vocabulary = SearchVocabulary()
     private var settings = LiveSettings.Search()
     private var rulesRevision = -1
@@ -149,7 +149,7 @@ final class PlaceSearch: NSObject, ObservableObject, @preconcurrency MKLocalSear
         if completionCache.count > 24 { completionCache.removeValue(forKey: completionCache.min { $0.value.0 < $1.value.0 }!.key) }
     }
     func setContext(_ coordinate: Coordinate?) {
-        let point = coordinate?.isInServiceArea == true ? coordinate! : .taipei
+        let point = coordinate?.isInServiceArea == true ? coordinate! : .serviceCenter
         let moved = preferredPosition.distance(to: point) > 1_500
         preferredPosition = point
         searchRegion = MKCoordinateRegion(center: point.locationCoordinate, span: Self.region.span)

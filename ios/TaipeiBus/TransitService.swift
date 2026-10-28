@@ -67,7 +67,8 @@ actor TransitService {
     private var checkedBikeCache = false
     private let bikeSession: URLSession
     private let bikeNow: @Sendable () -> Date
-    private static let bikeFeedURL = URL(string: "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json")!
+    /// nil for a region without YouBike.
+    private static let bikeFeedURL = RegionCatalog.shared.source(.bike)?.feed
     /// Reuse a recent official report across launches, keeping its original receipt and
     /// station report times. Loading a file never makes old counts current again.
     func cachedBikeAvailability(network: BikeNetwork) -> BikeAvailability? {
@@ -102,7 +103,8 @@ actor TransitService {
     }
     private func fetchBikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
         bikeRetryAt = bikeNow().addingTimeInterval(10)
-        var request = URLRequest(url: Self.bikeFeedURL)
+        guard let url = Self.bikeFeedURL else { return bikePacket }
+        var request = URLRequest(url: url)
         request.timeoutInterval = 12; request.cachePolicy = .reloadIgnoringLocalCacheData
         if let bikeTag, bikePacket != nil { request.setValue(bikeTag, forHTTPHeaderField: "If-None-Match") }
         do {
@@ -143,7 +145,7 @@ actor TransitService {
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
         transport = ConditionalFeedTransport(session: feedSession ?? URLSession(configuration: configuration),
-            baseURL: URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/")!)
+            baseURL: RegionCatalog.shared.source(.bus)!.feed)
         self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }

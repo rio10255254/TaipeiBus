@@ -105,7 +105,7 @@ enum ProAccess {
 /// Reads only the saved stops out of the city's public arrival file (about 160 KB compressed),
 /// without decoding the whole file into memory-hungry objects.
 enum EstimateLookup {
-    static let url = URL(string: "https://tcgbusfs.blob.core.windows.net/blobbus/GetEstimateTime.gz")!
+    static let url = RegionCatalog.shared.source(.bus)!.feed.appendingPathComponent("GetEstimateTime.gz")
 
     static func timings(for commutes: [CommuteWidgetPayload.Commute], now: Date) async -> (timings: [String: CommuteTiming], failed: Bool) {
         let wanted = commutes.compactMap { commute in commute.ride.flatMap { $0.metro || $0.routeKey.isEmpty ? nil : (commute.id, $0) } }
