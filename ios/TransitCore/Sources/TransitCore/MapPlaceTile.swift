@@ -4,10 +4,12 @@ public struct MapPlace: Sendable {
     public let id: String
     public let coordinate: Coordinate
     public let kind: String
+    /// OpenMapTiles' finer type within `kind`: a hospital's `clinic`, a railway's `subway`.
+    public let subclass: String
     public let rank: Double
     public let names: [String: String]
-    public init(id: String, coordinate: Coordinate, kind: String, rank: Double, names: [String: String]) {
-        self.id = id; self.coordinate = coordinate; self.kind = kind; self.rank = rank; self.names = names
+    public init(id: String, coordinate: Coordinate, kind: String, subclass: String = "", rank: Double, names: [String: String]) {
+        self.id = id; self.coordinate = coordinate; self.kind = kind; self.subclass = subclass; self.rank = rank; self.names = names
     }
 }
 
@@ -91,12 +93,13 @@ public enum MapPlaceTile {
                       let geometry = body.first(where: { $0.number == 4 })?.data else { continue }
                 let tags = try packed(tagsData)
                 guard tags.count.isMultiple(of: 2) else { throw FeedError.invalid("Vector tile tags") }
-                var names: [String: String] = [:], kind = "", rank = 999999.0
+                var names: [String: String] = [:], kind = "", subclass = "", rank = 999999.0
                 for i in stride(from: 0, to: tags.count, by: 2) {
                     guard tags[i] < UInt64(keys.count), tags[i + 1] < UInt64(values.count) else { throw FeedError.invalid("Vector tile attribute") }
                     let key = keys[Int(tags[i])], val = values[Int(tags[i + 1])]
                     if case .string(let text) = val {
                         if key == "class" { kind = text }
+                        if key == "subclass" { subclass = text }
                         if ["name", "name:zh", "name:en", "name_en", "name:latin"].contains(key), !text.isEmpty { names[key] = text }
                     }
                     if key == "rank", case .number(let number) = val { rank = number }
@@ -113,7 +116,7 @@ public enum MapPlaceTile {
                 guard longitude.isFinite, latitude.isFinite, abs(longitude) <= 180, abs(latitude) < 85 else { continue }
                 let coordinate = Coordinate(latitude: latitude, longitude: longitude)
                 let id = "\(kind):\(name):\(String(format: "%.6f", latitude)):\(String(format: "%.6f", longitude))"
-                result.append(MapPlace(id: id, coordinate: coordinate, kind: kind, rank: rank, names: names))
+                result.append(MapPlace(id: id, coordinate: coordinate, kind: kind, subclass: subclass, rank: rank, names: names))
             }
         }
         return result

@@ -1156,5 +1156,7 @@
   "選這個地點": "Choose this place",
   "導航中，到了「%@」再看下一段。": "Navigating now; the next leg comes once you reach “%@”.",
   "這是第 %@ 段，接著要去%@，說「下一段」就能看。": " This is leg %@; %@ comes next — say “next leg” to see it.",
-  "已到達「%@」。下一站是「%@」，要規劃過去的路線嗎？": "You've arrived at “%@”. Next is “%@” — shall I plan the way there?"
+  "已到達「%@」。下一站是「%@」，要規劃過去的路線嗎？": "You've arrived at “%@”. Next is “%@” — shall I plan the way there?",
+  "政府資料開放授權條款": "Open Government Data License",
+  "地圖先顯示較知名的景點與餐飲，知名程度參考交通部觀光署觀光資訊資料庫（景點、餐飲、旅宿，依政府資料開放授權條款第 1 版使用），以及維基數據與維基百科的閱讀次數（QRank）。語音辨識也用觀光署的地名校正。": "The map shows better-known sights and places to eat first. How well known a place is comes from the Tourism Administration (MOTC) tourism information database (attractions, restaurants and hotels, used under the Open Government Data License, version 1.0), and from Wikidata and Wikipedia readership (QRank). Voice recognition also corrects place names against the Tourism Administration's list."
 }

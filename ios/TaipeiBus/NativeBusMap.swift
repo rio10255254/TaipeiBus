@@ -1224,6 +1224,7 @@ struct NativeBusMap: UIViewRepresentable {
                     sources.removeValue(forKey: "viewport-places")
                     for i in layers.indices where (layers[i]["id"] as? String ?? "").hasPrefix("poi") {
                         layers[i]["source"] = "openmaptiles"; layers[i]["source-layer"] = "poi"
+                        layers[i]["filter"] = ViewportPlaceRenderer.legacyFilter(layers[i]["id"] as? String ?? "")
                     }
                 }
                 document["layers"] = layers; document["sources"] = sources
@@ -2168,8 +2169,15 @@ private final class ZoomPerformanceProbe {
 /// Only nearby, budgeted places enter the symbol layout pipeline. Queries are
 /// coalesced after gestures and reused inside a buffered geographic viewport.
 private final class ViewportPlaceRenderer {
-    static let landmarkClasses: Set<String> = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
-    static let ordinaryClasses: Set<String> = Set(NativeBusMap.Coordinator.poiCategories.flatMap(\.classes)).subtracting(landmarkClasses)
+    /// How every tile place was drawn before the viewport budget (tile rank and class), kept so
+    /// the legacy-poi probe still measures that cost. MapPlacePriority now decides what is shown.
+    static func legacyFilter(_ layerID: String) -> [Any] {
+        let landmarks = ["hospital", "college", "library", "park", "zoo", "museum", "attraction", "monument", "castle", "town_hall", "railway"]
+        let ordinary = NativeBusMap.Coordinator.poiCategories.flatMap(\.classes).filter { !landmarks.contains($0) }
+        let rank: [Any] = layerID == "poi_landmark" ? ["<=", ["get", "rank"], 3] : layerID == "poi" ? ["<=", ["get", "rank"], 25] :
+            layerID == "poi_dense" ? ["all", [">", ["get", "rank"], 25], ["<=", ["get", "rank"], 120]] : [">", ["get", "rank"], 120]
+        return ["all", ["match", ["get", "class"], layerID == "poi_landmark" ? landmarks : ordinary, true, false], ["has", "name"], rank]
+    }
     /// Labels are pre-placed this far past each screen edge so a short pan shows places at once.
     private static let overscan: CGFloat = 120
     private weak var map: MLNMapView?
@@ -2228,7 +2236,7 @@ private final class ViewportPlaceRenderer {
     /// Gestures only hold back publication. A tile fetch already under way keeps going in
     /// the background so its places are ready the moment the map settles.
     func suspend() { generation += 1; pending?.cancel(); pending = nil; deferred += 1 }
-    private func band(_ zoom: Double) -> Int { zoom < 14 ? 0 : zoom < 15.5 ? 1 : zoom < 16.5 ? 2 : zoom < 17.5 ? 3 : 4 }
+    private func band(_ zoom: Double) -> Int { MapPlacePriority.band(zoom) }
     func request() {
         guard let map, source != nil else { return }
         let now = CACurrentMediaTime()
@@ -2300,14 +2308,12 @@ private final class ViewportPlaceRenderer {
         let token = loadGeneration
         let started = CACurrentMediaTime()
         queries += 1
-        let maximumRank = currentBand == 2 ? 25.0 : currentBand == 3 ? 120.0 : 1_000_000.0
-        let ordinary = currentBand > 1 ? Self.ordinaryClasses : []
+        let eligibleZoom = MapPlacePriority.zoomSteps[currentBand - 1]
         loadTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { if self.loadGeneration == token { self.loadTask = nil } }
             do {
-                let values = try await self.provider.places(in: buffered, landmarks: Self.landmarkClasses,
-                                                            ordinary: ordinary, maximumRank: maximumRank)
+                let values = try await self.provider.places(in: buffered, zoom: eligibleZoom)
                 try Task.checkCancellation()
                 guard self.loadGeneration == token, self.source != nil else { return }
                 self.sourceCount = values.count
@@ -2315,10 +2321,11 @@ private final class ViewportPlaceRenderer {
                 self.maxQueryMs = max(self.maxQueryMs, self.lastQueryMs)
                 var fresh: [String: MLNPointFeature] = [:]
                 fresh.reserveCapacity(values.count)
-                for place in values {
+                for (place, priority) in values {
                     let feature = MLNPointFeature(); feature.coordinate = place.coordinate.locationCoordinate
                     feature.identifier = place.id
-                    var attributes: [String: Any] = ["class": place.kind, "rank": place.rank]
+                    // `tier` picks the style layer; `rank` orders labels there and in the budget below.
+                    var attributes: [String: Any] = ["class": place.kind, "tier": priority.tier.rawValue, "rank": priority.score]
                     for (key, value) in place.names { attributes[key] = value }
                     feature.attributes = attributes; fresh[place.id] = feature
                 }
@@ -2339,10 +2346,10 @@ private final class ViewportPlaceRenderer {
     private func publish(_ map: MLNMapView, source: MLNShapeSource, zoom: Double, viewport: CGRect) {
         let projected = records.map { id, feature -> PlaceLabelCandidate in
             let pixel = map.convert(feature.coordinate, toPointTo: map)
-            let kind = feature.attribute(forKey: "class") as? String ?? ""
+            let tier = (feature.attribute(forKey: "tier") as? NSNumber)?.intValue
             let rank = (feature.attribute(forKey: "rank") as? NSNumber)?.doubleValue ?? 999999
             return PlaceLabelCandidate(id: id, x: pixel.x - viewport.minX, y: pixel.y - viewport.minY,
-                                       rank: rank, landmark: Self.landmarkClasses.contains(kind))
+                                       rank: rank, landmark: tier == MapPlacePriority.Tier.sight.rawValue)
         }
         candidates = projected.count
         let ids = PlaceLabelBudget.select(projected, zoom: zoom, width: viewport.width, height: viewport.height,
@@ -2371,7 +2378,8 @@ private final class ViewportPlaceRenderer {
 private actor PlaceTileProvider {
     private struct Configuration: Decodable { let tiles: [String]; let maxzoom: Int? }
     private var configuration: Configuration?
-    private var cache: [String: [MapPlace]] = [:]
+    /// Only places the map draws, each ranked once when its tile is decoded.
+    private var cache: [String: [(MapPlace, MapPlacePriority)]] = [:]
     private var order: [String] = []
     /// Tile URLs carry the data version, so a dedicated disk cache can serve them across
     /// launches without a second download of what the map itself already fetched once.
@@ -2392,7 +2400,8 @@ private actor PlaceTileProvider {
         guard (response as? HTTPURLResponse)?.statusCode == 200, data.count <= 8 * 1024 * 1024 else { throw FeedError.invalid("Place tile response") }
         return data
     }
-    func places(in bounds: GeoBounds, landmarks: Set<String>, ordinary: Set<String>, maximumRank: Double) async throws -> [MapPlace] {
+    /// The places in `bounds` that may be shown from `zoom` (one of MapPlacePriority.zoomSteps).
+    func places(in bounds: GeoBounds, zoom eligibleZoom: Double) async throws -> [(MapPlace, MapPlacePriority)] {
         if configuration == nil {
             // The tile list names the current data version; revalidate it so an old cached
             // version that the server has retired never leaves the map without places.
@@ -2412,13 +2421,13 @@ private actor PlaceTileProvider {
             west = tileX(bounds.west); east = tileX(bounds.east); north = tileY(bounds.north); south = tileY(bounds.south)
         }
         guard east >= west, south >= north, (east - west + 1) * (south - north + 1) <= 16 else { return [] }
-        var result: [String: MapPlace] = [:]
+        var result: [String: (MapPlace, MapPlacePriority)] = [:]
         var failures = 0, tiles = 0
         for x in west...east { for y in north...south {
             try Task.checkCancellation()
             tiles += 1
             let key = "\(zoom)/\(x)/\(y)"
-            let points: [MapPlace]
+            let points: [(MapPlace, MapPlacePriority)]
             if let cached = cache[key] { points = cached }
             else {
                 let text = template.replacingOccurrences(of: "{z}", with: String(zoom)).replacingOccurrences(of: "{x}", with: String(x)).replacingOccurrences(of: "{y}", with: String(y))
@@ -2426,6 +2435,7 @@ private actor PlaceTileProvider {
                 // One unreachable tile leaves a gap instead of blanking the whole screen.
                 do {
                     points = try MapPlaceTile.decode(try await bytes(url, policy: .returnCacheDataElseLoad), zoom: zoom, x: x, y: y)
+                        .compactMap { place in MapPlacePriority(place).map { (place, $0) } }
                 } catch {
                     if Task.isCancelled { throw CancellationError() }
                     failures += 1; continue
@@ -2433,12 +2443,10 @@ private actor PlaceTileProvider {
                 cache[key] = points; order.removeAll { $0 == key }; order.append(key)
                 if order.count > 24 { cache.removeValue(forKey: order.removeFirst()) }
             }
-            for point in points where point.coordinate.latitude >= bounds.south && point.coordinate.latitude <= bounds.north &&
+            for (point, priority) in points where point.coordinate.latitude >= bounds.south && point.coordinate.latitude <= bounds.north &&
                 point.coordinate.longitude >= bounds.west && point.coordinate.longitude <= bounds.east {
                 // Only places the current zoom band can draw compete for the hand-off below.
-                let eligible = landmarks.contains(point.kind) ? point.rank <= 3 :
-                    ordinary.contains(point.kind) && point.rank <= maximumRank
-                if eligible { result[point.id] = point }
+                if priority.minimumZoom <= eligibleZoom { result[point.id] = (point, priority) }
             }
         } }
         if failures > 0, failures == tiles {
@@ -2447,13 +2455,15 @@ private actor PlaceTileProvider {
             throw FeedError.invalid("Place tiles unavailable")
         }
         let center = Coordinate(latitude: (bounds.south + bounds.north) / 2, longitude: (bounds.west + bounds.east) / 2)
-        let keyed = result.values.map { ($0, landmarks.contains($0.kind), Int($0.coordinate.distance(to: center) / 20)) }
+        let keyed = result.values.map { place, priority in
+            (place: place, priority: priority, distance: Int(place.coordinate.distance(to: center) / 20))
+        }
         let ordered = keyed.sorted { a, b in
-            if a.1 != b.1 { return a.1 }
-            if a.2 != b.2 { return a.2 < b.2 }
-            return a.0.rank == b.0.rank ? a.0.id < b.0.id : a.0.rank < b.0.rank
+            if (a.priority.tier == .sight) != (b.priority.tier == .sight) { return a.priority.tier == .sight }
+            if a.distance != b.distance { return a.distance < b.distance }
+            return a.priority.score == b.priority.score ? a.place.id < b.place.id : a.priority.score < b.priority.score
         }
         // A pathological dense tile never delivers thousands of UIKit objects.
-        return ordered.prefix(512).map(\.0)
+        return ordered.prefix(512).map { ($0.place, $0.priority) }
     }
 }

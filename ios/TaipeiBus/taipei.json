@@ -4562,130 +4562,23 @@
       }
     },
     {
-      "id": "highway-name-major",
-      "type": "symbol",
-      "source": "openmaptiles",
-      "source-layer": "transportation_name",
-      "minzoom": 12.2,
-      "filter": [
-        "match",
-        [
-          "get",
-          "class"
-        ],
-        [
-          "primary",
-          "secondary",
-          "tertiary",
-          "trunk"
-        ],
-        true,
-        false
-      ],
-      "layout": {
-        "symbol-placement": "line",
-        "text-field": [
-          "coalesce",
-          [
-            "get",
-            "name:zh"
-          ],
-          [
-            "get",
-            "name"
-          ],
-          [
-            "get",
-            "name:latin"
-          ]
-        ],
-        "text-font": [
-          "Noto Sans Regular"
-        ],
-        "text-rotation-alignment": "map",
-        "text-size": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          13,
-          12,
-          14,
-          13
-        ]
-      },
-      "paint": {
-        "text-color": "#6E6C66",
-        "text-halo-blur": 0.5,
-        "text-halo-width": 1,
-        "text-halo-color": "#FFFFFF"
-      }
-    },
-    {
       "id": "poi_dense_street",
       "type": "symbol",
       "source": "viewport-places",
-      "minzoom": 17.5,
+      "minzoom": 16.5,
       "filter": [
         "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
-            "restaurant",
-            "fast_food",
-            "bar",
-            "beer",
-            "bakery",
-            "ice_cream",
-            "cafe",
-            "shop",
-            "clothing_store",
-            "alcohol_shop",
-            "butcher",
-            "jewelry",
-            "books",
-            "mobile_phone",
-            "music",
-            "grocery",
-            "pharmacy",
-            "dentist",
-            "doctors",
-            "veterinary",
-            "school",
-            "kindergarten",
-            "garden",
-            "playground",
-            "art_gallery",
-            "theatre",
-            "cinema",
-            "lodging",
-            "bank",
-            "post",
-            "police",
-            "fire_station",
-            "place_of_worship"
-          ],
-          true,
-          false
-        ],
         [
           "has",
           "name"
         ],
         [
-          ">",
+          "==",
           [
             "get",
-            "rank"
+            "tier"
           ],
-          120
+          3
         ]
       ],
       "layout": {
@@ -4922,72 +4815,20 @@
       "id": "poi_dense",
       "type": "symbol",
       "source": "viewport-places",
-      "minzoom": 16.5,
+      "minzoom": 15.5,
       "filter": [
         "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
-            "restaurant",
-            "fast_food",
-            "bar",
-            "beer",
-            "bakery",
-            "ice_cream",
-            "cafe",
-            "shop",
-            "clothing_store",
-            "alcohol_shop",
-            "butcher",
-            "jewelry",
-            "books",
-            "mobile_phone",
-            "music",
-            "grocery",
-            "pharmacy",
-            "dentist",
-            "doctors",
-            "veterinary",
-            "school",
-            "kindergarten",
-            "garden",
-            "playground",
-            "art_gallery",
-            "theatre",
-            "cinema",
-            "lodging",
-            "bank",
-            "post",
-            "police",
-            "fire_station",
-            "place_of_worship"
-          ],
-          true,
-          false
-        ],
         [
           "has",
           "name"
         ],
         [
-          ">",
+          "==",
           [
             "get",
-            "rank"
+            "tier"
           ],
-          25
-        ],
-        [
-          "<=",
-          [
-            "get",
-            "rank"
-          ],
-          120
+          2
         ]
       ],
       "layout": {
@@ -5224,64 +5065,20 @@
       "id": "poi",
       "type": "symbol",
       "source": "viewport-places",
-      "minzoom": 15.5,
+      "minzoom": 15,
       "filter": [
         "all",
-        [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
-            "restaurant",
-            "fast_food",
-            "bar",
-            "beer",
-            "bakery",
-            "ice_cream",
-            "cafe",
-            "shop",
-            "clothing_store",
-            "alcohol_shop",
-            "butcher",
-            "jewelry",
-            "books",
-            "mobile_phone",
-            "music",
-            "grocery",
-            "pharmacy",
-            "dentist",
-            "doctors",
-            "veterinary",
-            "school",
-            "kindergarten",
-            "garden",
-            "playground",
-            "art_gallery",
-            "theatre",
-            "cinema",
-            "lodging",
-            "bank",
-            "post",
-            "police",
-            "fire_station",
-            "place_of_worship"
-          ],
-          true,
-          false
-        ],
         [
           "has",
           "name"
         ],
         [
-          "<=",
+          "==",
           [
             "get",
-            "rank"
+            "tier"
           ],
-          25
+          1
         ]
       ],
       "layout": {
@@ -5522,38 +5319,16 @@
       "filter": [
         "all",
         [
-          "match",
-          [
-            "get",
-            "class"
-          ],
-          [
-            "hospital",
-            "college",
-            "library",
-            "park",
-            "zoo",
-            "museum",
-            "attraction",
-            "monument",
-            "castle",
-            "town_hall",
-            "railway"
-          ],
-          true,
-          false
-        ],
-        [
           "has",
           "name"
         ],
         [
-          "<=",
+          "==",
           [
             "get",
-            "rank"
+            "tier"
           ],
-          3
+          0
         ]
       ],
       "layout": {
@@ -5784,6 +5559,69 @@
         "text-halo-color": "#FFFFFF",
         "text-halo-width": 1.4,
         "text-halo-blur": 0.3
+      }
+    },
+    {
+      "id": "highway-name-major",
+      "type": "symbol",
+      "source": "openmaptiles",
+      "source-layer": "transportation_name",
+      "minzoom": 12.2,
+      "filter": [
+        "match",
+        [
+          "get",
+          "class"
+        ],
+        [
+          "primary",
+          "secondary",
+          "tertiary",
+          "trunk"
+        ],
+        true,
+        false
+      ],
+      "layout": {
+        "symbol-placement": "line",
+        "text-field": [
+          "coalesce",
+          [
+            "get",
+            "name:zh"
+          ],
+          [
+            "get",
+            "name"
+          ],
+          [
+            "get",
+            "name:latin"
+          ]
+        ],
+        "text-font": [
+          "Noto Sans Regular"
+        ],
+        "text-rotation-alignment": "map",
+        "text-size": [
+          "interpolate",
+          [
+            "linear"
+          ],
+          [
+            "zoom"
+          ],
+          13,
+          12,
+          14,
+          13
+        ]
+      },
+      "paint": {
+        "text-color": "#6E6C66",
+        "text-halo-blur": 0.5,
+        "text-halo-width": 1,
+        "text-halo-color": "#FFFFFF"
       }
     },
     {

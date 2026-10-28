@@ -11,12 +11,13 @@ final class MapPlaceTileTests: XCTestCase {
     private func number(_ field: UInt64, _ value: UInt64) -> Data { varint(field << 3) + varint(value) }
     private func string(_ field: UInt64, _ value: String) -> Data { bytes(field, Data(value.utf8)) }
     private func fixture() -> Data {
-        let tags = [0,0,1,1,2,2,3,3,4,4].reduce(Data()) { $0 + varint(UInt64($1)) }
+        let tags = [0,0,1,1,2,2,3,3,4,4,5,5].reduce(Data()) { $0 + varint(UInt64($1)) }
         let geometry = varint(9) + varint(4096) + varint(4096)
         let feature = number(1, 123) + bytes(2, tags) + number(3, 1) + bytes(4, geometry)
         var layer = string(1, "poi") + bytes(2, feature)
-        for key in ["class", "name", "rank", "name:zh", "name:en"] { layer += string(3, key) }
-        for value in [string(1, "cafe"), string(1, "Test Cafe"), number(4, 150), string(1, "測試咖啡"), string(1, "Test Cafe")] { layer += bytes(4, value) }
+        for key in ["class", "name", "rank", "name:zh", "name:en", "subclass"] { layer += string(3, key) }
+        for value in [string(1, "cafe"), string(1, "Test Cafe"), number(4, 150), string(1, "測試咖啡"), string(1, "Test Cafe"),
+                      string(1, "coffee_shop")] { layer += bytes(4, value) }
         layer += number(5, 4096) + number(15, 2)
         return bytes(3, layer)
     }
@@ -24,6 +25,7 @@ final class MapPlaceTileTests: XCTestCase {
         let points = try MapPlaceTile.decode(fixture(), zoom: 14, x: 13724, y: 7014)
         XCTAssertEqual(points.count, 1)
         XCTAssertEqual(points[0].kind, "cafe")
+        XCTAssertEqual(points[0].subclass, "coffee_shop")
         XCTAssertEqual(points[0].rank, 150)
         XCTAssertEqual(points[0].names["name:zh"], "測試咖啡")
         XCTAssertEqual(points[0].names["name:en"], "Test Cafe")
