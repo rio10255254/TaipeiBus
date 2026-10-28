@@ -1,7 +1,7 @@
 import Foundation
 
 /// Geographic bounds of received trajectories, reused before evaluating motion.
-public struct GeoBounds: Sendable {
+public struct GeoBounds: Sendable, Equatable {
     public let south: Double
     public let west: Double
     public let north: Double

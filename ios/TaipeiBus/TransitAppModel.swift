@@ -1412,7 +1412,7 @@ final class TransitAppModel: ObservableObject {
     }
     func beginStationBrowsing() {
         stationBrowsing = true
-        let point = [location.usableCoordinate, mapCenter].compactMap { $0 }.first { $0.isInServiceArea } ?? .taipei
+        let point = [location.usableCoordinate, mapCenter].compactMap { $0 }.first { $0.isInServiceArea } ?? .serviceCenter
         stationBrowseCenter = point
         focusNearbyStations(around: point); sheetDetent = .height(390)
     }
@@ -1535,14 +1535,14 @@ final class TransitAppModel: ObservableObject {
     }
 
     func stations(query: String) -> [Station] {
-        let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .taipei
+        let position = location.usableCoordinate?.isInServiceArea == true ? location.usableCoordinate! : .serviceCenter
         return metadata.stationSearch.search(query, near: position, favorites: favorites, recent: recentStationIDs, vocabulary: vocabulary)
     }
     var stationSearchContextKey: String {
         "\(metadata.revision):\(liveSettings.revision):\(location.revision):\(favorites.sorted()):\(recentStationIDs):\(stationBrowsing):\(stationBrowseCenter?.latitude ?? 0):\(stationBrowseCenter?.longitude ?? 0)"
     }
     func findStations(query: String, limit: Int = 40) async -> [Station] {
-        let userPoint = location.displayCoordinate.flatMap { $0.isInServiceArea ? $0 : nil } ?? .taipei
+        let userPoint = location.displayCoordinate.flatMap { $0.isInServiceArea ? $0 : nil } ?? .serviceCenter
         let point = stationBrowsing ? stationBrowseCenter ?? userPoint : userPoint
         let results = await stationLookup.search(metadata: metadata, query: query, near: point, favorites: favorites,
             recent: recentStationIDs, limit: limit, settingsRevision: liveSettings.revision, vocabulary: vocabulary)

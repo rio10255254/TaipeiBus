@@ -36,7 +36,7 @@ struct NativeBusMap: UIViewRepresentable {
         map.compassViewMargins = CGPoint(x: 20, y: 116)
         map.compassView.accessibilityIdentifier = "map-compass"
         // An altitude camera needs a laid-out viewport; zoom is safe before SwiftUI sizes the view.
-        map.setCenter(Coordinate.taipei.locationCoordinate, zoomLevel: 17.2, animated: false)
+        map.setCenter(Coordinate.serviceCenter.locationCoordinate, zoomLevel: 17.2, animated: false)
         context.coordinator.attach(map)
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.selectBus(_:)))
         tap.delegate = context.coordinator
@@ -905,7 +905,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard let map else { return }
             if !positionedInitialCamera, map.bounds.width > 0, map.bounds.height > 0 {
                 positionedInitialCamera = true
-                let first = location?.isInServiceArea == true ? location! : Coordinate.taipei
+                let first = location?.isInServiceArea == true ? location! : Coordinate.serviceCenter
                 map.setCamera(MLNMapCamera(lookingAtCenter: first.locationCoordinate,
                                           altitude: 650, pitch: 54, heading: 0), animated: false)
             }

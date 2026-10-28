@@ -47,10 +47,16 @@ def source_checks(root):
     require(len(bikes["stations"]) == bike_provenance["stations"], "Bundled YouBike station count does not match its provenance.")
     require(len({station["id"] for station in bikes["stations"]}) == len(bikes["stations"]), "Duplicate YouBike station IDs.")
     live_fields = {"available_rent_bikes", "available_return_bikes", "infoTime", "srcUpdateTime"}
+    # The service area is the regions the app bundles (release/service_area.py reads the same file).
+    regions = json.loads((root / "TransitCore/Sources/TransitCore/Regions/regions.json").read_text(encoding="utf-8"))
+    boxes = [box for region in regions["regions"] for box in region["bounds"]]
+    require(regions["home"] in {region["id"] for region in regions["regions"]}, "The home region is not defined.")
+    require(all(source["feed"].startswith("https://") for source in regions["sources"]), "Region feeds must be https.")
     for station in bikes["stations"]:
         require(not live_fields & set(station), "Live YouBike counts must not be bundled with the app.")
-        require(24.90 <= station["coordinate"]["latitude"] <= 25.25, "Bundled YouBike station outside the service area.")
-        require(121.27 <= station["coordinate"]["longitude"] <= 121.72, "Bundled YouBike station outside the service area.")
+        latitude, longitude = station["coordinate"]["latitude"], station["coordinate"]["longitude"]
+        require(any(south <= latitude <= north and west <= longitude <= east for south, west, north, east in boxes),
+                "Bundled YouBike station outside the service area.")
     icon_set = root / "TaipeiBus/Assets.xcassets/AppIcon.appiconset"
     icon_metadata = json.loads((icon_set / "Contents.json").read_text(encoding="utf-8"))
     icon = icon_set / icon_metadata["images"][0]["filename"]
