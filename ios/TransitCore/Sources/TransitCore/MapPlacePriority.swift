@@ -32,9 +32,17 @@ public struct MapPlacePriority: Sendable, Equatable {
     private static let minor: Set<String> = ["doctors", "dentist", "veterinary", "kindergarten", "playground",
                                              "alcohol_shop", "butcher", "jewelry", "mobile_phone", "music"]
 
-    private init(_ tier: Tier, _ weight: Double, notable: Bool, from zoom: Double) {
+    /// Read this often a month on Wikipedia, a place people go to is a sight: a department store, a temple.
+    static let famousViews = 300.0
+    /// Places people go to. Schools and offices are read about by those who study or work there.
+    private static let visited: Set<String> = Set(sights.keys).union(venues.keys)
+        .union(["park", "garden", "grocery", "shop", "place_of_worship", "cinema", "library", "lodging"])
+
+    private init(_ tier: Tier, _ weight: Double, notable: Bool, views: Double, from zoom: Double) {
         self.tier = tier; minimumZoom = zoom
-        score = Double(tier.rawValue) * 1000 + weight * 100 + (notable ? 0 : 50)
+        // Better known places go first within their kind, never ahead of a kind that comes first;
+        // never below 0, which PlaceLabelBudget treats as invalid.
+        score = Double(tier.rawValue) * 1000 + weight * 100 + (notable ? 49 - min(49, 12 * log10(1 + views)) : 99)
     }
 
     /// nil for places the map does not draw: kinds without an icon, and metro stations, which the
@@ -43,47 +51,90 @@ public struct MapPlacePriority: Sendable, Equatable {
         let kind = place.kind, subclass = place.subclass
         // Checked first: a dense city tile holds thousands of bus stops and offices.
         guard Self.drawn.contains(kind), kind != "railway" || subclass != "subway" else { return nil }
-        let listed = known.kind(of: place.names["name:zh"] ?? place.names["name"] ?? "", near: place.coordinate)
-        // A real English name is the best sign in the tile that visitors know the place.
-        let notable = listed != nil || (place.names["name:en"] ?? "").unicodeScalars.contains { $0.isASCII && $0.properties.isAlphabetic }
-        // A listed temple, park or market is a sight whatever its kind.
-        if listed == "spot", Self.food[kind] == nil { self.init(.sight, 0, notable: true, from: 14); return }
+        let match = known.match(place.names["name:zh"] ?? place.names["name"] ?? "", near: place.coordinate)
+        let views = match?.views ?? 0
+        // Listed or read about, or a real English name: the best signs in the tile that people know the place.
+        let notable = match != nil || (place.names["name:en"] ?? "").unicodeScalars.contains { $0.isASCII && $0.properties.isAlphabetic }
+        // A listed temple, park or market, or a well-read department store, is a sight whatever its kind.
+        if match?.listing == "spot" && Self.food[kind] == nil || views >= Self.famousViews && Self.visited.contains(kind) {
+            self.init(.sight, 0, notable: true, views: views, from: 14); return
+        }
         switch (kind, subclass) {
-        case ("attraction", "viewpoint"): self.init(.sight, 3, notable: notable, from: 15.5)
+        case ("attraction", "viewpoint"): self.init(.sight, 3, notable: notable, views: views, from: 15.5)
         case ("hospital", "hospital"), ("college", _), ("railway", _):
-            self.init(.sight, Self.landmarks[kind]!, notable: notable, from: notable ? 14 : 15)
-        case ("hospital", _), ("art_gallery", "artwork"), ("art_gallery", "art"): self.init(.minor, 0, notable: notable, from: 16.5)
+            self.init(.sight, Self.landmarks[kind]!, notable: notable, views: views, from: notable ? 14 : 15)
+        case ("hospital", _), ("art_gallery", "artwork"), ("art_gallery", "art"): self.init(.minor, 0, notable: notable, views: views, from: 16.5)
         case ("lodging", let type) where !["hotel", "hostel", "motel", "guest_house"].contains(type):
-            self.init(.minor, 0, notable: notable, from: 16.5)
+            self.init(.minor, 0, notable: notable, views: views, from: 16.5)
         case ("grocery", let type) where !["supermarket", "department_store", "marketplace"].contains(type):
-            self.init(.minor, 0, notable: notable, from: 16.5)
+            self.init(.minor, 0, notable: notable, views: views, from: 16.5)
         default:
-            if let weight = Self.sights[kind] { self.init(.sight, weight, notable: notable, from: notable ? 14 : 15) }
+            if let weight = Self.sights[kind] { self.init(.sight, weight, notable: notable, views: views, from: notable ? 14 : 15) }
             else if let weight = Self.venues[kind] {
-                if notable { self.init(.sight, weight, notable: true, from: 15) } else { self.init(.minor, 0, notable: false, from: 16.5) }
+                if notable { self.init(.sight, weight, notable: true, views: views, from: 15) }
+                else { self.init(.minor, 0, notable: false, views: views, from: 16.5) }
             }
-            else if let weight = Self.food[kind] { self.init(.food, weight, notable: notable, from: notable ? 15 : 15.5) }
-            else if let weight = Self.everyday[kind] { self.init(.everyday, weight, notable: notable, from: 15.5) }
-            else { self.init(.minor, 0, notable: notable, from: 16.5) }
+            else if let weight = Self.food[kind] { self.init(.food, weight, notable: notable, views: views, from: notable ? 15 : 15.5) }
+            else if let weight = Self.everyday[kind] { self.init(.everyday, weight, notable: notable, views: views, from: 15.5) }
+            else { self.init(.minor, 0, notable: notable, views: views, from: 16.5) }
         }
     }
     /// Every kind with a map icon (NativeBusMap poiCategories).
     private static let drawn = Set([sights, venues, landmarks, food, everyday].flatMap(\.keys)).union(minor)
 }
 
-/// The Tourism Administration's attractions, restaurants and hotels (VoicePlaces), looked up by
-/// name and place: many temples and churches share a name, so only the listing nearby counts.
-public struct KnownPlaces: Sendable {
-    public static let shared = KnownPlaces(VoicePlaces.shared.places)
-    private let byName: [String: [VoicePlaces.Place]]
-    public init(_ places: [VoicePlaces.Place]) {
-        byName = Dictionary(grouping: places) { Self.key($0.name) }
+/// A place people read about: its Wikidata names and how often its Wikipedia articles are read
+/// (QRank; famous-places.json, from release/collect-famous-places.py).
+public struct FamousPlace: Sendable, Equatable {
+    public let name: String
+    public let coordinate: Coordinate
+    /// Average monthly views over a year, across Wikimedia projects.
+    public let views: Double
+
+    public static let bundled: [FamousPlace] = {
+        guard let url = Bundle.module.url(forResource: "famous-places", withExtension: "json"),
+              let data = try? Data(contentsOf: url) else { return [] }
+        return decode(data)
+    }()
+    /// `{"places": [["台北101", 25.03361, 121.56472, 11297], ...]}`; rows that do not fit are left out.
+    public static func decode(_ data: Data) -> [FamousPlace] {
+        let rows = ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["places"] as? [[Any]] ?? []
+        return rows.compactMap { row in
+            guard row.count >= 4, let name = row[0] as? String, !name.isEmpty,
+                  let latitude = (row[1] as? NSNumber)?.doubleValue, let longitude = (row[2] as? NSNumber)?.doubleValue,
+                  let views = (row[3] as? NSNumber)?.doubleValue, views.isFinite, views > 0 else { return nil }
+            return FamousPlace(name: name, coordinate: Coordinate(latitude: latitude, longitude: longitude), views: views)
+        }
     }
-    /// spot, food or hotel, for a listing of this name within 500 m.
-    public func kind(of name: String, near coordinate: Coordinate) -> String? {
-        let key = Self.key(name)
-        guard !key.isEmpty, let listings = byName[key] else { return nil }
-        return listings.first { $0.coordinate.distance(to: coordinate) <= 500 }?.kind
+}
+
+/// What open data says about a place of this name nearby: the Tourism Administration's attractions,
+/// restaurants and hotels (VoicePlaces), and how often its Wikipedia articles are read. Many temples and
+/// churches share a name, so only an entry within 500 m counts.
+public struct KnownPlaces: Sendable {
+    public struct Match: Sendable, Equatable {
+        /// spot, food or hotel when the Tourism Administration lists it.
+        public var listing: String?
+        /// Monthly Wikipedia views; 0 without an article.
+        public var views: Double
+    }
+    public static let shared = KnownPlaces(VoicePlaces.shared.places, famous: FamousPlace.bundled)
+    private struct Entry: Sendable { let coordinate: Coordinate; let listing: String?; let views: Double }
+    private let byName: [String: [Entry]]
+    public init(_ places: [VoicePlaces.Place], famous: [FamousPlace] = []) {
+        var byName: [String: [Entry]] = [:]
+        for place in places { byName[Self.key(place.name), default: []].append(Entry(coordinate: place.coordinate, listing: place.kind, views: 0)) }
+        for place in famous { byName[Self.key(place.name), default: []].append(Entry(coordinate: place.coordinate, listing: nil, views: place.views)) }
+        byName.removeValue(forKey: "")
+        self.byName = byName
+    }
+    public func match(_ name: String, near coordinate: Coordinate) -> Match? {
+        guard let entries = byName[Self.key(name)] else { return nil }
+        var match: Match?
+        for entry in entries where entry.coordinate.distance(to: coordinate) <= 500 {
+            match = Match(listing: match?.listing ?? entry.listing, views: max(match?.views ?? 0, entry.views))
+        }
+        return match
     }
     /// The name as the listing writes it: no bracketed branch or note, 台 rather than 臺, letters
     /// and digits only (release/collect-voice-places.py cleans listed names the same way).

@@ -1955,6 +1955,8 @@ private struct DataSourcesView: View {
                 Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))
                 Link("OpenFreeMap", destination: URL(string: "https://openfreemap.org")!)
                 Link("© OpenStreetMap contributors", destination: URL(string: "https://www.openstreetmap.org/copyright")!)
+                Text(AppText.text("地圖先顯示較知名的景點與餐飲，知名程度參考交通部觀光署觀光資訊資料庫（景點、餐飲、旅宿，依政府資料開放授權條款第 1 版使用），以及維基數據與維基百科的閱讀次數（QRank）。語音辨識也用觀光署的地名校正。"))
+                Link(AppText.text("政府資料開放授權條款"), destination: URL(string: "https://data.gov.tw/license")!)
                 NavigationLink(AppText.text("開源授權")) { LicenseView() }
             } header: { SectionHeader(title: AppText.text("地圖"), symbol: "map.fill", color: .green) }
         }

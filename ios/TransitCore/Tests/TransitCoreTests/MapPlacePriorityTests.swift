@@ -75,6 +75,40 @@ final class MapPlacePriorityTests: XCTestCase {
         XCTAssertEqual(priority(place("restaurant", "restaurant", name: "阿宗麵線"), known: food)?.tier, .food)
         XCTAssertEqual(priority(place("restaurant", "restaurant", name: "阿宗麵線"), known: food)?.minimumZoom, 15)
     }
+    func testWellReadPlacesComeFirstAndBecomeSights() throws {
+        let mall = Coordinate(latitude: 25.0396, longitude: 121.5667)
+        let known = KnownPlaces([], famous: [FamousPlace(name: "新光三越台北信義新天地", coordinate: mall, views: 2400),
+                                             FamousPlace(name: "國立故宮博物院", coordinate: ximen, views: 9000),
+                                             FamousPlace(name: "郵政博物館", coordinate: ximen, views: 120),
+                                             FamousPlace(name: "鼎泰豐", coordinate: ximen, views: 5000),
+                                             FamousPlace(name: "某某高中", coordinate: ximen, views: 2400)])
+        // Students read about their school: it goes first among schools but is no sight.
+        let school = try XCTUnwrap(priority(place("school", "school", name: "某某高中"), known: known))
+        XCTAssertEqual(school.tier, .everyday)
+        XCTAssertLessThan(school.score, priority(place("school", "school", name: "另一所高中"), known: known)!.score)
+        // A department store people read about is a sight from the first zoom; the same name across town is not.
+        let store = try XCTUnwrap(priority(place("shop", "department_store", name: "新光三越台北信義新天地", at: mall), known: known))
+        XCTAssertEqual(store.tier, .sight)
+        XCTAssertEqual(store.minimumZoom, 14)
+        XCTAssertEqual(priority(place("shop", "department_store", name: "新光三越台北信義新天地"), known: known)?.tier, .everyday)
+        // Among museums, the better known comes first, and a little-read one still counts as notable.
+        let palace = try XCTUnwrap(priority(place("museum", "museum", name: "國立故宮博物院"), known: known))
+        let post = try XCTUnwrap(priority(place("museum", "museum", name: "郵政博物館"), known: known))
+        let plain = try XCTUnwrap(priority(place("museum", "museum", name: "某紀念館"), known: known))
+        XCTAssertLessThan(palace.score, post.score)
+        XCTAssertLessThan(post.score, plain.score)
+        XCTAssertEqual(post.minimumZoom, 14)
+        // A famous restaurant stays food, ahead of other food but behind every sight.
+        let restaurant = try XCTUnwrap(priority(place("restaurant", "restaurant", name: "鼎泰豐"), known: known))
+        XCTAssertEqual(restaurant.tier, .food)
+        XCTAssertLessThan(restaurant.score, priority(place("restaurant", "restaurant", english: "Noodles"))!.score)
+        XCTAssertGreaterThan(restaurant.score, plain.score)
+    }
+    func testFamousPlacesReadFromTheirFile() {
+        let data = Data(#"{"places":[["台北101",25.03361,121.56472,11297],["壞資料",25.0],["無人讀",25.0,121.5,0]]}"#.utf8)
+        XCTAssertEqual(FamousPlace.decode(data), [FamousPlace(name: "台北101", coordinate: Coordinate(latitude: 25.03361, longitude: 121.56472), views: 11297)])
+        XCTAssertFalse(FamousPlace.bundled.isEmpty, "famous-places.json ships with the package")
+    }
     func testListedNamesMatchWithoutBracketsOrVariantCharacters() {
         XCTAssertEqual(KnownPlaces.key("國家攝影文化中心（原大阪商船株式會社臺北支店）"), "國家攝影文化中心")
         XCTAssertEqual(KnownPlaces.key("臺北市立 動物園"), KnownPlaces.key("台北市立動物園"))
