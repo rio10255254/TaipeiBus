@@ -75,6 +75,11 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     private var trainsOnScreen = 0
     private var trainRedrawInterval: CFTimeInterval = 1 / 60
     private var lastTrainDraw: CFTimeInterval = 0
+    /// Buses are redrawn as often as the fastest one on screen moves a fraction of a point, not on
+    /// every frame while any bus in the city is gliding: each redraw renders the whole map.
+    private var busesOnScreen = 0
+    private var busRedrawInterval: CFTimeInterval = 1 / 60
+    private var lastBusDraw: CFTimeInterval = 0
     private var geometryGeneration = ""
     /// 16 + 0xRRGGBB. Buses use this slot for wheel rotation, which stays below 2π, so the
     /// shader can tell a train livery apart from a wheel angle.
@@ -177,6 +182,20 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         if trainMode { return trains.first { $0.report.id == id }.flatMap { trainPose($0, at: now) } }
         return motion.pose(id: id, time: time, now: now)
     }
+    /// How often this layer wants drawing now, or nil while nothing on it moves.
+    func redrawInterval(time: TimeInterval, now: Date) -> CFTimeInterval? {
+        if trainMode {
+            guard !trains.isEmpty else { return nil }
+            // A correction glides at full rate; otherwise trains are redrawn only as often as they
+            // move a fraction of a pixel, so a zoomed-out network costs a few frames a second.
+            if !reduceMotion, now.timeIntervalSince(trainBlendStarted) < Self.trainBlendSeconds { return 1 / 120 }
+            return reduceMotion ? 5 : trainsOnScreen > 0 ? trainRedrawInterval : 2
+        }
+        if (selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45 { return 1 / 120 }
+        guard motion.isAnimating(time: time, now: now) else { return nil }
+        // Off screen, a look every two seconds catches a bus driving into view.
+        return busesOnScreen > 0 ? busRedrawInterval : 2
+    }
     func isAnimating(time: TimeInterval, now: Date) -> Bool {
         if trainMode {
             if trains.isEmpty {
@@ -184,13 +203,9 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                 return false
             }
             trainVisible = true
-            // A correction glides at full rate; otherwise trains are redrawn only as often as they
-            // move a fraction of a pixel, so a zoomed-out network costs a few frames a second.
-            if !reduceMotion, now.timeIntervalSince(trainBlendStarted) < Self.trainBlendSeconds { return true }
-            let interval = reduceMotion ? 5 : trainsOnScreen > 0 ? trainRedrawInterval : 2
-            return time - lastTrainDraw >= interval
         }
-        return motion.isAnimating(time: time, now: now) || ((selectedID != nil || !emphasizedIDs.isEmpty) && !reduceMotion && time - selectionStartedAt < 0.45)
+        guard let interval = redrawInterval(time: time, now: now) else { return false }
+        return time - (trainMode ? lastTrainDraw : lastBusDraw) >= interval
     }
 
     override func didMove(to mapView: MLNMapView) {
@@ -315,6 +330,11 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             trainsOnScreen = poses.count; lastTrainDraw = CACurrentMediaTime()
             // About 22 m/s at most between stations; 0.4 pt of movement per redraw looks continuous.
             trainRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 22))
+        } else {
+            busesOnScreen = poses.count; lastBusDraw = CACurrentMediaTime()
+            // City buses glide at up to about 16 m/s between fixes: about 46 redraws a second at
+            // street zoom, 12 across a district, 3 across the city.
+            busRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 16))
         }
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []

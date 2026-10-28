@@ -118,6 +118,14 @@ struct NativeBusMap: UIViewRepresentable {
         private var cameraMoveToken = 0
         private var lastPowerCheck: CFTimeInterval = 0
         private var lastPreferredRate = 0
+        /// The highest rate now: the screen's, or 60 Hz in Low Power Mode or on a hot phone.
+        private var rateCap = 60
+        /// Until when something on the map moves every frame (the camera, the location marker).
+        private var fullRateUntil: CFTimeInterval = 0
+        /// When a lower rate was first enough; it is applied after half a second, so a pause
+        /// between two movements does not drop the rate and raise it again.
+        private var lowerRateSince: CFTimeInterval?
+        private static let frameRates = [10, 15, 20, 30, 40, 60, 80, 120]
         private var lastMotionSetting: Bool?
         private var lastNearbyUpdate: CFTimeInterval = 0
         private var lastNearbyCenter: Coordinate?
@@ -191,7 +199,7 @@ struct NativeBusMap: UIViewRepresentable {
             let rate = Float(fullFrameRate)
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: rate, preferred: rate)
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: Int(rate))
-            lastPreferredRate = Int(rate)
+            lastPreferredRate = Int(rate); rateCap = Int(rate)
             link.add(to: .main, forMode: .common)
             displayLink = link
 #if DEBUG
@@ -206,6 +214,40 @@ struct NativeBusMap: UIViewRepresentable {
         }
         /// ProMotion screens run the map, the 3D buses and the camera at up to 120 Hz.
         private var fullFrameRate: Int { min(120, max(60, UIScreen.main.maximumFramesPerSecond)) }
+
+        /// How often the map is drawn: the full rate while the camera moves or follows something,
+        /// the location marker glides or a selection animates; otherwise only as often as what is on
+        /// screen moves a fraction of a point. Each frame renders the whole map, so a map at rest
+        /// with buses creeping across it no longer holds a ProMotion screen at 120 Hz.
+        private func applyFrameRate(_ link: CADisplayLink, _ map: MLNMapView, now: CFTimeInterval, date: Date) {
+            let busy = cameraMoving || places.interacting || now < fullRateUntil || model.following || model.followingTrain
+            var rate = rateCap
+            if !busy {
+                let intervals = [buses?.redrawInterval(time: now, now: date), trains?.redrawInterval(time: now, now: date)].compactMap { $0 }
+                let needed = intervals.min().map { 1 / $0 } ?? 0
+                rate = min(rateCap, Self.frameRates.first { Double($0) >= needed } ?? rateCap)
+            }
+            if rate < lastPreferredRate {
+                let since = lowerRateSince ?? now
+                lowerRateSince = since
+                guard now - since >= 0.5 else { return }
+            }
+            lowerRateSince = nil
+            guard rate != lastPreferredRate else { return }
+            setFrameRate(rate, link: link, map: map)
+        }
+        private func setFrameRate(_ rate: Int, link: CADisplayLink, map: MLNMapView) {
+            link.preferredFrameRateRange = CAFrameRateRange(minimum: Float(max(10, rate / 2)), maximum: Float(rate), preferred: Float(rate))
+            map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
+            lastPreferredRate = rate
+        }
+        /// A gesture or a flight starts: the full rate from its first frame.
+        private func raiseFrameRate() {
+            fullRateUntil = max(fullRateUntil, CACurrentMediaTime() + 0.3)
+            lowerRateSince = nil
+            guard let link = displayLink, let map, lastPreferredRate != rateCap else { return }
+            setFrameRate(rateCap, link: link, map: map)
+        }
         func stop() {
             pacing.reset()
             UIDevice.current.isBatteryMonitoringEnabled = previousBatteryMonitoring
@@ -1554,19 +1596,15 @@ struct NativeBusMap: UIViewRepresentable {
             if now - lastPowerCheck > 1 {
                 let lowPower = ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState.rawValue >= ProcessInfo.ThermalState.serious.rawValue
                 // Low Power Mode and a hot device fall back to 60 Hz; motion stays smooth either way.
-                var rate = lowPower ? 60 : fullFrameRate
+                rateCap = lowPower ? 60 : fullFrameRate
 #if DEBUG
-                if zoomProbeMode == "60hz" { rate = 60 }
+                if zoomProbeMode == "60hz" { rateCap = 60 }
 #endif
-                if rate != lastPreferredRate {
-                    link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: Float(rate), preferred: Float(rate))
-                    map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
-                    lastPreferredRate = rate
-                }
                 lastPowerCheck = now
             }
             if buses.isAnimating(time: now, now: date) { buses.setNeedsDisplay() }
             if trains?.isAnimating(time: now, now: date) == true { trains?.setNeedsDisplay() }
+            applyFrameRate(link, map, now: now, date: date)
             // Tile loading can delay a flight beyond its requested duration. Wait
             // for MapLibre's completion before following or avoiding buildings.
             guard !cameraMoving else { return }
@@ -1583,6 +1621,7 @@ struct NativeBusMap: UIViewRepresentable {
                     camera.centerCoordinate = center.interpolate(to: point, fraction: fraction).locationCoordinate
                     camera.heading = (camera.heading + delta * fraction + 360).truncatingRemainder(dividingBy: 360)
                     map.setCamera(camera, animated: false)
+                    fullRateUntil = now + 0.3
                 }
             }
             if model.following, now >= followSuspendedUntil, let id = model.selectedVehicleID,
@@ -1594,6 +1633,7 @@ struct NativeBusMap: UIViewRepresentable {
                     let target = center.interpolate(to: pose.coordinate, fraction: reduceMotion ? 1 : 1 - exp(-dt / 0.10))
                     camera.centerCoordinate = target.locationCoordinate
                     map.setCamera(camera, animated: false)
+                    fullRateUntil = now + 0.3
                 }
                 lastFollowTime = now
             }
@@ -1650,9 +1690,22 @@ struct NativeBusMap: UIViewRepresentable {
                 angle = atan2(Double(target.x - screen.x), Double(screen.y - target.y))
             }
             locationMarker.update(direction: angle, accuracy: model.location.headingAccuracy ?? 20)
+            // A marker gliding to a new fix or turning keeps the full rate for a moment.
+            if !locationMarker.isHidden,
+               abs(screen.x - lastMarkerPoint.x) > 0.25 || abs(screen.y - lastMarkerPoint.y) > 0.25 || abs((angle ?? 0) - lastMarkerAngle) > 0.01 {
+                fullRateUntil = max(fullRateUntil, CACurrentMediaTime() + 0.3)
+            }
+            lastMarkerPoint = screen; lastMarkerAngle = angle ?? 0
         }
+        private var lastMarkerPoint = CGPoint.zero
+        private var lastMarkerAngle = 0.0
 
+        /// Every frame of a gesture, a deceleration or an animated camera change keeps the full rate.
+        func mapView(_ mapView: MLNMapView, regionIsChangingWith reason: MLNCameraChangeReason) {
+            fullRateUntil = max(fullRateUntil, CACurrentMediaTime() + 0.3)
+        }
         func mapView(_ mapView: MLNMapView, regionWillChangeWith reason: MLNCameraChangeReason, animated: Bool) {
+            raiseFrameRate()
             let gestures: MLNCameraChangeReason = [.gesturePan, .gesturePinch, .gestureRotate, .gestureTilt, .gestureZoomIn, .gestureZoomOut, .gestureOneFingerZoom, .resetNorth]
             if !reason.intersection(gestures).isEmpty {
                 places.interacting = true
