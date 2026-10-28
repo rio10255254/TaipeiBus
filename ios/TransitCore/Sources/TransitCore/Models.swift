@@ -176,6 +176,31 @@ public struct TransitMetadata: Sendable {
         return rows.filter { $0.direction == direction }.sorted { $0.sequence < $1.sequence }
     }
     public func journey(routeID: String, direction: String) -> RouteJourney? { journeys["\(routeID):\(direction)"] }
+    /// Another source's routes and stops, before the catalog is rebuilt. Ids already defined stay as they
+    /// are; a stop at a station this catalog has joins that station, which keeps its name and position.
+    mutating func absorb(_ other: TransitMetadata) {
+        func add<Value>(_ values: [String: Value], to target: inout [String: Value]) {
+            target.merge(values) { current, _ in current }
+        }
+        add(other.routes, to: &routes); add(other.paths, to: &paths)
+        add(other.providers, to: &providers); add(other.englishProviders, to: &englishProviders)
+        add(other.lines, to: &lines); add(other.directionalLines, to: &directionalLines)
+        let added = Set(other.stops.keys.filter { stops[$0] == nil })
+        add(other.stops, to: &stops)
+        for station in other.stations.values {
+            let stopIDs = station.stopIDs.filter(added.contains)
+            guard var current = stations[station.id] else {
+                var joined = station; joined.stopIDs = stopIDs
+                if !stopIDs.isEmpty { stations[station.id] = joined }
+                continue
+            }
+            guard !stopIDs.isEmpty else { continue }
+            current.stopIDs += stopIDs
+            for name in station.searchNames where !current.searchNames.contains(name) { current.searchNames.append(name) }
+            if current.englishName.isEmpty { current.englishName = station.englishName }
+            stations[station.id] = current
+        }
+    }
     public mutating func rebuildJourneys() {
         journeys = [:]
         for route in routes.values {
@@ -204,6 +229,22 @@ public struct EstimateFeed: Sendable {
         // The published estimate belongs to the source timestamp, not the latest HTTP request.
         let elapsed = max(0, Int(date.timeIntervalSince(updatedAt).rounded(.down)))
         return max(0, value - elapsed)
+    }
+    /// Several sources' feeds, each published at its own time, as one. Countdowns move to the newest source
+    /// time so they still count down from one time. A source that failed, or that is more than two minutes
+    /// behind the newest (its countdowns would already be stale), is left out; the result fails only when
+    /// every source did, and keeps the first one's last values as a single feed does.
+    public static func combining(_ parts: [EstimateFeed]) -> EstimateFeed {
+        guard parts.count > 1 else { return parts.first ?? EstimateFeed() }
+        let usable = parts.filter { $0.error == nil && $0.updatedAt != nil }
+        guard let newest = usable.compactMap(\.updatedAt).max() else { return parts[0] }
+        var seconds: [String: Int] = [:]
+        for part in usable {
+            let behind = Int(newest.timeIntervalSince(part.updatedAt!).rounded(.down))
+            guard behind <= 120 else { continue }
+            seconds.merge(part.seconds.mapValues { $0 < 0 ? $0 : max(0, $0 - behind) }) { current, _ in current }
+        }
+        return EstimateFeed(seconds: seconds, updatedAt: newest)
     }
     public static func label(_ seconds: Int?) -> String {
         guard let seconds else { return AppText.text("暫無預估") }

@@ -55,7 +55,29 @@ public enum FeedDecoder {
         guard !entries.isEmpty else { throw FeedError.invalid("路線／站牌") }
     }
 
-    public static func metadata(feeds: [String: Data]) throws -> TransitMetadata {
+    public static func metadata(feeds: [String: Data]) throws -> TransitMetadata { try metadata(sources: [feeds]) }
+
+    /// Several sources' feeds, the first being the one the app cannot work without. Taipei's and New Taipei's
+    /// files come from one dynamic information centre with one numbering: their route, stop, provider and
+    /// vehicle ids never overlap, and both use the same stop location ids, so a stop location both cities
+    /// serve becomes one station with both cities' routes. An id an earlier source defined is never replaced,
+    /// and a later source whose routes or stops cannot be read is left out rather than half loaded.
+    public static func metadata(sources: [[String: Data]]) throws -> TransitMetadata {
+        var metadata = TransitMetadata()
+        for (index, feeds) in sources.enumerated() {
+            do {
+                let part = try source(feeds: feeds)
+                if index == 0 { metadata = part } else { metadata.absorb(part) }
+            } catch { if index == 0 { throw error } }
+        }
+        guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
+        metadata.rebuildRouteCatalog()
+        metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
+        metadata.rebuildJourneys()
+        return metadata
+    }
+
+    private static func source(feeds: [String: Data]) throws -> TransitMetadata {
         var metadata = TransitMetadata()
         for (name, data) in feeds {
             let required = name == "GetRoute" || name == "GetStop"
@@ -101,6 +123,8 @@ public enum FeedDecoder {
                     metadata.routes[id] = route
                 }
             case "GetStop":
+                // Most of a station's stops share one English name; its aliases are worked out once.
+                var englishAliases: [String: [String]] = [:]
                 for row in rows {
                     let id = text(row["Id"])
                     guard !id.isEmpty, let lat = number(row["latitude"]), let lon = number(row["longitude"]) else { continue }
@@ -129,7 +153,9 @@ public enum FeedDecoder {
                             metadata.stations[stationID]?.searchNames.append(name)
                         }
                     }
-                    for alias in StationSearch.englishNames(stop.englishName) where !metadata.stations[stationID]!.searchNames.contains(alias) {
+                    let aliases = englishAliases[stop.englishName] ?? StationSearch.englishNames(stop.englishName)
+                    englishAliases[stop.englishName] = aliases
+                    for alias in aliases where !metadata.stations[stationID]!.searchNames.contains(alias) {
                         metadata.stations[stationID]!.searchNames.append(alias)
                     }
                 }
@@ -156,9 +182,6 @@ public enum FeedDecoder {
             }
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
-        metadata.rebuildRouteCatalog()
-        metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
-        metadata.rebuildJourneys()
         return metadata
     }
 

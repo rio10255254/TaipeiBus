@@ -25,7 +25,7 @@ public struct BikeStation: Codable, Identifiable, Sendable, Equatable {
     public var localizedAddress: String { AppLanguage.current == .english && !englishAddress.isEmpty ? englishAddress : address }
 }
 
-/// The bundled Taipei City YouBike station list, with a cell index for nearby lookups.
+/// The bundled YouBike station list of Taipei and New Taipei, with a cell index for nearby lookups.
 public struct BikeNetwork: Codable, Sendable {
     public let schema: Int
     public let generatedAt: String

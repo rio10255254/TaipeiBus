@@ -1158,5 +1158,9 @@
   "這是第 %@ 段，接著要去%@，說「下一段」就能看。": " This is leg %@; %@ comes next — say “next leg” to see it.",
   "已到達「%@」。下一站是「%@」，要規劃過去的路線嗎？": "You've arrived at “%@”. Next is “%@” — shall I plan the way there?",
   "政府資料開放授權條款": "Open Government Data License",
-  "地圖先顯示較知名的景點與餐飲，知名程度參考交通部觀光署觀光資訊資料庫（景點、餐飲、旅宿，依政府資料開放授權條款第 1 版使用），以及維基數據與維基百科的閱讀次數（QRank）。語音辨識也用觀光署的地名校正。": "The map shows better-known sights and places to eat first. How well known a place is comes from the Tourism Administration (MOTC) tourism information database (attractions, restaurants and hotels, used under the Open Government Data License, version 1.0), and from Wikidata and Wikipedia readership (QRank). Voice recognition also corrects place names against the Tourism Administration's list."
+  "地圖先顯示較知名的景點與餐飲，知名程度參考交通部觀光署觀光資訊資料庫（景點、餐飲、旅宿，依政府資料開放授權條款第 1 版使用），以及維基數據與維基百科的閱讀次數（QRank）。語音辨識也用觀光署的地名校正。": "The map shows better-known sights and places to eat first. How well known a place is comes from the Tourism Administration (MOTC) tourism information database (attractions, restaurants and hotels, used under the Open Government Data License, version 1.0), and from Wikidata and Wikipedia readership (QRank). Voice recognition also corrects place names against the Tourism Administration's list.",
+  "臺北市公共運輸處公開資料，含臺北市與新北市公車，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。": "Public bus data for Taipei and New Taipei, checked every 5 seconds while active. Individual reporting times vary.",
+  "YouBike 站點內建於 App，含臺北市與新北市。App 使用期間會預先載入兩市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。臺北市資料約每分鐘更新，新北市約每 5 分鐘；實際借還以現場為準。": "Taipei and New Taipei stations ship with the app. While it is in use, the app preloads both cities’ public bike and dock counts for cycling comparisons and keeps recent reports for the next visit. Taipei updates about every minute, New Taipei about every 5 minutes; check at the dock.",
+  "新北市 YouBike 資料說明": "New Taipei YouBike data",
+  "目前在服務範圍外，可手動選擇雙北的出發地": "Outside the service area. Choose a start in Taipei or New Taipei."
 }

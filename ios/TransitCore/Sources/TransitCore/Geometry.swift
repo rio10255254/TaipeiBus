@@ -62,14 +62,33 @@ public struct RouteLine: Sendable {
     }
 
     public static func parse(wkt: String) -> RouteLine? {
-        guard wkt.uppercased().hasPrefix("LINESTRING"),
-              let start = wkt.firstIndex(of: "("), let end = wkt.lastIndex(of: ")") else { return nil }
+        // Read as bytes: the shapes of two cities' routes are close to 20 MB of text.
+        let bytes = Array(wkt.utf8)
+        let open = UInt8(ascii: "("), close = UInt8(ascii: ")"), comma = UInt8(ascii: ",")
+        guard String(decoding: bytes.prefix(10), as: UTF8.self).uppercased() == "LINESTRING",
+              let start = bytes.firstIndex(of: open), let end = bytes.lastIndex(of: close), start < end else { return nil }
+        func space(_ byte: UInt8) -> Bool { byte == 0x20 || (0x09...0x0d).contains(byte) }
         var coordinates: [Coordinate] = []
-        for pair in wkt[wkt.index(after: start)..<end].split(separator: ",") {
-            let values = pair.split(whereSeparator: { $0.isWhitespace })
-            guard values.count >= 2, let lon = Double(values[0]), let lat = Double(values[1]),
-                  lon.isFinite, lat.isFinite, abs(lon) <= 180, abs(lat) <= 90 else { return nil }
-            coordinates.append(Coordinate(latitude: lat, longitude: lon))
+        coordinates.reserveCapacity((end - start) / 20)
+        var cursor = start + 1
+        while cursor <= end {
+            let stop = bytes[cursor..<end].firstIndex(of: comma) ?? end
+            // An empty pair (",,") is skipped, as splitting on commas always did.
+            if stop == cursor { cursor = stop + 1; continue }
+            // A pair's first two words, which must be numbers: "121.55 25.04".
+            var values: [Double] = []
+            var index = cursor
+            while index < stop, values.count < 2 {
+                while index < stop, space(bytes[index]) { index += 1 }
+                let wordStart = index
+                while index < stop, !space(bytes[index]) { index += 1 }
+                guard index > wordStart else { break }
+                guard let value = Double(String(decoding: bytes[wordStart..<index], as: UTF8.self)) else { return nil }
+                values.append(value)
+            }
+            guard values.count == 2, values[0].isFinite, values[1].isFinite, abs(values[0]) <= 180, abs(values[1]) <= 90 else { return nil }
+            coordinates.append(Coordinate(latitude: values[1], longitude: values[0]))
+            cursor = stop + 1
         }
         return coordinates.count >= 2 ? RouteLine(coordinates: coordinates) : nil
     }

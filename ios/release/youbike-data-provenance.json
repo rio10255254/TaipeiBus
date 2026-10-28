@@ -1,11 +1,21 @@
 {
   "schema": 1,
-  "collectedAt": "2026-10-15T03:00:18Z",
-  "source": "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json",
+  "collectedAt": "2026-10-28T16:43:46Z",
+  "feeds": [
+    {
+      "source": "https://tcgbusfs.blob.core.windows.net/dotapp/youbike/v2/youbike_immediate.json",
+      "sha256": "9ed251d0bdeaae7d6df925cbb21f3b98793aa679423e3631f74c3742ffcdbebc",
+      "stations": 1823
+    },
+    {
+      "source": "https://data.ntpc.gov.tw/api/datasets/010e5b15-3823-4b20-b401-b1cf000550c5/json?page=0&size=5000",
+      "sha256": "b659c9866e0a742d6cb5571094be679567a61b2a53b6ef262ee26f15a29319b7",
+      "stations": 1614
+    }
+  ],
   "license": "Open Government Data License 1.0",
-  "feedSha256": "456a5e858bdc30018b1851fca5ffc349982448e0dc4195f38e1d8ecb8e941d3f",
-  "outputSha256": "4f89599596b9a9f59809ddb46e58c5c11162d89c849c21085d267949f8b22c46",
-  "stations": 1819,
+  "outputSha256": "d168b0296a4b8af97285d412fb95bce218fd95a9f977e08a2865008f5dc32873",
+  "stations": 3437,
   "skipped": 0,
   "note": "Static fields only; live bike and dock counts are never bundled."
 }

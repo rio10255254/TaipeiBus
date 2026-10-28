@@ -32,15 +32,24 @@ def source_checks(root):
     require("TARGETED_DEVICE_FAMILY = 1;" in project, "Review the supported device family.")
     require("ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;" in project, "App icon is not configured.")
     if tuple(map(int, config["version"].split("."))) >= (1,3,0):
-        provenance = json.loads((root / "release/bus-static-provenance.json").read_text(encoding="utf-8"))
-        for feed in provenance["feeds"]:
-            raw = (root / "TaipeiBus/BusMetadata" / (feed["name"] + ".gz")).read_bytes()
-            require(hashlib.sha256(raw).hexdigest() == feed["sha256"], "Bundled bus metadata provenance mismatch")
-            decoded = gzip.decompress(raw)
-            require(len(decoded) <= 32 * 1024 * 1024, "Bundled metadata exceeds its size limit")
-            rows = json.loads(decoded)
-            rows = rows if isinstance(rows,list) else rows.get("BusInfo",[])
-            require(len(rows) == feed["rows"], "Bundled static metadata row count changed")
+        # Taipei's files, and New Taipei's beside them (one numbering, so their ids must never overlap).
+        ids = []
+        for folder, record in [("BusMetadata", "bus-static-provenance.json"), ("BusMetadata/ntpc", "bus-static-ntpc-provenance.json")]:
+            provenance = json.loads((root / "release" / record).read_text(encoding="utf-8"))
+            names = {}
+            for feed in provenance["feeds"]:
+                raw = (root / "TaipeiBus" / folder / (feed["name"] + ".gz")).read_bytes()
+                require(hashlib.sha256(raw).hexdigest() == feed["sha256"], "Bundled bus metadata provenance mismatch")
+                decoded = gzip.decompress(raw)
+                require(len(decoded) <= 32 * 1024 * 1024, "Bundled metadata exceeds its size limit")
+                rows = json.loads(decoded)
+                rows = rows if isinstance(rows,list) else rows.get("BusInfo",[])
+                require(len(rows) == feed["rows"], "Bundled static metadata row count changed")
+                if feed["name"] in ("GetRoute", "GetStop"): names[feed["name"]] = rows
+            require({"GetRoute", "GetStop"} <= set(names), "Bundled routes or stops missing: " + folder)
+            ids.append(({str(row["pathAttributeId"]) for row in names["GetRoute"]} | {"parent:" + str(row["Id"]) for row in names["GetRoute"]},
+                        {str(row["Id"]) for row in names["GetStop"]}))
+        require(not (ids[0][0] & ids[1][0]) and not (ids[0][1] & ids[1][1]), "Taipei and New Taipei route or stop ids overlap.")
     bikes = json.loads((root / "TaipeiBus/BikeNetwork.json").read_text(encoding="utf-8"))
     bike_provenance = json.loads((root / "release/youbike-data-provenance.json").read_text(encoding="utf-8"))
     require(bikes["schema"] == 1 and len(bikes["stations"]) >= 1000, "Bundled YouBike station list is incomplete.")
@@ -102,6 +111,7 @@ def archive_checks(archive, bundle_id, version, build_number, minimum_sdk):
         require((app / "MetroNetwork.json").is_file(), "Metro metadata missing from signed archive")
         for name in ["GetRoute","GetStop","GetPathDetail","GetProvider","GetBusShape"]:
             require((app / "BusMetadata" / (name + ".gz")).is_file(), "Static bus fallback missing from signed archive: " + name)
+            require((app / "BusMetadata/ntpc" / (name + ".gz")).is_file(), "New Taipei bus fallback missing from signed archive: " + name)
     if tuple(map(int, version.split("."))) >= (1, 8, 0):
         bike_file = app / "BikeNetwork.json"
         require(bike_file.is_file(), "YouBike station list missing from signed archive")

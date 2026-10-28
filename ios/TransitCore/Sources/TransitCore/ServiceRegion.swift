@@ -9,11 +9,14 @@ public struct TransitSource: Sendable, Equatable, Identifiable {
     public let kind: Kind
     /// A bus source's folder of feed files, or a bike source's single file.
     public let feed: URL
-    /// Taipei's ids are stored unprefixed, as they always were, so saved stops and commutes need no
-    /// migration; every later source gets one ("ntpc:").
+    /// Taipei's and New Taipei's ids are stored unprefixed: they come from one information centre with
+    /// one numbering, so saved stops and commutes need no migration. A source relayed from elsewhere gets one.
     public let idPrefix: String
-    public init(id: String, name: String, kind: Kind, feed: URL, idPrefix: String = "") {
-        self.id = id; self.name = name; self.kind = kind; self.feed = feed; self.idPrefix = idPrefix
+    /// How often a feed is worth asking for, when it is rewritten less often than the app's usual pace
+    /// (New Taipei's YouBike file, about every five minutes); 0 keeps the usual pace.
+    public let refreshSeconds: Double
+    public init(id: String, name: String, kind: Kind, feed: URL, idPrefix: String = "", refreshSeconds: Double = 0) {
+        self.id = id; self.name = name; self.kind = kind; self.feed = feed; self.idPrefix = idPrefix; self.refreshSeconds = refreshSeconds
     }
 }
 
@@ -53,7 +56,8 @@ public struct RegionCatalog: Sendable {
     }
 
     /// Used only if the bundled file cannot be read, so a damaged resource never takes the whole app
-    /// out of service. It is the home region as bundled (RegionCatalogTests keeps the two the same).
+    /// out of service: Taipei's buses and bikes in the area the app first served, which the bundled
+    /// file always covers (RegionCatalogTests).
     static let builtIn = RegionCatalog(
         regions: [ServiceRegion(id: "taipei", name: "台北", englishName: "Taipei", center: Coordinate(latitude: 25.0377, longitude: 121.56),
                                 bounds: [GeoBounds(south: 24.90, west: 121.27, north: 25.25, east: 121.72)], sources: ["tpe", "bike-tpe"])],
@@ -72,7 +76,7 @@ public struct RegionCatalog: Sendable {
 
     /// `{"home": "taipei", "regions": [{"id", "name", "englishName", "center": [lat, lon],
     /// "bounds": [[south, west, north, east]], "sources": ["tpe"]}], "sources": [{"id", "name", "kind",
-    /// "feed", "idPrefix"}]}`. Feeds must be https; a region naming an unknown source is rejected.
+    /// "feed", "idPrefix", "refreshSeconds"}]}`. Feeds must be https; a region naming an unknown source is rejected.
     public init(data: Data) throws {
         guard let document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let home = document["home"] as? String,
@@ -83,7 +87,9 @@ public struct RegionCatalog: Sendable {
             guard let id = row["id"] as? String, !id.isEmpty, let name = row["name"] as? String,
                   let kind = (row["kind"] as? String).flatMap(TransitSource.Kind.init(rawValue:)),
                   let feed = (row["feed"] as? String).flatMap(URL.init(string:)), feed.scheme == "https" else { throw FeedError.invalid("Region source") }
-            return TransitSource(id: id, name: name, kind: kind, feed: feed, idPrefix: row["idPrefix"] as? String ?? "")
+            let refresh = number(row["refreshSeconds"]) ?? 0
+            guard refresh.isFinite, (0...3_600).contains(refresh) else { throw FeedError.invalid("Region source") }
+            return TransitSource(id: id, name: name, kind: kind, feed: feed, idPrefix: row["idPrefix"] as? String ?? "", refreshSeconds: refresh)
         }
         let regions = try regionRows.map { row -> ServiceRegion in
             guard let id = row["id"] as? String, !id.isEmpty, let name = row["name"] as? String,
@@ -105,7 +111,11 @@ public struct RegionCatalog: Sendable {
     public func contains(_ point: Coordinate) -> Bool { regions.contains { $0.contains(point) } }
     /// The first source of a kind a region lists; the home region's when none is given.
     public func source(_ kind: TransitSource.Kind, in region: ServiceRegion? = nil) -> TransitSource? {
-        (region ?? home).sources.lazy.compactMap { sources[$0] }.first { $0.kind == kind }
+        self.sources(kind, in: region).first
+    }
+    /// Every source of a kind a region lists, in its order; the first is the one the app cannot work without.
+    public func sources(_ kind: TransitSource.Kind, in region: ServiceRegion? = nil) -> [TransitSource] {
+        (region ?? home).sources.compactMap { sources[$0] }.filter { $0.kind == kind }
     }
 }
 

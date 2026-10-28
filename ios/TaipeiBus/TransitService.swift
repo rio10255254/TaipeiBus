@@ -59,72 +59,92 @@ actor TransitService {
         bikeNetworkValue = network
         return network
     }
-    private var bikeFetchedAt = Date.distantPast
-    private var bikeRetryAt = Date.distantPast
-    private var bikeTag: String?
-    private var bikePacket: BikeAvailability?
-    private var bikeRequest: Task<BikeAvailability?, Never>?
+    /// Taipei's YouBike and New Taipei's: separate files, each with its own pace and cache.
+    private let bikeSources: [TransitSource]
+    private struct BikeFeed {
+        var fetchedAt = Date.distantPast
+        var retryAt = Date.distantPast
+        var tag: String?
+        var packet: BikeAvailability?
+        var request: Task<Void, Never>?
+    }
+    private var bikeFeeds: [String: BikeFeed] = [:]
     private var checkedBikeCache = false
     private let bikeSession: URLSession
     private let bikeNow: @Sendable () -> Date
-    /// nil for a region without YouBike.
-    private static let bikeFeedURL = RegionCatalog.shared.source(.bike)?.feed
+    private var bikePacket: BikeAvailability? { BikeAvailability.combining(bikeSources.compactMap { bikeFeeds[$0.id]?.packet }) }
+    /// Taipei's file keeps the name it always had.
+    private func bikeCacheFile(_ source: TransitSource) -> URL {
+        cacheDirectory.appendingPathComponent(source == bikeSources.first ? "YouBikeImmediate.json" : "\(source.id)-YouBikeImmediate.json")
+    }
     /// Reuse a recent official report across launches, keeping its original receipt and
     /// station report times. Loading a file never makes old counts current again.
     func cachedBikeAvailability(network: BikeNetwork) -> BikeAvailability? {
         guard !network.stations.isEmpty else { return nil }
         if checkedBikeCache { return bikePacket }
         checkedBikeCache = true
-        let file = cacheDirectory.appendingPathComponent("YouBikeImmediate.json"), now = bikeNow()
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
-              let received = attributes[.modificationDate] as? Date,
-              (0..<BikeDock.freshnessSeconds).contains(now.timeIntervalSince(received)),
-              ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 8 * 1_024 * 1_024,
-              let bytes = try? Data(contentsOf: file),
-              let packet = try? BikeAvailability(data: bytes, network: network, at: received),
-              packet.docks.values.contains(where: { $0.isFresh(at: now) }) else { return nil }
-        bikePacket = packet; bikeFetchedAt = received
-        return packet
+        let now = bikeNow()
+        for source in bikeSources {
+            let file = bikeCacheFile(source)
+            guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+                  let received = attributes[.modificationDate] as? Date,
+                  (0..<BikeDock.freshnessSeconds).contains(now.timeIntervalSince(received)),
+                  ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 8 * 1_024 * 1_024,
+                  let bytes = try? Data(contentsOf: file),
+                  let packet = try? BikeAvailability(data: bytes, network: network, at: received),
+                  packet.docks.values.contains(where: { $0.isFresh(at: now) }) else { continue }
+            bikeFeeds[source.id, default: BikeFeed()].packet = packet
+            bikeFeeds[source.id, default: BikeFeed()].fetchedAt = received
+        }
+        return bikePacket
     }
     /// Taipei's public YouBike 2.0 feed is one file for the whole city, rewritten about once a
-    /// minute. Load a recent cache first, share concurrent requests, and retry a failed first
-    /// download promptly rather than treating it as a successful one-minute cache.
+    /// minute; New Taipei's is rewritten about every five and asked for less often. Load a recent
+    /// cache first, share concurrent requests, and retry a failed first download promptly rather
+    /// than treating it as a successful cache.
     func bikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
         guard !network.stations.isEmpty else { return nil }
         _ = cachedBikeAvailability(network: network)
-        if bikeNow().timeIntervalSince(bikeFetchedAt) < 60 { return bikePacket }
-        if let bikeRequest { return await bikeRequest.value }
-        guard bikeNow() >= bikeRetryAt else { return bikePacket }
-        let request = Task { await self.fetchBikeAvailability(network: network) }
-        bikeRequest = request
-        let packet = await request.value
-        bikeRequest = nil
-        return packet
+        await withTaskGroup(of: Void.self) { group in
+            for source in bikeSources { group.addTask { await self.refreshBikes(source, network: network) } }
+        }
+        return bikePacket
     }
-    private func fetchBikeAvailability(network: BikeNetwork) async -> BikeAvailability? {
-        bikeRetryAt = bikeNow().addingTimeInterval(10)
-        guard let url = Self.bikeFeedURL else { return bikePacket }
-        var request = URLRequest(url: url)
+    private func refreshBikes(_ source: TransitSource, network: BikeNetwork) async {
+        let interval = source.refreshSeconds > 0 ? source.refreshSeconds : 60
+        if bikeNow().timeIntervalSince(bikeFeeds[source.id]?.fetchedAt ?? .distantPast) < interval { return }
+        if let request = bikeFeeds[source.id]?.request { await request.value; return }
+        guard bikeNow() >= bikeFeeds[source.id]?.retryAt ?? .distantPast else { return }
+        let request = Task { await self.fetchBikeAvailability(source, network: network) }
+        bikeFeeds[source.id, default: BikeFeed()].request = request
+        await request.value
+        bikeFeeds[source.id]?.request = nil
+    }
+    private func fetchBikeAvailability(_ source: TransitSource, network: BikeNetwork) async {
+        bikeFeeds[source.id, default: BikeFeed()].retryAt = bikeNow().addingTimeInterval(10)
+        var request = URLRequest(url: source.feed)
         request.timeoutInterval = 12; request.cachePolicy = .reloadIgnoringLocalCacheData
-        if let bikeTag, bikePacket != nil { request.setValue(bikeTag, forHTTPHeaderField: "If-None-Match") }
+        if let tag = bikeFeeds[source.id]?.tag, bikeFeeds[source.id]?.packet != nil { request.setValue(tag, forHTTPHeaderField: "If-None-Match") }
         do {
             let (bytes, response) = try await bikeSession.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return bikePacket }
-            if http.statusCode == 304 { bikeFetchedAt = bikeNow(); return bikePacket }
-            guard http.statusCode == 200 else { return bikePacket }
+            guard let http = response as? HTTPURLResponse else { return }
+            if http.statusCode == 304 { bikeFeeds[source.id]?.fetchedAt = bikeNow(); return }
+            guard http.statusCode == 200 else { return }
             let received = bikeNow()
             let packet = try BikeAvailability(data: bytes, network: network, at: received)
-            bikeTag = http.value(forHTTPHeaderField: "ETag")
-            bikePacket = packet; bikeFetchedAt = received
+            bikeFeeds[source.id]?.tag = http.value(forHTTPHeaderField: "ETag")
+            bikeFeeds[source.id]?.packet = packet; bikeFeeds[source.id]?.fetchedAt = received
             try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-            let file = cacheDirectory.appendingPathComponent("YouBikeImmediate.json")
+            let file = bikeCacheFile(source)
             if (try? bytes.write(to: file, options: .atomic)) != nil {
                 try? FileManager.default.setAttributes([.modificationDate: received], ofItemAtPath: file.path)
             }
-            return packet
-        } catch { return bikePacket }
+        } catch { return }
     }
-    private let transport: ConditionalFeedTransport
+    /// Taipei's and New Taipei's buses: one numbering from one information centre, published as two
+    /// sets of files. The first is the one the app cannot work without.
+    private let busSources: [TransitSource]
+    private let transports: [String: ConditionalFeedTransport]
     private let cacheDirectory: URL
     private var metadata = TransitMetadata()
     private var snapshot = TransitSnapshot()
@@ -137,28 +157,41 @@ actor TransitService {
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
 
-    init(bikeSession: URLSession = .shared, feedSession: URLSession? = nil, cacheDirectory: URL? = nil, bikeNow: @escaping @Sendable () -> Date = { Date() }) {
-        self.bikeSession = bikeSession; self.bikeNow = bikeNow
+    init(bikeSession: URLSession = .shared, feedSession: URLSession? = nil, cacheDirectory: URL? = nil,
+         busSources: [TransitSource] = RegionCatalog.shared.sources(.bus), bikeSources: [TransitSource] = RegionCatalog.shared.sources(.bike),
+         bikeNow: @escaping @Sendable () -> Date = { Date() }) {
+        self.bikeSession = bikeSession; self.bikeNow = bikeNow; self.busSources = busSources; self.bikeSources = bikeSources
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 40
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
         configuration.waitsForConnectivity = false
-        transport = ConditionalFeedTransport(session: feedSession ?? URLSession(configuration: configuration),
-            baseURL: RegionCatalog.shared.source(.bus)!.feed)
+        let session = feedSession ?? URLSession(configuration: configuration)
+        transports = Dictionary(busSources.map {
+            ($0.id, ConditionalFeedTransport(session: session, baseURL: $0.feed))
+        }, uniquingKeysWith: { first, _ in first })
         self.cacheDirectory = cacheDirectory ?? FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("TaipeiTransit", isDirectory: true)
     }
     func updateSettings(_ settings: LiveSettings) { self.settings = settings }
-    func offlineMetroMetadata() -> TransitMetadata? {
-        if let bundledMetadata { return bundledMetadata }
-        var feeds: [String:Data] = [:]
+    /// The primary source's files keep the names they always had; another source's carry its id.
+    private func cacheFile(_ name: String, _ source: TransitSource) -> URL {
+        cacheDirectory.appendingPathComponent(source == busSources.first ? "\(name).json" : "\(source.id)-\(name).json")
+    }
+    private func bundledFeeds(_ source: TransitSource) -> [String: Data] {
+        var feeds: [String: Data] = [:]
         for name in Self.metadataNames {
-            guard let url = Bundle.main.url(forResource:name,withExtension:"gz",subdirectory:"BusMetadata"),
-                  let compressed = try? Data(contentsOf:url), let bytes = try? inflate(compressed) else { continue }
+            let folder = source == busSources.first ? "BusMetadata" : "BusMetadata/\(source.id)"
+            guard let url = Bundle.main.url(forResource: name, withExtension: "gz", subdirectory: folder),
+                  let compressed = try? Data(contentsOf: url), let bytes = try? inflate(compressed) else { continue }
             feeds[name] = bytes
         }
-        var result = (try? FeedDecoder.metadata(feeds:feeds)) ?? TransitMetadata()
+        return feeds
+    }
+    private static let essentialNames: Set<String> = ["GetRoute", "GetStop", "GetPathDetail"]
+    func offlineMetroMetadata() -> TransitMetadata? {
+        if let bundledMetadata { return bundledMetadata }
+        var result = (try? FeedDecoder.metadata(sources: busSources.map { bundledFeeds($0) })) ?? TransitMetadata()
         result.officialTravelTimes = (bundledOfficialTravelTimes() ?? .init()).matching(result)
         installMetro(in:&result)
         bundledMetadata = result
@@ -166,22 +199,28 @@ actor TransitService {
         return result.metro.stations.isEmpty ? nil : result
     }
     func cachedMetadata() -> TransitMetadata? {
-        var feeds: [String: Data] = [:]
-        let essentials: Set<String> = ["GetRoute", "GetStop", "GetPathDetail"]
-        for name in Self.metadataNames {
-            let file = cacheDirectory.appendingPathComponent("\(name).json")
-            guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
-                  let modified = attributes[.modificationDate] as? Date,
-                  Date().timeIntervalSince(modified) < settings.refresh.metadataHours * 3_600,
-                  ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 32 * 1_024 * 1_024,
-                  let bytes = try? Data(contentsOf: file),
-                  (try? FeedDecoder.validateMetadataFeed(bytes)) != nil else {
-                if essentials.contains(name) { return nil }
-                continue
+        func recent(_ source: TransitSource) -> [String: Data]? {
+            var feeds: [String: Data] = [:]
+            for name in Self.metadataNames {
+                let file = cacheFile(name, source)
+                guard let attributes = try? FileManager.default.attributesOfItem(atPath: file.path),
+                      let modified = attributes[.modificationDate] as? Date,
+                      Date().timeIntervalSince(modified) < settings.refresh.metadataHours * 3_600,
+                      ((attributes[.size] as? NSNumber)?.intValue ?? Int.max) <= 32 * 1_024 * 1_024,
+                      let bytes = try? Data(contentsOf: file),
+                      (try? FeedDecoder.validateMetadataFeed(bytes)) != nil else {
+                    if Self.essentialNames.contains(name) { return nil }
+                    continue
+                }
+                feeds[name] = bytes
             }
-            feeds[name] = bytes
+            return feeds
         }
-        guard let value = try? FeedDecoder.metadata(feeds: feeds), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
+        // Without a recent copy of the primary source the app waits for the network as before; another
+        // source without one uses the copy inside the app.
+        guard let first = busSources.first, let primary = recent(first) else { return nil }
+        let sources = [primary] + busSources.dropFirst().map { recent($0) ?? bundledFeeds($0) }
+        guard let value = try? FeedDecoder.metadata(sources: sources), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
         var loaded = value
         let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
             .flatMap { try? OfficialTravelTimes(data: $0) }
@@ -195,16 +234,18 @@ actor TransitService {
         let refreshInterval: TimeInterval = metadataNotice == nil ? settings.refresh.metadataHours * 3_600 : 300
         if !force, let date = metadataLoadedAt, Date().timeIntervalSince(date) < refreshInterval { return metadata }
         try FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
-        var feeds: [String: Data] = [:]
+        var feeds: [String: [String: Data]] = [:]
         var notices: [String] = []
         async let official = officialTravelTimes(force: force)
         // Independent metadata requests; failure of shapes does not disable station arrivals.
-        await withTaskGroup(of: (String, Data?, String?).self) { group in
-            for name in Self.metadataNames {
-                group.addTask { await self.metadataFeed(name, force: force) }
+        await withTaskGroup(of: (String, String, Data?, String?).self) { group in
+            for source in busSources {
+                for name in Self.metadataNames {
+                    group.addTask { await self.metadataFeed(name, source: source, force: force) }
+                }
             }
-            for await (name, data, notice) in group {
-                if let data { feeds[name] = data }
+            for await (source, name, data, notice) in group {
+                if let data { feeds[source, default: [:]][name] = data }
                 if let notice { notices.append(notice) }
             }
         }
@@ -212,10 +253,13 @@ actor TransitService {
         let decodedBus: TransitMetadata
         do {
             // A missing path feed cannot replace a complete catalog with guessed parent stop order.
-            guard ["GetRoute","GetStop","GetPathDetail"].allSatisfy({ feeds[$0] != nil }) else {
+            let complete = { (source: TransitSource) in Self.essentialNames.allSatisfy { feeds[source.id]?[$0] != nil } }
+            guard let first = busSources.first, complete(first) else {
                 throw FeedError.invalid("Incomplete bus planning metadata")
             }
-            let candidate = try FeedDecoder.metadata(feeds:feeds)
+            // Another source that cannot be read in full uses the copy inside the app.
+            let sources = busSources.map { complete($0) ? feeds[$0.id]! : bundledFeeds($0) }
+            let candidate = try FeedDecoder.metadata(sources: sources)
             guard !candidate.paths.isEmpty else { throw FeedError.invalid("Missing bus stop order") }
             decodedBus = candidate
         }
@@ -335,27 +379,27 @@ actor TransitService {
         return bytes
     }
 
-    private func metadataFeed(_ name: String, force: Bool) async -> (String, Data?, String?) {
-        let url = cacheDirectory.appendingPathComponent("\(name).json")
+    private func metadataFeed(_ name: String, source: TransitSource, force: Bool) async -> (String, String, Data?, String?) {
+        let url = cacheFile(name, source)
         let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
         let modified = attributes?[.modificationDate] as? Date
         if !force, let modified, Date().timeIntervalSince(modified) < settings.refresh.metadataHours * 3_600,
            let bytes = try? Data(contentsOf: url) {
-            do { try FeedDecoder.validateMetadataFeed(bytes); return (name, bytes, nil) }
+            do { try FeedDecoder.validateMetadataFeed(bytes); return (source.id, name, bytes, nil) }
             catch { /* Treat an empty or malformed cache as a cache miss. */ }
         }
         do {
-            let bytes = try await fetch(name)
+            let bytes = try await fetch(name, from: source)
             do { try FeedDecoder.validateMetadataFeed(bytes) }
-            catch { await transport.invalidate(name); throw error }
+            catch { await transports[source.id]?.invalidate(name); throw error }
             try bytes.write(to: url, options: .atomic)
-            return (name, bytes, nil)
+            return (source.id, name, bytes, nil)
         } catch {
             if let bytes = try? Data(contentsOf: url) {
-                do { try FeedDecoder.validateMetadataFeed(bytes); return (name, bytes, name) }
+                do { try FeedDecoder.validateMetadataFeed(bytes); return (source.id, name, bytes, name) }
                 catch { /* A broken cache cannot become the fallback. */ }
             }
-            return (name, nil, name)
+            return (source.id, name, nil, name)
         }
     }
 
@@ -371,47 +415,59 @@ actor TransitService {
         return result
     }
 
-    private enum LiveResult: Sendable { case vehicles(Data?), estimates(Data?) }
-    /// All stops' estimates are about 150 KB and change every few seconds, while the app shows
+    private enum LiveResult: Sendable { case vehicles(String, Data?), estimates(String, Data?) }
+    /// All stops' estimates are about 150 KB a city and change every few seconds, while the app shows
     /// whole minutes counted down from the source time. Fetch them at most this often.
     private let estimateInterval: TimeInterval = 20
-    private var estimatesRequestedAt = Date.distantPast
+    private var estimatesRequestedAt: [String: Date] = [:]
+    /// Each source's last accepted report. A source's vehicles are tracked against its own previous
+    /// report, so a city that is late or offline never makes the other city's buses look missing.
+    private var vehicleParts: [String: (vehicles: [BusVehicle], updatedAt: Date)] = [:]
+    private var vehicleErrors: [String: String] = [:]
+    private var estimateParts: [String: EstimateFeed] = [:]
 
     private func performRefresh(onPartial: @escaping @Sendable (TransitSnapshot) async -> Void) async -> TransitSnapshot {
         // Publish each independent feed immediately; ETA must not wait for GPS and road matching.
         await withTaskGroup(of: LiveResult.self) { group in
-            group.addTask { .vehicles(try? await self.fetch("GetBusData")) }
-            if snapshot.estimates.updatedAt == nil || snapshot.estimates.error != nil ||
-                Date().timeIntervalSince(estimatesRequestedAt) >= estimateInterval {
-                estimatesRequestedAt = Date()
-                group.addTask { .estimates(try? await self.fetch("GetEstimateTime")) }
+            for source in busSources {
+                group.addTask { .vehicles(source.id, try? await self.fetch("GetBusData", from: source)) }
+                let estimates = estimateParts[source.id]
+                if estimates?.updatedAt == nil || estimates?.error != nil ||
+                    Date().timeIntervalSince(estimatesRequestedAt[source.id] ?? .distantPast) >= estimateInterval {
+                    estimatesRequestedAt[source.id] = Date()
+                    group.addTask { .estimates(source.id, try? await self.fetch("GetEstimateTime", from: source)) }
+                }
             }
             for await result in group {
                 guard !Task.isCancelled else { group.cancelAll(); break }
                 switch result {
-                case .vehicles(let bytes):
+                case .vehicles(let source, let bytes):
                     do {
                         guard let bytes else { throw FeedError.invalid(AppText.text("車輛定位")) }
-                        let value = try FeedDecoder.vehicles(bytes, metadata: metadata, previous: snapshot.vehicles, now: Date())
-                        if let date = value.updatedAt, snapshot.sourceUpdatedAt.map({ date >= $0 }) ?? true {
-                            snapshot.vehicles = value.vehicles; snapshot.sourceUpdatedAt = date
-                            snapshot.receivedAt = Date(); snapshot.vehicleError = nil
-                        } else { snapshot.vehicleError = AppText.text("定位來源回報較舊，保留最後資料") }
+                        let value = try FeedDecoder.vehicles(bytes, metadata: metadata, previous: vehicleParts[source]?.vehicles ?? [], now: Date())
+                        if let date = value.updatedAt, vehicleParts[source].map({ date >= $0.updatedAt }) ?? true {
+                            vehicleParts[source] = (value.vehicles, date)
+                            snapshot.vehicles = busSources.flatMap { vehicleParts[$0.id]?.vehicles ?? [] }.sorted { $0.id < $1.id }
+                            snapshot.sourceUpdatedAt = vehicleParts.values.map { $0.updatedAt }.max()
+                            snapshot.receivedAt = Date(); vehicleErrors[source] = nil
+                        } else { vehicleErrors[source] = AppText.text("定位來源回報較舊，保留最後資料") }
                     } catch {
-                        if bytes != nil { await transport.invalidate("GetBusData") }
-                        snapshot.vehicleError = AppText.text("定位來源連線中斷，保留最後回報")
+                        if bytes != nil { await transports[source]?.invalidate("GetBusData") }
+                        vehicleErrors[source] = AppText.text("定位來源連線中斷，保留最後回報")
                     }
-                case .estimates(let bytes):
+                    snapshot.vehicleError = busSources.lazy.compactMap { self.vehicleErrors[$0.id] }.first
+                case .estimates(let source, let bytes):
                     do {
                         guard let bytes else { throw FeedError.invalid(AppText.text("到站預估")) }
                         let value = try FeedDecoder.estimates(bytes)
-                        if let date = value.updatedAt, snapshot.estimates.updatedAt.map({ date >= $0 }) ?? true {
-                            snapshot.estimates = value
-                        } else { snapshot.estimates.error = AppText.text("到站預估來源回報較舊") }
+                        if let date = value.updatedAt, estimateParts[source]?.updatedAt.map({ date >= $0 }) ?? true {
+                            estimateParts[source] = value
+                        } else { estimateParts[source, default: EstimateFeed()].error = AppText.text("到站預估來源回報較舊") }
                     } catch {
-                        if bytes != nil { await transport.invalidate("GetEstimateTime") }
-                        snapshot.estimates.error = AppText.text("到站預估來源連線中斷")
+                        if bytes != nil { await transports[source]?.invalidate("GetEstimateTime") }
+                        estimateParts[source, default: EstimateFeed()].error = AppText.text("到站預估來源連線中斷")
                     }
+                    snapshot.estimates = EstimateFeed.combining(busSources.compactMap { estimateParts[$0.id] })
                 }
                 snapshot.revision += 1
                 await onPartial(snapshot)
@@ -420,7 +476,8 @@ actor TransitService {
         return snapshot
     }
 
-    private func fetch(_ name: String) async throws -> Data {
+    private func fetch(_ name: String, from source: TransitSource) async throws -> Data {
+        guard let transport = transports[source.id] else { throw FeedError.invalid(name) }
         let data = try await transport.data(name)
         do { return try inflate(data) }
         catch { await transport.invalidate(name); throw error }

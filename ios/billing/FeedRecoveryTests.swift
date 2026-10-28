@@ -48,8 +48,10 @@ private actor PartialFeedRecorder {
     private func service() -> TransitService {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RecoveryFeedProtocol.self]
-        return TransitService(feedSession: URLSession(configuration: configuration))
+        return TransitService(feedSession: URLSession(configuration: configuration), busSources: Self.taipei)
     }
+    /// One city's files: these tests count requests and follow a single feed's recovery.
+    private static let taipei = Array(RegionCatalog.shared.sources(.bus).prefix(1))
     func testArrivalFeedPublishesBeforeSlowerGPSFinishes() async throws {
         RecoveryFeedProtocol.configure(delays: ["GetBusData":0.35])
         let service = service(), recorder = PartialFeedRecorder()
@@ -94,7 +96,7 @@ private actor PartialFeedRecorder {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [RecoveryFeedProtocol.self]
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let service = TransitService(feedSession: URLSession(configuration:configuration),cacheDirectory:folder)
+        let service = TransitService(feedSession: URLSession(configuration:configuration),cacheDirectory:folder,busSources:Self.taipei)
         _ = await service.offlineMetroMetadata()
         let model = TransitAppModel(service:service)
         model.setActive(true)

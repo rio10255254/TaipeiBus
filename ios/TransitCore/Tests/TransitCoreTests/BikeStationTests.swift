@@ -41,8 +41,35 @@ final class BikeStationTests: XCTestCase {
             XCTAssertGreaterThan(station.capacity, 0, station.id)
             XCTAssertLessThanOrEqual(station.capacity, 200, station.id)
         }
-        // Every station is in Taipei City; New Taipei is not part of this list yet.
+        // Both cities' stations, which never share a number (Taipei's 5001…, New Taipei's 5002…).
         XCTAssertTrue(network.stations.allSatisfy { $0.district.hasSuffix("區") })
+        XCTAssertGreaterThan(network.stations.filter { $0.id.hasPrefix("5001") }.count, 1_200)
+        XCTAssertGreaterThan(network.stations.filter { $0.id.hasPrefix("5002") }.count, 1_000)
+        XCTAssertNotNil(network.stations.first { $0.district == "板橋區" })
+    }
+
+    func testNewTaipeiCountsReadAlongsideTaipeisAsOneSnapshot() throws {
+        let now = FeedDecoder.taipeiDate("2026/10/29 00:39:00")!
+        let network = BikeNetwork(stations: sampleNetwork().stations + [
+            BikeStation(id: "500201001", name: "下庄市場", district: "八里區", coordinate: Coordinate(latitude: 25.14678, longitude: 121.3999), capacity: 20)])
+        // New Taipei's own field names and compact time, as published.
+        let newTaipei = try BikeAvailability(data: feed([
+            ["sno": "500201001", "sna": "YouBike2.0_下庄市場", "tot_quantity": "20", "sbi_quantity": "11", "bemp": "9",
+             "mday": "20261029T003403", "lat": "25.14678", "lng": "121.3999", "act": "1"],
+            ["sno": "500201001x", "sbi_quantity": "1", "bemp": "1", "mday": "20261029T003403"],
+            ["sno": "500101002", "sbi_quantity": "2", "bemp": "3", "mday": "2026-10-29T003403"]]), network: network, at: now)
+        let dock = try XCTUnwrap(newTaipei.dock("500201001"))
+        XCTAssertEqual(dock.rentable, 11); XCTAssertEqual(dock.returnable, 9); XCTAssertEqual(dock.capacity, 20)
+        XCTAssertEqual(dock.observedAt, FeedDecoder.taipeiDate("2026/10/29 00:34:03"))
+        XCTAssertTrue(dock.active)
+        XCTAssertNil(newTaipei.dock("500101002"), "a stamp that is neither shape is not read as a time")
+        let taipei = try BikeAvailability(data: feed([["sno": "500101001", "available_rent_bikes": 5, "available_return_bikes": 23,
+            "Quantity": 28, "act": "1", "infoTime": "2026-10-29 00:38:04"]]), network: network, at: now.addingTimeInterval(-30))
+        let both = try XCTUnwrap(BikeAvailability.combining([taipei, newTaipei]))
+        XCTAssertEqual(Set(both.docks.keys), ["500101001", "500201001"])
+        XCTAssertEqual(both.receivedAt, now, "the newer city's receipt marks the change")
+        XCTAssertEqual(BikeAvailability.combining([taipei]), taipei)
+        XCTAssertNil(BikeAvailability.combining([]))
     }
 
     func testMalformedStationFilesAreRejectedInsteadOfPartlyLoaded() throws {

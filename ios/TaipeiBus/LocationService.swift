@@ -262,7 +262,7 @@ final class LocationService: NSObject, ObservableObject, @preconcurrency CLLocat
         guard value != sample else { return }
         sample = value; coordinate = value.coordinate; accuracy = value.accuracy; updatedAt = value.timestamp
         if let bytes = try? JSONEncoder().encode(value) { UserDefaults.standard.set(bytes, forKey: cacheKey) }
-        if !value.coordinate.isInServiceArea { message = settings.text("目前在服務範圍外，可手動選擇台北出發地") }
+        if !value.coordinate.isInServiceArea { message = settings.text("目前在服務範圍外，可手動選擇雙北的出發地") }
         else if Date().timeIntervalSince(value.timestamp) > 60 { message = settings.text("上次位置，正在更新") }
         else if value.accuracy > 120 { message = AppText.text("位置約 ±%@ 公尺", Int(value.accuracy.rounded())) }
         else { message = nil }
