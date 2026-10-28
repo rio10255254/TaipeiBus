@@ -78,7 +78,8 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     /// Buses are redrawn as often as the fastest one on screen moves a fraction of a point, not on
     /// every frame while any bus in the city is gliding: each redraw renders the whole map.
     private var busesOnScreen = 0
-    private var lastBusPoints: [String: CGPoint] = [:]
+    /// Where each vehicle on screen was drawn last, in points.
+    private var lastPoints: [String: CGPoint] = [:]
     private var busRedrawInterval: CFTimeInterval = 1 / 60
     private var lastBusDraw: CFTimeInterval = 0
     private var geometryGeneration = ""
@@ -327,11 +328,6 @@ final class NativeBusLayer: MLNCustomStyleLayer {
         let poses = trainMode ? trains.compactMap { trainPose($0, at: Date()) }
             .filter { bounds.contains($0.coordinate) || $0.id == selectedID } : motion.poses(time: time, now: Date(), in: bounds, including: selectedID)
         sampledVehicleCount = poses.count
-        if trainMode {
-            trainsOnScreen = poses.count; lastTrainDraw = CACurrentMediaTime()
-            // About 22 m/s at most between stations; 0.4 pt of movement per redraw looks continuous.
-            trainRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 22))
-        }
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
         candidates.reserveCapacity(poses.count)
@@ -364,22 +360,22 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
                                selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))
         }
-        if !trainMode {
-            // How far the buses on screen actually moved since the last redraw: the next one comes
-            // when the fastest has moved about 0.4 pt, which still looks continuous. A bus waiting
-            // at a light or creeping in traffic no longer costs the whole map 120 frames a second.
-            let drawn = CACurrentMediaTime(), elapsed = drawn - lastBusDraw
-            var fastest = 0.0
-            if elapsed > 0.001, elapsed < 2 {
-                for candidate in candidates {
-                    guard let before = lastBusPoints[candidate.id] else { continue }
-                    fastest = max(fastest, hypot(candidate.point.x - before.x, candidate.point.y - before.y) / elapsed)
-                }
+        // How far the vehicles on screen actually moved since the last redraw: the next one comes
+        // when the fastest has moved about 0.4 pt, which still looks continuous. A bus at a light,
+        // a train at a platform or anything creeping no longer costs the whole map 120 frames a
+        // second; a zoomed-out network costs a few.
+        let drawn = CACurrentMediaTime(), elapsed = drawn - (trainMode ? lastTrainDraw : lastBusDraw)
+        var fastest = 0.0
+        if elapsed > 0.001, elapsed < 2 {
+            for candidate in candidates {
+                guard let before = lastPoints[candidate.id] else { continue }
+                fastest = max(fastest, hypot(candidate.point.x - before.x, candidate.point.y - before.y) / elapsed)
             }
-            lastBusPoints = Dictionary(candidates.map { ($0.id, $0.point) }, uniquingKeysWith: { first, _ in first })
-            busesOnScreen = candidates.count; lastBusDraw = drawn
-            busRedrawInterval = fastest > 0 ? min(0.5, max(1 / 120, 0.4 / fastest)) : 0.5
         }
+        lastPoints = Dictionary(candidates.map { ($0.id, $0.point) }, uniquingKeysWith: { first, _ in first })
+        let interval = fastest > 0 ? min(0.5, max(1 / 120, 0.4 / fastest)) : 0.5
+        if trainMode { trainsOnScreen = candidates.count; lastTrainDraw = drawn; trainRedrawInterval = interval }
+        else { busesOnScreen = candidates.count; lastBusDraw = drawn; busRedrawInterval = interval }
         // Both batches use the same gray body, roof, glazing and lighting. At city
         // scale we omit tiny wheel spokes, never replace a bus with an arrow.
         let eligible = candidates.filter(\.detailed)
