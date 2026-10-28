@@ -129,6 +129,12 @@ final class MotionCostProbe: NSObject, ObservableObject {
     private var pacing = FramePacingWindow(interval: 5)
     private var windowStart: (wall: CFTimeInterval, main: Double, process: Double)?
     private var windows: [[String: Any]] = []
+    private var mapFrames = 0
+    /// One frame of the map drawn (MapLibre finished rendering it).
+    func noteMapFrame() { mapFrames += 1 }
+    /// The frame rate the map last asked for, and whether something moving held the full rate.
+    var mapRate = 0
+    var mapRateBusy = false
     func start() {
         guard link == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -138,7 +144,7 @@ final class MotionCostProbe: NSObject, ObservableObject {
     }
     @objc private func tick(_ link: CADisplayLink) {
         let now = CACurrentMediaTime()
-        if windowStart == nil { windowStart = (now, Self.mainThreadSeconds(), Self.processSeconds()) }
+        if windowStart == nil { windowStart = (now, Self.mainThreadSeconds(), Self.processSeconds()); mapFrames = 0 }
         guard let frames = pacing.observe(timestamp: link.timestamp, targetInterval: link.targetTimestamp - link.timestamp),
               let start = windowStart else { return }
         let main = Self.mainThreadSeconds(), process = Self.processSeconds()
@@ -148,7 +154,9 @@ final class MotionCostProbe: NSObject, ObservableObject {
         windows.append(["began": ended - wall, "ended": ended, "seconds": wall, "fps": frames.framesPerSecond, "frames": frames.frames,
                         "delayed": frames.delayedFrames, "longest_ms": frames.longestGapMilliseconds,
                         "main_cpu_pct": (main - start.main) / wall * 100,
-                        "process_cpu_pct": (process - start.process) / wall * 100])
+                        "process_cpu_pct": (process - start.process) / wall * 100,
+                        "map_fps": Double(mapFrames) / wall, "map_rate": mapRate, "map_rate_busy": mapRateBusy])
+        mapFrames = 0
         let environment = ProcessInfo.processInfo.environment
         let value: [String: Any] = ["windows": Array(windows.suffix(12)), "count": windows.count,
             "os": UIDevice.current.systemVersion,

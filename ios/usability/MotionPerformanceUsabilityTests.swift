@@ -21,6 +21,8 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         // Typed, so `last` is the property and not the `last(where:)` method boxed as Any.
         let longest: Double = values("longest_ms").last ?? -1
         return ["main_cpu_pct": median("main_cpu_pct"), "process_cpu_pct": median("process_cpu_pct"), "fps": median("fps"),
+                "map_fps": median("map_fps"), "map_rate": median("map_rate"),
+                "map_rate_busy_windows": Int(values("map_rate_busy").reduce(0, +)),
                 "delayed_frames": Int(values("delayed").reduce(0, +)), "longest_ms": longest,
                 "windows": windows.count]
     }
@@ -74,6 +76,25 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         for row in rows where ["pulse", "symbols", "orb", "orb-large", "glow", "preview"].contains(row["component"] as? String) {
             XCTAssertLessThanOrEqual(row["main_cpu_extra_pct"] as? Double ?? 99, 1.5, "\(row)")
         }
+    }
+
+    /// The home map left alone with 2,500 buses moving across the city (the stress fixture): how
+    /// often the map is drawn and what the app's threads cost while nobody touches the screen.
+    /// This is most of the time the app is open, and where its heat and battery go.
+    func testMapAtRestOnThisSystem() {
+        launch(["--city-fleet-fixture", "--usability-fixture", "--test-motion-cost"])
+        XCTAssertTrue(app.staticTexts["motion-cost-state"].waitForExistence(timeout: 60))
+        // The fixture's first positions and the map's first tiles settle first.
+        Thread.sleep(forTimeInterval: 12)
+        let since = Date().timeIntervalSince1970
+        Thread.sleep(forTimeInterval: 31)
+        let value = report()
+        capture("map-rest")
+        let windows = quiet(value, since: since)
+        XCTAssertGreaterThanOrEqual(windows.count, 4, "too few quiet windows in \(value)")
+        publish("map-rest", ["device": ["os": value["os"] as? String ?? "", "model": value["model"] as? String ?? "",
+                                        "screen_hz": value["screen_hz"] as? Int ?? 0],
+                             "result": summary(windows)])
     }
 
     /// The trip with the new feedback, walked through on this system and screen size: pages,
