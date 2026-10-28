@@ -132,6 +132,9 @@ final class MotionCostProbe: NSObject, ObservableObject {
     private var mapFrames = 0
     /// One frame of the map drawn (MapLibre finished rendering it).
     func noteMapFrame() { mapFrames += 1 }
+    /// The frame rate the map last asked for, and whether something moving held the full rate.
+    var mapRate = 0
+    var mapRateBusy = false
     func start() {
         guard link == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(tick(_:)))
@@ -152,7 +155,7 @@ final class MotionCostProbe: NSObject, ObservableObject {
                         "delayed": frames.delayedFrames, "longest_ms": frames.longestGapMilliseconds,
                         "main_cpu_pct": (main - start.main) / wall * 100,
                         "process_cpu_pct": (process - start.process) / wall * 100,
-                        "map_fps": Double(mapFrames) / wall])
+                        "map_fps": Double(mapFrames) / wall, "map_rate": mapRate, "map_rate_busy": mapRateBusy])
         mapFrames = 0
         let environment = ProcessInfo.processInfo.environment
         let value: [String: Any] = ["windows": Array(windows.suffix(12)), "count": windows.count,

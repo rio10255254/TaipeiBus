@@ -21,7 +21,8 @@ final class MotionPerformanceUsabilityTests: JourneyUsabilityTestBase {
         // Typed, so `last` is the property and not the `last(where:)` method boxed as Any.
         let longest: Double = values("longest_ms").last ?? -1
         return ["main_cpu_pct": median("main_cpu_pct"), "process_cpu_pct": median("process_cpu_pct"), "fps": median("fps"),
-                "map_fps": median("map_fps"),
+                "map_fps": median("map_fps"), "map_rate": median("map_rate"),
+                "map_rate_busy_windows": Int(values("map_rate_busy").reduce(0, +)),
                 "delayed_frames": Int(values("delayed").reduce(0, +)), "longest_ms": longest,
                 "windows": windows.count]
     }

@@ -78,6 +78,7 @@ final class NativeBusLayer: MLNCustomStyleLayer {
     /// Buses are redrawn as often as the fastest one on screen moves a fraction of a point, not on
     /// every frame while any bus in the city is gliding: each redraw renders the whole map.
     private var busesOnScreen = 0
+    private var lastBusPoints: [String: CGPoint] = [:]
     private var busRedrawInterval: CFTimeInterval = 1 / 60
     private var lastBusDraw: CFTimeInterval = 0
     private var geometryGeneration = ""
@@ -330,11 +331,6 @@ final class NativeBusLayer: MLNCustomStyleLayer {
             trainsOnScreen = poses.count; lastTrainDraw = CACurrentMediaTime()
             // About 22 m/s at most between stations; 0.4 pt of movement per redraw looks continuous.
             trainRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 22))
-        } else {
-            busesOnScreen = poses.count; lastBusDraw = CACurrentMediaTime()
-            // City buses glide at up to about 16 m/s between fixes: about 46 redraws a second at
-            // street zoom, 12 across a district, 3 across the city.
-            busRedrawInterval = min(1, max(1 / 120, 0.4 * (metersPerWorld / worldSize) / 16))
         }
         typealias Candidate = (id: String, instance: Instance, point: CGPoint, size: CGFloat, score: Double, detailed: Bool)
         var candidates: [Candidate] = []
@@ -367,6 +363,22 @@ final class NativeBusLayer: MLNCustomStyleLayer {
                                                     Float(pose.traveledDistance.truncatingRemainder(dividingBy: .pi * 0.98) / 0.49)))
             candidates.append((pose.id, instance, screen, max(22, min(38, screenLength + 8)),
                                selected ? -1 : ndc.x * ndc.x + ndc.y * ndc.y, selected || naturalLength >= 18))
+        }
+        if !trainMode {
+            // How far the buses on screen actually moved since the last redraw: the next one comes
+            // when the fastest has moved about 0.4 pt, which still looks continuous. A bus waiting
+            // at a light or creeping in traffic no longer costs the whole map 120 frames a second.
+            let drawn = CACurrentMediaTime(), elapsed = drawn - lastBusDraw
+            var fastest = 0.0
+            if elapsed > 0.001, elapsed < 2 {
+                for candidate in candidates {
+                    guard let before = lastBusPoints[candidate.id] else { continue }
+                    fastest = max(fastest, hypot(candidate.point.x - before.x, candidate.point.y - before.y) / elapsed)
+                }
+            }
+            lastBusPoints = Dictionary(candidates.map { ($0.id, $0.point) }, uniquingKeysWith: { first, _ in first })
+            busesOnScreen = candidates.count; lastBusDraw = drawn
+            busRedrawInterval = fastest > 0 ? min(0.5, max(1 / 120, 0.4 / fastest)) : 0.5
         }
         // Both batches use the same gray body, roof, glazing and lighting. At city
         // scale we omit tiny wheel spokes, never replace a bus with an arrow.

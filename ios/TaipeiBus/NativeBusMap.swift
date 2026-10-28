@@ -221,6 +221,9 @@ struct NativeBusMap: UIViewRepresentable {
         /// with buses creeping across it no longer holds a ProMotion screen at 120 Hz.
         private func applyFrameRate(_ link: CADisplayLink, _ map: MLNMapView, now: CFTimeInterval, date: Date) {
             let busy = cameraMoving || places.interacting || now < fullRateUntil || model.following || model.followingTrain
+#if DEBUG
+            MotionCostProbe.shared.mapRateBusy = busy
+#endif
             var rate = rateCap
             if !busy {
                 let intervals = [buses?.redrawInterval(time: now, now: date), trains?.redrawInterval(time: now, now: date)].compactMap { $0 }
@@ -240,6 +243,9 @@ struct NativeBusMap: UIViewRepresentable {
             link.preferredFrameRateRange = CAFrameRateRange(minimum: Float(max(10, rate / 2)), maximum: Float(rate), preferred: Float(rate))
             map.preferredFramesPerSecond = MLNMapViewPreferredFramesPerSecond(rawValue: rate)
             lastPreferredRate = rate
+#if DEBUG
+            MotionCostProbe.shared.mapRate = rate
+#endif
         }
         /// A gesture or a flight starts: the full rate from its first frame.
         private func raiseFrameRate() {
