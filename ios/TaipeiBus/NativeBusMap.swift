@@ -1126,6 +1126,7 @@ struct NativeBusMap: UIViewRepresentable {
             places.dataReady = fullyRendered
             places.request()
 #if DEBUG
+            MotionCostProbe.shared.noteMapFrame()
             zoomProbe.frame(zoom: mapView.zoomLevel, busEncode: buses?.lastEncodeMilliseconds ?? 0)
             zoomProbeFullyRendered = fullyRendered
 #endif
