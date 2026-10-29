@@ -78,12 +78,16 @@ final class OfficialTravelTimeTests: XCTestCase {
             "updated": "2026-10-05T05:26:38.100+08:00", "edges": (0..<4).map { ["s\($0)", "s\($0 + 1)"] }, "periods": periods]]]
         metadata.officialTravelTimes = try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: object))
         let now = date("2026-10-06T10:50:00+08:00"), forecast = VehicleArrivalForecast()
+        // Official profiles are scaled by the hour's measured pace factor, as everywhere (TravelTimeModel).
+        let factor = { (at: String) in ForecastTuning.current.paceFactor(at: self.date(at)) }
         let estimate = forecast.ridingEstimate(ride, metadata: metadata, at: now)
-        XCTAssertEqual(estimate.seconds, 400); XCTAssertEqual(estimate.evidence, .officialProfile)
+        XCTAssertEqual(estimate.seconds, 400 * factor("2026-10-06T10:50:00+08:00"), accuracy: 0.001)
+        XCTAssertEqual(estimate.evidence, .officialProfile)
         var withoutGeometry = metadata
         withoutGeometry.lines = [:]; withoutGeometry.directionalLines = [:]; withoutGeometry.journeys = [:]
         let noRoad = forecast.ridingEstimate(ride, metadata: withoutGeometry, at: now)
-        XCTAssertEqual(noRoad.seconds, 400); XCTAssertEqual(noRoad.evidence, .officialProfile)
+        XCTAssertEqual(noRoad.seconds, 400 * factor("2026-10-06T10:50:00+08:00"), accuracy: 0.001)
+        XCTAssertEqual(noRoad.evidence, .officialProfile)
         withoutGeometry.officialTravelTimes = OfficialTravelTimes()
         let uncertain = forecast.ridingEstimate(ride, metadata: withoutGeometry, at: now)
         XCTAssertGreaterThan(uncertain.seconds, Double(ride.stopCount) * 20)
@@ -93,11 +97,11 @@ final class OfficialTravelTimeTests: XCTestCase {
                                score: 0, rideSeconds: [400])
         let values = forecast.plannedRidingEstimates(trip, metadata: metadata,
             estimates: EstimateFeed(seconds: ["family:s0": 900], updatedAt: now), walkingDurations: [180, 0], at: now)
-        XCTAssertEqual(values.first?.seconds, 1200)
+        XCTAssertEqual(try XCTUnwrap(values.first?.seconds), 1200 * factor("2026-10-06T11:05:00+08:00"), accuracy: 0.001)
         XCTAssertEqual(values.first?.evidence, .officialProfile)
         // GPS freshness is evaluated now, not against the later boarding clock.
         XCTAssertEqual(forecast.ridingEstimate(ride, metadata: metadata, at: now,
-            travellingAt: date("2026-10-06T11:15:00+08:00")).seconds, 1200)
+            travellingAt: date("2026-10-06T11:15:00+08:00")).seconds, 1200 * factor("2026-10-06T11:15:00+08:00"), accuracy: 0.001)
     }
 
     func testCandidateSearchUsesOfficialTimesBeforeDiscardingRoutes() throws {
@@ -129,7 +133,8 @@ final class OfficialTravelTimeTests: XCTestCase {
         let result = TripPlanner(metadata: metadata).plan(from: first.coordinate, to: last.coordinate,
             maximumWalk: 30, limit: 1, at: date("2026-10-06T10:15:00+08:00"))
         XCTAssertEqual(result.first?.rides.first?.route.id, "observed")
-        XCTAssertEqual(result.first?.rideSeconds.first, 200)
+        XCTAssertEqual(try XCTUnwrap(result.first?.rideSeconds.first),
+                       200 * ForecastTuning.current.paceFactor(at: date("2026-10-06T10:15:00+08:00")), accuracy: 0.001)
     }
 
     func testCombinedLoopProfilesBindEachDirectionWithoutOppositeStopEdges() throws {

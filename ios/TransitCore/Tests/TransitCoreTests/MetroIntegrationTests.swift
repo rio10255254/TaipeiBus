@@ -154,7 +154,8 @@ final class MetroIntegrationTests: XCTestCase {
         for (date, seconds) in [(noon(), 300.0), (noon().addingTimeInterval(6 * 3600), 900.0), (noon(), 300.0)] {
             let trip = try XCTUnwrap(planner.plan(from:origin,to:destination,maximumWalk:100,limit:12,at:date)
                 .first { $0.rides.map(\.route.mode) == [.bus,.metro,.bus] })
-            XCTAssertEqual(trip.rideSeconds.first, seconds)
+            // Scaled by the hour's measured pace factor, as everywhere (TravelTimeModel).
+            XCTAssertEqual(try XCTUnwrap(trip.rideSeconds.first), seconds * ForecastTuning.current.paceFactor(at: date), accuracy: 0.001)
         }
     }
     func testBoardingAnAlternateOperatingPatternRequiresEveryPlannedStationInOrder() throws {
