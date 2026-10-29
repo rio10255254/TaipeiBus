@@ -120,15 +120,16 @@ def main():
                 continue
             if error.code in STOP_STATUS:
                 raise ValueError(f'TDX refused route requests (HTTP {error.code}); published data unchanged') from None
-            failed.append(route); consecutive += 1
-        except TRANSIENT:
-            failed.append(route); consecutive += 1
+            failed.append(route); consecutive += 1; reason = f'HTTP {error.code}'
+        except TRANSIENT as error:
+            failed.append(route); consecutive += 1; reason = type(error).__name__
         else:
             consecutive = 0
         if consecutive >= MAXIMUM_CONSECUTIVE_FAILURES:
             raise ValueError(f'TDX did not answer {consecutive} consecutive routes; published data unchanged')
         if consecutive:
-            print(f'Official profiles {index + 1}/{len(requested)}; route {route}; no answer after retries', flush=True)
+            # The status or error type only: a response body can carry account details.
+            print(f'Official profiles {index + 1}/{len(requested)}; route {route}; no answer after retries ({reason})', flush=True)
             continue
         used += len(raw)
         if used > args.maximum_decoded_mb * 1024 * 1024:
