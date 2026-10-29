@@ -1935,7 +1935,7 @@ private struct DataSourcesView: View {
         List {
             Section {
                 Text(AppText.text("%@ 條路線 · %@ 個走法", model.metadata.routeCatalog.groups.count, model.metadata.routes.count))
-                Text(live.text("臺北市公共運輸處公開資料，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
+                Text(live.text("臺北市公共運輸處公開資料，含臺北市與新北市公車，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。"))
                 Text(live.text("官方到站預估沒有車牌資訊；請以站牌的路線預估為準。"))
                 Text(live.text("回到 App 時立即更新；背景暫停畫面與輪詢。官方車輛資料會持續產生。"))
                 Link(AppText.text("公開資料說明"), destination: URL(string: "https://pto.gov.taipei/News_Content.aspx?n=A1DF07A86105B6BB&s=55E8ADD164E4F579&sms=2479B630A6BD8079")!)
@@ -1947,9 +1947,10 @@ private struct DataSourcesView: View {
                 Link(AppText.text("捷運資料說明"),destination:URL(string:"https://www.metro.taipei/cp.aspx?n=BDEB860F2BE3E249")!)
             } header: { SectionHeader(title: AppText.text("捷運"), symbol: "tram.fill", color: .red) }
             Section {
-                Text(AppText.text("YouBike 站點內建於 App。App 使用期間會預先載入臺北市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。資料約每分鐘更新，實際借還以現場為準。目前不含新北市站點。"))
+                Text(AppText.text("YouBike 站點內建於 App，含臺北市與新北市。App 使用期間會預先載入兩市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。臺北市資料約每分鐘更新，新北市約每 5 分鐘；實際借還以現場為準。"))
                 Text(AppText.text("路線規劃會在借車站有車、還車站有空位時才提出 YouBike 方案；沒有即時車位資料就不提出。"))
                 Link(AppText.text("YouBike 資料說明"), destination: URL(string: "https://data.taipei/dataset/detail?id=c6bc8aed-557d-41d5-bfb1-8da24f78f2fb")!)
+                Link(AppText.text("新北市 YouBike 資料說明"), destination: URL(string: "https://data.ntpc.gov.tw/datasets/010e5b15-3823-4b20-b401-b1cf000550c5")!)
             } header: { SectionHeader(title: "YouBike", symbol: "bicycle", color: .mint) }
             Section {
                 Text(live.text("原生 MapLibre / Metal 地圖，使用 OpenFreeMap 底圖；地形陰影以 AWS Terrain Tiles 預先製作並內建於 App。道路匹配受 GPS 與軌跡精度影響。"))

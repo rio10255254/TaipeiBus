@@ -102,25 +102,31 @@ enum ProAccess {
     }
 }
 
-/// Reads only the saved stops out of the city's public arrival file (about 160 KB compressed),
-/// without decoding the whole file into memory-hungry objects.
+/// Reads only the saved stops out of the cities' public arrival files (about 160 KB compressed each),
+/// without decoding a whole file into memory-hungry objects.
 enum EstimateLookup {
-    static let url = RegionCatalog.shared.source(.bus)!.feed.appendingPathComponent("GetEstimateTime.gz")
+    /// Taipei's first: a New Taipei file is read only for rides Taipei's does not list.
+    static let urls = RegionCatalog.shared.sources(.bus).map { $0.feed.appendingPathComponent("GetEstimateTime.gz") }
 
     static func timings(for commutes: [CommuteWidgetPayload.Commute], now: Date) async -> (timings: [String: CommuteTiming], failed: Bool) {
-        let wanted = commutes.compactMap { commute in commute.ride.flatMap { $0.metro || $0.routeKey.isEmpty ? nil : (commute.id, $0) } }
+        var wanted = commutes.compactMap { commute in commute.ride.flatMap { $0.metro || $0.routeKey.isEmpty ? nil : (commute.id, $0) } }
         guard !wanted.isEmpty else { return ([:], false) }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
-        request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
-        guard let (raw, response) = try? await URLSession.shared.data(for: request),
-              (response as? HTTPURLResponse)?.statusCode == 200, let data = inflate(raw),
-              let updated = EstimateScan.updateTime(data), now.timeIntervalSince(updated) < 600 else { return ([:], true) }
         var timings: [String: CommuteTiming] = [:]
-        for (id, ride) in wanted {
-            guard let value = EstimateScan.estimate(in: data, route: ride.routeKey, stop: ride.stopID) else { continue }
-            timings[id] = value >= 0 ? CommuteTiming(arrival: updated.addingTimeInterval(Double(value))) : CommuteTiming(status: value)
+        var failed = false
+        for url in urls where !wanted.isEmpty {
+            var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
+            request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
+            guard let (raw, response) = try? await URLSession.shared.data(for: request),
+                  (response as? HTTPURLResponse)?.statusCode == 200, let data = inflate(raw),
+                  let updated = EstimateScan.updateTime(data), now.timeIntervalSince(updated) < 600 else { failed = true; continue }
+            wanted.removeAll { id, ride in
+                guard let value = EstimateScan.estimate(in: data, route: ride.routeKey, stop: ride.stopID) else { return false }
+                timings[id] = value >= 0 ? CommuteTiming(arrival: updated.addingTimeInterval(Double(value))) : CommuteTiming(status: value)
+                return true
+            }
         }
-        return (timings, false)
+        // A file that could not be read matters only if it left a saved ride without a time.
+        return (timings, failed && !wanted.isEmpty)
     }
 
     static func inflate(_ data: Data) -> Data? {

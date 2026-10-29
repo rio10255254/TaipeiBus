@@ -51,8 +51,10 @@ public struct BikeAvailability: Sendable, Equatable {
         self.docks = docks; self.receivedAt = receivedAt
     }
 
-    /// Taipei's public immediate feed. Rows for stations the app does not know, rows missing
-    /// counts and counts stamped in the future are dropped rather than guessed at.
+    /// Taipei's public immediate feed, or New Taipei's, which names the same counts differently
+    /// (`sbi_quantity`, `bemp`, `tot_quantity`) and stamps them `20261029T003403`. Rows for stations
+    /// the app does not know, rows missing counts and counts stamped in the future are dropped rather
+    /// than guessed at.
     public init(data: Data, network: BikeNetwork, at date: Date = Date()) throws {
         guard data.count <= 8 * 1_024 * 1_024 else { throw FeedError.invalid("YouBike 即時資料") }
         var bytes = data
@@ -65,20 +67,28 @@ public struct BikeAvailability: Sendable, Equatable {
         let formatter = FeedDecoder.makeTaipeiFormatter()
         var dates: [String: Date] = [:], invalidDates = Set<String>()
         func timestamp(_ value: Any?) -> Date? {
-            let text = FeedDecoder.text(value)
+            var text = FeedDecoder.text(value)
             guard !text.isEmpty, !invalidDates.contains(text) else { return nil }
             if let date = dates[text] { return date }
-            guard let parsed = FeedDecoder.taipeiDate(text, formatter: formatter) else {
-                invalidDates.insert(text); return nil
+            let key = text, bytes = Array(text.utf8)
+            // New Taipei's "20261029T003403", in Taipei time like every other stamp.
+            if bytes.count == 15, bytes[8] == UInt8(ascii: "T"),
+               bytes.enumerated().allSatisfy({ $0.offset == 8 || (UInt8(ascii: "0")...UInt8(ascii: "9")).contains($0.element) }) {
+                func part(_ range: Range<Int>) -> String { String(decoding: bytes[range], as: UTF8.self) }
+                text = "\(part(0..<4))-\(part(4..<6))-\(part(6..<8)) \(part(9..<11)):\(part(11..<13)):\(part(13..<15))"
             }
-            dates[text] = parsed; return parsed
+            guard let parsed = FeedDecoder.taipeiDate(text, formatter: formatter) else {
+                invalidDates.insert(key); return nil
+            }
+            dates[key] = parsed; return parsed
         }
+        func count(_ row: [String: Any], _ keys: String...) -> Double? { keys.lazy.compactMap { FeedDecoder.number(row[$0]) }.first }
         for row in rows {
             let id = FeedDecoder.text(row["sno"])
             guard !id.isEmpty, let station = network.station(id) else { continue }
-            guard let rentable = FeedDecoder.number(row["available_rent_bikes"]),
-                  let returnable = FeedDecoder.number(row["available_return_bikes"]) else { continue }
-            let capacity = FeedDecoder.number(row["Quantity"]) ?? Double(station.capacity)
+            guard let rentable = count(row, "available_rent_bikes", "sbi_quantity", "sbi"),
+                  let returnable = count(row, "available_return_bikes", "bemp") else { continue }
+            let capacity = count(row, "Quantity", "tot_quantity", "tot") ?? Double(station.capacity)
             guard (0...500).contains(rentable), (0...500).contains(returnable), (0...500).contains(capacity) else { continue }
             // infoTime belongs to this station; a newer city-wide publication timestamp
             // must not revive a station that stopped reporting.
@@ -91,6 +101,15 @@ public struct BikeAvailability: Sendable, Equatable {
         }
         guard !result.isEmpty else { throw FeedError.invalid("YouBike 即時資料") }
         docks = result; receivedAt = date
+    }
+
+    /// Each city's own file as one: no station is in two cities, and the newest receipt marks a change.
+    public static func combining(_ parts: [BikeAvailability]) -> BikeAvailability? {
+        guard let first = parts.first else { return nil }
+        guard parts.count > 1 else { return first }
+        var docks: [String: BikeDock] = [:]
+        for part in parts { docks.merge(part.docks) { current, _ in current } }
+        return BikeAvailability(docks: docks, receivedAt: parts.map(\.receivedAt).max() ?? first.receivedAt)
     }
 
     public var isEmpty: Bool { docks.isEmpty }

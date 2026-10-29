@@ -1,0 +1,46 @@
+{
+  "collectedAt": "2026-10-28T16:19:05.685404+00:00",
+  "source": "https://tcgbusfs.blob.core.windows.net/ntpcbus/",
+  "feeds": [
+    {
+      "name": "GetRoute",
+      "bytes": 96801,
+      "decodedBytes": 1245778,
+      "rows": 1106,
+      "sha256": "b5fa8ffdf1bd6bb2188469894c6a94c503b4fbbd3a9708c0f9cc61bb27adb0fa",
+      "sourceTime": "2026/10/29 00:02:56"
+    },
+    {
+      "name": "GetStop",
+      "bytes": 1485359,
+      "decodedBytes": 10498412,
+      "rows": 33316,
+      "sha256": "cf8634c5d13ec00315d0a3eab55ceac75dfced22d6c274f98b4d6ef363135fc3",
+      "sourceTime": "2026/10/28 23:42:55"
+    },
+    {
+      "name": "GetPathDetail",
+      "bytes": 338380,
+      "decodedBytes": 4431499,
+      "rows": 43584,
+      "sha256": "270b05a905c0036e5b4457b6fcf1017058386d11f6e79a7d1d1504dc1a17699c",
+      "sourceTime": "2026/10/28 23:42:19"
+    },
+    {
+      "name": "GetProvider",
+      "bytes": 2672,
+      "decodedBytes": 26260,
+      "rows": 134,
+      "sha256": "81dc4ce501472caec5090406c76a543699c60cc214d6d6b07e97efdd85d0dbe2",
+      "sourceTime": "2026/10/28 23:42:31"
+    },
+    {
+      "name": "GetBusShape",
+      "bytes": 3216921,
+      "decodedBytes": 10246043,
+      "rows": 1262,
+      "sha256": "c9fb8d9002f673155ed59d5d586d94e08dcb63798485231ef6594df492e7ca95",
+      "sourceTime": ""
+    }
+  ]
+}

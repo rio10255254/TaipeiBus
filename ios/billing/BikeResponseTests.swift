@@ -57,7 +57,8 @@ private final class BikeFeedProtocol: URLProtocol, @unchecked Sendable {
         config.protocolClasses=[BikeFeedProtocol.self]
         let session=URLSession(configuration:config)
         addTeardownBlock { session.invalidateAndCancel() }
-        return TransitService(bikeSession:session,cacheDirectory:directory,bikeNow:{ clock.now })
+        // Taipei's file alone: these tests count requests to one feed.
+        return TransitService(bikeSession:session,cacheDirectory:directory,bikeSources:Array(RegionCatalog.shared.sources(.bike).prefix(1)),bikeNow:{ clock.now })
     }
     func testConcurrentFirstLoadsShareTheSameSuccessfulDownload() async throws {
         let clock=BikeTestClock(), s=service(try folder(),clock:clock), bikes=network()

@@ -5,22 +5,37 @@ final class RegionCatalogTests: XCTestCase {
     private func catalog(_ json: String) throws -> RegionCatalog { try RegionCatalog(data: Data(json.utf8)) }
     private let sources = #"[{"id":"tpe","name":"臺北市公車","kind":"bus","feed":"https://tcgbusfs.blob.core.windows.net/blobbus/"}]"#
 
-    func testBundledRegionsMatchTheBuiltInFallback() throws {
+    func testBundledRegionsCoverTheBuiltInFallback() throws {
         let bundled = try XCTUnwrap(RegionCatalog.bundled, "Regions/regions.json ships with the package and decodes")
-        // The fallback only matters if the file is damaged; it must then serve the same area and feeds.
-        XCTAssertEqual(bundled.home, RegionCatalog.builtIn.home)
-        XCTAssertEqual(bundled.sources, RegionCatalog.builtIn.sources)
-        XCTAssertEqual(RegionCatalog.shared.home, bundled.home)
+        // The fallback only matters if the file is damaged; it must then serve nothing the file does not.
+        XCTAssertEqual(bundled.home.id, RegionCatalog.builtIn.home.id)
+        XCTAssertEqual(bundled.home.center, RegionCatalog.builtIn.home.center)
+        for (id, source) in RegionCatalog.builtIn.sources { XCTAssertEqual(bundled.sources[id], source) }
+        for box in RegionCatalog.builtIn.home.bounds {
+            for latitude in stride(from: box.south, through: box.north, by: 0.01) {
+                for longitude in stride(from: box.west, through: box.east, by: 0.01) {
+                    XCTAssertTrue(bundled.contains(Coordinate(latitude: latitude, longitude: longitude)), "\(latitude), \(longitude)")
+                }
+            }
+        }
+        XCTAssertEqual(RegionCatalog.shared.home.id, bundled.home.id)
+        // Taipei's buses come first: the app cannot work without them.
+        XCTAssertEqual(bundled.sources(.bus).map(\.id), ["tpe", "ntpc"])
         XCTAssertEqual(bundled.source(.bus)?.feed.absoluteString, "https://tcgbusfs.blob.core.windows.net/blobbus/")
-        XCTAssertEqual(bundled.source(.bus)?.idPrefix, "", "Taipei ids stay unprefixed so saved stops need no migration")
+        XCTAssertTrue(bundled.sources(.bus).allSatisfy { $0.idPrefix.isEmpty }, "one numbering: saved stops need no migration")
         XCTAssertEqual(bundled.source(.bike)?.kind, .bike)
     }
-    func testServiceAreaIsTheSameBoxAsBefore() {
-        // The box the app served before regions existed, edges included.
-        for (latitude, longitude, inside) in [(24.90, 121.27, true), (25.25, 121.72, true), (25.0377, 121.56, true),
-                                              (24.8999, 121.5, false), (25.2501, 121.5, false), (25.0, 121.2699, false),
-                                              (25.0, 121.7201, false), (Double.nan, 121.5, false), (25.0, Double.infinity, false)] {
-            XCTAssertEqual(Coordinate(latitude: latitude, longitude: longitude).isInServiceArea, inside, "\(latitude), \(longitude)")
+    func testServiceAreaKeepsTaipeisBoxAndAddsNewTaipei() {
+        // The box the app served before New Taipei, edges included, and New Taipei's far districts.
+        let served = [(24.90, 121.27), (25.25, 121.72), (25.0377, 121.56), (25.0617, 121.3676), (24.8650, 121.5500),
+                      (25.0161, 121.9447), (25.2900, 121.5680), (25.2222, 121.6370), (24.9343, 121.3690), (25.1092, 121.8442),
+                      (24.9367, 121.7113), (25.1470, 121.4000)]
+        for (latitude, longitude) in served {
+            XCTAssertTrue(Coordinate(latitude: latitude, longitude: longitude).isInServiceArea, "\(latitude), \(longitude)")
+        }
+        // Keelung's centre and Yilan wait for their own sources; nonsense coordinates are never served.
+        for (latitude, longitude) in [(25.1318, 121.7397), (24.8590, 121.8230), (24.5, 121.5), (Double.nan, 121.5), (25.0, Double.infinity)] {
+            XCTAssertFalse(Coordinate(latitude: latitude, longitude: longitude).isInServiceArea, "\(latitude), \(longitude)")
         }
         XCTAssertEqual(Coordinate.serviceCenter, Coordinate.taipei)
     }
