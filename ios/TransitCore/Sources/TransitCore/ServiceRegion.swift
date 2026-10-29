@@ -16,7 +16,7 @@ public struct TransitSource: Sendable, Equatable, Identifiable {
     /// (New Taipei's YouBike file, about every five minutes); 0 keeps the usual pace.
     public let refreshSeconds: Double
     /// A bus source's pace for rides without official station-to-station times, as measured against its
-    /// buses (RideTiming); nil keeps ForecastTuning's.
+    /// buses (TravelTimeModel); nil keeps ForecastTuning's.
     public struct RidePace: Sendable, Equatable {
         public let metersPerSecond: Double
         public let stopSeconds: Double

@@ -550,9 +550,7 @@ final class JourneyPlannerModel: ObservableObject {
             duration.cyclingSeconds = option.cyclingSeconds
             duration.cyclingHandlingSeconds = option.walks.compactMap(\.bike).reduce(0) { $0 + $1.handlingSeconds }
             duration.stationSeconds = option.walks.reduce(0) { $0 + $1.stationAllowance }
-            duration.ridingEvidence = estimates.contains { $0.evidence == .typical } ? .typical :
-                estimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-                estimates.contains { $0.evidence == .officialProfile } ? .officialProfile : estimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
+            duration.ridingEvidence = RidingTimeEstimate.weakest(estimates)
             return duration
         }
         var duration = JourneyDuration(riding: [], walking: option.walks.compactMap(\.duration), arrivals: [], at: date)

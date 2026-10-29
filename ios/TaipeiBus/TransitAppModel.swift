@@ -1571,7 +1571,7 @@ final class TransitAppModel: ObservableObject {
             let values = planner.ridingEstimates(option, at: date)
             if values.indices.contains(index) { return values[index] }
         }
-        return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date)
+        return arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, estimates: snapshot.estimates)
     }
 
     /// The main banner and Live Activity describe the departure the rider can
@@ -1631,7 +1631,7 @@ final class TransitAppModel: ObservableObject {
     private func busRemaining(_ ride: TransitRide, at date: Date) -> (seconds: Double, estimatedPosition: Bool) {
         if let progress = onboardProgress, progress.rideID == ride.id,
            progress.hasConfirmedProgress, progress.isFresh(at: date), progress.source == .phone {
-            let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds
+            let seconds = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress, estimates: snapshot.estimates).seconds
             onboardArrival = (ride.id,date.addingTimeInterval(seconds),date)
             return (seconds,false)
         }
@@ -1647,7 +1647,7 @@ final class TransitAppModel: ObservableObject {
         }
         if let held = heldOnboardSeconds(ride, at: date) { return (held,true) }
         if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
-            return (max(60,arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress).seconds),true)
+            return (max(60,arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date, progress: progress, estimates: snapshot.estimates).seconds),true)
         }
         let planned = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: boardedAt ?? date).seconds
         return (max(60,planned - max(0,date.timeIntervalSince(boardedAt ?? date))),true)
@@ -1737,7 +1737,16 @@ final class TransitAppModel: ObservableObject {
         case nil: return planner.duration(option, at: date)
         }
         var remainingRides = Array(option.rides.dropFirst(index))
-        let rideEstimates = remainingRides.map { arrivalForecast.ridingEstimate($0, metadata: metadata, at: date) }
+        // Each later ride is timed for when it starts, after the walks and rides before it.
+        let walksAhead = Array(option.walks.dropFirst(index)).map(\.duration)
+        var elapsed = 0.0
+        let rideEstimates = remainingRides.enumerated().map { offset, ride -> RidingTimeEstimate in
+            elapsed += offset == 0 && onboard ? 0 : walksAhead.indices.contains(offset) ? walksAhead[offset] ?? 0 : 0
+            let value = arrivalForecast.ridingEstimate(ride, metadata: metadata, at: date,
+                travellingAt: date.addingTimeInterval(elapsed), estimates: snapshot.estimates)
+            elapsed += value.seconds
+            return value
+        }
         var riding = rideEstimates.map(\.seconds)
         var walking = Array(option.walks.dropFirst(index)).compactMap(\.duration)
         guard walking.count == riding.count + 1 else { return nil }
@@ -1790,9 +1799,7 @@ final class TransitAppModel: ObservableObject {
             result + (item.offset < index || (onboard && item.offset == index) ? 0 : item.element.stationAllowance)
         }
         duration.positionUncertain = positionUncertain
-        duration.ridingEvidence = rideEstimates.contains { $0.evidence == .typical } ? .typical :
-            rideEstimates.contains { $0.evidence == .recentTraffic } ? .recentTraffic :
-            rideEstimates.contains { $0.evidence == .officialProfile } ? .officialProfile : rideEstimates.contains { $0.evidence == .railProfile } ? .railProfile : .stationHistory
+        duration.ridingEvidence = RidingTimeEstimate.weakest(rideEstimates)
         return duration
     }
 
@@ -2139,12 +2146,12 @@ final class TransitAppModel: ObservableObject {
         let seconds: Double
         if stopID == ride.alighting.id { seconds = busRemaining(ride,at:date).seconds }
         else if let progress = onboardProgress, progress.rideID == ride.id, progress.hasConfirmedProgress {
-            seconds = arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress,to:stopID).seconds
+            seconds = arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,progress:progress,to:stopID,estimates:snapshot.estimates).seconds
         } else if let bus = onboardVehicle(for:ride),
                   let prediction = arrivalForecast.prediction(bus,stopID:stopID,metadata:metadata,at:date,allowTypicalWhenStopped:true) {
             seconds = prediction.seconds
         } else {
-            seconds = max(60,arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,to:stopID).seconds - max(0,date.timeIntervalSince(boardedAt ?? date)))
+            seconds = max(60,arrivalForecast.ridingEstimate(ride,metadata:metadata,at:date,to:stopID,estimates:snapshot.estimates).seconds - max(0,date.timeIntervalSince(boardedAt ?? date)))
         }
         return AppText.text("約 %@ 分",max(1,Int(ceil(seconds/60))))
     }
