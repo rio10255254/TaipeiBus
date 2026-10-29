@@ -7,8 +7,8 @@ recalibrate the App after the full 2026-10-14..28 recording:
 - the same rows timed with only the generic driving rule (distance / speed + allowance per stop), and the
   speed and allowance that would fit best;
 - the official EstimateTime against the next bus to pass, by its own estimate;
-- ride times between two stops of one bus, from estimates the App showed (the quantity spreadFraction
-  describes), and the spread that holds 80% of them, by evidence;
+- ride times on one bus from its nearest sampled stop to each later one, from estimates the App showed
+  (the quantity spreadFraction describes), and the spread that holds 80% of them, by evidence and length;
 - days after --holdout-from separately, for checking corrections fitted on earlier days.
 
 Predictions made in the last 45 minutes of a recording are dropped: their buses may arrive after it ends.
@@ -87,12 +87,15 @@ def load(folders):
 
 
 def ride_pairs(df):
-    """Consecutive sampled stops of one bus at one moment: predicted vs actual time between them."""
-    rows = df[df.actual_arrive_s.notna() & (df.predicted_s > 0)].sort_values(['vehicle', 'made_at', 'stops_ahead'])
-    same = (rows.vehicle.values[1:] == rows.vehicle.values[:-1]) & (rows.made_at.values[1:] == rows.made_at.values[:-1])
-    predicted = rows.predicted_s.values[1:] - rows.predicted_s.values[:-1]
-    actual = rows.actual_arrive_s.values[1:] - rows.actual_arrive_s.values[:-1]
-    pairs = pd.DataFrame({'predicted': predicted, 'actual': actual, 'evidence': rows.evidence.values[1:]})[same]
+    """Rides on one bus from its nearest sampled stop to each later one, as estimated at one moment."""
+    rows = df[df.predicted_s > 0].sort_values(['vehicle', 'made_at', 'stops_ahead'])
+    group = rows.groupby(['vehicle', 'made_at'], sort=False)
+    first_predicted = group.predicted_s.transform('first')
+    first_actual = group.actual_arrive_s.transform('first')
+    later = group.cumcount() > 0
+    pairs = pd.DataFrame({'predicted': (rows.predicted_s - first_predicted)[later],
+                          'actual': (rows.actual_arrive_s - first_actual)[later],
+                          'evidence': rows.evidence[later]})
     return pairs[(pairs.predicted >= 180) & (pairs.actual > 0)]
 
 
@@ -153,6 +156,11 @@ def main():
     result['ride_spread'] = {str(e): {'n': int(m.sum()), 'p80_abs_ratio': float(ratio[m].quantile(0.8)),
                                       'median_ratio': float((pairs.actual / pairs.predicted)[m].median())}
                              for e in pairs.evidence.cat.categories for m in [pairs.evidence == e] if m.sum() > 1000}
+    for low, high in [(3, 10), (10, 20), (20, 30)]:
+        m = (pairs.predicted >= low * 60) & (pairs.predicted < high * 60)
+        result['ride_spread'][f'{low}-{high} min'] = {
+            str(e): {'n': int(k.sum()), 'p80_abs_ratio': float(ratio[k].quantile(0.8))}
+            for e in pairs.evidence.cat.categories for k in [m & (pairs.evidence == e)] if k.sum() > 1000}
     result['ride_spread']['all'] = {'n': int(len(pairs)), 'p80_abs_ratio': float(ratio.quantile(0.8)),
                                     'median_ratio': float((pairs.actual / pairs.predicted).median())}
 

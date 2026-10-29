@@ -1,11 +1,10 @@
 name: Arrival benchmark recording
 # Two weeks of Taipei's public bus positions and official arrival estimates, so every
 # prediction method can be replayed against actual stop passages. Each run records
-# for just under six hours and queues the next one itself (GitHub's schedule did not
-# start the second run), and the schedule stays as a backup. Public data only.
+# for just under six hours and queues the next one itself until BENCHMARK_UNTIL.
+# The 2026-10-14..28 recording is complete, so it now only starts by hand: set a new
+# BENCHMARK_UNTIL and run it to record another period. Public data only.
 on:
-  schedule:
-    - cron: '7 */6 * * *'
   workflow_dispatch:
     inputs:
       chained:
