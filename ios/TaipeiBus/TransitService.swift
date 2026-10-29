@@ -191,7 +191,7 @@ actor TransitService {
     private static let essentialNames: Set<String> = ["GetRoute", "GetStop", "GetPathDetail"]
     func offlineMetroMetadata() -> TransitMetadata? {
         if let bundledMetadata { return bundledMetadata }
-        var result = (try? FeedDecoder.metadata(sources: busSources.map { bundledFeeds($0) })) ?? TransitMetadata()
+        var result = (try? FeedDecoder.metadata(sources: busSources.map { (source: $0.id, feeds: bundledFeeds($0)) })) ?? TransitMetadata()
         result.officialTravelTimes = (bundledOfficialTravelTimes() ?? .init()).matching(result)
         installMetro(in:&result)
         bundledMetadata = result
@@ -219,7 +219,8 @@ actor TransitService {
         // Without a recent copy of the primary source the app waits for the network as before; another
         // source without one uses the copy inside the app.
         guard let first = busSources.first, let primary = recent(first) else { return nil }
-        let sources = [primary] + busSources.dropFirst().map { recent($0) ?? bundledFeeds($0) }
+        let feeds = [primary] + busSources.dropFirst().map { recent($0) ?? bundledFeeds($0) }
+        let sources = zip(busSources, feeds).map { (source: $0.id, feeds: $1) }
         guard let value = try? FeedDecoder.metadata(sources: sources), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
         var loaded = value
         let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
@@ -258,7 +259,7 @@ actor TransitService {
                 throw FeedError.invalid("Incomplete bus planning metadata")
             }
             // Another source that cannot be read in full uses the copy inside the app.
-            let sources = busSources.map { complete($0) ? feeds[$0.id]! : bundledFeeds($0) }
+            let sources = busSources.map { (source: $0.id, feeds: complete($0) ? feeds[$0.id]! : bundledFeeds($0)) }
             let candidate = try FeedDecoder.metadata(sources: sources)
             guard !candidate.paths.isEmpty else { throw FeedError.invalid("Missing bus stop order") }
             decodedBus = candidate

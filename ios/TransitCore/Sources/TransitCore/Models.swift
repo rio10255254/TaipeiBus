@@ -19,6 +19,8 @@ public struct BusRoute: Identifiable, Sendable {
     public var mode: TransportMode = .bus
     public var lineCode: String = ""
     public var lineColor: String = ""
+    /// The bus source the route came from (`tpe`, `ntpc`); empty for metro and fixtures.
+    public var source: String = ""
     public var displayName: String { variantName.isEmpty ? name : variantName }
     public var localizedName: String { AppLanguage.current == .english && !englishName.isEmpty ? englishName : name }
     public var localizedDisplayName: String {

@@ -15,8 +15,17 @@ public struct TransitSource: Sendable, Equatable, Identifiable {
     /// How often a feed is worth asking for, when it is rewritten less often than the app's usual pace
     /// (New Taipei's YouBike file, about every five minutes); 0 keeps the usual pace.
     public let refreshSeconds: Double
-    public init(id: String, name: String, kind: Kind, feed: URL, idPrefix: String = "", refreshSeconds: Double = 0) {
+    /// A bus source's pace for rides without official station-to-station times, as measured against its
+    /// buses (RideTiming); nil keeps ForecastTuning's.
+    public struct RidePace: Sendable, Equatable {
+        public let metersPerSecond: Double
+        public let stopSeconds: Double
+        public init(metersPerSecond: Double, stopSeconds: Double) { self.metersPerSecond = metersPerSecond; self.stopSeconds = stopSeconds }
+    }
+    public let ridePace: RidePace?
+    public init(id: String, name: String, kind: Kind, feed: URL, idPrefix: String = "", refreshSeconds: Double = 0, ridePace: RidePace? = nil) {
         self.id = id; self.name = name; self.kind = kind; self.feed = feed; self.idPrefix = idPrefix; self.refreshSeconds = refreshSeconds
+        self.ridePace = ridePace
     }
 }
 
@@ -76,7 +85,7 @@ public struct RegionCatalog: Sendable {
 
     /// `{"home": "taipei", "regions": [{"id", "name", "englishName", "center": [lat, lon],
     /// "bounds": [[south, west, north, east]], "sources": ["tpe"]}], "sources": [{"id", "name", "kind",
-    /// "feed", "idPrefix", "refreshSeconds"}]}`. Feeds must be https; a region naming an unknown source is rejected.
+    /// "feed", "idPrefix", "refreshSeconds", "ridePace": {"metersPerSecond", "stopSeconds"}}]}`. Feeds must be https; a region naming an unknown source is rejected.
     public init(data: Data) throws {
         guard let document = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let home = document["home"] as? String,
@@ -89,7 +98,14 @@ public struct RegionCatalog: Sendable {
                   let feed = (row["feed"] as? String).flatMap(URL.init(string:)), feed.scheme == "https" else { throw FeedError.invalid("Region source") }
             let refresh = number(row["refreshSeconds"]) ?? 0
             guard refresh.isFinite, (0...3_600).contains(refresh) else { throw FeedError.invalid("Region source") }
-            return TransitSource(id: id, name: name, kind: kind, feed: feed, idPrefix: row["idPrefix"] as? String ?? "", refreshSeconds: refresh)
+            var pace: TransitSource.RidePace?
+            if let value = row["ridePace"] {
+                guard let fields = value as? [String: Any], let speed = number(fields["metersPerSecond"]), let stop = number(fields["stopSeconds"]),
+                      (2...20).contains(speed), (0...120).contains(stop) else { throw FeedError.invalid("Region ride pace") }
+                pace = TransitSource.RidePace(metersPerSecond: speed, stopSeconds: stop)
+            }
+            return TransitSource(id: id, name: name, kind: kind, feed: feed, idPrefix: row["idPrefix"] as? String ?? "",
+                                 refreshSeconds: refresh, ridePace: pace)
         }
         let regions = try regionRows.map { row -> ServiceRegion in
             guard let id = row["id"] as? String, !id.isEmpty, let name = row["name"] as? String,

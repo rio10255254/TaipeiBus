@@ -63,10 +63,16 @@ public enum FeedDecoder {
     /// serve becomes one station with both cities' routes. An id an earlier source defined is never replaced,
     /// and a later source whose routes or stops cannot be read is left out rather than half loaded.
     public static func metadata(sources: [[String: Data]]) throws -> TransitMetadata {
+        try metadata(sources: sources.map { (source: "", feeds: $0) })
+    }
+
+    /// The same, with each source's id kept on its routes (`BusRoute.source`).
+    public static func metadata(sources: [(source: String, feeds: [String: Data])]) throws -> TransitMetadata {
         var metadata = TransitMetadata()
-        for (index, feeds) in sources.enumerated() {
+        for (index, entry) in sources.enumerated() {
             do {
-                let part = try source(feeds: feeds)
+                var part = try source(feeds: entry.feeds)
+                for id in part.routes.keys { part.routes[id]?.source = entry.source }
                 if index == 0 { metadata = part } else { metadata.absorb(part) }
             } catch { if index == 0 { throw error } }
         }

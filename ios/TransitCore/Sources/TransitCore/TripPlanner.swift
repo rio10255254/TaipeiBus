@@ -251,6 +251,7 @@ public struct TripPlanner: Sendable {
         }
         // Use source-specific times before limiting candidates.
         let tuning = ForecastTuning.current
+        let live = RideTiming.liveEstimates(estimates, at: date)
         let routeTimes = patterns.map { pattern -> [Double] in
             var values = [0.0]
             for index in pattern.stops.indices.dropFirst() {
@@ -259,8 +260,11 @@ public struct TripPlanner: Sendable {
                     subroute: pattern.route.id, direction: pattern.direction,
                     from: pattern.stops[index - 1].id, to: pattern.stops[index].id,
                     travellingAt: date.addingTimeInterval(previous), observedAt: date)
-                values.append(previous + (official ??
-                    ((pattern.distances[index] - pattern.distances[index - 1]) / tuning.typicalSpeed + tuning.stopSeconds)))
+                // Without an official time, a trip leaving now uses the current arrival estimates (RideTiming).
+                let current = official == nil ? live.flatMap { RideTiming.live($0, parentRouteID: pattern.route.parentID,
+                    from: pattern.stops[index - 1].id, to: pattern.stops[index].id) } : nil
+                values.append(previous + (official ?? current ??
+                    RideTiming.estimate(meters: pattern.distances[index] - pattern.distances[index - 1], route: pattern.route, tuning: tuning)))
             }
             return values
         }

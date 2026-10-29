@@ -13,15 +13,33 @@ public struct MultimodalPlanner: Sendable {
         /// Per-segment seconds used when no official time applies: rail run plus dwell,
         /// or the road-distance estimate. Official bus times are applied per query hour.
         let fallback: [Double]
+        /// Per segment, the official time applied by `timed`; nil where the estimate stands.
+        var official: [Double?] = []
         func timed(_ times: OfficialTravelTimes, at date: Date) -> Pattern {
             guard route.mode == .bus else { return self }
-            var values = [0.0]
+            var values = [0.0], found: [Double?] = []
             for index in 1..<stops.count {
-                values.append(values.last! + (times.seconds(route: route.parentID, subroute: route.id, direction: direction,
-                    from: stops[index - 1].id, to: stops[index].id, travellingAt: date, observedAt: date) ?? fallback[index - 1]))
+                found.append(times.seconds(route: route.parentID, subroute: route.id, direction: direction,
+                    from: stops[index - 1].id, to: stops[index].id, travellingAt: date, observedAt: date))
+                values.append(values.last! + (found.last! ?? fallback[index - 1]))
             }
             return Pattern(route: route, direction: direction, stops: stops, cumulative: values, dwell: dwell,
-                windows: windows, fallback: fallback)
+                windows: windows, fallback: fallback, official: found)
+        }
+        /// Segments without an official time take the current arrival estimates' difference (RideTiming).
+        func live(_ estimates: EstimateFeed) -> Pattern {
+            guard route.mode == .bus, official.count == stops.count - 1, official.contains(where: { $0 == nil }) else { return self }
+            var values = [0.0], changed = false
+            for index in 1..<stops.count {
+                var seconds = official[index - 1]
+                if seconds == nil, let current = RideTiming.live(estimates, parentRouteID: route.parentID,
+                                                                  from: stops[index - 1].id, to: stops[index].id) {
+                    seconds = current; changed = true
+                }
+                values.append(values.last! + (seconds ?? fallback[index - 1]))
+            }
+            return changed ? Pattern(route: route, direction: direction, stops: stops, cumulative: values, dwell: dwell,
+                windows: windows, fallback: fallback, official: official) : self
         }
     }
     /// Bus times for the most recent query hour; a planner lives up to a day, across peaks.
@@ -29,6 +47,8 @@ public struct MultimodalPlanner: Sendable {
         let lock = NSLock()
         var key = ""
         var patterns: [Pattern] = []
+        var liveKey = ""
+        var livePatterns: [Pattern] = []
     }
     private struct Segment: Sendable { let pattern: Int; let first: Int; let last: Int }
     private struct Link: Sendable { let id: String; let distance: Double; let seconds: Double; let internalWalk: Bool }
@@ -83,7 +103,7 @@ public struct MultimodalPlanner: Sendable {
                     let rail = route.mode != .bus ? metadata.metro.ridingSeconds(routeID: route.id, direction: direction, from: a.stationID, to: b.stationID) : nil
                     let distance = anchors[a.id].flatMap { first in anchors[b.id].map { abs($0 - first) } } ?? a.coordinate.distance(to: b.coordinate) * 1.25
                     let dwell = index > 1 && railPattern?.dwellSeconds.indices.contains(index - 1) == true ? railPattern!.dwellSeconds[index - 1] : 0
-                    fallback.append((rail ?? (distance / tuning.typicalSpeed + tuning.stopSeconds)) + dwell)
+                    fallback.append((rail ?? RideTiming.estimate(meters: distance, route: route, tuning: tuning)) + dwell)
                     cumulative.append(cumulative.last! + fallback.last!)
                 }
                 let windows = route.mode != .bus ? stops.map { metadata.metro.boardingWindow(routeID: route.id, direction: direction, stationID: $0.stationID) } : []
@@ -124,7 +144,7 @@ public struct MultimodalPlanner: Sendable {
         self.links = links
     }
 
-    private func timedPatterns(at date: Date) -> [Pattern] {
+    private func timedPatterns(at date: Date, estimates: EstimateFeed? = nil) -> [Pattern] {
         var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
         let parts = calendar.dateComponents([.year, .month, .day, .hour], from: date)
         let key = "\(parts.year!)-\(parts.month!)-\(parts.day!)-\(parts.hour!)"
@@ -132,8 +152,17 @@ public struct MultimodalPlanner: Sendable {
         if timing.key != key {
             timing.patterns = patterns.map { $0.timed(metadata.officialTravelTimes, at: date) }
             timing.key = key
+            timing.liveKey = ""
         }
-        return timing.patterns
+        // A trip leaving now uses the current arrival estimates where no official time applies;
+        // they change every 20 seconds, so they are layered over the hour's official times.
+        guard let live = RideTiming.liveEstimates(estimates, at: date), let updated = live.updatedAt else { return timing.patterns }
+        let liveKey = key + "|" + String(updated.timeIntervalSince1970)
+        if timing.liveKey != liveKey {
+            timing.livePatterns = timing.patterns.map { $0.live(live) }
+            timing.liveKey = liveKey
+        }
+        return timing.livePatterns
     }
 
     public func plan(from origin: Coordinate, to destination: Coordinate, maximumWalk: Double = 1000, limit: Int = 36,
@@ -148,7 +177,7 @@ public struct MultimodalPlanner: Sendable {
             return busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
                 preferences: preferences, estimates: estimates, at: date, preservePlatforms: true)
         }
-        let patterns = timedPatterns(at: date)
+        let patterns = timedPatterns(at: date, estimates: estimates)
         let budget = JourneySearchBudget(distance: origin.distance(to: destination), cycling: cycling)
         let bikeRadius = min(TransitBikePolicy.maximumFeederSearchMeters,preferences.bikeMaximumRideMeters, max(1_500, origin.distance(to: destination) * 0.5))
         func streetDistance(_ stop: BusStop, to c: Coordinate) -> Double {
