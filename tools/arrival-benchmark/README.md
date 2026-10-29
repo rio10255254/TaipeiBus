@@ -23,7 +23,7 @@ curl -L -o official-times.json https://github.com/rio10255254/TaipeiBus/releases
 python3 tools/arrival-benchmark/replay_all.py recordings --official official-times.json --out results
 ```
 
-`results/report.md` 是報告（2026 年 10 月的基準結果存於 [baseline-2026-10.md](baseline-2026-10.md)，修正與驗證結果存於 [corrections-2026-10.md](corrections-2026-10.md)），`results/metrics.json` 是完整數字，`results/replay/*/predictions.csv.gz` 保留每筆預估與實際到站，可作為之後訓練模型的資料。
+`results/report.md` 是報告（2026 年 10 月的基準結果存於 [baseline-2026-10.md](baseline-2026-10.md)，修正與驗證結果存於 [corrections-2026-10.md](corrections-2026-10.md)，完整兩週的結果存於 [fortnight-2026-10.md](fortnight-2026-10.md)，由 `fortnight.py` 依日別與顯示的分鐘分組），`results/metrics.json` 是完整數字，`results/replay/*/predictions.csv.gz` 保留每筆預估與實際到站，可作為之後訓練模型的資料。
 
 在 GitHub 上可手動執行 `Arrival replay` workflow，它會從 release 下載錄製檔、回放、評分，並把報告放在執行摘要。
 
