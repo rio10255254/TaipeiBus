@@ -4,9 +4,10 @@ import Foundation
 /// New Taipei publishes none (TDX's S2STravelTime does not cover it), and a few Taipei routes have none.
 ///
 /// Measured against buses' actual stop-to-stop times (GetBusEvent, morning peak of 2026-10-29, legs of five
-/// stops), the median error was 13% in both cities for the arrival-estimate difference below, against 12%
-/// for Taipei's official profiles; 40% in New Taipei and 26% in Taipei for the generic distance estimate,
-/// which was 39% and 24% too slow.
+/// stops, the planner's own distances), the median error was 13% in both cities for the arrival-estimate
+/// difference below, against 12% for Taipei's official profiles. The generic 4.5 m/s + 20 s estimate was 27%
+/// off in New Taipei (24% too slow); New Taipei's best pace, 6.2 m/s + 25 s (21%), is the 6.25 m/s + 25 s
+/// that two weeks of Taipei recordings fit (tools/arrival-benchmark/fortnight-2026-10.md).
 public enum RideTiming {
     /// Whether this feed may stand for a departure at `date`: current, and not for a trip planned well ahead.
     public static func liveEstimates(_ estimates: EstimateFeed?, at date: Date) -> EstimateFeed? {

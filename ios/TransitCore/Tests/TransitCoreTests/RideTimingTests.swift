@@ -35,8 +35,8 @@ final class RideTimingTests: XCTestCase {
         XCTAssertEqual(RideTiming.estimate(meters: 900, route: route, tuning: tuning), 900 / tuning.typicalSpeed + tuning.stopSeconds)
         route.source = "ntpc"
         let pace = try XCTUnwrap(RegionCatalog.shared.sources["ntpc"]?.ridePace)
-        XCTAssertEqual(pace, TransitSource.RidePace(metersPerSecond: 8.3, stopSeconds: 30))
-        XCTAssertEqual(RideTiming.estimate(meters: 830, route: route, tuning: tuning), 130, accuracy: 0.001)
+        XCTAssertEqual(pace, TransitSource.RidePace(metersPerSecond: 6.25, stopSeconds: 25))
+        XCTAssertEqual(RideTiming.estimate(meters: 625, route: route, tuning: tuning), 125, accuracy: 0.001)
         XCTAssertNil(RegionCatalog.shared.sources["tpe"]?.ridePace, "Taipei keeps the shared tuning")
     }
 

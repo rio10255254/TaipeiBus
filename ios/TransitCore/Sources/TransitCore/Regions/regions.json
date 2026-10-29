@@ -47,7 +47,7 @@
       "kind": "bus",
       "feed": "https://tcgbusfs.blob.core.windows.net/ntpcbus/",
       "idPrefix": "",
-      "ridePace": {"metersPerSecond": 8.3, "stopSeconds": 30}
+      "ridePace": {"metersPerSecond": 6.25, "stopSeconds": 25}
     },
     {
       "id": "bike-tpe",
