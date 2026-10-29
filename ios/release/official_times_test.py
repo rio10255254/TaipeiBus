@@ -199,6 +199,22 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(report['publication']['failures'], [])
         self.assertIn('Publication checks passed', summary)
 
+    def test_a_citys_first_catalog_has_its_own_names_and_nothing_to_compare(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'collected.json').write_text(json.dumps(catalog([profile('1', NOW - timedelta(days=1))], NOW)))
+            (root / 'coverage.json').write_text('{"failed_routes": [], "missing_routes": []}')
+            args = ['prepare', '--candidate', str(root / 'collected.json'), '--published', str(root / 'not-published-yet.json'),
+                    '--coverage', str(root / 'coverage.json'), '--out', str(root / 'out'), '--name', 'official-times-ntpc']
+            with mock.patch.dict(os.environ, {'GITHUB_STEP_SUMMARY': str(root / 'summary.md')}), redirect_stdout(io.StringIO()):
+                gate.main(args, now=NOW)
+            names = sorted(path.name for path in (root / 'out').iterdir())
+            self.assertEqual(names, ['coverage-ntpc.json', 'official-times-ntpc-manifest.json', 'official-times-ntpc.json',
+                                     'official-times-ntpc.json.gz'])
+            self.assertEqual(len(json.loads((root / 'out' / 'official-times-ntpc.json').read_text())['routes']), 1)
+            with self.assertRaises(SystemExit), redirect_stdout(io.StringIO()), mock.patch('sys.stderr', io.StringIO()):
+                gate.main([*args[:-1], 'official-times-tokyo'], now=NOW)
+
     def test_compressed_copy_and_manifest_describe_the_catalog(self):
         import gzip, hashlib
         with tempfile.TemporaryDirectory() as folder:
@@ -284,15 +300,18 @@ class CollectorRetryTests(unittest.TestCase):
 class CollectorRunTests(unittest.TestCase):
     """The whole collection with a fake TDX: no network, no credentials, no sleeping."""
 
-    def run_collection(self, behaviour, routes):
+    def run_collection(self, behaviour, routes, city=None):
+        requested = []
         def read(url, headers=None, data=None, accounting=None):
             if url.endswith('GetRoute.gz'):
+                requested.append(url)
                 return json.dumps({'BusInfo': [{'Id': int(r)} for r in routes]}).encode()
             if 'openid-connect/token' in url:
                 return b'{"access_token": "token"}'
             if accounting is not None:
                 accounting['requests'] += 1
-            route = url.split('/City/Taipei/')[1].split('?')[0]
+            requested.append(url)
+            route = url.split(f'/City/{city or "Taipei"}/')[1].split('?')[0]
             answer = behaviour(route)
             if isinstance(answer, Exception):
                 raise answer
@@ -302,12 +321,21 @@ class CollectorRunTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder) / 'official-times.json'
-            argv = ['collect-route-times.py', '--out', str(out)]
+            argv = ['collect-route-times.py', '--out', str(out)] + (['--city', city] if city else [])
             environment = {'TDX_CLIENT_ID': 'id', 'TDX_CLIENT_SECRET': 'secret'}
             with mock.patch.object(collect, 'read', read), mock.patch.object(collect.time, 'sleep'), \
                     mock.patch('sys.argv', argv), mock.patch.dict(os.environ, environment), redirect_stdout(io.StringIO()):
                 collect.main()
+            self.requested = requested
             return json.loads(out.read_text()), json.loads(out.with_name('coverage.json').read_text())
+
+    def test_new_taipei_reads_its_own_route_list_and_tdx_city(self):
+        result, coverage = self.run_collection(lambda route: None, ['1', '2'], city='NewTaipei')
+        self.assertEqual(self.requested[0], 'https://tcgbusfs.blob.core.windows.net/ntpcbus/GetRoute.gz')
+        self.assertTrue(all('/S2STravelTime/City/NewTaipei/' in url for url in self.requested[1:]))
+        self.assertEqual([r['route'] for r in result['routes']], ['1', '2'])
+        self.assertIn('新北市', result['attribution'])
+        self.assertIn('/City/NewTaipei/', result['source'])
 
     def test_unanswered_routes_are_reported_and_collection_continues(self):
         def behaviour(route):

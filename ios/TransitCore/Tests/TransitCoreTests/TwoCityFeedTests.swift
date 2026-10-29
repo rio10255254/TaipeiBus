@@ -60,6 +60,25 @@ final class TwoCityFeedTests: XCTestCase {
         XCTAssertEqual(Set(single.stops.keys), Set(try FeedDecoder.metadata(sources: [taipei]).stops.keys))
     }
 
+    func testEachCitysTravelTimesApplyToItsOwnRoutesOnceCombined() throws {
+        func catalog(route: String, generated: String, seconds: Int) throws -> OfficialTravelTimes {
+            try OfficialTravelTimes(data: JSONSerialization.data(withJSONObject: ["schema": 1, "generatedAt": generated, "routes": [
+                ["route": route, "subroute": route + "0", "direction": "0", "updated": "2026-10-28T05:00:00+08:00",
+                 "edges": [["a", "b"]], "periods": [["weekday": 4, "startHour": 9, "endHour": 10, "seconds": [seconds]]]]]]))
+        }
+        let taipei = try catalog(route: "100", generated: "2026-10-28T00:00:00Z", seconds: 90)
+        let newTaipei = try catalog(route: "200", generated: "2026-10-29T00:00:00Z", seconds: 150)
+        let both = OfficialTravelTimes.combining([taipei, newTaipei])
+        let at = FeedDecoder.taipeiDate("2026/10/29 09:20:00")!
+        XCTAssertEqual(both.patternCount, 2)
+        XCTAssertEqual(both.seconds(route: "100", subroute: "1000", direction: "0", from: "a", to: "b", travellingAt: at, observedAt: at), 90)
+        XCTAssertEqual(both.seconds(route: "200", subroute: "2000", direction: "0", from: "a", to: "b", travellingAt: at, observedAt: at), 150)
+        XCTAssertNil(both.seconds(route: "100", subroute: "2000", direction: "0", from: "a", to: "b", travellingAt: at, observedAt: at))
+        XCTAssertEqual(both.generatedAt, newTaipei.generatedAt)
+        XCTAssertEqual(OfficialTravelTimes.combining([taipei]).patternCount, 1)
+        XCTAssertEqual(OfficialTravelTimes.combining([]).patternCount, 0)
+    }
+
     func testEstimatesFromTwoCitiesCountDownFromOneTime() {
         let now = Date(timeIntervalSince1970: 1_800_000_000)
         let taipei = EstimateFeed(seconds: ["1:a": 300, "1:b": -3], updatedAt: now)

@@ -201,16 +201,24 @@ def gate(candidate, published, now, allow_smaller=False):
     return failures, {'collected': new, 'published': old, 'bytes': len(blob)}
 
 
-def write_compressed(folder, blob, generated):
+# Taipei's catalog keeps the names every installed app asks for; another city's carries its id.
+NAMES = {'tpe': 'official-times', 'ntpc': 'official-times-ntpc'}
+
+
+def coverage_name(name):
+    return name.replace('official-times', 'coverage') + '.json'
+
+
+def write_compressed(folder, blob, generated, name='official-times'):
     """The gzip copy and a small manifest let phones skip downloading an unchanged catalog.
 
     Upload the manifest last: it must never name a catalog that is not yet published.
     """
     packed = gzip.compress(blob, compresslevel=9, mtime=0)
-    (folder / 'official-times.json.gz').write_bytes(packed)
+    (folder / f'{name}.json.gz').write_bytes(packed)
     manifest = {'schema': 1, 'generatedAt': generated, 'sha256': hashlib.sha256(blob).hexdigest(),
                 'bytes': len(blob), 'gzipBytes': len(packed)}
-    (folder / 'official-times-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    (folder / f'{name}-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     return manifest
 
 
@@ -230,7 +238,8 @@ def describe(name, stats):
 
 def prepare(args, now):
     candidate = json.loads(args.candidate.read_text(encoding='utf-8'))
-    published = json.loads(args.published.read_text(encoding='utf-8'))
+    # A city's first collection has nothing published to compare with or carry forward.
+    published = json.loads(args.published.read_text(encoding='utf-8')) if args.published.exists() else {}
     coverage = json.loads(args.coverage.read_text(encoding='utf-8'))
     if not isinstance(candidate, dict) or not isinstance(candidate.get('routes'), list):
         raise ValueError('The collected catalog is not a route list')
@@ -242,9 +251,9 @@ def prepare(args, now):
     coverage['publication'] = {'checked_at': now.isoformat(), 'failures': failures, **report}
     args.out.mkdir(parents=True, exist_ok=True)
     blob = encode(merged)
-    (args.out / 'official-times.json').write_bytes(blob)
-    write_compressed(args.out, blob, merged.get('generatedAt'))
-    (args.out / 'coverage.json').write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    (args.out / f'{args.name}.json').write_bytes(blob)
+    write_compressed(args.out, blob, merged.get('generatedAt'), args.name)
+    (args.out / coverage_name(args.name)).write_text(json.dumps(coverage, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     write_summary(['### Official travel-time catalog', '',
                    '| Catalog | Valid profiles | Usable now | Oldest UpdateTime | 10% expired at | Days left |',
                    '|---|---|---|---|---|---|', describe('Published', report['published']), describe('Collected', report['collected']), '',
@@ -283,10 +292,10 @@ def repack(args, now):
     coverage = args.coverage.read_bytes()
     json.loads(coverage)
     args.out.mkdir(parents=True, exist_ok=True)
-    (args.out / 'official-times.json').write_bytes(blob)
-    (args.out / 'coverage.json').write_bytes(coverage)
-    write_compressed(args.out, blob, document['generatedAt'])
-    assert gzip.decompress((args.out / 'official-times.json.gz').read_bytes()) == blob
+    (args.out / f'{args.name}.json').write_bytes(blob)
+    (args.out / coverage_name(args.name)).write_bytes(coverage)
+    write_compressed(args.out, blob, document['generatedAt'], args.name)
+    assert gzip.decompress((args.out / f'{args.name}.json.gz').read_bytes()) == blob
 
 
 def main(argv=None, now=None):
@@ -299,6 +308,7 @@ def main(argv=None, now=None):
     p.add_argument('--out', type=Path, required=True)
     p.add_argument('--allow-smaller', action='store_true', help='Accept fewer usable profiles, e.g. after routes are withdrawn')
     p.add_argument('--report-only', action='store_true', help='Report gate failures without failing (dry runs)')
+    p.add_argument('--name', choices=sorted(NAMES.values()), default='official-times', help="The catalog's published file name")
     c = commands.add_parser('check', help='Fail when the catalog phones download is close to expiring')
     c.add_argument('--document', type=Path, required=True)
     c.add_argument('--minimum-days', type=float, default=21)
@@ -306,6 +316,7 @@ def main(argv=None, now=None):
     r.add_argument('--document', type=Path, required=True)
     r.add_argument('--coverage', type=Path, required=True)
     r.add_argument('--out', type=Path, required=True)
+    r.add_argument('--name', choices=sorted(NAMES.values()), default='official-times', help="The catalog's published file name")
     args = parser.parse_args(argv)
     now = now or datetime.now(timezone.utc)
     {'prepare': prepare, 'check': check, 'repack': repack}[args.command](args, now)

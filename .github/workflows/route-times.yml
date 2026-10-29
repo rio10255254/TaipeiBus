@@ -2,17 +2,27 @@ name: Official route travel times
 # Phones keep a TDX station-to-station profile for 45 days after its UpdateTime
 # (OfficialTravelTimes.swift) and download this release daily. A weekly refresh keeps
 # every installed version on official times; the daily check raises an issue well
-# before phones would fall back to the generic speed estimate.
+# before phones would fall back to the generic speed estimate. Each city has its own
+# catalog: Taipei's keeps the file names every installed app asks for (official-times*),
+# New Taipei's carries its id (official-times-ntpc*).
 on:
   schedule:
-    # Wednesday 05:23 Taipei, after TDX's overnight profile rebuild.
+    # Wednesday 05:23 Taipei, after TDX's overnight profile rebuild: Taipei.
     - cron: '23 21 * * 2'
+    # Thursday 05:23 Taipei: New Taipei, about 130 minutes at five requests a minute.
+    # A day apart, so the two never share the account's request rate.
+    - cron: '23 21 * * 3'
     # Daily 09:41 Taipei.
     - cron: '41 1 * * *'
   workflow_dispatch:
     inputs:
+      city:
+        description: 'Which city to collect'
+        type: choice
+        options: [taipei, ntpc]
+        default: taipei
       routes:
-        description: 'Comma-separated published route IDs; empty covers the full Taipei catalog'
+        description: "Comma-separated published route IDs of that city; empty covers the city's full catalog"
         type: string
         default: ''
       publish:
@@ -34,15 +44,15 @@ concurrency:
   cancel-in-progress: false
 env:
   # The address compiled into the app (TransitService.swift).
-  PHONE_CATALOG_URL: https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/official-times.json
+  RELEASE_BASE: https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/
   # Compiled into the app as the jsDelivr mirror (TransitService.swift). Not the release tag name,
   # so the branch and the tag never share a ref name.
   MIRROR_BRANCH: phone-data
 jobs:
   collect:
-    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 21 * * 2'
+    if: github.event_name == 'workflow_dispatch' || github.event.schedule == '23 21 * * 2' || github.event.schedule == '23 21 * * 3'
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 200
     permissions:
       contents: write
     env:
@@ -51,17 +61,37 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       PUBLISH: ${{ github.event_name == 'schedule' || inputs.publish }}
       ALLOW_SMALLER: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_smaller }}
+      CITY: ${{ (inputs.city == 'ntpc' || github.event.schedule == '23 21 * * 3') && 'ntpc' || 'taipei' }}
     steps:
       - uses: actions/checkout@v4
+      - name: Name this city's catalog
+        run: |
+          set -euo pipefail
+          if [ "$CITY" = ntpc ]; then
+            { echo TDX_CITY=NewTaipei; echo NAME=official-times-ntpc; echo COVERAGE=coverage-ntpc.json
+              echo 'BUDGET=--maximum-routes 700 --maximum-transferred-mb 160'; } >> "$GITHUB_ENV"
+          else
+            { echo TDX_CITY=Taipei; echo NAME=official-times; echo COVERAGE=coverage.json; echo BUDGET=; } >> "$GITHUB_ENV"
+          fi
       - name: Test collection and publication rules before using account quota
         run: python3 ios/release/official_times_test.py
       - name: Read the published catalog for comparison (GitHub only, no TDX quota)
-        run: gh release download travel-time-data --pattern official-times.json --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
+        run: |
+          set -euo pipefail
+          # New Taipei's first collection has nothing published yet; Taipei's always has.
+          if gh release view travel-time-data --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -x "$NAME.json" > /dev/null; then
+            gh release download travel-time-data --pattern "$NAME.json" --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
+          elif [ "$NAME" = official-times ]; then
+            echo 'The Taipei catalog is missing from the release.'; exit 1
+          else
+            echo "No $NAME.json published yet: this is the city's first collection."
+          fi
       - name: Collect bounded shared public time profiles
         if: inputs.repack_existing != true
         env:
           REQUESTED_ROUTES: ${{ inputs.routes }}
-        run: python3 ios/release/collect-route-times.py --routes "$REQUESTED_ROUTES" --out "$RUNNER_TEMP/route-times/official-times.json"
+        # BUDGET is deliberately unquoted: it is empty or a fixed set of flags.
+        run: python3 ios/release/collect-route-times.py --city "$TDX_CITY" --routes "$REQUESTED_ROUTES" $BUDGET --out "$RUNNER_TEMP/route-times/collected.json"
       - name: Keep unanswered routes and check what phones would receive
         if: inputs.repack_existing != true
         run: |
@@ -70,23 +100,23 @@ jobs:
           if [ "$ALLOW_SMALLER" = true ]; then flags+=(--allow-smaller); fi
           if [ "$PUBLISH" != true ]; then flags+=(--report-only); fi
           python3 ios/release/official_times_gate.py prepare \
-            --candidate "$RUNNER_TEMP/route-times/official-times.json" \
+            --candidate "$RUNNER_TEMP/route-times/collected.json" \
             --coverage "$RUNNER_TEMP/route-times/coverage.json" \
-            --published "$RUNNER_TEMP/published/official-times.json" \
-            --out "$RUNNER_TEMP/route-times/publish" "${flags[@]}"
+            --published "$RUNNER_TEMP/published/$NAME.json" \
+            --name "$NAME" --out "$RUNNER_TEMP/route-times/publish" "${flags[@]}"
       - name: Repack the exact existing catalog without using TDX quota
         if: inputs.repack_existing == true
         run: |
           set -euo pipefail
-          gh release download travel-time-data --pattern coverage.json --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
+          gh release download travel-time-data --pattern "$COVERAGE" --dir "$RUNNER_TEMP/published" --repo "$GITHUB_REPOSITORY"
           python3 ios/release/official_times_gate.py repack \
-            --document "$RUNNER_TEMP/published/official-times.json" \
-            --coverage "$RUNNER_TEMP/published/coverage.json" \
-            --out "$RUNNER_TEMP/route-times/publish"
+            --document "$RUNNER_TEMP/published/$NAME.json" \
+            --coverage "$RUNNER_TEMP/published/$COVERAGE" \
+            --name "$NAME" --out "$RUNNER_TEMP/route-times/publish"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: official-route-times-${{ github.run_id }}
+          name: official-route-times-${{ env.CITY }}-${{ github.run_id }}
           path: ${{ runner.temp }}/route-times/
           retention-days: 30
           if-no-files-found: ignore
@@ -96,15 +126,15 @@ jobs:
           set -euo pipefail
           out="$RUNNER_TEMP/route-times/publish"
           # The manifest goes last so it never names a catalog that is not yet uploaded.
-          gh release upload travel-time-data "$out/official-times.json" "$out/official-times.json.gz" "$out/coverage.json" --clobber --repo "$GITHUB_REPOSITORY"
-          gh release upload travel-time-data "$out/official-times-manifest.json" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload travel-time-data "$out/$NAME.json" "$out/$NAME.json.gz" "$out/$COVERAGE" --clobber --repo "$GITHUB_REPOSITORY"
+          gh release upload travel-time-data "$out/$NAME-manifest.json" --clobber --repo "$GITHUB_REPOSITORY"
       - name: Confirm phones download the new catalog
         if: env.PUBLISH == 'true'
         run: |
           set -euo pipefail
-          expected=$(sha256sum < "$RUNNER_TEMP/route-times/publish/official-times.json")
+          expected=$(sha256sum < "$RUNNER_TEMP/route-times/publish/$NAME.json")
           for attempt in 1 2 3 4 5 6; do
-            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/downloaded.json" "$PHONE_CATALOG_URL" &&
+            if curl -fsSL --retry 3 -o "$RUNNER_TEMP/downloaded.json" "$RELEASE_BASE$NAME.json" &&
                [ "$(sha256sum < "$RUNNER_TEMP/downloaded.json")" = "$expected" ]; then break; fi
             if [ "$attempt" = 6 ]; then echo 'The public address still serves a different catalog.'; exit 1; fi
             sleep 20
@@ -114,20 +144,23 @@ jobs:
         if: env.PUBLISH == 'true'
         # Phones download the gzip copy from jsDelivr first and verify it against the manifest,
         # so heavy traffic does not depend on GitHub release downloads alone. The branch is a
-        # single orphan commit, replaced each week, so the repository does not grow.
+        # single orphan commit, replaced each week, so the repository does not grow. It carries
+        # every city's catalog: the other city's current files come from the release.
         run: |
           set -euo pipefail
           out="$RUNNER_TEMP/route-times/publish"
           mirror="$RUNNER_TEMP/mirror"
           git init -q -b "$MIRROR_BRANCH" "$mirror"
-          cp "$out/official-times.json.gz" "$out/official-times-manifest.json" "$mirror/"
+          gh release download travel-time-data --pattern 'official-times*.json.gz' --pattern 'official-times*-manifest.json' \
+            --dir "$mirror" --clobber --repo "$GITHUB_REPOSITORY"
+          cp "$out/$NAME.json.gz" "$out/$NAME-manifest.json" "$mirror/"
           cd "$mirror"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
-          git commit -q -m "Official travel times $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["generatedAt"])' official-times-manifest.json)"
+          git commit -q -m "Official travel times ($CITY) $(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["generatedAt"])' "$NAME-manifest.json")"
           git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$MIRROR_BRANCH"
-          for name in official-times-manifest.json official-times.json.gz; do
+          for name in "$NAME-manifest.json" "$NAME.json.gz"; do
             curl -fsS --retry 3 "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${MIRROR_BRANCH}/$name" > /dev/null ||
               echo "::warning::jsDelivr purge failed for $name; phones verify the copy and fall back to GitHub."
           done
@@ -135,7 +168,7 @@ jobs:
       - name: Verify compressed downloads from both public sources
         if: env.PUBLISH == 'true'
         run: |
-          python3 ios/release/verify_official_mirrors.py
+          python3 ios/release/verify_official_mirrors.py "$NAME"
 
 
   watchdog:
@@ -149,11 +182,16 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
-      - name: Check the catalog phones download
+      - name: Check the catalogs phones download
         run: |
           set -euo pipefail
-          curl -fsSL --retry 3 -o "$RUNNER_TEMP/official-times.json" "$PHONE_CATALOG_URL"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/official-times.json" "${RELEASE_BASE}official-times.json"
           python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/official-times.json" --minimum-days 21
+          # New Taipei's once it has been published.
+          if gh release view travel-time-data --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -x official-times-ntpc.json > /dev/null; then
+            curl -fsSL --retry 3 -o "$RUNNER_TEMP/official-times-ntpc.json" "${RELEASE_BASE}official-times-ntpc.json"
+            python3 ios/release/official_times_gate.py check --document "$RUNNER_TEMP/official-times-ntpc.json" --minimum-days 21
+          fi
       - name: Keep the schedules from being disabled
         # GitHub disables a public repository's schedules after 60 days without activity,
         # which would also silence this check. Re-enabling the workflow resets that clock.

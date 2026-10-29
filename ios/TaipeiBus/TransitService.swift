@@ -151,8 +151,8 @@ actor TransitService {
     private var refreshTask: Task<TransitSnapshot, Never>?
     private var refreshGeneration = UUID()
     private var metadataLoadedAt: Date?
-    private var bundledOfficial: OfficialTravelTimes?
-    private var checkedBundledOfficial = false
+    private var bundledOfficial: [String: OfficialTravelTimes] = [:]
+    private var checkedBundledOfficial: Set<String> = []
     private var settings = LiveSettings.defaults
     private(set) var metadataNotice: String?
     private static let metadataNames = ["GetRoute", "GetStop", "GetPathDetail", "GetProvider", "GetBusShape"]
@@ -192,7 +192,7 @@ actor TransitService {
     func offlineMetroMetadata() -> TransitMetadata? {
         if let bundledMetadata { return bundledMetadata }
         var result = (try? FeedDecoder.metadata(sources: busSources.map { bundledFeeds($0) })) ?? TransitMetadata()
-        result.officialTravelTimes = (bundledOfficialTravelTimes() ?? .init()).matching(result)
+        result.officialTravelTimes = OfficialTravelTimes.combining(busSources.compactMap { bundledOfficialTravelTimes($0) }).matching(result)
         installMetro(in:&result)
         bundledMetadata = result
         metadata = result
@@ -222,9 +222,10 @@ actor TransitService {
         let sources = [primary] + busSources.dropFirst().map { recent($0) ?? bundledFeeds($0) }
         guard let value = try? FeedDecoder.metadata(sources: sources), !value.stations.isEmpty, !value.routes.isEmpty else { return nil }
         var loaded = value
-        let cached = (try? Data(contentsOf: cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")))
-            .flatMap { try? OfficialTravelTimes(data: $0) }
-        loaded.officialTravelTimes = (preferredOfficial(cached, bundledOfficialTravelTimes()) ?? .init()).matching(loaded)
+        loaded.officialTravelTimes = OfficialTravelTimes.combining(busSources.compactMap { source in
+            let cached = (try? Data(contentsOf: officialFile(source, "json"))).flatMap { try? OfficialTravelTimes(data: $0) }
+            return preferredOfficial(cached, bundledOfficialTravelTimes(source))
+        }).matching(loaded)
         installMetro(in: &loaded)
         metadata = loaded
         return loaded
@@ -291,14 +292,26 @@ actor TransitService {
         metro.attach(to: &metadata)
     }
 
-    private func bundledOfficialTravelTimes() -> OfficialTravelTimes? {
-        guard !checkedBundledOfficial else { return bundledOfficial }
-        checkedBundledOfficial = true
-        if let url = Bundle.main.url(forResource: "OfficialTravelTimes", withExtension: "json"),
-           let bytes = try? Data(contentsOf: url), let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 {
-            bundledOfficial = catalog
+    /// Each city's official station-to-station catalog. Taipei's keeps the names every installed app
+    /// uses (official-times* in the release, OfficialTravelTimes.json inside the app and in the cache);
+    /// another city's carries its id and ships inside the app compressed, beside its bus files.
+    private func officialName(_ source: TransitSource) -> String {
+        source == busSources.first ? "official-times" : "official-times-\(source.id)"
+    }
+    private func officialFile(_ source: TransitSource, _ suffix: String) -> URL {
+        cacheDirectory.appendingPathComponent(source == busSources.first ? "OfficialTravelTimes.\(suffix)" : "\(source.id)-OfficialTravelTimes.\(suffix)")
+    }
+    private func bundledOfficialTravelTimes(_ source: TransitSource) -> OfficialTravelTimes? {
+        guard !checkedBundledOfficial.contains(source.id) else { return bundledOfficial[source.id] }
+        checkedBundledOfficial.insert(source.id)
+        let primary = source == busSources.first
+        if let url = primary ? Bundle.main.url(forResource: "OfficialTravelTimes", withExtension: "json")
+                             : Bundle.main.url(forResource: "OfficialTravelTimes.json", withExtension: "gz", subdirectory: "BusMetadata/\(source.id)"),
+           let stored = try? Data(contentsOf: url), let bytes = primary ? stored : (try? inflate(stored)),
+           let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 {
+            bundledOfficial[source.id] = catalog
         }
-        return bundledOfficial
+        return bundledOfficial[source.id]
     }
 
     private func preferredOfficial(_ cached: OfficialTravelTimes?, _ bundled: OfficialTravelTimes?) -> OfficialTravelTimes? {
@@ -312,11 +325,20 @@ actor TransitService {
     private static let officialRaw = "https://raw.githubusercontent.com/rio10255254/TaipeiBus/phone-data/"
     private static let officialMirror = "https://cdn.jsdelivr.net/gh/rio10255254/TaipeiBus@phone-data/"
 
+    /// Every city's catalog, each checked and downloaded on its own; a city whose catalog cannot be
+    /// had keeps the generic speed estimate without holding back the others.
     private func officialTravelTimes(force: Bool) async -> OfficialTravelTimes {
-        let file = cacheDirectory.appendingPathComponent("OfficialTravelTimes.json")
-        let checkFile = cacheDirectory.appendingPathComponent("OfficialTravelTimes.checked")
+        var parts: [OfficialTravelTimes] = []
+        for source in busSources { parts.append(await officialTravelTimes(source, force: force)) }
+        return OfficialTravelTimes.combining(parts.filter { $0.patternCount > 0 })
+    }
+
+    private func officialTravelTimes(_ source: TransitSource, force: Bool) async -> OfficialTravelTimes {
+        let name = officialName(source)
+        let file = officialFile(source, "json")
+        let checkFile = officialFile(source, "checked")
         let cached = (try? Data(contentsOf: file)).flatMap { try? OfficialTravelTimes(data: $0) }
-        let bundled = bundledOfficialTravelTimes()
+        let bundled = bundledOfficialTravelTimes(source)
         let saved = preferredOfficial(cached, bundled)
         func age(_ url: URL) -> TimeInterval? {
             ((try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date).map { Date().timeIntervalSince($0) }
@@ -331,15 +353,15 @@ actor TransitService {
             try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             try? Data().write(to: checkFile, options: .atomic)
         }
-        if let manifest = await officialManifest() {
+        if let manifest = await officialManifest(name) {
             let plain = ISO8601DateFormatter(), fractional = ISO8601DateFormatter()
             fractional.formatOptions.insert(.withFractionalSeconds)
             let published = plain.date(from: manifest.generatedAt) ?? fractional.date(from: manifest.generatedAt)
             if let saved, let published, (saved.generatedAt ?? .distantPast) >= published { markChecked(); return saved }
             // Use the verified release first; a cold or unavailable third-party mirror must not delay it.
             var verified: (Data, OfficialTravelTimes)?
-            for source in [Self.officialRelease, Self.officialRaw, Self.officialMirror] where verified == nil {
-                guard let packed = await download(source + "official-times.json.gz"), packed.count == manifest.gzipBytes,
+            for base in [Self.officialRelease, Self.officialRaw, Self.officialMirror] where verified == nil {
+                guard let packed = await download(base + name + ".json.gz"), packed.count == manifest.gzipBytes,
                       let bytes = try? inflate(packed), bytes.count == manifest.bytes,
                       SHA256.hash(data: bytes).map({ String(format: "%02x", $0) }).joined() == manifest.sha256,
                       let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { continue }
@@ -348,21 +370,23 @@ actor TransitService {
             guard let found = verified else { return saved ?? .init() }
             let (bytes, catalog) = found
             if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { markChecked(); return saved }
+            try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
             try? bytes.write(to: file, options: .atomic); markChecked()
             return catalog
         }
         // Without a manifest (unreachable, or not yet published) fall back to the full file.
-        guard let bytes = await download(Self.officialRelease + "official-times.json"),
+        guard let bytes = await download(Self.officialRelease + name + ".json"),
               let catalog = try? OfficialTravelTimes(data: bytes), catalog.patternCount > 0 else { return saved ?? .init() }
         if let saved, (saved.generatedAt ?? .distantPast) > (catalog.generatedAt ?? .distantPast) { return saved }
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         try? bytes.write(to: file, options: .atomic)
         return catalog
     }
 
     /// GitHub first, since it is always current; the CDN copy answers when GitHub does not.
-    private func officialManifest() async -> OfficialManifest? {
-        for source in [Self.officialRelease, Self.officialRaw, Self.officialMirror] {
-            guard let data = await download(source + "official-times-manifest.json"), data.count <= 4_096,
+    private func officialManifest(_ name: String) async -> OfficialManifest? {
+        for base in [Self.officialRelease, Self.officialRaw, Self.officialMirror] {
+            guard let data = await download(base + name + "-manifest.json"), data.count <= 4_096,
                   let manifest = try? JSONDecoder().decode(OfficialManifest.self, from: data), manifest.schema == 1,
                   manifest.sha256.count == 64, (1...(32 * 1_024 * 1_024)).contains(manifest.bytes),
                   (1...manifest.bytes).contains(manifest.gzipBytes) else { continue }
