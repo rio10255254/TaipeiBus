@@ -69,11 +69,16 @@ def load(folders):
         folder = Path(folder)
         end = json.loads((folder / 'summary.json').read_text())['recordingEnd']
         df = pd.read_csv(folder / 'predictions.csv.gz', usecols=PREDICTION_COLUMNS,
-                         dtype={'vehicle': str, 'stop': str, 'evidence': 'category'})
-        frames.append(df[(df.made_at <= end - TAIL) & df.predicted_s.notna()])
+                         dtype={'vehicle': 'category', 'stop': 'category', 'evidence': 'category'})
+        # Only rows that can be scored are kept, so two weeks fit in memory.
+        frames.append(df[(df.made_at <= end - TAIL) & df.predicted_s.notna() & df.actual_arrive_s.notna()
+                         & (df.predicted_s <= 1800)])
         of = pd.read_csv(folder / 'official.csv.gz', usecols=['made_at', 'official_s', 'actual_arrive_s'])
         officials.append(of[(of.made_at <= end - TAIL)])
-    return pd.concat(frames, ignore_index=True), pd.concat(officials, ignore_index=True)
+    frame = pd.concat(frames, ignore_index=True)
+    for column in ['vehicle', 'stop', 'evidence']:
+        frame[column] = frame[column].astype(str).astype('category')
+    return frame, pd.concat(officials, ignore_index=True)
 
 
 def ride_pairs(df):
@@ -101,7 +106,7 @@ def main():
     shown_estimate = shown.label_min * 60
     error = shown.actual_arrive_s - shown_estimate
     inside = (shown.actual_arrive_s >= shown.range_low_min * 60 - 30) & (shown.actual_arrive_s < shown.range_high_min * 60 + 30)
-    result = {'rows': {'predictions': int(len(df)), 'with_actual': int(len(known)), 'shown_scored': int(len(shown))},
+    result = {'rows': {'scored_candidates': int(len(known)), 'shown_scored': int(len(shown))},
               'first': str(local.min()), 'last': str(local.max())}
 
     result['app_shown'] = {kind: bucketed(shown[m], shown_estimate[m], error[m], inside[m])
