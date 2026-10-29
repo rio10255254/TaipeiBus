@@ -1,11 +1,6 @@
-"""Collect shared official profiles within a fixed free-tier budget. Never prints credentials.
-
-One city per run (--city): Taipei's and New Taipei's routes come from that city's published route
-list (Regions/regions.json) and TDX's S2STravelTime/City/{city}. Each city has its own catalog."""
+"""Collect shared official profiles within a fixed free-tier budget. Never prints credentials."""
 import argparse, gzip, http.client, json, os, time, urllib.error, urllib.parse, urllib.request, zlib
 from pathlib import Path
-
-import service_area
 
 BASE = 'https://tdx.transportdata.tw'
 # Network faults and TDX overload are retried; an unanswered route keeps its previous
@@ -15,11 +10,6 @@ RETRY_STATUS = {429, 500, 502, 503, 504}
 STOP_STATUS = {401, 403, 429}
 RETRY_PAUSES = (15, 30, 60)
 MAXIMUM_CONSECUTIVE_FAILURES = 8
-# TDX city name: (bus source in Regions/regions.json, attribution).
-CITIES = {'Taipei': ('tpe', '臺北市公車資料'), 'NewTaipei': ('ntpc', '新北市公車資料')}
-# New Taipei publishes about 635 parent routes; at five requests a minute that is about 130 minutes.
-MAXIMUM_ROUTES = 700
-MAXIMUM_TRANSFERRED_MB = 160
 
 def read(url, headers=None, data=None, accounting=None):
     req = urllib.request.Request(url, data=data, headers=headers or {})
@@ -73,22 +63,19 @@ def compact(row):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out', type=Path, required=True)
-    parser.add_argument('--city', choices=sorted(CITIES), default='Taipei')
     parser.add_argument('--routes', default='')
     parser.add_argument('--maximum-routes', type=int, default=450)
     parser.add_argument('--maximum-transferred-mb', type=int, default=100)
     parser.add_argument('--maximum-decoded-mb', type=int, default=2000)
     args = parser.parse_args()
-    if not (1 <= args.maximum_routes <= MAXIMUM_ROUTES and 1 <= args.maximum_transferred_mb <= MAXIMUM_TRANSFERRED_MB
-            and 1 <= args.maximum_decoded_mb <= 2000):
+    if not (1 <= args.maximum_routes <= 450 and 1 <= args.maximum_transferred_mb <= 100 and 1 <= args.maximum_decoded_mb <= 2000):
         raise ValueError('Request and byte budgets cannot exceed the fixed limit')
-    source, attribution = CITIES[args.city]
     client_id, client_secret = os.environ.get('TDX_CLIENT_ID', '').strip(), os.environ.get('TDX_CLIENT_SECRET', '').strip()
     if any(c in client_id + client_secret for c in '*＊•'):
         raise ValueError('The visible website field contains a mask; use its normal Copy control for the existing key')
     if not client_id or not client_secret:
         raise ValueError('Existing TDX credentials are required in encrypted GitHub Secrets; no subscription is created')
-    raw = read_with_retry(service_area.source(source)['feed'] + 'GetRoute.gz')
+    raw = read_with_retry('https://tcgbusfs.blob.core.windows.net/blobbus/GetRoute.gz')
     published = sorted({str(x['Id']) for x in json.loads(raw)['BusInfo']}, key=int)
     requested = [x.strip() for x in args.routes.split(',') if x.strip()] or published
     if any(x not in published for x in requested) or len(requested) > args.maximum_routes:
@@ -110,7 +97,7 @@ def main():
             token, token_at = answer['access_token'], time.monotonic()
         if accounting['transferred_bytes'] + 16 * 1024 * 1024 > args.maximum_transferred_mb * 1024 * 1024:
             raise ValueError('Fixed compressed-transfer budget exhausted; no overage or subscription is requested')
-        url = BASE + f'/api/basic/v2/Bus/S2STravelTime/City/{args.city}/' + urllib.parse.quote(route) + '?$format=JSON'
+        url = BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/' + urllib.parse.quote(route) + '?$format=JSON'
         try:
             raw = read_with_retry(url, {'Authorization': 'Bearer ' + token, 'Accept-Encoding': 'gzip'}, accounting=accounting)
         except urllib.error.HTTPError as error:
@@ -142,8 +129,8 @@ def main():
             missing.append(route)
         print(f'Official profiles {index + 1}/{len(requested)}; route {route}; patterns {len(decoded)}', flush=True)
     result = {'schema': 1, 'generatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-              'source': BASE + f'/api/basic/v2/Bus/S2STravelTime/City/{args.city}/{{RouteID}}',
-              'attribution': '交通部運輸資料流通服務平臺（TDX）／' + attribution, 'license': BASE + '/term', 'routes': profiles}
+              'source': BASE + '/api/basic/v2/Bus/S2STravelTime/City/Taipei/{RouteID}',
+              'attribution': '交通部運輸資料流通服務平臺（TDX）／臺北市公車資料', 'license': BASE + '/term', 'routes': profiles}
     blob = json.dumps(result, ensure_ascii=False, separators=(',', ':')).encode()
     if not profiles or len(blob) > 32 * 1024 * 1024:
         raise ValueError('Empty or oversized catalog; existing public data must remain unchanged')

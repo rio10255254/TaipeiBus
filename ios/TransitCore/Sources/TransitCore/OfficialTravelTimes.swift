@@ -31,18 +31,6 @@ public struct OfficialTravelTimes: Sendable {
     private var profiles: [Profile] = []
     private var indexed: [String: [Profile]] = [:]
     public init() { generatedAt = nil }
-    private init(generatedAt: Date?) { self.generatedAt = generatedAt }
-    /// Each city's catalog as one, for matching against the combined bus catalog. No two cities share
-    /// a route id, so a profile still only ever applies to its own city's routes.
-    public static func combining(_ parts: [OfficialTravelTimes]) -> OfficialTravelTimes {
-        guard parts.count > 1 else { return parts.first ?? OfficialTravelTimes() }
-        var result = OfficialTravelTimes(generatedAt: parts.compactMap(\.generatedAt).max())
-        for part in parts {
-            result.profiles += part.profiles
-            result.indexed.merge(part.indexed) { $0 + $1 }
-        }
-        return result
-    }
     public init(data: Data) throws {
         guard data.count <= 32 * 1024 * 1024 else { throw FeedError.invalid("Official travel-time size") }
         let document = try JSONDecoder().decode(Document.self, from: data)

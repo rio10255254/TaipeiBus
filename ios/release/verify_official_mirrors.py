@@ -1,6 +1,5 @@
-"""Check the exact two compressed public addresses compiled into the app, for one city's catalog
-(the name given, official-times by default)."""
-import gzip, hashlib, json, sys, time, urllib.request
+"""Check the exact two compressed public addresses compiled into the app."""
+import gzip, hashlib, json, time, urllib.request
 BASES = [
     "https://github.com/rio10255254/TaipeiBus/releases/download/travel-time-data/",
     "https://raw.githubusercontent.com/rio10255254/TaipeiBus/phone-data/",
@@ -8,13 +7,13 @@ BASES = [
 def read(url):
     with urllib.request.urlopen(url, timeout=40) as response:
         return response.read(33 * 1024 * 1024)
-def verify(name="official-times"):
+def verify():
     results=[]
     for base in BASES:
         for attempt in range(4):
             try:
-                manifest=json.loads(read(base+name+"-manifest.json"))
-                packed=read(base+name+".json.gz")
+                manifest=json.loads(read(base+"official-times-manifest.json"))
+                packed=read(base+"official-times.json.gz")
                 raw=gzip.decompress(packed)
                 assert len(raw)==manifest["bytes"]
                 assert hashlib.sha256(raw).hexdigest()==manifest["sha256"]
@@ -31,4 +30,4 @@ def verify(name="official-times"):
                 time.sleep(10)
     assert results[0]["sha256"]==results[1]["sha256"], "Public mirrors disagree"
     return results
-if __name__=="__main__": verify(*sys.argv[1:2])
+if __name__=="__main__": verify()
