@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CALENDAR = ROOT / 'ios/TransitCore/Sources/TransitCore/TransitServiceCalendar.swift'
 TAIL = 45 * 60
 BUCKETS = [(0, 5), (5, 10), (10, 20), (20, 30)]
-PREDICTION_COLUMNS = ['made_at', 'vehicle', 'stop', 'stops_ahead', 'distance_m', 'evidence', 'predicted_s',
+EVIDENCE = pd.CategoricalDtype(['limited', 'officialProfile', 'recentMovement', 'roadHistory', 'routeProgress'])
+PREDICTION_COLUMNS = ['made_at', 'vehicle', 'stops_ahead', 'distance_m', 'evidence', 'predicted_s',
                       'uncertainty_s', 'shown', 'actual_arrive_s', 'label_min', 'range_low_min', 'range_high_min']
 
 
@@ -69,15 +70,19 @@ def load(folders):
         folder = Path(folder)
         end = json.loads((folder / 'summary.json').read_text())['recordingEnd']
         df = pd.read_csv(folder / 'predictions.csv.gz', usecols=PREDICTION_COLUMNS,
-                         dtype={'vehicle': 'category', 'stop': 'category', 'evidence': 'category'})
-        # Only rows that can be scored are kept, so two weeks fit in memory.
-        frames.append(df[(df.made_at <= end - TAIL) & df.predicted_s.notna() & df.actual_arrive_s.notna()
-                         & (df.predicted_s <= 1800)])
+                         dtype={'vehicle': str, 'evidence': str})
+        # Only shown estimates with a known arrival are kept, in compact types, so two weeks fit in memory.
+        df = df[(df.made_at <= end - TAIL) & (df.shown == 1) & df.actual_arrive_s.notna() & (df.predicted_s <= 1800)].copy()
+        for column in ['stops_ahead', 'distance_m', 'predicted_s', 'uncertainty_s', 'actual_arrive_s',
+                       'label_min', 'range_low_min', 'range_high_min']:
+            df[column] = df[column].astype('float32')
+        df['vehicle'] = pd.util.hash_pandas_object(df.vehicle, index=False).to_numpy()
+        df['evidence'] = df.evidence.astype(str).astype(EVIDENCE)
+        frames.append(df)
         of = pd.read_csv(folder / 'official.csv.gz', usecols=['made_at', 'official_s', 'actual_arrive_s'])
-        officials.append(of[(of.made_at <= end - TAIL)])
+        of = of[(of.made_at <= end - TAIL) & (of.official_s > 0) & (of.official_s <= 1800) & of.actual_arrive_s.notna()]
+        officials.append(of.astype({'official_s': 'float32', 'actual_arrive_s': 'float32'}))
     frame = pd.concat(frames, ignore_index=True)
-    for column in ['vehicle', 'stop', 'evidence']:
-        frame[column] = frame[column].astype(str).astype('category')
     return frame, pd.concat(officials, ignore_index=True)
 
 
