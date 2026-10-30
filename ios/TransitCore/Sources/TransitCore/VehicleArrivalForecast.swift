@@ -15,7 +15,7 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 }
 
 public struct VehicleArrivalPrediction: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, routeProgress, cityPace, limited }
+    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, routeProgress, limited }
     public let seconds: Double
     public let uncertaintySeconds: Double
     public let evidence: Evidence
@@ -43,7 +43,6 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
         case .officialProfile: return AppText.text("依官方分時段車程與近期車流估算")
         case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
         case .routeProgress: return AppText.text("依 GPS 位置與沿線車程估算")
-        case .cityPace: return AppText.text("較遠的路段依一般車速與時段估算")
         case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
         }
     }
@@ -276,12 +275,7 @@ public struct VehicleArrivalForecast: Sendable {
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
         let route = metadata.route(bus.routeID) ?? BusRoute(id: bus.routeID, parentID: bus.parentRouteID, name: "", variantName: "", departure: "", destination: "")
         let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
-        // How far ahead this bus's own pace says anything: a short movement sample, or a fresh speed report, does
-        // not describe traffic kilometres away (extrapolating a bus held at a light made distant stops 8–12
-        // minutes late); segments beyond it take the city pace for the hour, like a planned ride.
-        let freshSpeed = age <= 30 && bus.hasSpeed && (5...80).contains(bus.speed)
-        let paceReach = max(1_200, observedDistance * 4 + 40, freshSpeed ? 2_500 : 0)
-        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0, paced = 0
+        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0
         let indices = journey.anchors.indices.dropFirst().prefix(target)
         for index in indices {
             let start = journey.anchors[index - 1].match.along * Double(journey.direction)
@@ -291,11 +285,8 @@ public struct VehicleArrivalForecast: Sendable {
             let fraction = min(1, remaining / span)
             let key = segmentKey(bus.routeID, bus.direction, journey, index, metadata)
             let travellingAt = date.addingTimeInterval(seconds)
-            let ownPace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil)
-            let pace: TravelTimeModel.Pace = ownPace.map { ownSpeed in
-                inService && (max(start, along) - along > paceReach || seconds > 900) ? .city :
-                    .vehicle(metersPerSecond: ownSpeed, variation: speedVariation, moving: movingHistory)
-            } ?? TravelTimeModel.Pace.none
+            let pace: TravelTimeModel.Pace = (speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil))
+                .map { .vehicle(metersPerSecond: $0, variation: speedVariation, moving: movingHistory) } ?? TravelTimeModel.Pace.none
             // A bus standing at its first stop may be in a terminal layover; the official
             // running time says nothing about when it leaves.
             guard let segment = TravelTimeModel.segment(route: route, meters: remaining, fraction: fraction,
@@ -308,8 +299,7 @@ public struct VehicleArrivalForecast: Sendable {
             switch segment.source {
             case .crossings: learned += 1
             case .officialProfile, .officialEstimates: profiled += 1
-            case .vehiclePace, .fleetPace: fallback += 1
-            case .cityPace: fallback += 1; paced += 1
+            case .vehiclePace, .fleetPace, .cityPace: fallback += 1
             }
             let duration = segment.seconds, margin = segment.margin
             seconds += duration; variance += margin * margin
@@ -325,16 +315,16 @@ public struct VehicleArrivalForecast: Sendable {
         // One fresh moving GPS report can provide a short-range estimate before
         // history matures. Never extend a terminal layover or a 50-minute crawl
         // across the route, and never use a straight-line distance to the stop.
-        let localGPS = freshSpeed && inService && seconds <= 600 && progress.distance <= 2_500
+        let localGPS = age <= 30 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
+            seconds <= 600 && progress.distance <= 2_500
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
             fallback == 0 && profiled > 0 ? .officialProfile :
-            learned > 0 && fallback == 0 ? .roadHistory : paced > 0 ? .cityPace :
-            matureHistory && withinObservedHorizon ? .recentMovement : localGPS ? .routeProgress : .limited
+            learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement :
+            localGPS ? .routeProgress : .limited
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
         let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, seconds * 0.1) : 0
         return VehicleArrivalPrediction(seconds: max(15, seconds - elapsed),
-            uncertaintySeconds: max(30, sqrt(variance), seconds * (evidence == .limited ? tuning.limitedUncertainty :
-                evidence == .cityPace ? tuning.typicalSpread : tuning.minimumUncertainty)) + age * 0.35,
+            uncertaintySeconds: max(30, sqrt(variance), seconds * (evidence == .limited ? tuning.limitedUncertainty : tuning.minimumUncertainty)) + age * 0.35,
             evidence: evidence, nearStop: false)
     }
 

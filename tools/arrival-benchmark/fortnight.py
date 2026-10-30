@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CALENDAR = ROOT / 'ios/TransitCore/Sources/TransitCore/TransitServiceCalendar.swift'
 TAIL = 45 * 60
 BUCKETS = [(0, 5), (5, 10), (10, 20), (20, 30)]
-EVIDENCE = pd.CategoricalDtype(['cityPace', 'limited', 'officialProfile', 'recentMovement', 'roadHistory', 'routeProgress'])
+EVIDENCE = pd.CategoricalDtype(['limited', 'officialProfile', 'recentMovement', 'roadHistory', 'routeProgress'])
 PREDICTION_COLUMNS = ['made_at', 'vehicle', 'stops_ahead', 'distance_m', 'evidence', 'predicted_s',
                       'uncertainty_s', 'shown', 'actual_arrive_s', 'label_min', 'range_low_min', 'range_high_min']
 
