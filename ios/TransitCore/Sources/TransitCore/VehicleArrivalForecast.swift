@@ -399,34 +399,39 @@ public struct VehicleArrivalForecast: Sendable {
             let along = match.along * Double(journey.direction)
             return !hasBusAhead(of: bus, from: along, to: along + progress.distance, at: date)
         } ?? false
-        let officialNext = officialSeconds.flatMap { official -> VehicleArrivalPrediction? in
+        /// The official estimate for this bus, met halfway by the App's own time when that rests on route
+        /// evidence (an official profile, other buses' crossings or estimate differences): in the replays that
+        /// halved the error of either alone, while a time from this bus's own pace or the city's only made it worse.
+        func officialNext(_ own: VehicleArrivalPrediction?) -> VehicleArrivalPrediction? {
             // It must also be possible for this bus: not faster than 16 m/s, nor slower than a 2 m/s crawl with
             // five minutes standing (an official 12 minutes for a bus 100 m away belongs to some other bus).
-            guard isNext, (0...1_800).contains(official), Double(official) >= progress.distance / 16 - 30,
+            guard isNext, let official = officialSeconds, (0...1_800).contains(official), Double(official) >= progress.distance / 16 - 30,
                   Double(official) <= progress.distance / 2 + 300 else { return nil }
-            let seconds = Double(max(official, 15))
-            return VehicleArrivalPrediction(seconds: seconds, uncertaintySeconds: max(30, seconds * ForecastTuning.current.officialSegmentMargin),
-                                            evidence: .official, nearStop: false)
+            let stated = Double(max(official, 15))
+            let routeEvidence: Set<VehicleArrivalPrediction.Evidence> = [.officialProfile, .roadHistory, .officialEstimates]
+            let seconds = own.map { routeEvidence.contains($0.evidence) ? ($0.seconds + stated) / 2 : stated } ?? stated
+            let spread = max(30, seconds * ForecastTuning.current.officialSegmentMargin, abs(seconds - stated))
+            return VehicleArrivalPrediction(seconds: seconds, uncertaintySeconds: spread, evidence: .official, nearStop: false)
         }
         func shown(_ value: VehicleArrivalPrediction) -> VehicleArrivalDisplay {
             VehicleArrivalDisplay(label: value.label, positionLabel: position, explanation: value.evidenceLabel, prediction: value)
         }
         guard let result = prediction(bus, stopID: stopID, metadata: metadata, at: date,
                                       allowTypicalWhenStopped: allowTypicalWhenStopped) else {
-            if let officialNext { return shown(officialNext) }
+            if let official = officialNext(nil) { return shown(official) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。") + officialAdvice, prediction: nil)
         }
         if let official = officialSeconds, official >= 0,
            (result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) ||
             (result.evidence == .routeProgress && abs(result.seconds - Double(official)) > 60)) {
-            if let officialNext { return shown(officialNext) }
+            if let official = officialNext(result) { return shown(official) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。"), prediction: nil)
         }
-        if result.evidence == .cityPace, let officialNext { return shown(officialNext) }
+        if result.evidence == .cityPace, let official = officialNext(result) { return shown(official) }
         guard result.isShowable else {
-            if let officialNext { return shown(officialNext) }
+            if let official = officialNext(result) { return shown(official) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("行駛紀錄較少或變化較大，先顯示站數，等待時間確認。") + officialAdvice, prediction: nil)
         }
