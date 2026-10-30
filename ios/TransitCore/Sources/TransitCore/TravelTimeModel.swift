@@ -12,7 +12,8 @@ import Foundation
 /// 3. Official arrival estimates: for a trip leaving now, the difference of the next bus's estimates at the
 ///    two stops. New Taipei publishes no station-to-station times (TDX's S2STravelTime does not cover it).
 /// 4. A pace: this bus's own recent pace (countdown), the route's recent traffic (rides), else the city's
-///    measured pace (regions.json `ridePace`) or ForecastTuning's typical speed.
+///    measured pace (regions.json `ridePace`) or ForecastTuning's typical speed, scaled by the hour's
+///    city pace factor (buses run far faster than the all-day pace at night, slower in the peaks).
 ///
 /// Measured against buses' actual stop-to-stop times (GetBusEvent, morning peak of 2026-10-29, legs of five
 /// stops, the planner's own distances), the median error was 13% in both cities for the arrival-estimate
@@ -78,7 +79,8 @@ public enum TravelTimeModel {
             let seconds = meters / speed
             return Segment(seconds: seconds, margin: max(12, seconds * 0.3), source: .fleetPace)
         case .city:
-            let seconds = cityPace(meters: meters, fraction: fraction, route: route, tuning: tuning) * correction
+            let seconds = cityPace(meters: meters, fraction: fraction, route: route, tuning: tuning)
+                * tuning.cityPaceFactor(at: travellingAt) * correction
             return Segment(seconds: seconds, margin: max(12, seconds * tuning.typicalSpread), source: .cityPace)
         case .none:
             return nil

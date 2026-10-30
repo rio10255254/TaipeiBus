@@ -6,8 +6,15 @@ final class TravelTimeModelTests: XCTestCase {
     private let now = FeedDecoder.taipeiDate("2026/10/29 09:40:00")!
     private let route = BusRoute(id: "1", parentID: "1", name: "99", variantName: "", departure: "", destination: "")
 
-    func testEvidenceIsTakenInOrder() throws {
+    /// Hourly factors fixed so the formulas can be read off: 1.1 on profiles and a bus's own pace, none on the city pace.
+    private func fixedTuning() -> ForecastTuning {
         var tuning = ForecastTuning(); tuning.workdayPaceFactors = Array(repeating: 1.1, count: 24)
+        tuning.workdayCityPaceFactors = Array(repeating: 1, count: 24)
+        return tuning
+    }
+
+    func testEvidenceIsTakenInOrder() throws {
+        let tuning = fixedTuning()
         func segment(_ crossings: [Double], official: Double? = nil, estimates: Double? = nil,
                      pace: TravelTimeModel.Pace = .city) -> TravelTimeModel.Segment? {
             TravelTimeModel.segment(route: route, meters: 450, crossings: (crossings, crossings.count),
@@ -30,7 +37,7 @@ final class TravelTimeModelTests: XCTestCase {
     }
 
     func testPaceFormulas() {
-        var tuning = ForecastTuning(); tuning.workdayPaceFactors = Array(repeating: 1.1, count: 24)
+        var tuning = fixedTuning()
         func seconds(_ pace: TravelTimeModel.Pace, fraction: Double = 1, correction: Double = 1) -> Double? {
             TravelTimeModel.segment(route: route, meters: 450 * fraction, fraction: fraction, pace: pace,
                 travellingAt: now, correction: correction, tuning: tuning)?.seconds
@@ -38,10 +45,14 @@ final class TravelTimeModelTests: XCTestCase {
         // A bus's own pace pays the stop allowance only when it has not been moving; the hour's factor and
         // the session's correction both apply.
         XCTAssertEqual(seconds(.vehicle(metersPerSecond: 5, variation: 0.2, moving: true))!, 99, accuracy: 0.001)
-        XCTAssertEqual(seconds(.vehicle(metersPerSecond: 5, variation: 0.2, moving: false), correction: 0.9)!, (90 + 20) * 1.1 * 0.9, accuracy: 0.001)
+        XCTAssertEqual(seconds(.vehicle(metersPerSecond: 5, variation: 0.2, moving: false), correction: 0.9)!, (90 + tuning.stopSeconds) * 1.1 * 0.9, accuracy: 0.001)
         // The remaining half of a segment pays half the stop allowance.
         XCTAssertEqual(seconds(.city, fraction: 0.5)!, 225 / tuning.typicalSpeed + tuning.stopSeconds / 2, accuracy: 0.001)
         XCTAssertEqual(seconds(.city, correction: 1.2)!, (450 / tuning.typicalSpeed + tuning.stopSeconds) * 1.2, accuracy: 0.001)
+        // The city pace follows the hour: buses run ahead of it at night and behind it in the peaks.
+        tuning.workdayCityPaceFactors[9] = 1.12
+        XCTAssertEqual(seconds(.city)!, (450 / tuning.typicalSpeed + tuning.stopSeconds) * 1.12, accuracy: 0.001)
+        XCTAssertEqual(seconds(.vehicle(metersPerSecond: 5, variation: 0.2, moving: true))!, 99, accuracy: 0.001, "not a bus's own pace")
     }
 
     func testThePaceFactorFollowsTheTaipeiHour() {
@@ -51,6 +62,12 @@ final class TravelTimeModelTests: XCTestCase {
         XCTAssertEqual(tuning.paceFactor(at: FeedDecoder.taipeiDate("2026/10/29 07:59:59")!), 7)
         XCTAssertEqual(tuning.paceFactor(at: FeedDecoder.taipeiDate("2026/10/29 23:30:00")!), 23)
         XCTAssertEqual(tuning.paceFactor(at: FeedDecoder.taipeiDate("2026/10/31 08:00:00")!), 108, "a Saturday")
+        tuning.workdayCityPaceFactors = (0..<24).map { Double($0) + 200 }
+        XCTAssertEqual(tuning.cityPaceFactor(at: FeedDecoder.taipeiDate("2026/10/29 07:59:59")!), 207)
+        // The shipped city table: faster than the all-day pace late at night, slower in the evening peak.
+        let shipped = ForecastTuning()
+        XCTAssertLessThan(shipped.cityPaceFactor(at: FeedDecoder.taipeiDate("2026/10/29 23:30:00")!), 0.9)
+        XCTAssertGreaterThan(shipped.cityPaceFactor(at: FeedDecoder.taipeiDate("2026/10/29 17:30:00")!), 1.1)
     }
 
     func testRoadDistanceFollowsTheLineWhenBothStopsAreOnIt() {
@@ -119,10 +136,11 @@ final class TravelTimeModelTests: XCTestCase {
         XCTAssertEqual(try ride(estimates, at: now), 400, accuracy: 0.5)
         let estimated = try ride(nil, at: now)
         XCTAssertGreaterThan(estimated, 500)
-        XCTAssertEqual(try ride(estimates, at: now.addingTimeInterval(3_600)), estimated, accuracy: 0.5, "a later trip ignores today's estimates")
+        // A trip at the same hour tomorrow ignores today's estimates.
+        XCTAssertEqual(try ride(estimates, at: now.addingTimeInterval(86_400)), estimated, accuracy: 0.5, "a later trip ignores today's estimates")
 
         // The ride time shown once the trip is chosen is the one the search ranked it by.
-        for (feed, date) in [(estimates, now), (nil, now), (estimates, now.addingTimeInterval(3_600))] {
+        for (feed, date) in [(estimates, now), (nil, now), (estimates, now.addingTimeInterval(86_400))] {
             let trip = try XCTUnwrap(planner.plan(from: origin, to: destination, maximumWalk: 600, estimates: feed, at: date)
                 .first { $0.rides.count == 1 && $0.rides[0].boarding.id == "300" && $0.rides[0].alighting.id == "304" })
             let shown = VehicleArrivalForecast().ridingEstimate(trip.rides[0], metadata: metadata, at: date, estimates: feed)

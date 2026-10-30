@@ -51,21 +51,23 @@ GitHub 連不上時，手機會改從 jsDelivr CDN 讀同一份檔案（最多�
 
 | 名稱 | 意思 | 內建值 | 可設定範圍 |
 |---|---|---|---|
-| `typicalSpeed` | 沒有資料時假設的公車車速（公尺／秒） | 4.5 | 2–10 |
-| `stopSeconds` | 沒有資料時每站加上的停靠秒數 | 20 | 0–90 |
+| `typicalSpeed` | 沒有資料時假設的公車車速（公尺／秒） | 6.25 | 2–10 |
+| `stopSeconds` | 沒有資料時每站加上的停靠秒數 | 25 | 0–90 |
 | `officialProfileWeight` | 官方車程相當於幾輛實際車輛的紀錄（越大越相信官方） | 2 | 0–10 |
 | `officialSegmentMargin` | 官方車程每一段的誤差比例（下一班車的到站範圍） | 0.25 | 0.05–0.8 |
 | `minimumUncertainty` | 到站範圍至少佔剩餘時間的比例 | 0.12 | 0.03–0.5 |
 | `limitedUncertainty` | 資料不足時到站範圍至少佔剩餘時間的比例 | 0.3 | 0.05–0.8 |
 | `railSpread` | 捷運車程的誤差比例 | 0.05 | 0.01–0.5 |
-| `stationHistorySpread` | 依近期站間紀錄估算時的誤差比例 | 0.10 | 0.02–0.6 |
-| `officialProfileSpread` | 依官方分時段車程估算時的誤差比例 | 0.15 | 0.02–0.6 |
-| `recentTrafficSpread` | 依目前路線車流估算時的誤差比例 | 0.15 | 0.02–0.6 |
+| `stationHistorySpread` | 依近期站間紀錄估算時的誤差比例 | 0.2 | 0.02–0.6 |
+| `officialProfileSpread` | 依官方分時段車程估算時的誤差比例 | 0.18 | 0.02–0.6 |
+| `recentTrafficSpread` | 依目前路線車流估算時的誤差比例 | 0.35 | 0.02–0.6 |
 | `typicalSpread` | 只能用一般車速估算時的誤差比例 | 0.25 | 0.02–0.8 |
 | `rangeEarlyScale` | 「參考範圍」往提早那側延伸幾倍的不確定度 | 1.39 | 0.5–3 |
 | `rangeLateScale` | 「參考範圍」往延後那側延伸幾倍的不確定度（公車晚到比早到常見，所以較寬） | 1.74 | 0.5–4 |
 | `workdayPaceFactors` | 平日 0–23 時各一個倍數，乘在「官方分時段車程」與「這輛車近期車速」估算的時間上；依其他車輛剛通過的紀錄估算的路段不乘 | App 內建實測值 | 每個 0.8–1.4，必須剛好 24 個 |
 | `holidayPaceFactors` | 同上，週末與國定假日使用 | App 內建實測值 | 每個 0.8–1.4，必須剛好 24 個 |
+| `workdayCityPaceFactors` | 平日 0–23 時各一個倍數，乘在「城市車速」（沒有官方車程、也沒有車流紀錄時，`typicalSpeed`/`stopSeconds` 或新北的 `ridePace`）估算的時間上。⚠️ 還沒內建這張表的舊版 App 看不懂，寫進來會讓舊版忽略整個檔案，等舊版都更新後再用 | App 內建實測值 | 每個 0.6–1.4，必須剛好 24 個 |
+| `holidayCityPaceFactors` | 同上，週末與國定假日使用 | App 內建實測值 | 每個 0.6–1.4，必須剛好 24 個 |
 
 「誤差比例」0.15 代表 20 分鐘的車程顯示為大約 ±3 分鐘的範圍。
 每小時倍數 1.1 代表該小時的估算時間加長 10%。內建值與建議值由 `tools/arrival-benchmark/fit_corrections.py` 依實測資料算出，可用 `--write-tuning runtime/tuning.json` 直接寫入。
