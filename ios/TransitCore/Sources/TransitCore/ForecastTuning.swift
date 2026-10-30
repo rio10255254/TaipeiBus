@@ -9,17 +9,19 @@ import FoundationNetworking
 public struct ForecastTuning: Equatable, Sendable {
     /// Share of a ride time it may run early or late, by how the time was obtained.
     public var railSpread = 0.05
-    public var stationHistorySpread = 0.10
-    public var officialProfileSpread = 0.15
-    public var recentTrafficSpread = 0.15
+    // Measured over two weeks of Taipei rides (tools/arrival-benchmark/fortnight-2026-10.md).
+    public var stationHistorySpread = 0.2
+    public var officialProfileSpread = 0.18
+    public var recentTrafficSpread = 0.35
     public var typicalSpread = 0.25
     /// Uncertainty of one segment timed from the official hour profile, as a share of it.
     public var officialSegmentMargin = 0.25
     /// How many recent crossings the official profile counts as when blended with them.
     public var officialProfileWeight = 2.0
-    /// Driving speed (m/s) and per-stop allowance (s) used when nothing better is known.
-    public var typicalSpeed = 4.5
-    public var stopSeconds = 20.0
+    /// Driving speed (m/s) and per-stop allowance (s) used when nothing better is known; the best fit
+    /// over two weeks of Taipei buses (fortnight-2026-10.md) and New Taipei's morning peak alike.
+    public var typicalSpeed = 6.25
+    public var stopSeconds = 25.0
     /// Smallest arrival uncertainty as a share of the remaining time, for normal and limited evidence.
     public var minimumUncertainty = 0.12
     public var limitedUncertainty = 0.3
@@ -33,6 +35,12 @@ public struct ForecastTuning: Equatable, Sendable {
     /// Weekends and national holidays use the holiday table (tools/arrival-benchmark/fit_corrections.py).
     public var workdayPaceFactors = ForecastTuning.measuredWorkdayFactors
     public var holidayPaceFactors = ForecastTuning.measuredHolidayFactors
+    /// Measured ratio of actual time to the city pace (typicalSpeed and stopSeconds, or a city's ridePace),
+    /// by Taipei hour: buses run well ahead of that all-day pace at night and behind it in the peaks
+    /// (tools/arrival-benchmark/city-pace-2026-10.md). Built in only: an App older than these tables
+    /// ignores a tuning.json that names them.
+    public var workdayCityPaceFactors = ForecastTuning.measuredWorkdayCityFactors
+    public var holidayCityPaceFactors = ForecastTuning.measuredHolidayCityFactors
 
     public init() {}
 
@@ -40,15 +48,24 @@ public struct ForecastTuning: Equatable, Sendable {
     static let measuredWorkdayFactors: [Double] = [0.996, 0.999, 1, 1, 1.002, 1.025, 1.044, 1.089, 1.033, 1.015, 1.022, 1.03, 1.04, 1.029, 1.024, 1.037, 1.052, 1.075, 1.042, 0.997, 1.013, 1.018, 0.99, 0.978]
     static let measuredHolidayFactors: [Double] = [0.998, 1.003, 1.001, 1, 1.002, 1.013, 1.021, 1.028, 1.032, 1.033, 1.029, 1.023, 1.028, 1.026, 1.019, 1.019, 1.027, 1.028, 1.005, 1.018, 1.018, 1.013, 0.991, 0.985]
     // MEASURED-FACTORS-END
+    // CITY-PACE-FACTORS-BEGIN
+    static let measuredWorkdayCityFactors: [Double] = [0.921, 0.992, 1, 1, 0.996, 0.867, 0.89, 1.132, 1.125, 1.031, 0.981, 0.934, 0.987, 0.991, 0.995, 1.024, 1.088, 1.134, 1.106, 1.01, 0.964, 0.947, 0.874, 0.82]
+    static let measuredHolidayCityFactors: [Double] = [0.925, 0.993, 0.999, 1, 0.998, 0.909, 0.844, 0.879, 0.908, 0.935, 0.944, 0.96, 0.968, 0.972, 0.968, 0.974, 0.998, 1.028, 0.978, 0.941, 0.933, 0.927, 0.901, 0.871]
+    // CITY-PACE-FACTORS-END
 
     private static let taipei = TimeZone(identifier: "Asia/Taipei")!
 
     /// The pace factor for travel at this moment.
-    public func paceFactor(at date: Date) -> Double {
+    public func paceFactor(at date: Date) -> Double { Self.hourly(workdayPaceFactors, holidayPaceFactors, at: date) }
+
+    /// The factor for the city pace at this moment.
+    public func cityPaceFactor(at date: Date) -> Double { Self.hourly(workdayCityPaceFactors, holidayCityPaceFactors, at: date) }
+
+    private static func hourly(_ workday: [Double], _ holiday: [Double], at date: Date) -> Double {
         // Every segment of every planned ride asks, so the Taipei hour is worked out without a Calendar.
-        let local = date.timeIntervalSince1970 + Double(Self.taipei.secondsFromGMT(for: date))
+        let local = date.timeIntervalSince1970 + Double(taipei.secondsFromGMT(for: date))
         let hour = Int(local.truncatingRemainder(dividingBy: 86_400).rounded(.down) / 3_600 + 24) % 24
-        let table = TransitServiceCalendar.isHoliday(date) ? holidayPaceFactors : workdayPaceFactors
+        let table = TransitServiceCalendar.isHoliday(date) ? holiday : workday
         return table.indices.contains(hour) ? table[hour] : 1
     }
 
@@ -72,7 +89,9 @@ public struct ForecastTuning: Equatable, Sendable {
     /// Key → (bounds of every entry, path). Each table has exactly 24 entries, one per hour.
     public static let tables: [(key: String, range: ClosedRange<Double>, path: WritableKeyPath<ForecastTuning, [Double]>)] = [
         ("workdayPaceFactors", 0.8...1.4, \.workdayPaceFactors),
-        ("holidayPaceFactors", 0.8...1.4, \.holidayPaceFactors)
+        ("holidayPaceFactors", 0.8...1.4, \.holidayPaceFactors),
+        ("workdayCityPaceFactors", 0.6...1.4, \.workdayCityPaceFactors),
+        ("holidayCityPaceFactors", 0.6...1.4, \.holidayCityPaceFactors)
     ]
 
     public static func decode(_ data: Data) throws -> ForecastTuning {

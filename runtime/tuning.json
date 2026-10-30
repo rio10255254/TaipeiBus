@@ -1,4 +1,9 @@
 {
   "schemaVersion": 1,
-  "note": "到站時間校正參數。只寫要改的項目，其餘使用 App 內建值。說明見 runtime/README.md。"
+  "note": "2026-10 兩週實測（tools/arrival-benchmark/fortnight-2026-10.md）；新版 App 已內建同樣的值，這裡讓已安裝的舊版也套用。",
+  "typicalSpeed": 6.25,
+  "stopSeconds": 25,
+  "officialProfileSpread": 0.18,
+  "stationHistorySpread": 0.2,
+  "recentTrafficSpread": 0.35
 }

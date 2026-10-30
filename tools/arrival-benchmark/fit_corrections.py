@@ -7,7 +7,10 @@ known actual arrival, and fits:
   The median, not the mean: late buses have a long tail, and matching the mean would make the
   typical bus arrive earlier than shown more often;
 - rangeEarlyScale / rangeLateScale: how many uncertainties the reference range must span on each
-  side so that about 80% of arrivals fall inside it.
+  side so that about 80% of arrivals fall inside it;
+- workdayCityPaceFactors / holidayCityPaceFactors: the median of actual time ÷ the city pace (distance at
+  typicalSpeed plus stopSeconds per stop, the rule used when nothing better is known), by Taipei hour.
+  Absolute, not relative to the replay, since the rule is recomputed from each row's distance.
 
 Factors are multiplied into the ones in effect during the replay (--base, a tuning.json; default 1),
 so running replay → fit repeatedly converges instead of correcting twice. Hours with little data are
@@ -25,9 +28,11 @@ ROOT = Path(__file__).resolve().parents[2]
 SWIFT = ROOT / 'ios/TransitCore/Sources/TransitCore/ForecastTuning.swift'
 CALENDAR = ROOT / 'ios/TransitCore/Sources/TransitCore/TransitServiceCalendar.swift'
 SCHEMA = ROOT / 'runtime/tuning.schema.json'
-COLUMNS = ['made_at', 'evidence', 'predicted_s', 'uncertainty_s', 'shown', 'actual_arrive_s']
+COLUMNS = ['made_at', 'evidence', 'predicted_s', 'uncertainty_s', 'shown', 'actual_arrive_s', 'distance_m', 'stops_ahead']
 # Bounds must stay inside ForecastTuning.tables / fields; tighter here so one odd fortnight cannot swing the App far.
 FACTOR_RANGE = (0.9, 1.3)
+CITY_RANGE = (0.6, 1.4)
+CITY_PACE = (6.25, 25)   # ForecastTuning.typicalSpeed, stopSeconds
 SHRINK = 20000   # rows at which an hour's own ratio counts half
 COVERAGE = 0.8
 
@@ -81,6 +86,33 @@ def fit_factors(df, base):
     return tables
 
 
+def fit_city_factors(df):
+    rows = df[df.distance_m > 0]
+    pace = rows.distance_m / CITY_PACE[0] + CITY_PACE[1] * rows.stops_ahead
+    ratios = (rows.actual_arrive_s / pace).groupby([rows.holiday, rows.hour]).agg(['median', 'size'])
+    tables = {}
+    for holiday, key in [(False, 'workdayCityPaceFactors'), (True, 'holidayCityPaceFactors')]:
+        values = []
+        for hour in range(24):
+            factor = 1.0
+            if (holiday, hour) in ratios.index:
+                entry = ratios.loc[(holiday, hour)]
+                factor = 1 + (entry['median'] - 1) * entry['size'] / (entry['size'] + SHRINK)
+            values.append(round(float(np.clip(factor, *CITY_RANGE)), 3))
+        tables[key] = values
+    return tables
+
+
+def evaluate_city(name, df, city):
+    rows = df[df.distance_m > 0]
+    pace = rows.distance_m / CITY_PACE[0] + CITY_PACE[1] * rows.stops_ahead
+    scale = np.where(rows.holiday, np.array(city['holidayCityPaceFactors'])[rows.hour.to_numpy()],
+                     np.array(city['workdayCityPaceFactors'])[rows.hour.to_numpy()])
+    for label, estimate in [('city pace', pace), ('city pace x hour', pace * scale)]:
+        error = (rows.actual_arrive_s - estimate) / 60
+        print(f'{name + ": " + label:34s} MAE {error.abs().mean():.2f}  bias {error.median():+.2f} min  early >2 {(error < -2).mean():.1%}')
+
+
 def corrected(df, tables, base):
     """Approximate the App's correction per prediction (the App scales segments, not whole estimates)."""
     def factor(column, holiday):
@@ -111,7 +143,7 @@ def evaluate(name, df, predicted, uncertainty, early, late, rounding):
           f'in range {inside:.0%} (width {(upper - lower).mean():.1f} min)')
 
 
-def write_swift(tables, early, late):
+def write_swift(tables, early, late, city):
     """Store the fit as the App's built-in values; the schema defaults must match them (ForecastTuningTests)."""
     text = SWIFT.read_text(encoding='utf-8')
     def literal(values):
@@ -121,6 +153,11 @@ def write_swift(tables, early, late):
              f'    static let measuredHolidayFactors: [Double] = {literal(tables["holidayPaceFactors"])}\n'
              '    // MEASURED-FACTORS-END')
     text = re.sub(r'    // MEASURED-FACTORS-BEGIN.*?// MEASURED-FACTORS-END', block, text, flags=re.S)
+    block = ('    // CITY-PACE-FACTORS-BEGIN\n'
+             f'    static let measuredWorkdayCityFactors: [Double] = {literal(city["workdayCityPaceFactors"])}\n'
+             f'    static let measuredHolidayCityFactors: [Double] = {literal(city["holidayCityPaceFactors"])}\n'
+             '    // CITY-PACE-FACTORS-END')
+    text = re.sub(r'    // CITY-PACE-FACTORS-BEGIN.*?// CITY-PACE-FACTORS-END', block, text, flags=re.S)
     text = re.sub(r'public var rangeEarlyScale = [0-9.]+', f'public var rangeEarlyScale = {early:g}', text)
     text = re.sub(r'public var rangeLateScale = [0-9.]+', f'public var rangeLateScale = {late:g}', text)
     SWIFT.write_text(text, encoding='utf-8')
@@ -150,16 +187,20 @@ def main():
     print('workday', tables['workdayPaceFactors'])
     print('holiday', tables['holidayPaceFactors'])
     print(f'range scales: early {early}, late {late}')
+    city = fit_city_factors(train)
+    print('city workday', city['workdayCityPaceFactors'])
+    print('city holiday', city['holidayCityPaceFactors'])
     for name, part in [('fit days', train)] + ([('held-out days', df[df.day.isin(args.test_days)])] if args.test_days else []):
         p, u = corrected(part, tables, base)
         evaluate(f'{name}: before (round up)', part, part.predicted_s, part.uncertainty_s, 1, 1, np.ceil)
         evaluate(f'{name}: corrected + nearest', part, p, u, early, late, np.round)
+        evaluate_city(name, part, city)
 
     fitted = {**tables, 'rangeEarlyScale': early, 'rangeLateScale': late}
     if args.json:
         Path(args.json).write_text(json.dumps(fitted, indent=2) + '\n')
     if args.write_swift:
-        write_swift(tables, early, late)
+        write_swift(tables, early, late, city)
     if args.write_tuning:
         path = Path(args.write_tuning)
         document = json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'schemaVersion': 1}

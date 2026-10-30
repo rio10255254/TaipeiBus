@@ -24,21 +24,21 @@
       "type": "number",
       "minimum": 0.02,
       "maximum": 0.6,
-      "default": 0.1,
+      "default": 0.2,
       "description": "依近期站間紀錄估算時的誤差比例"
     },
     "officialProfileSpread": {
       "type": "number",
       "minimum": 0.02,
       "maximum": 0.6,
-      "default": 0.15,
+      "default": 0.18,
       "description": "依官方分時段車程估算時的誤差比例"
     },
     "recentTrafficSpread": {
       "type": "number",
       "minimum": 0.02,
       "maximum": 0.6,
-      "default": 0.15,
+      "default": 0.35,
       "description": "依目前路線車流估算時的誤差比例"
     },
     "typicalSpread": {
@@ -66,14 +66,14 @@
       "type": "number",
       "minimum": 2,
       "maximum": 10,
-      "default": 4.5,
+      "default": 6.25,
       "description": "沒有資料時假設的公車車速（公尺／秒）"
     },
     "stopSeconds": {
       "type": "number",
       "minimum": 0,
       "maximum": 90,
-      "default": 20,
+      "default": 25,
       "description": "沒有資料時每站加上的停靠秒數"
     },
     "minimumUncertainty": {
@@ -125,6 +125,28 @@
         "maximum": 1.4
       },
       "description": "週末與國定假日各小時的修正倍數"
+    },
+    "workdayCityPaceFactors": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": {
+        "type": "number",
+        "minimum": 0.6,
+        "maximum": 1.4
+      },
+      "description": "平日各小時（0–23 時）沒有官方車程、也沒有車流紀錄時，城市車速估算的修正倍數（還沒內建這兩張表的舊版 App 看不懂，寫進 tuning.json 會讓舊版忽略整個檔案）"
+    },
+    "holidayCityPaceFactors": {
+      "type": "array",
+      "minItems": 24,
+      "maxItems": 24,
+      "items": {
+        "type": "number",
+        "minimum": 0.6,
+        "maximum": 1.4
+      },
+      "description": "週末與國定假日各小時的城市車速修正倍數（同上）"
     }
   }
 }

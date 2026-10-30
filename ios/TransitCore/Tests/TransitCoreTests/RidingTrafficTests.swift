@@ -91,14 +91,18 @@ final class RidingTrafficTests: XCTestCase {
     func testColdRideKeepsTheBaselineAndIdentifiesItsSource() {
         let (m, ride) = source(); let estimate = VehicleArrivalForecast().ridingEstimate(ride, metadata: m, at: now)
         XCTAssertEqual(estimate.evidence, .typical)
-        XCTAssertEqual(estimate.seconds, m.line("observed", direction: "0")!.length / 4.5 + Double(ride.stopCount) * 20, accuracy: 1)
+        // The city pace for the hour (TravelTimeModel), with nothing observed.
+        let tuning = ForecastTuning.current
+        XCTAssertEqual(estimate.seconds, (m.line("observed", direction: "0")!.length / tuning.typicalSpeed + Double(ride.stopCount) * tuning.stopSeconds)
+            * tuning.cityPaceFactor(at: now), accuracy: 1)
     }
     func testDistributedObservedTrafficIncludesDwellOnlyOnce() {
         let (m, ride) = source(), f = replay(starts: [250, 1500, 3000], rates: [5, 5, 5], metadata: m)
         let estimate = f.ridingEstimate(ride, metadata: m, at: now)
         XCTAssertEqual(estimate.evidence, .recentTraffic); XCTAssertEqual(estimate.observedVehicles, 3)
         XCTAssertEqual(estimate.seconds, m.line("observed", direction: "0")!.length / 5, accuracy: 1)
-        XCTAssertLessThan(estimate.seconds, VehicleArrivalForecast().ridingSeconds(ride, metadata: m, at: now))
+        // Not the observed pace plus every stop's allowance again.
+        XCTAssertLessThan(estimate.seconds, m.line("observed", direction: "0")!.length / 5 + Double(ride.stopCount) * ForecastTuning.current.stopSeconds - 1)
     }
     func testCongestionAndStoppedVehiclesDoNotProduceAnOptimisticSpeed() {
         let (m, ride) = source(), f = replay(starts: [700, 1600, 3000], rates: [0, 5, 5], metadata: m)
