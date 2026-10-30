@@ -15,19 +15,25 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 }
 
 public struct VehicleArrivalPrediction: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case roadHistory, officialProfile, officialEstimates, recentMovement, routeProgress, limited }
+    /// `cityPace`: some segments had no evidence and took the city's pace for the hour. `official`: the official
+    /// estimate for the next bus, shown when the App's own time is missing or disagrees with it.
+    public enum Evidence: String, Sendable { case roadHistory, officialProfile, officialEstimates, recentMovement, routeProgress, cityPace, official, limited }
     public let seconds: Double
     public let uncertaintySeconds: Double
     public let evidence: Evidence
     public let nearStop: Bool
+    /// Precise enough to plan a wait or a transfer with.
     public var hasUsableTime: Bool {
-        nearStop || (evidence != .limited && seconds <= 1_800 &&
+        nearStop || (evidence != .limited && evidence != .cityPace && evidence != .official && seconds <= 1_800 &&
             uncertaintySeconds <= (evidence == .routeProgress ? 180 : 300) &&
             uncertaintySeconds <= max(60, seconds * 0.4))
     }
+    /// Worth showing a rider as minutes with its reference range: every time but a stale or unfounded one.
+    /// Riders asked for a time on every bus; the range says how sure it is (tools/arrival-benchmark/display-2026-10.md).
+    public var isShowable: Bool { nearStop || (evidence != .limited && seconds <= 3_600) }
     public var label: String {
         if nearStop { return AppText.text("站牌附近") }
-        guard hasUsableTime else { return AppText.text("時間待確認") }
+        guard isShowable else { return AppText.text("時間待確認") }
         // Nearest minute: rounding up made buses look later than they were (tools/arrival-benchmark).
         return AppText.text("約 %@ 分", max(1, Int((seconds / 60).rounded())))
     }
@@ -42,6 +48,8 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
         case .roadHistory: return AppText.text("依近期車輛通過各站的時間估算")
         case .officialProfile: return AppText.text("依官方分時段車程與近期車流估算")
         case .officialEstimates: return AppText.text("依官方到站預估的站間差距估算")
+        case .cityPace: return AppText.text("較遠的路段依一般車速與時段估算")
+        case .official: return AppText.text("依官方到站預估")
         case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
         case .routeProgress: return AppText.text("依 GPS 位置與沿線車程估算")
         case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
@@ -228,7 +236,7 @@ public struct VehicleArrivalForecast: Sendable {
                          at date: Date) -> VehicleArrivalEstimate {
         guard approach.alongDistance != nil, metadata.canServe(ride, vehicle: approach.vehicle),
               let result = prediction(approach.vehicle, stopID: ride.boarding.id, metadata: metadata, at: date),
-              result.hasUsableTime else { return .unavailable }
+              result.isShowable else { return .unavailable }
         if result.nearStop { return .nearStop }
         // Symmetric, so the label's midpoint stays the estimate rounded to the nearest minute.
         let lower = max(1, Int(((result.seconds - result.uncertaintySeconds) / 60).rounded()))
@@ -280,68 +288,79 @@ public struct VehicleArrivalForecast: Sendable {
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
         let route = metadata.route(bus.routeID) ?? BusRoute(id: bus.routeID, parentID: bus.parentRouteID, name: "", variantName: "", departure: "", destination: "")
         let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
-        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, estimated = 0, fallback = 0
         let live = TravelTimeModel.liveEstimates(estimates, at: date)
-        let indices = journey.anchors.indices.dropFirst().prefix(target)
-        for index in indices {
-            let start = journey.anchors[index - 1].match.along * Double(journey.direction)
-            let end = journey.anchors[index].match.along * Double(journey.direction)
-            let span = end - start, remaining = end - max(start, along)
-            guard span > 1, remaining > 0 else { continue }
-            let fraction = min(1, remaining / span)
-            let key = segmentKey(bus.routeID, bus.direction, journey, index, metadata)
-            let travellingAt = date.addingTimeInterval(seconds)
-            let pace: TravelTimeModel.Pace = (speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil))
-                .map { .vehicle(metersPerSecond: $0, variation: speedVariation, moving: movingHistory) } ?? TravelTimeModel.Pace.none
-            // A bus standing at its first stop may be in a terminal layover; the official
-            // running time says nothing about when it leaves.
-            guard let segment = TravelTimeModel.segment(route: route, meters: remaining, fraction: fraction,
-                crossings: recentCrossings(key, at: date),
-                official: { inService ? metadata.officialTravelTimes.seconds(route: bus.parentRouteID, subroute: bus.routeID,
-                    direction: bus.direction, from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
-                    travellingAt: travellingAt, observedAt: date) : nil },
-                estimates: {
-                    guard inService, let live else { return nil }
-                    let to = journey.anchors[index].stop.id
-                    guard along > start else {
-                        return TravelTimeModel.estimated(live, parentRouteID: bus.parentRouteID, from: journey.anchors[index - 1].stop.id, to: to)
-                    }
-                    // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of it.
-                    guard !hasBusAhead(of: bus, from: along, to: end, at: date) else { return nil }
-                    return TravelTimeModel.estimatedRemaining(live, parentRouteID: bus.parentRouteID, to: to, fraction: fraction, at: date)
-                },
-                pace: pace, travellingAt: travellingAt,
-                correction: applyCalibration ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }
-            switch segment.source {
-            case .crossings: learned += 1
-            case .officialProfile: profiled += 1
-            case .officialEstimates: estimated += 1
-            case .vehiclePace, .fleetPace, .cityPace: fallback += 1
+        // One walk along the remaining segments by the shared rule. Segments without crossings, an official
+        // profile or official estimates take this bus's own pace, or with `cityPace` the city's pace for the hour.
+        func walk(cityPace: Bool) -> (seconds: Double, variance: Double, learned: Int, profiled: Int, estimated: Int,
+                                      fallback: Int, paced: Double)? {
+            var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, estimated = 0, fallback = 0, paced = 0.0
+            for index in journey.anchors.indices.dropFirst().prefix(target) {
+                let start = journey.anchors[index - 1].match.along * Double(journey.direction)
+                let end = journey.anchors[index].match.along * Double(journey.direction)
+                let span = end - start, remaining = end - max(start, along)
+                guard span > 1, remaining > 0 else { continue }
+                let fraction = min(1, remaining / span)
+                let key = segmentKey(bus.routeID, bus.direction, journey, index, metadata)
+                let travellingAt = date.addingTimeInterval(seconds)
+                let pace: TravelTimeModel.Pace = cityPace ? .city : (speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil))
+                    .map { .vehicle(metersPerSecond: $0, variation: speedVariation, moving: movingHistory) } ?? TravelTimeModel.Pace.none
+                // A bus standing at its first stop may be in a terminal layover; the official
+                // running time says nothing about when it leaves.
+                guard let segment = TravelTimeModel.segment(route: route, meters: remaining, fraction: fraction,
+                    crossings: recentCrossings(key, at: date),
+                    official: { inService ? metadata.officialTravelTimes.seconds(route: bus.parentRouteID, subroute: bus.routeID,
+                        direction: bus.direction, from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
+                        travellingAt: travellingAt, observedAt: date) : nil },
+                    estimates: {
+                        guard inService, let live else { return nil }
+                        let to = journey.anchors[index].stop.id
+                        guard along > start else {
+                            return TravelTimeModel.estimated(live, parentRouteID: bus.parentRouteID, from: journey.anchors[index - 1].stop.id, to: to)
+                        }
+                        // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of it.
+                        guard !hasBusAhead(of: bus, from: along, to: end, at: date) else { return nil }
+                        return TravelTimeModel.estimatedRemaining(live, parentRouteID: bus.parentRouteID, to: to, fraction: fraction, at: date)
+                    },
+                    pace: pace, travellingAt: travellingAt,
+                    correction: applyCalibration && !cityPace ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }
+                switch segment.source {
+                case .crossings: learned += 1
+                case .officialProfile: profiled += 1
+                case .officialEstimates: estimated += 1
+                case .vehiclePace, .fleetPace: fallback += 1
+                case .cityPace: fallback += 1; paced += segment.seconds
+                }
+                seconds += segment.seconds; variance += segment.margin * segment.margin
             }
-            let duration = segment.seconds, margin = segment.margin
-            seconds += duration; variance += margin * margin
+            if target == 0 || along < firstAlong {
+                guard let pace = speed ?? (allowTypicalWhenStopped || cityPace ? tuning.typicalSpeed : nil) else { return nil }
+                let leading = (target == 0 ? progress.distance : firstAlong - along) * tuning.paceFactor(at: date.addingTimeInterval(seconds))
+                seconds += leading / pace; variance += pow(leading / pace * speedVariation, 2); fallback += 1
+            }
+            return seconds > 0 ? (seconds, variance, learned, profiled, estimated, fallback, paced) : nil
         }
-        if target == 0 || along < firstAlong {
-            guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
-            let leading = (target == 0 ? progress.distance : firstAlong - along) * tuning.paceFactor(at: date.addingTimeInterval(seconds))
-            seconds += leading / pace; variance += pow(leading / pace * speedVariation, 2); fallback += 1
-        }
-        guard seconds > 0 else { return nil }
+        guard var timed = walk(cityPace: false) else { return nil }
         // A short movement sample cannot describe distant traffic or extrapolate a terminal dwell over the whole route.
-        let withinObservedHorizon = seconds <= 900 && progress.distance <= max(1_200, observedDistance * 4 + 40)
+        let withinObservedHorizon = timed.seconds <= 900 && progress.distance <= max(1_200, observedDistance * 4 + 40)
         // One fresh moving GPS report can provide a short-range estimate before
         // history matures. Never extend a terminal layover or a 50-minute crawl
         // across the route, and never use a straight-line distance to the stop.
         let localGPS = age <= 30 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
-            seconds <= 600 && progress.distance <= 2_500
-        let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
-            fallback == 0 && profiled + estimated > 0 ? (estimated > profiled ? .officialEstimates : .officialProfile) :
-            learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement :
+            timed.seconds <= 600 && progress.distance <= 2_500
+        var evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
+            timed.fallback == 0 && timed.profiled + timed.estimated > 0 ? (timed.estimated > timed.profiled ? .officialEstimates : .officialProfile) :
+            timed.learned > 0 && timed.fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement :
             localGPS ? .routeProgress : .limited
+        if evidence == .limited, isUnderWay(bus, journey: journey, at: date), let city = walk(cityPace: true) {
+            // This bus's own pace would be extrapolated past what it describes (a bus held at a light made
+            // distant stops 5–12 minutes late): the segments without evidence take the city's pace instead.
+            timed = city; evidence = .cityPace
+        }
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
-        let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, seconds * 0.1) : 0
-        return VehicleArrivalPrediction(seconds: max(15, seconds - elapsed),
-            uncertaintySeconds: max(30, sqrt(variance), seconds * (evidence == .limited ? tuning.limitedUncertainty : tuning.minimumUncertainty)) + age * 0.35,
+        let elapsed = bus.hasSpeed && bus.speed >= 5 ? min(age, 15, timed.seconds * 0.1) : 0
+        let share = evidence == .limited ? tuning.limitedUncertainty : tuning.minimumUncertainty
+        return VehicleArrivalPrediction(seconds: max(15, timed.seconds - elapsed),
+            uncertaintySeconds: max(30, sqrt(timed.variance), timed.seconds * share, timed.paced * tuning.typicalSpread) + age * 0.35,
             evidence: evidence, nearStop: false)
     }
 
@@ -368,23 +387,44 @@ public struct VehicleArrivalForecast: Sendable {
             return VehicleArrivalDisplay(label: AppText.text("位置更新中"), positionLabel: AppText.text("上次位置 · ") + position,
                 explanation: AppText.text("車輛位置等待更新，暫停顯示分鐘數。") + officialAdvice, prediction: nil)
         }
+        // For the next bus to reach the stop, the official estimate counts down to this very bus: it stands in
+        // when the App's own time is missing, rests only on the city's pace, or disagrees with it.
+        let isNext = isUnderWay(bus, journey: journey, at: date) && bus.roadMatch.map { match in
+            let along = match.along * Double(journey.direction)
+            return !hasBusAhead(of: bus, from: along, to: along + progress.distance, at: date)
+        } ?? false
+        let officialNext = officialSeconds.flatMap { official -> VehicleArrivalPrediction? in
+            // It must also be possible for this bus: not faster than 16 m/s, nor slower than a 2 m/s crawl with
+            // five minutes standing (an official 12 minutes for a bus 100 m away belongs to some other bus).
+            guard isNext, (0...3_600).contains(official), Double(official) >= progress.distance / 16 - 30,
+                  Double(official) <= progress.distance / 2 + 300 else { return nil }
+            let seconds = Double(max(official, 15))
+            return VehicleArrivalPrediction(seconds: seconds, uncertaintySeconds: max(30, seconds * ForecastTuning.current.officialSegmentMargin),
+                                            evidence: .official, nearStop: false)
+        }
+        func shown(_ value: VehicleArrivalPrediction) -> VehicleArrivalDisplay {
+            VehicleArrivalDisplay(label: value.label, positionLabel: position, explanation: value.evidenceLabel, prediction: value)
+        }
         guard let result = prediction(bus, stopID: stopID, metadata: metadata, at: date,
                                       allowTypicalWhenStopped: allowTypicalWhenStopped) else {
+            if let officialNext { return shown(officialNext) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("尚未累積足夠行駛紀錄，先顯示車輛距離此站的站數。") + officialAdvice, prediction: nil)
         }
         if let official = officialSeconds, official >= 0,
            (result.seconds + result.uncertaintySeconds + max(60, Double(official) * 0.1) < Double(official) ||
             (result.evidence == .routeProgress && abs(result.seconds - Double(official)) > 60)) {
+            if let officialNext { return shown(officialNext) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("候車請以官方下一班為準。車輛推估尚不一致，先保留位置與站數，不指定到站車牌。"), prediction: nil)
         }
-        guard result.hasUsableTime else {
+        if result.evidence == .cityPace, let officialNext { return shown(officialNext) }
+        guard result.isShowable else {
+            if let officialNext { return shown(officialNext) }
             return VehicleArrivalDisplay(label: position, positionLabel: position,
                 explanation: AppText.text("行駛紀錄較少或變化較大，先顯示站數，等待時間確認。") + officialAdvice, prediction: nil)
         }
-        return VehicleArrivalDisplay(label: result.label, positionLabel: position,
-            explanation: result.evidenceLabel, prediction: result)
+        return shown(result)
     }
 
     /// Only real, fresh, upstream buses on the complete requested stop pattern.
@@ -484,6 +524,22 @@ public struct VehicleArrivalForecast: Sendable {
         if sources.contains(.officialEstimates) { return .officialEstimates }
         if sources.contains(.officialProfile) { return .officialProfile }
         return .stationHistory
+    }
+
+    /// A fresh report of a bus genuinely running its route: moving now or lately, or already past its terminal.
+    /// Only such a bus may be timed from the city's pace or given the official estimate; a bus parked at its
+    /// terminal, or one whose snapshots never moved, gets no invented time.
+    private func isUnderWay(_ bus: BusVehicle, journey: RouteJourney, at date: Date) -> Bool {
+        guard (0...30).contains(date.timeIntervalSince(bus.observedAt)), let match = bus.roadMatch else { return false }
+        if bus.hasSpeed && bus.speed >= 5 { return true }
+        let along = match.along * Double(journey.direction)
+        if let first = journey.anchors.first, along > first.match.along * Double(journey.direction) + 150 { return true }
+        let samples = (history[bus.id] ?? []).filter {
+            $0.route == bus.routeID && $0.direction == bus.direction && (-5...180).contains(bus.observedAt.timeIntervalSince($0.date))
+        }
+        guard let oldest = samples.first, let newest = samples.last else { return false }
+        let interval = newest.date.timeIntervalSince(oldest.date)
+        return interval >= 20 && (newest.along - oldest.along) / interval >= 1
     }
 
     /// Whether another bus on the same route and direction was last seen between `from` and `to`.

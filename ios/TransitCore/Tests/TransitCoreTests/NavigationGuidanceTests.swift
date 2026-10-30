@@ -220,14 +220,16 @@ final class NavigationGuidanceTests: XCTestCase {
         for (forecastTime, longitude) in [(60.0, 121.591), (30.0, 121.593), (0.0, 121.593)] {
             slow.ingest([bus("one", longitude: longitude, metadata: metadata, age: forecastTime, speed: 0)], metadata: metadata, at: now)
         }
-        for (forecastTime, longitude) in [(30.0, 121.591), (0.0, 121.593)] {
+        // Both histories mature (three reports over a minute, the route starts at 121.590): the slow one stood still
+        // for its last half minute, so it averages 3.3 m/s against the quick one's 5 m/s.
+        for (forecastTime, longitude) in [(60.0, 121.590), (30.0, 121.5915), (0.0, 121.593)] {
             quick.ingest([bus("one", longitude: longitude, metadata: metadata, age: forecastTime, speed: 0)], metadata: metadata, at: now)
         }
         let vehicle = bus("one", longitude: 121.593, metadata: metadata, speed: 0)
         let a = try XCTUnwrap(slow.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now))
         let b = try XCTUnwrap(quick.prediction(vehicle, stopID: ride.alighting.id, metadata: metadata, at: now))
-        XCTAssertEqual(a.evidence, .recentMovement)
-        XCTAssertGreaterThan(a.seconds, b.seconds * 1.8)
+        XCTAssertEqual(a.evidence, .recentMovement); XCTAssertEqual(b.evidence, .recentMovement)
+        XCTAssertGreaterThan(a.seconds, b.seconds * 1.4)
     }
 
     func testThreeRealSegmentPassagesCanEstimateAStoppedBusAndCannotCrossDirections() throws {

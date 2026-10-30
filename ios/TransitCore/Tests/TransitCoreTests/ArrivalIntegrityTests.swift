@@ -31,8 +31,12 @@ final class ArrivalIntegrityTests: XCTestCase {
                 if bus.plate == "388-U8" {
                     XCTAssertEqual(display.label, "已過站")
                     XCTAssertNil(display.prediction)
+                } else if let shown = display.prediction {
+                    // The recorded sparse observations cannot support the App's own minute claim; as the next bus,
+                    // the official estimate may stand in, and only as itself.
+                    XCTAssertEqual(shown.evidence, .official, "The recorded sparse observations cannot support individual minute claims")
+                    XCTAssertEqual(shown.seconds, Double(max(guide.estimateSeconds ?? -1, 15)))
                 } else {
-                    XCTAssertNil(display.prediction, "The recorded sparse observations cannot support individual minute claims")
                     XCTAssertTrue(display.label.contains("站"))
                     XCTAssertFalse(display.label.contains("分"))
                 }
@@ -74,6 +78,30 @@ final class ArrivalIntegrityTests: XCTestCase {
             direction: "0", destination: "终点", coordinate: coordinate, rawCoordinate: coordinate,
             heading: heading, speed: speed, observedAt: date, status: "0", lowFloor: true, provider: nil)
         return VehicleTracker.accept(raw, previous: nil, metadata: metadata, now: date)
+    }
+
+    func testEveryBusUnderWayGetsATimeAndTheNextOneTheOfficialEstimate() throws {
+        // About four kilometres and twenty stops from the boarding stop: too far for this bus's own short pace.
+        let (metadata, ride) = source(count: 32, boarding: 20)
+        let far = bus(along: 120, metadata: metadata)
+        var forecast = VehicleArrivalForecast(); forecast.ingest([far], metadata: metadata, at: now)
+        let own = try XCTUnwrap(forecast.prediction(far, stopID: ride.boarding.id, metadata: metadata, at: now))
+        XCTAssertEqual(own.evidence, .cityPace)
+        XCTAssertTrue(own.isShowable); XCTAssertFalse(own.hasUsableTime, "Not precise enough to plan a transfer with")
+        let alone = forecast.display(far, stopID: ride.boarding.id, metadata: metadata, at: now)
+        XCTAssertTrue(alone.label.contains("分")); XCTAssertEqual(alone.prediction?.evidence, .cityPace)
+        // As the next bus, its official estimate stands in for the city's pace.
+        let official = forecast.display(far, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 900)
+        XCTAssertEqual(official.prediction?.evidence, .official); XCTAssertEqual(official.label, "約 15 分")
+        // Not when another bus is ahead of it (the estimate is that bus's), nor when it is impossible for this one.
+        let ahead = bus("ahead", along: 2_000, metadata: metadata)
+        var behind = VehicleArrivalForecast(); behind.ingest([far, ahead], metadata: metadata, at: now)
+        XCTAssertEqual(behind.display(far, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 900).prediction?.evidence, .cityPace)
+        XCTAssertEqual(forecast.display(far, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 60).prediction?.evidence, .cityPace)
+        // A bus standing at its terminal gets no invented time, from either source.
+        let parked = bus("parked", along: 20, speed: 0, metadata: metadata)
+        var terminal = VehicleArrivalForecast(); terminal.ingest([parked], metadata: metadata, at: now)
+        XCTAssertNil(terminal.display(parked, stopID: ride.boarding.id, metadata: metadata, at: now, officialSeconds: 900).prediction)
     }
 
     func testOfficialTwelveMinutesIsNotReassignedToANearbyPlate() throws {
