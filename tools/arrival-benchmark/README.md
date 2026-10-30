@@ -1,10 +1,10 @@
 # 到站預估基準測試
 
-用真實錄下的公開資料，量測 App 對每輛公車「約幾分到站」的誤差，作為之後改良（含機器學習模型）的比較基準。只用臺北市公開資料，不含任何使用者資料。
+用真實錄下的公開資料，量測 App 對每輛公車「約幾分到站」的誤差，作為之後改良（含機器學習模型）的比較基準。只用臺北市、新北市公開資料（不使用 TDX 額度），不含任何使用者資料。
 
 ## 三個步驟
 
-1. **錄製**：`.github/workflows/arrival-benchmark.yml` 執行 `collect.py`，每 20 秒記錄全市公車定位（`gps.csv.gz`），每 60 秒記錄 20% 固定抽樣站牌的官方到站預估（`eta.csv.gz`），每天一次存路線、站牌與軌跡（`static/`）。
+1. **錄製**：`.github/workflows/arrival-benchmark.yml` 執行 `collect.py`，每 20 秒記錄全市公車定位（`gps.csv.gz`），每 60 秒記錄 20% 固定抽樣站牌的官方到站預估（`eta.csv.gz`），每天一次存路線、站牌與軌跡（`static/`）。2026-10-30 起同時錄新北市（`collect.py --city ntpc`），放在同一份錄製檔的 `ntpc/` 裡，格式相同；10/14–10/28 只有臺北市。
 2. **保存**：workflow artifact 90 天後會被刪除。`.github/workflows/arrival-benchmark-archive.yml` 每天把尚未保存的錄製檔複製到 `arrival-benchmark-data` release，release 不會過期。
 3. **回放與評分**：
    - `replay/` 是一個 Swift 執行檔，直接使用 App 的 `TransitCore`（`FeedDecoder`、`VehicleTracker`、`VehicleArrivalForecast`），依錄製順序逐次重現 App 收到的資料，所以量到的就是 App 實際顯示給乘客的結果，不是另外改寫的近似版本。
@@ -24,6 +24,9 @@ python3 tools/arrival-benchmark/replay_all.py recordings --official official-tim
 ```
 
 `results/report.md` 是報告（2026 年 10 月的基準結果存於 [baseline-2026-10.md](baseline-2026-10.md)，修正與驗證結果存於 [corrections-2026-10.md](corrections-2026-10.md)，完整兩週的結果存於 [fortnight-2026-10.md](fortnight-2026-10.md)，由 `fortnight.py` 依日別與顯示的分鐘分組），`results/metrics.json` 是完整數字，`results/replay/*/predictions.csv.gz` 保留每筆預估與實際到站，可作為之後訓練模型的資料。
+
+- `--city ntpc`：回放各錄製檔的 `ntpc/`（新北市），路線會帶上新北的來源代號，所以套用 `regions.json` 裡新北的車速。
+- `--tuning FILE`：用一份候選的 `runtime/tuning.json` 回放，和不加時的結果比較，就能在發布前知道參數改了之後誤差會變多少。
 
 在 GitHub 上可手動執行 `Arrival replay` workflow，它會從 release 下載錄製檔、回放、評分，並把報告放在執行摘要。
 

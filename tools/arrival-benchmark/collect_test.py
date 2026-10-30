@@ -73,6 +73,20 @@ class CollectTests(unittest.TestCase):
         self.assertIsNone(counts)
         self.assertFalse((folder / 'gps.csv.gz').exists())
 
+    def test_each_city_reads_its_own_feeds(self):
+        asked = []
+
+        class Response:
+            def __init__(self, request): asked.append(request.full_url)
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def read(self, _): return b''
+
+        collect.fetch('GetBusData', opener=lambda request, timeout: Response(request))
+        collect.fetch('GetBusData', opener=lambda request, timeout: Response(request), base=collect.CITIES['ntpc'])
+        self.assertEqual(asked, ['https://tcgbusfs.blob.core.windows.net/blobbus/GetBusData.gz',
+                                 'https://tcgbusfs.blob.core.windows.net/ntpcbus/GetBusData.gz'])
+
 
 if __name__ == '__main__':
     unittest.main()

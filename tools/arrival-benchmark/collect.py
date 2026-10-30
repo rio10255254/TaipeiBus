@@ -1,24 +1,27 @@
-"""Record Taipei's public bus feeds for measuring arrival-prediction accuracy.
+"""Record Taipei's or New Taipei's public bus feeds for measuring arrival-prediction accuracy.
 
 Stores what is needed to replay every prediction method later, not the raw feeds:
 - gps.csv.gz: each bus report once (a new DataTime for that bus), polled every 20 s.
 - eta.csv.gz: official EstimateTime every 60 s for a fixed 20% sample of stops.
 - static/: route, stop, path and shape feeds once per UTC day.
-Public data only; no credentials and no passenger information.
+Both cities publish the same feeds from one data centre (--city tpe or ntpc). Public data only;
+no credentials and no passenger information, and no TDX quota.
 """
 import argparse, csv, gzip, hashlib, json, os, time, urllib.request, zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-BASE = 'https://tcgbusfs.blob.core.windows.net/blobbus/'
+CITIES = {'tpe': 'https://tcgbusfs.blob.core.windows.net/blobbus/',
+          'ntpc': 'https://tcgbusfs.blob.core.windows.net/ntpcbus/'}
+BASE = CITIES['tpe']
 STATIC = ['GetRoute', 'GetStop', 'GetPathDetail', 'GetBusShape']
 GPS_FIELDS = ['BusID', 'CarID', 'RouteID', 'GoBack', 'Longitude', 'Latitude', 'Speed', 'Azimuth', 'DataTime', 'DutyStatus', 'BusStatus', 'ProviderID']
 SAMPLE_PERCENT = 20
 
 
-def fetch(name, opener=None):
+def fetch(name, opener=None, base=BASE):
     """Raw gzip bytes of one feed; decoding happens separately so it can be tested."""
-    request = urllib.request.Request(BASE + name + '.gz')
+    request = urllib.request.Request(base + name + '.gz')
     with (opener or urllib.request.urlopen)(request, timeout=30) as response:
         return response.read(64 * 1024 * 1024)
 
@@ -119,9 +122,11 @@ def main():
     parser.add_argument('--minutes', type=float, default=345)
     parser.add_argument('--until', default=os.environ.get('BENCHMARK_UNTIL', ''))
     parser.add_argument('--no-static', action='store_true')
+    parser.add_argument('--city', choices=sorted(CITIES), default='tpe')
     args = parser.parse_args()
     until = datetime.fromisoformat(args.until).timestamp() if args.until else None
-    counts = run(args.out, args.minutes, until, static=not args.no_static)
+    base = CITIES[args.city]
+    counts = run(args.out, args.minutes, until, read=lambda name: fetch(name, base=base), static=not args.no_static)
     print('Recorded:', json.dumps(counts))
 
 
