@@ -30,7 +30,9 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
     }
     /// Worth showing a rider as minutes with its reference range: every time but a stale or unfounded one.
     /// Riders asked for a time on every bus; the range says how sure it is (tools/arrival-benchmark/display-2026-10.md).
-    public var isShowable: Bool { nearStop || (evidence != .limited && seconds <= 3_600) }
+    /// Beyond half an hour every source runs long (buses came well before 99% of such claims), so those
+    /// keep the stop count.
+    public var isShowable: Bool { nearStop || (evidence != .limited && seconds <= 1_800) }
     public var label: String {
         if nearStop { return AppText.text("站牌附近") }
         guard isShowable else { return AppText.text("時間待確認") }
@@ -317,9 +319,13 @@ public struct VehicleArrivalForecast: Sendable {
                         guard along > start else {
                             return TravelTimeModel.estimated(live, parentRouteID: bus.parentRouteID, from: journey.anchors[index - 1].stop.id, to: to)
                         }
-                        // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of it.
-                        guard !hasBusAhead(of: bus, from: along, to: end, at: date) else { return nil }
-                        return TravelTimeModel.estimatedRemaining(live, parentRouteID: bus.parentRouteID, to: to, fraction: fraction, at: date)
+                        // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of
+                        // it or the estimate is impossible for it (slower than a 2 m/s crawl with five minutes standing).
+                        guard !hasBusAhead(of: bus, from: along, to: end, at: date),
+                              let whole = TravelTimeModel.estimatedRemaining(live, parentRouteID: bus.parentRouteID, to: to,
+                                                                             fraction: fraction, at: date),
+                              whole * fraction <= remaining / 2 + 300 else { return nil }
+                        return whole
                     },
                     pace: pace, travellingAt: travellingAt,
                     correction: applyCalibration && !cityPace ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }
@@ -396,7 +402,7 @@ public struct VehicleArrivalForecast: Sendable {
         let officialNext = officialSeconds.flatMap { official -> VehicleArrivalPrediction? in
             // It must also be possible for this bus: not faster than 16 m/s, nor slower than a 2 m/s crawl with
             // five minutes standing (an official 12 minutes for a bus 100 m away belongs to some other bus).
-            guard isNext, (0...3_600).contains(official), Double(official) >= progress.distance / 16 - 30,
+            guard isNext, (0...1_800).contains(official), Double(official) >= progress.distance / 16 - 30,
                   Double(official) <= progress.distance / 2 + 300 else { return nil }
             let seconds = Double(max(official, 15))
             return VehicleArrivalPrediction(seconds: seconds, uncertaintySeconds: max(30, seconds * ForecastTuning.current.officialSegmentMargin),
