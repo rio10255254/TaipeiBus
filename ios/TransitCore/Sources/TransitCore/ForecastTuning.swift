@@ -41,10 +41,13 @@ public struct ForecastTuning: Equatable, Sendable {
     static let measuredHolidayFactors: [Double] = [0.998, 1.003, 1.001, 1, 1.002, 1.013, 1.021, 1.028, 1.032, 1.033, 1.029, 1.023, 1.028, 1.026, 1.019, 1.019, 1.027, 1.028, 1.005, 1.018, 1.018, 1.013, 0.991, 0.985]
     // MEASURED-FACTORS-END
 
+    private static let taipei = TimeZone(identifier: "Asia/Taipei")!
+
     /// The pace factor for travel at this moment.
     public func paceFactor(at date: Date) -> Double {
-        var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(identifier: "Asia/Taipei")!
-        let hour = calendar.component(.hour, from: date)
+        // Every segment of every planned ride asks, so the Taipei hour is worked out without a Calendar.
+        let local = date.timeIntervalSince1970 + Double(Self.taipei.secondsFromGMT(for: date))
+        let hour = Int(local.truncatingRemainder(dividingBy: 86_400).rounded(.down) / 3_600 + 24) % 24
         let table = TransitServiceCalendar.isHoliday(date) ? holidayPaceFactors : workdayPaceFactors
         return table.indices.contains(hour) ? table[hour] : 1
     }

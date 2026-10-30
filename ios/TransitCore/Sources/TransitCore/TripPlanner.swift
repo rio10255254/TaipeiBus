@@ -177,11 +177,7 @@ public struct TripPlanner: Sendable {
                 let journey = metadata.journey(routeID: route.id, direction: direction)
                 let anchors = Dictionary((journey?.anchors ?? []).map { ($0.stop.id, $0.match.along) }, uniquingKeysWith: { a, _ in a })
                 for i in 1..<stops.count {
-                    let distance: Double
-                    if let from = anchors[stops[i - 1].id], let to = anchors[stops[i].id] {
-                        distance = abs(to - from)
-                    } else { distance = stops[i - 1].coordinate.distance(to: stops[i].coordinate) * 1.25 }
-                    distances.append(distances[i - 1] + distance)
+                    distances.append(distances[i - 1] + TravelTimeModel.meters(from: stops[i - 1], to: stops[i], along: anchors))
                 }
                 patterns.append(Pattern(route: route, direction: direction, stops: stops, distances: distances,
                     fingerprint: stops.flatMap { Array($0.id.utf8) + [0] }.reduce(UInt64(1_469_598_103_934_665_603)) { ($0 ^ UInt64($1)) &* 1_099_511_628_211 }))
@@ -249,18 +245,22 @@ public struct TripPlanner: Sendable {
                 exits[occurrence.pattern, default: []].append(Exit(index: occurrence.index, walk: station.distance))
             }
         }
-        // Use source-specific times before limiting candidates.
+        // Use source-specific times before limiting candidates: the shared rule (TravelTimeModel) with the
+        // evidence a search holds, official profiles, the current arrival estimates for a trip leaving now,
+        // and the city's pace.
         let tuning = ForecastTuning.current
+        let live = TravelTimeModel.liveEstimates(estimates, at: date)
         let routeTimes = patterns.map { pattern -> [Double] in
             var values = [0.0]
             for index in pattern.stops.indices.dropFirst() {
-                let previous = values.last!
-                let official = metadata.officialTravelTimes.seconds(route: pattern.route.parentID,
-                    subroute: pattern.route.id, direction: pattern.direction,
-                    from: pattern.stops[index - 1].id, to: pattern.stops[index].id,
-                    travellingAt: date.addingTimeInterval(previous), observedAt: date)
-                values.append(previous + (official ??
-                    ((pattern.distances[index] - pattern.distances[index - 1]) / tuning.typicalSpeed + tuning.stopSeconds)))
+                let previous = values.last!, at = date.addingTimeInterval(previous)
+                let from = pattern.stops[index - 1].id, to = pattern.stops[index].id
+                let segment = TravelTimeModel.segment(route: pattern.route, meters: pattern.distances[index] - pattern.distances[index - 1],
+                    official: { metadata.officialTravelTimes.seconds(route: pattern.route.parentID, subroute: pattern.route.id,
+                        direction: pattern.direction, from: from, to: to, travellingAt: at, observedAt: date) },
+                    estimates: { live.flatMap { TravelTimeModel.estimated($0, parentRouteID: pattern.route.parentID, from: from, to: to) } },
+                    pace: .city, travellingAt: at, tuning: tuning)
+                values.append(previous + (segment?.seconds ?? 0))
             }
             return values
         }

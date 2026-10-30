@@ -59,7 +59,7 @@ public struct VehicleArrivalDisplay: Equatable, Sendable {
 /// A whole-ride planning estimate, never the official arrival time of a named bus.
 public struct RidingTimeEstimate: Equatable, Sendable {
     public enum Evidence: String, Sendable {
-        case stationHistory, officialProfile, railProfile, recentTraffic, typical
+        case stationHistory, officialProfile, officialEstimates, railProfile, recentTraffic, typical
         /// Share of the ride time it may plausibly run early or late, by how the time was obtained.
         /// Calibrated remotely (ForecastTuning) against recorded arrivals.
         public var spreadFraction: Double {
@@ -67,7 +67,8 @@ public struct RidingTimeEstimate: Equatable, Sendable {
             switch self {
             case .railProfile: return tuning.railSpread
             case .stationHistory: return tuning.stationHistorySpread
-            case .officialProfile: return tuning.officialProfileSpread
+            // Official arrival estimates measured as close to actual times as the profiles (TravelTimeModel).
+            case .officialProfile, .officialEstimates: return tuning.officialProfileSpread
             case .recentTraffic: return tuning.recentTrafficSpread
             case .typical: return tuning.typicalSpread
             }
@@ -80,10 +81,16 @@ public struct RidingTimeEstimate: Equatable, Sendable {
         self.seconds = seconds; self.evidence = evidence; self.observedVehicles = observedVehicles
     }
     public var spreadSeconds: Double { seconds * evidence.spreadFraction }
+    /// What a whole journey's riding rests on: its weakest ride's evidence.
+    public static func weakest(_ estimates: [RidingTimeEstimate]) -> Evidence {
+        let order: [Evidence] = [.typical, .recentTraffic, .officialEstimates, .officialProfile, .railProfile]
+        return order.first { kind in estimates.contains { $0.evidence == kind } } ?? .stationHistory
+    }
     public var sourceLabel: String {
         switch evidence {
         case .stationHistory: return AppText.text("依近期站間紀錄")
         case .officialProfile: return AppText.text("依官方分時段車程")
+        case .officialEstimates: return AppText.text("依官方到站預估")
         case .railProfile: return AppText.text("依官方捷運站間車程")
         case .recentTraffic: return AppText.text("依目前路線車流")
         case .typical: return AppText.text("一般車程估計")
@@ -266,8 +273,7 @@ public struct VehicleArrivalForecast: Sendable {
         }
         let along = match.along * Double(journey.direction)
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
-        // A bus standing at its first stop may be in a terminal layover; the official
-        // running time says nothing about when it leaves.
+        let route = metadata.route(bus.routeID) ?? BusRoute(id: bus.routeID, parentID: bus.parentRouteID, name: "", variantName: "", departure: "", destination: "")
         let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
         var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0
         let indices = journey.anchors.indices.dropFirst().prefix(target)
@@ -277,38 +283,25 @@ public struct VehicleArrivalForecast: Sendable {
             let span = end - start, remaining = end - max(start, along)
             guard span > 1, remaining > 0 else { continue }
             let fraction = min(1, remaining / span)
-            let records = (segments[segmentKey(bus.routeID, bus.direction, journey, index, metadata)] ?? [])
-                .filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
-            let values = records.map(\.seconds)
-            let vehicles = Set(records.map(\.vehicleID)).count
-            let duration: Double, margin: Double
-            let official = vehicles >= 3 || !inService ? nil : metadata.officialTravelTimes.seconds(route: bus.parentRouteID,
-                subroute: bus.routeID, direction: bus.direction, from: journey.anchors[index - 1].stop.id,
-                to: journey.anchors[index].stop.id, travellingAt: date.addingTimeInterval(seconds), observedAt: date)
-            if vehicles >= 3 {
-                let typical = median(values)
-                duration = typical * fraction
-                margin = max(12, median(values.map { abs($0 - typical) }) * 1.5) * fraction
-                learned += 1
-            } else if let official {
-                // The official hour profile is the baseline; one or two recent crossings refine it
-                // as if the profile were worth officialProfileWeight observations. The profile runs
-                // short in busy hours, so it is first scaled by the measured pace factor.
-                let weight = tuning.officialProfileWeight
-                let profile = official * tuning.paceFactor(at: date.addingTimeInterval(seconds))
-                let typical = vehicles == 0 ? profile : (median(values) * Double(vehicles) + profile * weight) / (Double(vehicles) + weight)
-                duration = typical * fraction
-                margin = max(12, typical * tuning.officialSegmentMargin) * fraction
-                profiled += 1
-            } else {
-                guard let pace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil) else { return nil }
-                let correction = applyCalibration ? timingFeedback.factor(for:segmentKey(bus.routeID,bus.direction,journey,index,metadata),at:date) : 1
-                // The pace factor applies with or without calibration, so the session feedback
-                // learns only what remains after it.
-                duration = (remaining / pace + (movingHistory ? 0 : tuning.stopSeconds * fraction)) *
-                    tuning.paceFactor(at: date.addingTimeInterval(seconds)) * correction
-                margin = max(12, duration * speedVariation); fallback += 1
+            let key = segmentKey(bus.routeID, bus.direction, journey, index, metadata)
+            let travellingAt = date.addingTimeInterval(seconds)
+            let pace: TravelTimeModel.Pace = (speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil))
+                .map { .vehicle(metersPerSecond: $0, variation: speedVariation, moving: movingHistory) } ?? TravelTimeModel.Pace.none
+            // A bus standing at its first stop may be in a terminal layover; the official
+            // running time says nothing about when it leaves.
+            guard let segment = TravelTimeModel.segment(route: route, meters: remaining, fraction: fraction,
+                crossings: recentCrossings(key, at: date),
+                official: { inService ? metadata.officialTravelTimes.seconds(route: bus.parentRouteID, subroute: bus.routeID,
+                    direction: bus.direction, from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
+                    travellingAt: travellingAt, observedAt: date) : nil },
+                pace: pace, travellingAt: travellingAt,
+                correction: applyCalibration ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }
+            switch segment.source {
+            case .crossings: learned += 1
+            case .officialProfile, .officialEstimates: profiled += 1
+            case .vehiclePace, .fleetPace, .cityPace: fallback += 1
             }
+            let duration = segment.seconds, margin = segment.margin
             seconds += duration; variance += margin * margin
         }
         if target == 0 || along < firstAlong {
@@ -410,14 +403,17 @@ public struct VehicleArrivalForecast: Sendable {
             let assessment = TripRanking.assessment(trip, estimates: estimates, at: date, preferences: preferences,
                 walkingDurations: walkingDurations, ridingDurations: durations, departures: departures)
             elapsed += max(0, walks[index]) + assessment.waits[index].seconds
-            let value = ridingEstimate(ride, metadata: metadata, at: date, travellingAt: date.addingTimeInterval(elapsed))
+            let value = ridingEstimate(ride, metadata: metadata, at: date, travellingAt: date.addingTimeInterval(elapsed), estimates: estimates)
             durations[index] = value.seconds; result.append(value); elapsed += value.seconds
         }
         return result
     }
 
+    /// A ride's time by the shared rule (TravelTimeModel), with the route's recent traffic as its pace.
+    /// `estimates` are the official arrival estimates, used only for a ride leaving now.
     public func ridingEstimate(_ ride: TransitRide, metadata: TransitMetadata, at date: Date,
-                              travellingAt: Date? = nil, progress: OnboardProgress? = nil, to stopID: String? = nil) -> RidingTimeEstimate {
+                              travellingAt: Date? = nil, progress: OnboardProgress? = nil, to stopID: String? = nil,
+                              estimates: EstimateFeed? = nil) -> RidingTimeEstimate {
         let tuning = ForecastTuning.current
         let riderProgress = progress?.rideID == ride.id ? progress : nil
         let targetID = stopID ?? ride.alighting.id
@@ -425,61 +421,52 @@ public struct VehicleArrivalForecast: Sendable {
             from: ride.boarding.stationID, to: ride.alighting.stationID) {
             return RidingTimeEstimate(seconds: seconds, evidence: .railProfile, observedVehicles: 0)
         }
+        let start = travellingAt ?? date
+        let live = TravelTimeModel.liveEstimates(estimates, at: start)
+        var seconds = 0.0, sources: [TravelTimeModel.Source] = []
+        func time(_ from: String, _ to: String, meters: Double, fraction: Double, crossings: (seconds: [Double], vehicles: Int) = ([], 0),
+                  pace: TravelTimeModel.Pace, correction: Double = 1) {
+            let at = start.addingTimeInterval(seconds)
+            guard let segment = TravelTimeModel.segment(route: ride.route, meters: meters, fraction: fraction, crossings: crossings,
+                official: { metadata.officialTravelTimes.seconds(route: ride.route.parentID, subroute: ride.route.id,
+                    direction: ride.direction, from: from, to: to, travellingAt: at, observedAt: date) },
+                estimates: { live.flatMap { TravelTimeModel.estimated($0, parentRouteID: ride.route.parentID, from: from, to: to) } },
+                pace: pace, travellingAt: at, correction: correction, tuning: tuning) else { return }
+            seconds += segment.seconds; sources.append(segment.source)
+        }
         guard let journey = metadata.journey(routeID: ride.route.id, direction: ride.direction),
               let first = journey.anchors.firstIndex(where: { $0.stop.id == ride.boarding.id }),
               let last = journey.anchors.firstIndex(where: { $0.stop.id == targetID }), last > first else {
-            let points = ride.coordinates.count >= 2 ? ride.coordinates : ride.stops.map(\.coordinate)
-            let distance = zip(points, points.dropFirst()).reduce(0.0) { $0 + $1.0.distance(to: $1.1) } * (ride.coordinates.count >= 2 ? 1 : 1.25)
-            let spans = zip(ride.stops, ride.stops.dropFirst()).map { $0.coordinate.distance(to: $1.coordinate) }
-            let totalSpan = spans.reduce(0, +)
-            var seconds = 0.0, published = 0, remainingSegments = 0
             let endIndex = ride.stops.firstIndex(where: { $0.id == targetID }) ?? ride.stops.count-1
             for index in ride.stops.indices.dropFirst() where index <= endIndex {
                 let from = ride.stops[index - 1], to = ride.stops[index]
                 let fraction: Double = riderProgress?.remainingSegmentFraction(from: from.id, to: to.id) ?? (riderProgress?.remainingFraction ?? 1.0)
                 guard fraction > 0 else { continue }
-                remainingSegments += 1
-                if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
-                    subroute: ride.route.id, direction: ride.direction, from: from.id, to: to.id,
-                    travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
-                    seconds += official * fraction; published += 1
-                } else {
-                    let share = totalSpan > 1 ? spans[index - 1] / totalSpan : 1 / Double(max(1, ride.stopCount))
-                    seconds += (distance * share / tuning.typicalSpeed + tuning.stopSeconds) * fraction
-                }
+                time(from.id, to.id, meters: TravelTimeModel.meters(from: from, to: to, along: [:]) * fraction, fraction: fraction, pace: .city)
             }
-            return RidingTimeEstimate(seconds: seconds,
-                evidence: published == remainingSegments && published > 0 ? .officialProfile : .typical, observedVehicles: 0)
+            return RidingTimeEstimate(seconds: seconds, evidence: Self.rideEvidence(sources), observedVehicles: 0)
         }
         let traffic = observedRidePace(ride, journey: journey, first: first, last: last, at: date)
-        var seconds = 0.0, measured = 0, published = 0, fallback = 0
         for index in (first + 1)...last {
             let fraction: Double = riderProgress?.remainingSegmentFraction(from: journey.anchors[index-1].stop.id,
                 to: journey.anchors[index].stop.id) ?? 1
             guard fraction > 0 else { continue }
-            let records = (segments[segmentKey(ride.route.id, ride.direction, journey, index, metadata)] ?? [])
-                .filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
-            let samples = records.map(\.seconds)
+            let key = segmentKey(ride.route.id, ride.direction, journey, index, metadata)
             let distance = abs(journey.anchors[index].match.along - journey.anchors[index - 1].match.along)
-            if Set(records.map(\.vehicleID)).count >= 3 {
-                seconds += median(samples) * fraction; measured += 1
-            } else if let official = metadata.officialTravelTimes.seconds(route: ride.route.parentID,
-                        subroute: ride.route.id, direction: ride.direction,
-                        from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
-                        travellingAt: (travellingAt ?? date).addingTimeInterval(seconds), observedAt: date) {
-                seconds += official * fraction; published += 1
-            } else if let traffic {
-                // The observed elapsed time already contains signals, congestion
-                // and dwell. Adding another 20 seconds per stop would count it twice.
-                seconds += distance / traffic.speed * fraction; fallback += 1
-            } else {
-                let correction = timingFeedback.factor(for:segmentKey(ride.route.id,ride.direction,journey,index,metadata),at:date)
-                seconds += (distance / tuning.typicalSpeed + tuning.stopSeconds) * fraction * correction; fallback += 1
-            }
+            time(journey.anchors[index - 1].stop.id, journey.anchors[index].stop.id, meters: distance * fraction, fraction: fraction,
+                 crossings: recentCrossings(key, at: date), pace: traffic.map { .fleet(metersPerSecond: $0.speed) } ?? .city,
+                 correction: timingFeedback.factor(for: key, at: date))
         }
-        return RidingTimeEstimate(seconds: seconds,
-            evidence: fallback == 0 && published > 0 ? .officialProfile : fallback == 0 && measured > 0 ? .stationHistory : traffic != nil ? .recentTraffic : .typical,
-            observedVehicles: traffic?.count ?? 0)
+        return RidingTimeEstimate(seconds: seconds, evidence: Self.rideEvidence(sources), observedVehicles: traffic?.count ?? 0)
+    }
+
+    /// What a ride's time rests on, for its label and spread: the weakest kind among its segments.
+    static func rideEvidence(_ sources: [TravelTimeModel.Source]) -> RidingTimeEstimate.Evidence {
+        if sources.isEmpty || sources.contains(.cityPace) || sources.contains(.vehiclePace) { return .typical }
+        if sources.contains(.fleetPace) { return .recentTraffic }
+        if sources.contains(.officialEstimates) { return .officialEstimates }
+        if sources.contains(.officialProfile) { return .officialProfile }
+        return .stationHistory
     }
 
     private func observedRidePace(_ ride: TransitRide, journey: RouteJourney, first: Int, last: Int,
@@ -512,6 +499,12 @@ public struct VehicleArrivalForecast: Sendable {
         let speed = distance / durations
         guard (0.6...18).contains(speed) else { return nil }
         return (speed, positions.count)
+    }
+
+    /// Crossing times of a segment in the last 20 minutes and how many distinct buses made them.
+    private func recentCrossings(_ key: String, at date: Date) -> (seconds: [Double], vehicles: Int) {
+        let records = (segments[key] ?? []).filter { (-5...1_200).contains(date.timeIntervalSince($0.date)) }
+        return (records.map(\.seconds), Set(records.map(\.vehicleID)).count)
     }
 
     private func segmentKey(_ route: String, _ direction: String, _ journey: RouteJourney, _ index: Int,
