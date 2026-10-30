@@ -20,7 +20,7 @@ def bus(plate, stamp, route='307'):
 
 
 class CollectTests(unittest.TestCase):
-    def run_fake(self, polls, until=None, minutes=2):
+    def run_fake(self, polls, until=None, minutes=2, sample='stop', estimates=None):
         now = [1_800_000_000.0]
         gps = iter(polls)
 
@@ -31,7 +31,7 @@ class CollectTests(unittest.TestCase):
                     raise answer
                 return feed(answer)
             if name == 'GetEstimateTime':
-                return feed([{'RouteID': 1, 'StopID': stop, 'GoBack': '0', 'EstimateTime': '120'} for stop in range(1000)])
+                return feed(estimates or [{'RouteID': 1, 'StopID': stop, 'GoBack': '0', 'EstimateTime': '120'} for stop in range(1000)])
             return b'static'
 
         def sleep(seconds):
@@ -39,7 +39,7 @@ class CollectTests(unittest.TestCase):
 
         folder = tempfile.mkdtemp()
         with redirect_stdout(io.StringIO()):
-            counts = collect.run(folder, minutes, until, read=read, clock=lambda: now[0], sleep=sleep)
+            counts = collect.run(folder, minutes, until, read=read, clock=lambda: now[0], sleep=sleep, sample=sample)
         return Path(folder), counts
 
     def rows(self, path):
@@ -64,6 +64,16 @@ class CollectTests(unittest.TestCase):
         folder, counts = self.run_fake(polls)
         self.assertEqual(counts['errors'], 2)
         self.assertEqual(len(self.rows(folder / 'gps.csv.gz')), 1)
+
+    def test_a_route_sample_keeps_every_stop_of_the_sampled_routes(self):
+        rows = [{'RouteID': route, 'StopID': route * 100 + stop, 'GoBack': '0', 'EstimateTime': '120'}
+                for route in range(200) for stop in range(5)]
+        folder, _ = self.run_fake([[bus('A', 't1')]] * 3, minutes=1, sample='route', estimates=rows)
+        kept = self.rows(folder / 'eta.csv.gz')
+        routes = {r[2] for r in kept}
+        self.assertTrue(20 < len(routes) < 60)  # About 20% of 200 routes.
+        self.assertEqual(len(kept), len(routes) * 5)  # Each with all five stops.
+        self.assertEqual(routes, {str(r) for r in range(200) if collect.sampled_route(r)})
 
     def test_sample_is_stable_across_runs(self):
         self.assertEqual([collect.sampled(s) for s in range(50)], [collect.sampled(str(s)) for s in range(50)])

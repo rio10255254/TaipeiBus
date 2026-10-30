@@ -2,7 +2,9 @@
 
 Stores what is needed to replay every prediction method later, not the raw feeds:
 - gps.csv.gz: each bus report once (a new DataTime for that bus), polled every 20 s.
-- eta.csv.gz: official EstimateTime every 60 s for a fixed 20% sample of stops.
+- eta.csv.gz: official EstimateTime every 60 s for a fixed 20% sample of stops, or with --sample route for
+  every stop of a fixed 20% sample of routes, so consecutive stops can be compared (an estimate difference
+  times a segment, which New Taipei relies on without official station-to-station times).
 - static/: route, stop, path and shape feeds once per UTC day.
 Both cities publish the same feeds from one data centre (--city tpe or ntpc). Public data only;
 no credentials and no passenger information, and no TDX quota.
@@ -39,8 +41,14 @@ def sampled(stop_id):
     return int(hashlib.sha1(str(stop_id).encode()).hexdigest()[:8], 16) % 100 < SAMPLE_PERCENT
 
 
+def sampled_route(route_id):
+    """The same, by route: all of a sampled route's stops."""
+    return sampled('route:' + str(route_id))
+
+
 class Recorder:
-    def __init__(self, folder):
+    def __init__(self, folder, sample='stop'):
+        self.keep = (lambda row: sampled_route(row.get('RouteID'))) if sample == 'route' else (lambda row: sampled(row.get('StopID')))
         self.folder = Path(folder)
         self.folder.mkdir(parents=True, exist_ok=True)
         self.gps = gzip.open(self.folder / 'gps.csv.gz', 'wt', newline='', encoding='utf-8')
@@ -65,7 +73,7 @@ class Recorder:
     def record_eta(self, rows, update, received):
         self.counts['eta_polls'] += 1
         for row in rows:
-            if sampled(row.get('StopID')):
+            if self.keep(row):
                 self.eta_writer.writerow([received, update, row.get('RouteID', ''), row.get('StopID', ''),
                                           row.get('GoBack', ''), row.get('EstimateTime', '')])
                 self.counts['eta_rows'] += 1
@@ -85,14 +93,14 @@ def save_static(folder, read=fetch):
             print(f'Static {name} unavailable: {type(error).__name__}', flush=True)
 
 
-def run(folder, minutes, until, read=fetch, clock=time.time, sleep=time.sleep, static=True):
+def run(folder, minutes, until, read=fetch, clock=time.time, sleep=time.sleep, static=True, sample='stop'):
     stop_at = clock() + minutes * 60
     if until and clock() >= until:
         print('Benchmark period has ended; nothing recorded.', flush=True)
         return None
     if static:
         save_static(folder, read)
-    recorder = Recorder(folder)
+    recorder = Recorder(folder, sample)
     next_eta = clock()
     try:
         while clock() < stop_at and not (until and clock() >= until):
@@ -123,10 +131,12 @@ def main():
     parser.add_argument('--until', default=os.environ.get('BENCHMARK_UNTIL', ''))
     parser.add_argument('--no-static', action='store_true')
     parser.add_argument('--city', choices=sorted(CITIES), default='tpe')
+    parser.add_argument('--sample', choices=['stop', 'route'], default='stop', help='which official estimates to keep')
     args = parser.parse_args()
     until = datetime.fromisoformat(args.until).timestamp() if args.until else None
     base = CITIES[args.city]
-    counts = run(args.out, args.minutes, until, read=lambda name: fetch(name, base=base), static=not args.no_static)
+    counts = run(args.out, args.minutes, until, read=lambda name: fetch(name, base=base), static=not args.no_static,
+                 sample=args.sample)
     print('Recorded:', json.dumps(counts))
 
 

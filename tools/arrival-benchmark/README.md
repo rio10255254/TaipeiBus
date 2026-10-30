@@ -23,7 +23,7 @@ curl -L -o official-times.json https://github.com/rio10255254/TaipeiBus/releases
 python3 tools/arrival-benchmark/replay_all.py recordings --official official-times.json --out results
 ```
 
-`results/report.md` 是報告（2026 年 10 月的基準結果存於 [baseline-2026-10.md](baseline-2026-10.md)，修正與驗證結果存於 [corrections-2026-10.md](corrections-2026-10.md)，完整兩週的結果存於 [fortnight-2026-10.md](fortnight-2026-10.md)，由 `fortnight.py` 依日別與顯示的分鐘分組），`results/metrics.json` 是完整數字，`results/replay/*/predictions.csv.gz` 保留每筆預估與實際到站，可作為之後訓練模型的資料。
+`results/report.md` 是報告（2026 年 10 月的基準結果存於 [baseline-2026-10.md](baseline-2026-10.md)，修正與驗證結果存於 [corrections-2026-10.md](corrections-2026-10.md)，完整兩週的結果存於 [fortnight-2026-10.md](fortnight-2026-10.md)，由 `fortnight.py` 依日別與顯示的分鐘分組；城市車速與分時段倍數的驗證存於 [city-pace-2026-10.md](city-pace-2026-10.md)，各條隱藏規則的量測與試過但未採用的改法存於 [display-2026-10.md](display-2026-10.md)），`results/metrics.json` 是完整數字，`results/replay/*/predictions.csv.gz` 保留每筆預估與實際到站，可作為之後訓練模型的資料。
 
 - `--city ntpc`：回放各錄製檔的 `ntpc/`（新北市），路線會帶上新北的來源代號，所以套用 `regions.json` 裡新北的車速。
 - `--tuning FILE`：用一份候選的 `runtime/tuning.json` 回放，和不加時的結果比較，就能在發布前知道參數改了之後誤差會變多少。
