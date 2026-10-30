@@ -5,7 +5,10 @@ import TransitCore
 /// vehicle tracker and VehicleArrivalForecast, poll by poll, then compares every prediction with
 /// the moment the same bus actually reached that stop later in the recording.
 ///
-/// Usage: ArrivalReplay --static DIR --official FILE --run DIR --out DIR [--every N]
+/// Usage: ArrivalReplay --static DIR --official FILE --run DIR --out DIR [--every N] [--tuning FILE] [--source ID]
+///
+/// --tuning replays with a runtime/tuning.json candidate instead of the App's built-in values.
+/// --source names the city the feeds come from (regions.json: tpe, ntpc), for its own ride pace.
 ///
 /// Writes to --out:
 /// - predictions.csv.gz  one row per (poll, bus, downstream sampled stop) the App could be asked about
@@ -21,6 +24,8 @@ struct Options {
     var every = 3
     /// How many stops ahead of a bus are evaluated.
     var maxStopsAhead = 40
+    var tuning = ""
+    var source = "tpe"
 
     init(_ arguments: [String]) {
         var index = 1
@@ -37,6 +42,8 @@ struct Options {
             case "--out": out = value()
             case "--every": every = max(1, Int(value()) ?? 3)
             case "--max-stops-ahead": maxStopsAhead = max(1, Int(value()) ?? 40)
+            case "--tuning": tuning = value()
+            case "--source": source = value()
             default: fail("unknown argument \(arguments[index])")
             }
             index += 1
@@ -129,6 +136,10 @@ final class GzipWriter {
 // MARK: - Inputs
 
 let options = Options(CommandLine.arguments)
+if !options.tuning.isEmpty {
+    guard let data = FileManager.default.contents(atPath: options.tuning) else { fail("cannot read \(options.tuning)") }
+    do { ForecastTuning.current = try ForecastTuning.decode(data) } catch { fail("invalid tuning file: \(error)") }
+}
 let isoFormatter = ISO8601DateFormatter()
 
 func loadMetadata() -> TransitMetadata {
@@ -139,7 +150,7 @@ func loadMetadata() -> TransitMetadata {
         feeds[name] = gunzip(path)
     }
     do {
-        var metadata = try FeedDecoder.metadata(feeds: feeds)
+        var metadata = try FeedDecoder.metadata(sources: [(source: options.source, feeds: feeds)])
         guard let bytes = FileManager.default.contents(atPath: options.official) else { fail("missing \(options.official)") }
         metadata.officialTravelTimes = try OfficialTravelTimes(data: bytes).matching(metadata)
         return metadata

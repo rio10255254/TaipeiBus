@@ -1,9 +1,10 @@
 name: Arrival benchmark recording
-# Two weeks of Taipei's public bus positions and official arrival estimates, so every
-# prediction method can be replayed against actual stop passages. Each run records
-# for just under six hours and queues the next one itself until BENCHMARK_UNTIL.
-# The 2026-10-14..28 recording is complete, so it now only starts by hand: set a new
-# BENCHMARK_UNTIL and run it to record another period. Public data only.
+# Two weeks of Taipei's and New Taipei's public bus positions and official arrival estimates,
+# so every prediction method can be replayed against actual stop passages. Each run records
+# for just under six hours and queues the next one itself until BENCHMARK_UNTIL; New Taipei's
+# feeds go to ntpc/ inside the same recording. Taipei alone was recorded 2026-10-14..28.
+# After BENCHMARK_UNTIL it only starts by hand: set a new BENCHMARK_UNTIL and run it to
+# record another period. Public data only; no TDX quota.
 on:
   workflow_dispatch:
     inputs:
@@ -17,7 +18,7 @@ concurrency:
   group: arrival-benchmark
   cancel-in-progress: false
 env:
-  BENCHMARK_UNTIL: '2026-10-29T00:00:00+08:00'
+  BENCHMARK_UNTIL: '2026-11-14T00:00:00+08:00'
 jobs:
   record:
     runs-on: ubuntu-latest
@@ -49,7 +50,13 @@ jobs:
           # they start between 08:00 and 14:00 Taipei; a manual start always records them.
           automatic=${{ github.event_name == 'schedule' || inputs.chained }}
           if [ "$automatic" = true ] && [ "$(date -u +%H)" -ge 6 ]; then flags+=(--no-static); fi
-          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark" --minutes 345 "${flags[@]}"
+          # Both cities at once, each polling on its own; the step fails if either does, after both end.
+          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark/ntpc" --city ntpc --minutes 345 "${flags[@]}" &
+          ntpc=$!
+          taipei=0
+          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark" --city tpe --minutes 345 "${flags[@]}" || taipei=$?
+          wait "$ntpc"
+          exit "$taipei"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
