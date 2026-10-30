@@ -307,9 +307,8 @@ public struct VehicleArrivalForecast: Sendable {
                         return TravelTimeModel.estimated(live, parentRouteID: bus.parentRouteID, from: journey.anchors[index - 1].stop.id, to: to)
                     }
                     // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of it.
-                    guard !hasBusAhead(of: bus, from: along, to: end, at: date),
-                          let ahead = live.value(routeID: bus.parentRouteID, stopID: to, at: date), (0...1_800).contains(ahead) else { return nil }
-                    return Double(max(ahead, 10)) / fraction
+                    guard !hasBusAhead(of: bus, from: along, to: end, at: date) else { return nil }
+                    return TravelTimeModel.estimatedRemaining(live, parentRouteID: bus.parentRouteID, to: to, fraction: fraction, at: date)
                 },
                 pace: pace, travellingAt: travellingAt,
                 correction: applyCalibration ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }

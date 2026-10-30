@@ -89,6 +89,24 @@ final class TravelTimeModelTests: XCTestCase {
         XCTAssertEqual(TravelTimeModel.estimated(EstimateFeed(seconds: ["9:a": 120, "9:b": 120], updatedAt: now), parentRouteID: "9", from: "a", to: "b"), 10)
     }
 
+    func testABusOnASegmentTakesItsNextStopsOwnEstimate() {
+        let feed = EstimateFeed(seconds: ["9:b": 90, "9:c": -3, "9:d": 4000], updatedAt: now)
+        // A quarter of the segment left, 90 s away: the segment as a whole would be 360 s.
+        XCTAssertEqual(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "b", fraction: 0.25, at: now), 360)
+        // The estimate counts down with the clock until the feed is replaced.
+        XCTAssertEqual(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "b", fraction: 1, at: now.addingTimeInterval(30)), 60)
+        // A status code, an implausible wait, a stop not listed or a feed over two minutes old gives nothing.
+        XCTAssertNil(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "c", fraction: 1, at: now))
+        XCTAssertNil(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "d", fraction: 1, at: now))
+        XCTAssertNil(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "x", fraction: 1, at: now))
+        XCTAssertNil(TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "b", fraction: 1, at: now.addingTimeInterval(180)))
+        let segment = TravelTimeModel.segment(route: route, meters: 100, fraction: 0.25,
+            estimates: { TravelTimeModel.estimatedRemaining(feed, parentRouteID: "9", to: "b", fraction: 0.25, at: self.now) },
+            pace: .city, travellingAt: now)
+        XCTAssertEqual(segment?.seconds, 90)
+        XCTAssertEqual(segment?.source, .officialEstimates)
+    }
+
     func testOnlyACurrentFeedStandsForATripLeavingNow() {
         let feed = EstimateFeed(seconds: ["9:a": 120], updatedAt: now)
         XCTAssertNotNil(TravelTimeModel.liveEstimates(feed, at: now.addingTimeInterval(30)))
