@@ -376,6 +376,7 @@
   "暫無法估算": "Time unconfirmed",
   "行駛紀錄較少或變化較大，先顯示站數，等待時間確認。": "Movement data is limited or variable. Stop progress is shown until time is confirmed.",
   "行駛紀錄較少，時間僅供參考": "Limited movement data; time is approximate",
+  "較遠的路段依一般車速與時段估算": "Farther stops estimated from typical speeds for this hour",
   "路線軌跡／站序": "Route paths and stop order",
   "車輛位置尚未確認，暫停推估到站時間。": "The bus position is unconfirmed; arrival estimates are paused.",
   "車輛位置等待更新，暫停顯示分鐘數。": "Waiting for a new position; minute estimates are paused.",
