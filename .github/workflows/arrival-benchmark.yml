@@ -51,7 +51,8 @@ jobs:
           automatic=${{ github.event_name == 'schedule' || inputs.chained }}
           if [ "$automatic" = true ] && [ "$(date -u +%H)" -ge 6 ]; then flags+=(--no-static); fi
           # Both cities at once, each polling on its own; the step fails if either does, after both end.
-          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark/ntpc" --city ntpc --minutes 345 "${flags[@]}" &
+          # New Taipei keeps whole sampled routes, so the countdown's estimate-difference segments can be scored.
+          python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark/ntpc" --city ntpc --sample route --minutes 345 "${flags[@]}" &
           ntpc=$!
           taipei=0
           python3 tools/arrival-benchmark/collect.py --out "$RUNNER_TEMP/benchmark" --city tpe --minutes 345 "${flags[@]}" || taipei=$?
