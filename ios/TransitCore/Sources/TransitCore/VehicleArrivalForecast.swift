@@ -276,11 +276,12 @@ public struct VehicleArrivalForecast: Sendable {
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
         let route = metadata.route(bus.routeID) ?? BusRoute(id: bus.routeID, parentID: bus.parentRouteID, name: "", variantName: "", departure: "", destination: "")
         let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
-        // How far ahead this bus's own pace says anything: a short movement sample, or a fresh speed report, does
-        // not describe traffic kilometres away (extrapolating a bus held at a light made distant stops 8–12
-        // minutes late); segments beyond it take the city pace for the hour, like a planned ride.
+        // Where this bus's own pace says anything: only a mature movement history, and only as far ahead as it
+        // reaches. A short sample or a single speed report (often a bus held at a light) extrapolated along the
+        // route made stops 5–12 minutes late (tools/arrival-benchmark/display-2026-10.md); other segments take
+        // the city pace for the hour, like a planned ride.
         let freshSpeed = age <= 30 && bus.hasSpeed && (5...80).contains(bus.speed)
-        let paceReach = max(1_200, observedDistance * 4 + 40, freshSpeed ? 2_500 : 0)
+        let paceReach = max(1_200, observedDistance * 4 + 40)
         var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0, paced = 0
         let indices = journey.anchors.indices.dropFirst().prefix(target)
         for index in indices {
@@ -293,7 +294,7 @@ public struct VehicleArrivalForecast: Sendable {
             let travellingAt = date.addingTimeInterval(seconds)
             let ownPace = speed ?? (allowTypicalWhenStopped ? tuning.typicalSpeed : nil)
             let pace: TravelTimeModel.Pace = ownPace.map { ownSpeed in
-                inService && (max(start, along) - along > paceReach || seconds > 900) ? .city :
+                inService && (!matureHistory || max(start, along) - along > paceReach || seconds > 900) ? .city :
                     .vehicle(metersPerSecond: ownSpeed, variation: speedVariation, moving: movingHistory)
             } ?? TravelTimeModel.Pace.none
             // A bus standing at its first stop may be in a terminal layover; the official
