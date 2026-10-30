@@ -317,7 +317,7 @@ func processPoll(_ received: String) {
     }
     previousVehicles = result.vehicles
     // The App ingests each snapshot with the time it arrived.
-    forecast.ingest(result.vehicles, metadata: metadata, at: now)
+    forecast.ingest(result.vehicles, metadata: metadata, at: now, estimates: currentOfficial)
     observeCrossings(result.vehicles, at: now)
     guard pollCount % options.every == 0 else { return }
     for bus in result.vehicles {

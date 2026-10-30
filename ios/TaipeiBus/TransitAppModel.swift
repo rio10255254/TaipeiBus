@@ -1328,7 +1328,7 @@ final class TransitAppModel: ObservableObject {
         busArrivals = result.estimates
         snapshot = result
         if let metroRealtime { snapshot.estimates = metroRealtime.applying(to: result.estimates, network: metadata.metro, at: Date()) }
-        arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date())
+        arrivalForecast.ingest(result.vehicles, metadata: metadata, at: Date(), estimates: result.estimates)
         anchorBoardedVehicle(publish: false)
         planner.updateSnapshot(snapshot, forecast: arrivalForecast)
         considerJourneyAlternative()
@@ -2234,7 +2234,7 @@ final class TransitAppModel: ObservableObject {
     }
     func auditNavigation(metadata: TransitMetadata, snapshot: TransitSnapshot, at date: Date) {
         self.metadata = metadata; self.snapshot = snapshot; busArrivals = snapshot.estimates
-        arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date)
+        arrivalForecast.ingest(snapshot.vehicles,metadata:metadata,at:date,estimates:snapshot.estimates)
         planner.updateSnapshot(snapshot,forecast:arrivalForecast)
     }
     func auditAlternative(_ option: JourneyOption, snapshot: TransitSnapshot) -> Bool {

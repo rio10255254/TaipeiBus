@@ -189,7 +189,7 @@ def table(groups, title, with_range=True):
 
 
 EVIDENCE = {'roadHistory': '近期車輛通過紀錄', 'officialProfile': '官方分時段車程', 'recentMovement': '這輛車近期行駛',
-            'routeProgress': 'GPS 位置與沿線車程', 'limited': '資料有限'}
+            'routeProgress': 'GPS 位置與沿線車程', 'officialEstimates': '官方到站預估的站間差距', 'limited': '資料有限'}
 
 
 def report(metrics, summaries):

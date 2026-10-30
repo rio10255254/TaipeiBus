@@ -15,7 +15,7 @@ public enum VehicleArrivalEstimate: Equatable, Sendable {
 }
 
 public struct VehicleArrivalPrediction: Equatable, Sendable {
-    public enum Evidence: String, Sendable { case roadHistory, officialProfile, recentMovement, routeProgress, limited }
+    public enum Evidence: String, Sendable { case roadHistory, officialProfile, officialEstimates, recentMovement, routeProgress, limited }
     public let seconds: Double
     public let uncertaintySeconds: Double
     public let evidence: Evidence
@@ -41,6 +41,7 @@ public struct VehicleArrivalPrediction: Equatable, Sendable {
         switch evidence {
         case .roadHistory: return AppText.text("依近期車輛通過各站的時間估算")
         case .officialProfile: return AppText.text("依官方分時段車程與近期車流估算")
+        case .officialEstimates: return AppText.text("依官方到站預估的站間差距估算")
         case .recentMovement: return AppText.text("依這輛車近期的行駛情況估算")
         case .routeProgress: return AppText.text("依 GPS 位置與沿線車程估算")
         case .limited: return AppText.text("行駛紀錄較少，時間僅供參考")
@@ -115,9 +116,13 @@ public struct VehicleArrivalForecast: Sendable {
     private var roadSignatures: [String: Int] = [:]
     private var timingFeedback = ArrivalTimingFeedback()
     private var feedbackCursor = 0
+    /// The latest official arrival estimates, for segments the shared rule times from their differences.
+    private var estimates: EstimateFeed?
     public init() {}
 
-    public mutating func ingest(_ vehicles: [BusVehicle], metadata: TransitMetadata, at date: Date) {
+    /// - Parameter estimates: the official arrival estimates that came with these positions, if any.
+    public mutating func ingest(_ vehicles: [BusVehicle], metadata: TransitMetadata, at date: Date, estimates: EstimateFeed? = nil) {
+        if let estimates { self.estimates = estimates }
         if metadataRevision != metadata.revision {
             var signatures: [String: Int] = [:]
             let contexts = vehicles.map { ($0.routeID, $0.direction) } + history.values.compactMap { values in
@@ -275,7 +280,8 @@ public struct VehicleArrivalForecast: Sendable {
         let firstAlong = journey.anchors.first.map { $0.match.along * Double(journey.direction) } ?? along
         let route = metadata.route(bus.routeID) ?? BusRoute(id: bus.routeID, parentID: bus.parentRouteID, name: "", variantName: "", departure: "", destination: "")
         let inService = movingHistory || (bus.hasSpeed && bus.speed >= 5) || along > firstAlong + 150
-        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, fallback = 0
+        var seconds = 0.0, variance = 0.0, learned = 0, profiled = 0, estimated = 0, fallback = 0
+        let live = TravelTimeModel.liveEstimates(estimates, at: date)
         let indices = journey.anchors.indices.dropFirst().prefix(target)
         for index in indices {
             let start = journey.anchors[index - 1].match.along * Double(journey.direction)
@@ -294,11 +300,23 @@ public struct VehicleArrivalForecast: Sendable {
                 official: { inService ? metadata.officialTravelTimes.seconds(route: bus.parentRouteID, subroute: bus.routeID,
                     direction: bus.direction, from: journey.anchors[index - 1].stop.id, to: journey.anchors[index].stop.id,
                     travellingAt: travellingAt, observedAt: date) : nil },
+                estimates: {
+                    guard inService, let live else { return nil }
+                    let to = journey.anchors[index].stop.id
+                    guard along > start else {
+                        return TravelTimeModel.estimated(live, parentRouteID: bus.parentRouteID, from: journey.anchors[index - 1].stop.id, to: to)
+                    }
+                    // On this segment, the next stop's own estimate is this bus's, unless another bus is ahead of it.
+                    guard !hasBusAhead(of: bus, from: along, to: end, at: date),
+                          let ahead = live.value(routeID: bus.parentRouteID, stopID: to, at: date), (0...1_800).contains(ahead) else { return nil }
+                    return Double(max(ahead, 10)) / fraction
+                },
                 pace: pace, travellingAt: travellingAt,
                 correction: applyCalibration ? timingFeedback.factor(for: key, at: date) : 1, tuning: tuning) else { return nil }
             switch segment.source {
             case .crossings: learned += 1
-            case .officialProfile, .officialEstimates: profiled += 1
+            case .officialProfile: profiled += 1
+            case .officialEstimates: estimated += 1
             case .vehiclePace, .fleetPace, .cityPace: fallback += 1
             }
             let duration = segment.seconds, margin = segment.margin
@@ -318,7 +336,7 @@ public struct VehicleArrivalForecast: Sendable {
         let localGPS = age <= 30 && inService && bus.hasSpeed && (5...80).contains(bus.speed) &&
             seconds <= 600 && progress.distance <= 2_500
         let evidence: VehicleArrivalPrediction.Evidence = age > 30 ? .limited :
-            fallback == 0 && profiled > 0 ? .officialProfile :
+            fallback == 0 && profiled + estimated > 0 ? (estimated > profiled ? .officialEstimates : .officialProfile) :
             learned > 0 && fallback == 0 ? .roadHistory : matureHistory && withinObservedHorizon ? .recentMovement :
             localGPS ? .routeProgress : .limited
         // Do not count down a stopped bus, or manufacture an arrival after GPS updates cease.
@@ -467,6 +485,15 @@ public struct VehicleArrivalForecast: Sendable {
         if sources.contains(.officialEstimates) { return .officialEstimates }
         if sources.contains(.officialProfile) { return .officialProfile }
         return .stationHistory
+    }
+
+    /// Whether another bus on the same route and direction was last seen between `from` and `to`.
+    private func hasBusAhead(of bus: BusVehicle, from: Double, to: Double, at date: Date) -> Bool {
+        history.contains { id, samples in
+            guard id != bus.id, let last = samples.last else { return false }
+            return last.route == bus.routeID && last.direction == bus.direction && last.along > from + 5 && last.along < to &&
+                date.timeIntervalSince(last.date) <= 90
+        }
     }
 
     private func observedRidePace(_ ride: TransitRide, journey: RouteJourney, first: Int, last: Int,
