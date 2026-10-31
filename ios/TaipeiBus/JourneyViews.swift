@@ -2191,21 +2191,29 @@ private struct BannerTitle: View {
         Group {
             if parts.count < 2 {
                 // A sentence such as 「步行至 …」 or 「從 內湖站出口1 進站」 stays on one line when it fits;
-                // otherwise it wraps only between words, so on an iPhone SE the stop name is never
-                // split in the middle (「果菜／市場」) or cut short.
-                ViewThatFits(in: .horizontal) {
-                    Text(text).lineLimit(1)
-                    ChipFlow(spacing: 5) {
-                        ForEach(Array(text.split(separator: " ").enumerated()), id: \.offset) { _, word in
-                            Text(word).lineLimit(1).minimumScaleFactor(0.75)
+                // otherwise Chinese wraps only between words, so on an iPhone SE the stop name is never
+                // split in the middle (「果菜／市場」). English already wraps between words and may step
+                // down in size to stay within three lines instead of being cut short.
+                Group {
+                    if text.unicodeScalars.contains(where: \.properties.isIdeographic) {
+                        ViewThatFits(in: .horizontal) {
+                            Text(text).lineLimit(1)
+                            ChipFlow(spacing: 5) {
+                                ForEach(Array(text.split(separator: " ").enumerated()), id: \.offset) { _, word in
+                                    Text(word).lineLimit(1).minimumScaleFactor(0.75)
+                                }
+                            }
                         }
+                    } else {
+                        Text(text).lineLimit(large ? nil : 3).minimumScaleFactor(0.8)
                     }
                 }
+                .accessibilityHidden(true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // One element for the whole sentence, not one per word.
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(text)
-                .accessibilityAddTraits(.isStaticText)
+                // One element for the whole sentence that covers the instruction's column.
+                .background {
+                    Color.clear.accessibilityElement().accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
+                }
             } else {
                 ViewThatFits(in: .horizontal) {
                     Text(text).lineLimit(1)
