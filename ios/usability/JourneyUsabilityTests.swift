@@ -332,7 +332,9 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
     func testAllArrivingVehiclesAndOnboardStopsKeepTheConfirmedPlate() throws {
         launch(["--preview-boarding-fixture", "--usability-fixture"])
         XCTAssertTrue(button("journey-board").waitForExistence(timeout: 90))
-        XCTAssertTrue(app.staticTexts["journey-total-duration"].label.contains("全程約"))
+        // A started trip shows what remains (summaryLabel(remaining:), since 1.8.11), not the whole trip.
+        let total = app.staticTexts["journey-total-duration"].label
+        XCTAssertTrue(total.contains("剩餘約") || total.contains("剩餘行程約"), total)
         button("journey-all-vehicles").tap()
         XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 5))
         capture("all-departed-before-scroll")
