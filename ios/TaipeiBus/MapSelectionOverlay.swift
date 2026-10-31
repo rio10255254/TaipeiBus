@@ -195,7 +195,8 @@ private struct MapContextLabelContent: View, Equatable {
                 let route = model.metadata.route(bus.routeID)
                 RouteBadge(name: route?.localizedName ?? bus.localizedRouteName, tintName: route?.name ?? bus.routeName, compact: true)
                 Text(bus.plate).font(.subheadline.weight(.semibold)).monospaced()
-                Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 36, height: 36) }
+                // An icon-only control on a moving map: the full 44-point target.
+                Button(action: showDetails) { Image(systemName: "ellipsis").frame(width: 44, height: 44).contentShape(Rectangle()) }
                     .accessibilityLabel(AppText.text("車輛資訊"))
             }.padding(.horizontal, 12).readableMapSurface().fixedSize()
         } else if model.showsLiveTrains, let id = model.selectedTrainID, let report = model.metroTrain(id) {

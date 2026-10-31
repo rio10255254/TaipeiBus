@@ -439,7 +439,8 @@ final class UIUXAuditUsabilityTests: JourneyUsabilityTestBase {
                      ("official-service-notices", "notices"), ("settings-sources", "sources"), ("settings-privacy", "privacy")]
         for (index, page) in pages.enumerated() {
             let link = button(page.0)
-            for _ in 0..<3 where link.exists && !link.isHittable { app.swipeUp(); settle(0.5) }
+            // A List creates rows lazily, so a link further down may not exist until it is scrolled to.
+            for _ in 0..<4 where !(link.exists && link.isHittable) { app.swipeUp(); settle(0.5) }
             guard tap(link, "settings: " + page.1) else { continue }
             settle(page.1 == "notices" ? 7 : 2)
             review("audit-08c\(index)-\(page.1)")
@@ -548,16 +549,23 @@ final class UIUXAuditUsabilityTests: JourneyUsabilityTestBase {
     func test11MapTaps() {
         launch(["--test-map-controls"])
         _ = starting("nearby-station-").waitForExistence(timeout: 90)
-        map.pinch(withScale: 2.2, velocity: 1.5)
-        let settled = waitUntil(30) { (self.camera()["cameraMoving"] as? Bool) == false && (self.camera()["markerID"] as? String) != nil }
-        note("a stop marker on screen", settled)
-        if settled {
-            let marker = camera()
-            map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: marker["markerX"] as? Double ?? 0, dy: marker["markerY"] as? Double ?? 0)).tap()
-            settle(3); review("audit-11a-tapped-stop-marker")
-            tap(button("關閉選取"), "close the stop", timeout: 5); settle(2.5)
+        // Places: the probe reports a rendered place well inside the open map.
+        let place = waitUntil(30) { self.camera()["placeX"] as? Double != nil && (self.camera()["cameraMoving"] as? Bool) == false }
+        let placeCard = app.descendants(matching: .any).matching(identifier: "place-card").firstMatch
+        if place, let x = camera()["placeX"] as? Double, let y = camera()["placeY"] as? Double {
+            map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
         }
-        let bikes = waitUntil(20) { !(self.camera()["visibleBikePins"] as? [[String: Any]] ?? []).isEmpty }
+        if placeCard.waitForExistence(timeout: 5) {
+            settle(1); review("audit-11a-place-card")
+            if tap(button("place-card-route"), "route to the place", timeout: 4) {
+                settle(6); review("audit-11b-route-to-place")
+                if !tap(button("journey-close"), "close the route", timeout: 5) { app.swipeDown(velocity: .fast) }
+                settle(2)
+            }
+        } else { note("open a place card", false, place ? "tap did not open a card" : "no rendered place reported") }
+        // YouBike: pins appear at street scale once the operator's report is fresh.
+        map.pinch(withScale: 1.8, velocity: 1.5)
+        let bikes = waitUntil(40) { !(self.camera()["visibleBikePins"] as? [[String: Any]] ?? []).isEmpty }
         note("YouBike pins at street scale", bikes)
         if bikes {
             let card = app.descendants(matching: .any).matching(identifier: "bike-station-card").firstMatch
@@ -568,21 +576,18 @@ final class UIUXAuditUsabilityTests: JourneyUsabilityTestBase {
                 if card.waitForExistence(timeout: 4) { break }
             }
             if card.exists {
-                settle(1.5); review("audit-11b-youbike-station")
+                settle(1.5); review("audit-11c-youbike-station")
                 tap(button("bike-station-close"), "close YouBike station", timeout: 5); settle(1.5)
             } else { note("open a YouBike station", false) }
         }
-        // Places: tap labelled points of interest until a place card opens.
-        let placeCard = app.descendants(matching: .any).matching(identifier: "place-card").firstMatch
-        for point in [CGVector(dx: 0.3, dy: 0.35), CGVector(dx: 0.65, dy: 0.42), CGVector(dx: 0.4, dy: 0.55), CGVector(dx: 0.7, dy: 0.3)] {
-            app.coordinate(withNormalizedOffset: point).tap()
-            if placeCard.waitForExistence(timeout: 2.5) { break }
-            if button("關閉選取").exists { button("關閉選取").tap(); settle(1.5) }
+        // Stop markers are reported while the stop list is browsing the map.
+        guard tap(button("站牌"), "stops for map markers", timeout: 10) else { return }
+        let marker = waitUntil(30) { (self.camera()["markerID"] as? String) != nil }
+        note("a stop marker on screen", marker)
+        if marker, let x = camera()["markerX"] as? Double, let y = camera()["markerY"] as? Double {
+            map.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: x, dy: y)).tap()
+            settle(3); review("audit-11d-tapped-stop-marker")
         }
-        if placeCard.exists {
-            settle(1); review("audit-11c-place-card")
-            if tap(button("place-card-route"), "route to the place", timeout: 4) { settle(6); review("audit-11d-route-to-place") }
-        } else { note("open a place card", false, "no labelled place under the probed points") }
     }
 
     // MARK: No location permission (runs last; resets the location permission)

@@ -1477,6 +1477,13 @@ final class TransitAppModel: ObservableObject {
         if let previous = context.flatMap({ metadata.stops[$0] }), previous.direction != self.direction {
             routeBoardingStopID = routeStops.first { $0.name == previous.name && $0.coordinate.distance(to: previous.coordinate) < 250 }?.id
         }
+        // Opened from route search: start at the rider's nearest stop on this direction, as a stop
+        // board would, instead of asking them to find it in a list of every stop on the route.
+        if routeBoardingStopID == nil, let here = location.usableCoordinate,
+           let nearest = routeStops.min(by: { $0.coordinate.distance(to: here) < $1.coordinate.distance(to: here) }),
+           nearest.coordinate.distance(to: here) <= 600 {
+            routeBoardingStopID = nearest.id
+        }
         selectedStationID = nil; selectedVehicleID = nil; following = false; query = ""
         focusMap(.route(route.id)); sheetDetent = .height(520)
         selectionRevision += 1
@@ -2179,7 +2186,14 @@ final class TransitAppModel: ObservableObject {
         JourneyDiagnostics.shared.record("island \(moment) trip=\(planner.started && !planner.arrived) \(rideActivity.nativeSummary)"
             + " state=\(rideActivity.debugState) bg_location=\(location.backgroundNavigation)")
     }
-    func finishJourney() { defer { recordIslandDiagnostics("end") }; clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll() }
+    func finishJourney() {
+        defer { recordIslandDiagnostics("end") }
+        let travelling = planner.started
+        clearJourneySuggestion(); alternativeCheckedAt = .distantPast; alightReminder.reset(); boardedVehicle = nil; boardedAt = nil; selectedTrainID = nil; followingTrain = false; planner.finish(); tripPreference = nil; applyPersonalPreferences(); clearSelection(); anchorBoardedVehicle(); rideActivity.endAll()
+        // After a trip the home screen's nearby stops describe where the rider is now, so the map
+        // returns there too instead of staying on the trip's last view.
+        if travelling, location.usableCoordinate != nil { focusMap(.userLocation) }
+    }
 
     /// Keep the boarding card visible while following the specific physical vehicle the user chose.
     func trackApproachingVehicle(_ vehicle: BusVehicle, userInitiated: Bool = true) {

@@ -2147,7 +2147,9 @@ private struct WaitingBannerContent: View {
                         Text(ride.route.localizedDisplayName).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
                     }
                 }
-                Spacer(minLength: 4)
+                // The instruction takes all the room left beside the wait; hugging its own text, with a
+                // spacer after it, made a narrow column on small screens that cut long stop names short.
+                .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 2) {
                     let wait = ride.route.mode == .bus ? boarding.label : model.metroWaitLabel(ride, at: date)
                     Text(wait).liveFont(.title, weight: .bold, design: .rounded)
@@ -2188,8 +2190,32 @@ private struct BannerTitle: View {
         let large = dynamicTypeSize.isAccessibilitySize
         Group {
             if parts.count < 2 {
-                // A sentence such as 「步行至 …」 has no name to keep whole; it wraps as before.
-                Text(text).lineLimit(large ? 4 : 2).minimumScaleFactor(0.9)
+                // A sentence such as 「步行至 …」 or 「從 內湖站出口1 進站」 stays on one line when it fits;
+                // otherwise Chinese wraps only between words, so on an iPhone SE the stop name is never
+                // split in the middle (「果菜／市場」). English already wraps between words and may step
+                // down in size to stay within three lines instead of being cut short.
+                Group {
+                    if text.unicodeScalars.contains(where: \.properties.isIdeographic) {
+                        ViewThatFits(in: .horizontal) {
+                            Text(text).lineLimit(1)
+                            ChipFlow(spacing: 5) {
+                                ForEach(Array(text.split(separator: " ").enumerated()), id: \.offset) { _, word in
+                                    Text(word).lineLimit(1).minimumScaleFactor(0.75)
+                                }
+                            }
+                        }
+                    } else {
+                        Text(text).lineLimit(large ? nil : 3).minimumScaleFactor(0.8)
+                    }
+                }
+                // VoiceOver reads the sentence once, from an element covering the instruction's column,
+                // instead of word by word.
+                .accessibilityElement(children: .ignore)
+                .accessibilityHidden(true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    Color.clear.accessibilityElement().accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
+                }
             } else {
                 ViewThatFits(in: .horizontal) {
                     Text(text).lineLimit(1)

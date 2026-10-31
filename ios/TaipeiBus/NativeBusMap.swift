@@ -27,6 +27,8 @@ struct NativeBusMap: UIViewRepresentable {
         map.automaticallyAdjustsContentInset = false
         map.showsUserLocation = false // A single Core Location service owns permission and location requests.
         map.showsLogoView = false
+        // Until the style draws, show the map's own ground (the launch screen's colour) instead of black.
+        map.backgroundColor = UIColor(named: "LaunchBackground")
         map.attributionButtonPosition = .bottomLeft
         map.attributionButtonMargins = CGPoint(x: 16, y: 12)
         // Keep the OpenStreetMap credit, but as quiet as Apple's legal link.
