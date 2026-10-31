@@ -58,44 +58,70 @@ public enum BikeRouting {
             dropoffStations: network.stations(near: to, radius: preferences.bikeAccessMeters, limit: network.stations.count),
             availability: availability, preferences: preferences, at: date, limit: limit)
     }
+    /// A station with a fresh, active dock holding enough bikes (or free docks) to plan on.
+    fileprivate struct UsableStation { let station: BikeStation; let count: Int; let dock: BikeDock }
+    /// The first eight usable stations, in the order given.
+    fileprivate static func usable(_ stations: [BikeStation], renting: Bool, availability: BikeAvailability,
+                                   preferences: LiveSettings.Planning, at date: Date) -> [UsableStation] {
+        var result: [UsableStation] = []
+        for station in stations {
+            guard let dock = availability.dock(station.id, at: date), dock.active else { continue }
+            let count = renting ? dock.rentable : dock.returnable
+            let needed = renting ? preferences.bikeMinimumBikes : preferences.bikeMinimumDocks
+            guard Double(count) >= needed else { continue }
+            result.append(UsableStation(station: station, count: count, dock: dock))
+            if result.count == 8 { break }
+        }
+        return result
+    }
+
     fileprivate static func pairs(from: Coordinate, to: Coordinate, direct: Double,
                                   pickupStations: [BikeStation], dropoffStations: [BikeStation],
                                   availability: BikeAvailability, preferences: LiveSettings.Planning,
                                   at date: Date, limit: Int) -> [BikeConnection] {
-        func usable(_ station: BikeStation, renting: Bool) -> Int? {
-            guard let dock = availability.dock(station.id, at: date), dock.active else { return nil }
-            let count = renting ? dock.rentable : dock.returnable
-            let needed = renting ? preferences.bikeMinimumBikes : preferences.bikeMinimumDocks
-            return Double(count) >= needed ? count : nil
-        }
-        let pickups = pickupStations
-            .compactMap { station in usable(station, renting: true).map { (station: station, count: $0) } }.prefix(8)
+        let pickups = usable(pickupStations, renting: true, availability: availability, preferences: preferences, at: date)
         guard !pickups.isEmpty else { return [] }
-        let dropoffs = dropoffStations
-            .compactMap { station in usable(station, renting: false).map { (station: station, count: $0) } }.prefix(8)
-        guard !dropoffs.isEmpty else { return [] }
-        var candidates: [(connection: BikeConnection, cost: Double)] = []
-        for pickup in pickups {
+        let dropoffs = usable(dropoffStations, renting: false, availability: availability, preferences: preferences, at: date)
+        return pairs(from: from, to: to, direct: direct, pickups: pickups, dropoffs: dropoffs, preferences: preferences, at: date, limit: limit)
+    }
+
+    /// Every pair is ranked from its numbers; only the pairs kept become connections.
+    fileprivate static func pairs(from: Coordinate, to: Coordinate, direct: Double,
+                                  pickups: [UsableStation], dropoffs: [UsableStation],
+                                  preferences: LiveSettings.Planning, at date: Date, limit: Int) -> [BikeConnection] {
+        guard !pickups.isEmpty, !dropoffs.isEmpty else { return [] }
+        struct Pair { let pickup: Int; let dropoff: Int; let access: Double; let ride: Double; let egress: Double; let cost: Double }
+        let egresses = dropoffs.map { $0.station.coordinate.distance(to: to) }
+        var candidates: [Pair] = []
+        for (p, pickup) in pickups.enumerated() {
             let access = from.distance(to: pickup.station.coordinate)
-            for dropoff in dropoffs where dropoff.station.id != pickup.station.id {
+            for (d, dropoff) in dropoffs.enumerated() where dropoff.station.id != pickup.station.id {
                 let straight = pickup.station.coordinate.distance(to: dropoff.station.coordinate)
                 guard straight >= preferences.bikeMinimumRideMeters, straight <= preferences.bikeMaximumRideMeters else { continue }
-                let egress = dropoff.station.coordinate.distance(to: to)
+                let egress = egresses[d]
                 // Two detours around the direct line are a walk with extra steps, not a shortcut.
                 guard access + straight + egress <= direct * 1.6 + 600 else { continue }
                 let ride = straight * cyclingDetour
-                let candidate = BikeConnection(pickup: pickup.station, dropoff: dropoff.station,
-                    bikes: pickup.count, docks: dropoff.count, accessMeters: access, rideMeters: ride, egressMeters: egress,
-                    accessSeconds: walkingSeconds(access), rideSeconds: ride / preferences.bikeSpeed,
-                    egressSeconds: walkingSeconds(egress), handlingSeconds: preferences.bikeHandlingSeconds)
-                candidates.append((candidate,candidate.totalSeconds + supplyPenalty(candidate, availability: availability, at: date)))
+                // The same arithmetic as BikeConnection.totalSeconds and supplyPenalty(_:).
+                let total = walkingSeconds(access) + preferences.bikeHandlingSeconds + ride / preferences.bikeSpeed + walkingSeconds(egress)
+                let penalty = stationPenalty(pickup.dock, renting: true, after: 0, at: date) +
+                    stationPenalty(dropoff.dock, renting: false, after: max(0 + total, 0), at: date)
+                candidates.append(Pair(pickup: p, dropoff: d, access: access, ride: ride, egress: egress, cost: total + penalty))
             }
         }
-        return Array(candidates.sorted {
+        func pairID(_ pair: Pair) -> String { pickups[pair.pickup].station.id + ":" + dropoffs[pair.dropoff].station.id }
+        return candidates.sorted {
             if $0.cost != $1.cost { return $0.cost < $1.cost }
-            if $0.connection.bikes != $1.connection.bikes { return $0.connection.bikes > $1.connection.bikes }
-            return pairID($0.connection) < pairID($1.connection)
-        }.prefix(min(8, limit)).map(\.connection))
+            let a = pickups[$0.pickup].count, b = pickups[$1.pickup].count
+            if a != b { return a > b }
+            return pairID($0) < pairID($1)
+        }.prefix(min(8, limit)).map { pair in
+            let pickup = pickups[pair.pickup], dropoff = dropoffs[pair.dropoff]
+            return BikeConnection(pickup: pickup.station, dropoff: dropoff.station,
+                bikes: pickup.count, docks: dropoff.count, accessMeters: pair.access, rideMeters: pair.ride, egressMeters: pair.egress,
+                accessSeconds: walkingSeconds(pair.access), rideSeconds: pair.ride / preferences.bikeSpeed,
+                egressSeconds: walkingSeconds(pair.egress), handlingSeconds: preferences.bikeHandlingSeconds)
+        }
     }
 
     public static func pairID(_ connection: BikeConnection) -> String { connection.pickup.id + ":" + connection.dropoff.id }
@@ -119,17 +145,18 @@ public enum BikeRouting {
     public static func supplyPenalty(_ connection: BikeConnection, availability: BikeAvailability?,
                                      pickupAfter: Double = 0, dropoffAfter: Double = 0,
                                      at date: Date = Date()) -> Double {
-        func cost(_ station: BikeStation, renting: Bool, after: Double) -> Double {
-            guard let dock = availability?.dock(station.id, at: date), dock.active else { return .infinity }
-            let count = renting ? dock.rentable : dock.returnable
-            guard count >= 2 else { return .infinity }
-            let low: Double = count <= 2 ? 120 : count <= 5 ? 60 : 0
-            let later = count <= 5 ? min(180, max(0, after - 300) / 5) : 0
-            let age = min(180, max(0, date.timeIntervalSince(dock.observedAt) - 120) / 3)
-            return low + later + age
-        }
-        return cost(connection.pickup, renting: true, after: pickupAfter) +
-            cost(connection.dropoff, renting: false, after: max(pickupAfter + connection.totalSeconds, dropoffAfter))
+        stationPenalty(availability?.dock(connection.pickup.id, at: date), renting: true, after: pickupAfter, at: date) +
+            stationPenalty(availability?.dock(connection.dropoff.id, at: date), renting: false,
+                after: max(pickupAfter + connection.totalSeconds, dropoffAfter), at: date)
+    }
+    fileprivate static func stationPenalty(_ dock: BikeDock?, renting: Bool, after: Double, at date: Date) -> Double {
+        guard let dock, dock.active else { return .infinity }
+        let count = renting ? dock.rentable : dock.returnable
+        guard count >= 2 else { return .infinity }
+        let low: Double = count <= 2 ? 120 : count <= 5 ? 60 : 0
+        let later = count <= 5 ? min(180, max(0, after - 300) / 5) : 0
+        let age = min(180, max(0, date.timeIntervalSince(dock.observedAt) - 120) / 3)
+        return low + later + age
     }
 
     /// Cycling replaces a walk only when it saves real time. What counts as real depends on
@@ -194,6 +221,9 @@ final class BikeConnectionSearch {
     let date: Date
     private let feederOnly: Bool
     private var nearby: [Coordinate: [BikeStation]] = [:]
+    /// Each point's usable stations, checked once per search instead of once per pair of points.
+    private var pickupsNear: [Coordinate: [BikeRouting.UsableStation]] = [:]
+    private var dropoffsNear: [Coordinate: [BikeRouting.UsableStation]] = [:]
     init(network: BikeNetwork, availability: BikeAvailability?, preferences: LiveSettings.Planning, at date: Date,
          feederOnly: Bool = false) {
         self.network = network; self.availability = availability
@@ -209,8 +239,17 @@ final class BikeConnectionSearch {
         let direct = from.distance(to: to)
         guard preferences.bikeRouting, let availability, !network.stations.isEmpty, limit > 0,
               direct >= preferences.bikeMinimumRideMeters, from.isInServiceArea, to.isInServiceArea else { return [] }
-        let pairs = BikeRouting.pairs(from: from, to: to, direct: direct, pickupStations: stations(near: from), dropoffStations: stations(near: to),
-            availability: availability, preferences: preferences, at: date, limit: feederOnly ? 8 : limit)
+        let pickups = pickupsNear[from] ?? {
+            let value = BikeRouting.usable(stations(near: from), renting: true, availability: availability, preferences: preferences, at: date)
+            pickupsNear[from] = value; return value
+        }()
+        guard !pickups.isEmpty else { return [] }
+        let dropoffs = dropoffsNear[to] ?? {
+            let value = BikeRouting.usable(stations(near: to), renting: false, availability: availability, preferences: preferences, at: date)
+            dropoffsNear[to] = value; return value
+        }()
+        let pairs = BikeRouting.pairs(from: from, to: to, direct: direct, pickups: pickups, dropoffs: dropoffs,
+            preferences: preferences, at: date, limit: feederOnly ? 8 : limit)
         return feederOnly ? Array(pairs.filter(TransitBikePolicy.isFeederCandidate).prefix(limit)) : pairs
     }
 }

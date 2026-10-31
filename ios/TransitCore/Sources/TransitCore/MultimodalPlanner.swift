@@ -3,7 +3,8 @@ import Foundation
 /// Round-based transit search. Each round adds one actual operating pattern;
 /// shared station names never splice trains or buses into a fictitious direct service.
 public struct MultimodalPlanner: Sendable {
-    private struct Pattern: Sendable {
+    /// A class, so the search's many reads of a pattern share it instead of copying its arrays.
+    private final class Pattern: Sendable {
         let route: BusRoute
         let direction: String
         let stops: [BusStop]
@@ -14,7 +15,12 @@ public struct MultimodalPlanner: Sendable {
         let fallback: [Double]
         let meters: [Double]
         /// Per bus segment, the source `timed` used, so the current estimates replace only paced segments.
-        var sources: [TravelTimeModel.Source] = []
+        let sources: [TravelTimeModel.Source]
+        init(route: BusRoute, direction: String, stops: [BusStop], cumulative: [Double], dwell: [Double],
+             windows: [BusServiceWindow?], fallback: [Double], meters: [Double], sources: [TravelTimeModel.Source] = []) {
+            self.route = route; self.direction = direction; self.stops = stops; self.cumulative = cumulative; self.dwell = dwell
+            self.windows = windows; self.fallback = fallback; self.meters = meters; self.sources = sources
+        }
         /// Bus times for the query hour by the shared rule (TravelTimeModel).
         func timed(_ times: OfficialTravelTimes, at date: Date, tuning: ForecastTuning) -> Pattern {
             guard route.mode == .bus else { return self }
@@ -57,7 +63,9 @@ public struct MultimodalPlanner: Sendable {
     }
     private struct Segment: Sendable { let pattern: Int; let first: Int; let last: Int }
     private struct Link: Sendable { let id: String; let distance: Double; let seconds: Double; let internalWalk: Bool }
-    private struct Label: Sendable {
+    /// A class, so pools and candidates share a label instead of copying its arrays. A label is
+    /// only changed while it is being made, before any pool or other thread can see it.
+    private final class Label: @unchecked Sendable {
         let segments: [Segment]
         let access: Double
         let distances: [Double]
@@ -68,6 +76,12 @@ public struct MultimodalPlanner: Sendable {
         let lastStation: String
         let hasRail: Bool
         let family: String
+        init(segments: [Segment], access: Double, distances: [Double], transferSeconds: [Double], elapsed: Double,
+             walking: Double, cost: Double, lastStation: String, hasRail: Bool, family: String) {
+            self.segments = segments; self.access = access; self.distances = distances; self.transferSeconds = transferSeconds
+            self.elapsed = elapsed; self.walking = walking; self.cost = cost; self.lastStation = lastStation
+            self.hasRail = hasRail; self.family = family
+        }
         var bikes: [Int: BikeConnection] = [:]
         var supplyRisk: Double = 0
         var lastWalk: Double = 0
@@ -195,17 +209,35 @@ public struct MultimodalPlanner: Sendable {
         var accessBikes: [String: [BikeConnection]] = [:], egressBikes: [String: [BikeConnection]] = [:]
         let bikeSearch = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date, feederOnly:true)
         if cycling {
-            for (id, stop) in stationStops {
-                let access = streetDistance(stop, to: origin), egress = streetDistance(stop, to: destination)
-                if access >= preferences.bikeMinimumRideMeters, access <= bikeRadius {
-                    let entry = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: origin)?.coordinate ?? stop.coordinate
-                    accessBikes[id] = bikeSearch.connections(from: origin, to: entry)
-                }
-                if egress >= preferences.bikeMinimumRideMeters, egress <= bikeRadius {
-                    let exit = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
-                    egressBikes[id] = bikeSearch.connections(from: exit, to: destination)
+            // Every station is independent here, so they are worked out in parallel, each group
+            // with its own search.
+            let ids = stationStops.keys.sorted()
+            let groupSize = max(1, (ids.count + 31) / 32)
+            let chunks = stride(from: 0, to: ids.count, by: groupSize).map { ids[$0..<min(ids.count, $0 + groupSize)] }
+            var found = [[(id: String, access: [BikeConnection]?, egress: [BikeConnection]?)]](repeating: [], count: chunks.count)
+            found.withUnsafeMutableBufferPointer { output in
+                DispatchQueue.concurrentPerform(iterations: chunks.count) { chunk in
+                    let search = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability, preferences: preferences, at: date, feederOnly: true)
+                    output[chunk] = chunks[chunk].map { id in
+                        let stop = stationStops[id]!
+                        let access = streetDistance(stop, to: origin), egress = streetDistance(stop, to: destination)
+                        var accessBikes: [BikeConnection]?, egressBikes: [BikeConnection]?
+                        if access >= preferences.bikeMinimumRideMeters, access <= bikeRadius {
+                            let entry = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: origin)?.coordinate ?? stop.coordinate
+                            accessBikes = search.connections(from: origin, to: entry)
+                        }
+                        if egress >= preferences.bikeMinimumRideMeters, egress <= bikeRadius {
+                            let exit = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
+                            egressBikes = search.connections(from: exit, to: destination)
+                        }
+                        return (id, accessBikes, egressBikes)
+                    }
                 }
             }
+            for list in found { for item in list {
+                if let value = item.access { accessBikes[item.id] = value }
+                if let value = item.egress { egressBikes[item.id] = value }
+            } }
         }
         let bus = busPlanner.plan(from: origin, to: destination, maximumWalk: maximumWalk, limit: limit,
             preferences: preferences, estimates: estimates, at: date, preservePlatforms: true,
@@ -217,7 +249,7 @@ public struct MultimodalPlanner: Sendable {
             let distance = streetDistance(stop, to: origin)
             if distance <= maximumWalk {
                 let walking = distance * 1.25 / 1.2 + (stop.mode != .bus ? 120 : 0)
-                var label = Label(segments: [], access: distance, distances: [], transferSeconds: [], elapsed: walking,
+                let label = Label(segments: [], access: distance, distances: [], transferSeconds: [], elapsed: walking,
                     walking: walking, cost: walking * (preferences.walkingWeight + 0.35), lastStation: id, hasRail: false, family: "")
                 label.lastWalk = walking; previous[id] = [label]
             }
@@ -225,7 +257,7 @@ public struct MultimodalPlanner: Sendable {
                 let station = stop.mode == .bus ? 0.0 : 120.0
                 let elapsed = bike.totalSeconds + station, walking = bike.accessSeconds + bike.egressSeconds + station
                 let risk = BikeRouting.supplyPenalty(bike, availability: bikeAvailability, at: date)
-                var label = Label(segments: [], access: distance, distances: [], transferSeconds: [], elapsed: elapsed,
+                let label = Label(segments: [], access: distance, distances: [], transferSeconds: [], elapsed: elapsed,
                     walking: walking, cost: JourneyPreferenceCost.score(elapsed: elapsed, walking: walking, waiting: 0,
                         transfers: 0, rentals: 1, unknownWaits: 0, supplyRisk: risk, preferences: preferences),
                     lastStation: id, hasRail: false, family: "")
@@ -236,8 +268,14 @@ public struct MultimodalPlanner: Sendable {
         var candidates: [Candidate] = []
         let secondsOfDay = BusServiceWindow.secondsOfDay(at: date)
         let minimumWaits = patterns.map { $0.route.minimumServiceWait(direction: $0.direction, at: date, fullRouteSeconds: $0.cumulative.last ?? 0) }
-        var serviceCache: [String: BusDayService] = [:]
-        func service(_ index: Int, ready: Double) -> BusDayService {
+        // The patterns of a round are expanded in parallel, in fixed groups. Each group keeps its
+        // own caches across rounds; every cache key names its pattern, so a value is always
+        // computed by the same first call as when the patterns were expanded one after another.
+        let groupCount = max(1, min(patterns.count, ProcessInfo.processInfo.activeProcessorCount * 8))
+        let groups = (0..<groupCount).map { (patterns.count * $0 / groupCount)..<(patterns.count * ($0 + 1) / groupCount) }
+        var serviceCaches = [[String: BusDayService]](repeating: [:], count: groupCount)
+        var railCaches = [[String: BusDayService]](repeating: [:], count: groupCount)
+        func service(_ index: Int, ready: Double, cache serviceCache: inout [String: BusDayService]) -> BusDayService {
             let key = "\(index):\(Int(ready / 60))"
             if let value = serviceCache[key] { return value }
             let pattern = patterns[index], value: BusDayService
@@ -246,8 +284,7 @@ public struct MultimodalPlanner: Sendable {
             serviceCache[key] = value; return value
         }
         // Rail waits count every service that stops here and reaches the destination stop.
-        var railCache: [String: BusDayService] = [:]
-        func railService(_ index: Int, from: Int, to: Int?, ready: Double) -> BusDayService {
+        func railService(_ index: Int, from: Int, to: Int?, ready: Double, cache railCache: inout [String: BusDayService]) -> BusDayService {
             let key = "\(index):\(from):\(to ?? -1):\(Int(ready / 60))"
             if let value = railCache[key] { return value }
             let pattern = patterns[index]
@@ -259,34 +296,64 @@ public struct MultimodalPlanner: Sendable {
         // Bike transfers are street connections in the same search, not a later rewrite
         // of a route already selected for walking. The spatial index and corridor diversity
         // bound work without selecting only the two nearest metro lines.
-        func transferCell(_ point: Coordinate) -> String {
-            "\(Int(floor(point.longitude / 0.01))):\(Int(floor(point.latitude / 0.01)))"
-        }
-        let transferGrid = cycling ? Dictionary(grouping: stationStops.values, by: { transferCell($0.coordinate) }) : [:]
-        let destinationPotential = cycling ? stationStops.mapValues { $0.coordinate.distance(to: destination) / 12 } : [:]
+        // Cells are numbered rather than named, and each station's distance to the destination is
+        // kept beside it, because every transfer station scans the 49 cells around it.
+        func transferCell(_ x: Int, _ y: Int) -> Int { x &* 1_000_003 &+ y }
+        let transferStops = cycling ? Array(stationStops.values) : []
+        let transferGrid = Dictionary(grouping: transferStops.indices, by: {
+            transferCell(Int(floor(transferStops[$0].coordinate.longitude / 0.01)), Int(floor(transferStops[$0].coordinate.latitude / 0.01)))
+        })
+        let destinationPotential = transferStops.map { $0.coordinate.distance(to: destination) / 12 }
+        let transferIDs = transferStops.map(\.stationID), transferPoints = transferStops.map(\.coordinate)
         var streetLinks: [String: [(Link, BikeConnection?)]] = [:]
-        func connections(from id: String) -> [(Link, BikeConnection?)] {
-            if let cached = streetLinks[id] { return cached }
+        /// A station's walking links and, when cycling, its bicycle links. It reads only what the
+        /// search fixed beforehand, so several stations can be worked out at once, each with its own `search`.
+        func streetConnections(from id: String, search bikeSearch: BikeConnectionSearch) -> [(Link, BikeConnection?)] {
             var result = (links[id] ?? []).map { ($0, Optional<BikeConnection>.none) }
-            guard cycling, let stop = stationStops[id] else { streetLinks[id] = result; return result }
+            guard cycling, let stop = stationStops[id] else { return result }
             let start = stop.mode == .bus ? stop.coordinate : metadata.metro.nearestExit(stationID: id, to: destination)?.coordinate ?? stop.coordinate
             guard bikeSearch.stations(near: start).contains(where: {
                 BikeRouting.confirmed($0, availability: bikeAvailability, renting: true, at: date)
-            }) else { streetLinks[id] = result; return result }
-            var scoredTargets: [(stop: BusStop, cost: Double)] = []
+            }) else { return result }
+            // Targets in order of cost, then station: the rail targets all, the rest only until
+            // the corridor slots fill, so they are drawn from a heap instead of sorting thousands.
+            var heap: [(cost: Double, index: Int)] = []
             let indoors = Set((links[id] ?? []).filter(\.internalWalk).map(\.id))
             let x = Int(floor(start.longitude / 0.01)), y = Int(floor(start.latitude / 0.01))
             for dx in -3...3 { for dy in -3...3 {
-                for other in transferGrid["\(x + dx):\(y + dy)"] ?? [] where other.stationID != id && !indoors.contains(other.stationID) {
-                    let distance = start.distance(to: other.coordinate)
+                for index in transferGrid[transferCell(x + dx, y + dy)] ?? [] {
+                    guard transferIDs[index] != id, !indoors.contains(transferIDs[index]) else { continue }
+                    let distance = start.distance(to: transferPoints[index])
                     if distance >= preferences.bikeMinimumRideMeters, distance <= min(2_500, bikeRadius) {
-                        scoredTargets.append((other,distance / preferences.bikeSpeed + (destinationPotential[other.stationID] ?? 0)))
+                        heap.append((distance / preferences.bikeSpeed + destinationPotential[index], index))
                     }
                 }
             } }
-            let targets = scoredTargets.sorted {
-                $0.cost == $1.cost ? $0.stop.stationID < $1.stop.stationID : $0.cost < $1.cost
-            }.map(\.stop)
+            func precedes(_ a: (cost: Double, index: Int), _ b: (cost: Double, index: Int)) -> Bool {
+                a.cost == b.cost ? transferIDs[a.index] < transferIDs[b.index] : a.cost < b.cost
+            }
+            let railTargets = heap.filter { transferStops[$0.index].mode != .bus }.sorted(by: precedes).map { transferStops[$0.index] }
+            func siftDown(_ start: Int, _ count: Int) {
+                var parent = start
+                while true {
+                    let left = 2 * parent + 1, right = left + 1
+                    var smallest = parent
+                    if left < count, precedes(heap[left], heap[smallest]) { smallest = left }
+                    if right < count, precedes(heap[right], heap[smallest]) { smallest = right }
+                    if smallest == parent { return }
+                    heap.swapAt(parent, smallest); parent = smallest
+                }
+            }
+            for index in stride(from: heap.count / 2 - 1, through: 0, by: -1) { siftDown(index, heap.count) }
+            var remaining = heap.count
+            func nextTarget() -> BusStop? {
+                guard remaining > 0 else { return nil }
+                let first = heap[0]
+                remaining -= 1
+                heap.swapAt(0, remaining)
+                siftDown(0, remaining)
+                return transferStops[first.index]
+            }
             var corridors = Set<String>(), added = Set<String>()
             // Include every published outdoor interchange even when its corridor is also
             // represented by another nearby station. Indoor transfers never rent a bike.
@@ -295,12 +362,12 @@ public struct MultimodalPlanner: Sendable {
             // Nearby bus route numbers must not crowd every rail line out of the
             // transfer budget. Include the nearest useful platform of each line,
             // then fill the remaining corridor slots using the same travel bound.
-            for other in targets where other.mode != .bus {
+            for other in railTargets {
                 let route = metadata.routes[other.routeID]
                 let corridor = "rail:" + (route?.lineCode ?? other.routeID)
                 if corridors.insert(corridor).inserted { eligible.append(other) }
             }
-            for other in targets {
+            while let other = nextTarget() {
                 let route = metadata.routes[other.routeID]
                 let corridor = other.mode == .bus ? "bus:" + (route?.parentID ?? other.routeID) : "rail:" + (route?.lineCode ?? other.routeID)
                 if corridors.insert(corridor).inserted { eligible.append(other) }
@@ -314,6 +381,11 @@ public struct MultimodalPlanner: Sendable {
                     result.append((Link(id: other.stationID, distance: distance, seconds: bike.totalSeconds + station, internalWalk: false), bike))
                 }
             }
+            return result
+        }
+        func connections(from id: String) -> [(Link, BikeConnection?)] {
+            if let cached = streetLinks[id] { return cached }
+            let result = streetConnections(from: id, search: bikeSearch)
             streetLinks[id] = result; return result
         }
         func materialize(_ values: [Candidate], maximum: Int) -> [TransitTrip] {
@@ -371,17 +443,21 @@ public struct MultimodalPlanner: Sendable {
             }
             var arrived: [String: [Label]] = [:]
             func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
-                var pool = values[id] ?? []
                 // A cheaper but later label must not erase a path which can catch an
                 // earlier connection. Rental count and remaining boarding time both matter.
-                if pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
+                if let pool = values[id], pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
                     $0.bikes.count <= label.bikes.count && $0.hasRail == label.hasRail && $0.previousSpread <= label.previousSpread &&
                     $0.unknownWaits <= label.unknownWaits }) { return }
+                // The pool is changed where it is stored; a copy taken out and written back
+                // duplicated the whole pool on every insertion.
+                prune(&values[id, default: []], with: label)
+            }
+            func prune(_ pool: inout [Label], with label: Label) {
                 pool.removeAll { label.cost <= $0.cost && label.elapsed <= $0.elapsed && label.walking <= $0.walking &&
                     label.bikes.count <= $0.bikes.count && label.hasRail == $0.hasRail && label.previousSpread <= $0.previousSpread &&
                     label.unknownWaits <= $0.unknownWaits }
                 pool.append(label)
-                guard pool.count > budget.labels else { values[id] = pool; return }
+                guard pool.count > budget.labels else { return }
                 pool.sort { $0.cost == $1.cost ? $0.elapsed < $1.elapsed : $0.cost < $1.cost }
                 // Preserve the earliest connection and least walking, not a rectangle
                 // made from several different labels which can erase a useful tradeoff.
@@ -393,87 +469,100 @@ public struct MultimodalPlanner: Sendable {
                     if !kept.contains(where: { $0.elapsed == candidate.elapsed && $0.walking == candidate.walking &&
                         $0.cost == candidate.cost && $0.family == candidate.family && $0.bikeMask == candidate.bikeMask }) { kept.append(candidate) }
                 }
-                values[id] = kept
+                pool = kept
             }
-            for (pIndex, pattern) in patterns.enumerated() {
-                var boarding: [(label: Label, index: Int, wait: Double, railHeadway: Double?, unknown: Bool)] = []
-                for index in pattern.stops.indices {
-                    let stop = pattern.stops[index]
-                    // Ride only after boarding; this prevents zero-station transfer legs.
-                    for boarded in boarding {
-                        let source = boarded.label, seconds: Double
-                        let boardingDwell = boarded.index > 0 && pattern.dwell.indices.contains(boarded.index) ? pattern.dwell[boarded.index] : 0
-                        seconds = pattern.cumulative[index] - pattern.cumulative[boarded.index] - boardingDwell
-                        let fixedCost = source.cost + seconds + (boarded.unknown ? 180 : 0) + (round > 0 ? preferences.effectiveTransferPenaltySeconds : 0)
-                        if fixedCost + boarded.wait * preferences.waitingWeight > ceiling(source) { continue }
-                        // Short-turn trains that stop short of this stop do not help: wait for
-                        // the sparser service that does reach it.
-                        var wait = boarded.wait
-                        if let near = boarded.railHeadway,
-                           let far = railService(pIndex, from: boarded.index, to: index, ready: source.elapsed).headway?.midpoint,
-                           far > near { wait *= far / near }
-                        let elapsed = source.elapsed + wait + seconds
-                        guard elapsed.isFinite, elapsed < 4 * 3600 else { continue }
-                        let cost = fixedCost + wait * preferences.waitingWeight
-                        if cost > ceiling(source) { continue }
-                        var label = Label(segments: source.segments + [Segment(pattern: pIndex, first: boarded.index, last: index)],
-                            access: source.access, distances: source.distances, transferSeconds: source.transferSeconds,
-                            elapsed: elapsed, walking: source.walking,
-                            cost: cost,
-                            lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus,
-                            family: source.family + "|" + pattern.route.parentID)
-                        label.bikes = source.bikes; label.supplyRisk = source.supplyRisk
-                        label.unknownWaits = source.unknownWaits + (boarded.unknown ? 1 : 0)
-                        label.previousSpread = seconds * (pattern.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
-                        insert(label, in: &arrived, at: stop.stationID)
-                    }
-                    guard index < pattern.stops.count - 1 else { continue }
-                    for source in previous[stop.stationID] ?? [] {
-                        if source.segments.contains(where: { $0.pattern == pIndex }) { continue }
-                        if let last = source.segments.last {
-                            let previousRoute = patterns[last.pattern].route
-                            // Bus-only chains are already handled by the indexed bus planner.
-                            // A mixed search must not expand the entire city's bus–bus graph
-                            // before it has entered rail; one feeder on each side is retained.
-                            // The indexed bus planner covers ordinary bus-bus changes.
-                            // The round search adds bus-bus links when a real bicycle
-                            // connection between them makes a new boarding point reachable.
-                            if previousRoute.mode == .bus && pattern.route.mode == .bus &&
-                                source.bikes[source.segments.count] == nil { continue }
-                            if previousRoute.mode == .bus && pattern.route.mode == .bus && previousRoute.parentID == pattern.route.parentID { continue }
-                            if patterns[last.pattern].stops[last.first].stationID == stop.stationID { continue }
+            // Each group lists its labels in pattern order; inserting the lists one after another
+            // gives the same pools as expanding every pattern in turn.
+            var expanded = [[(String, Label)]](repeating: [], count: groupCount)
+            let reached = previous
+            expanded.withUnsafeMutableBufferPointer { output in
+            serviceCaches.withUnsafeMutableBufferPointer { serviceSlots in
+            railCaches.withUnsafeMutableBufferPointer { railSlots in
+            DispatchQueue.concurrentPerform(iterations: groupCount) { group in
+                var found: [(String, Label)] = []
+                for pIndex in groups[group] {
+                    let pattern = patterns[pIndex]
+                        var boarding: [(label: Label, index: Int, wait: Double, railHeadway: Double?, unknown: Bool)] = []
+                        for index in pattern.stops.indices {
+                            let stop = pattern.stops[index]
+                            // Ride only after boarding; this prevents zero-station transfer legs.
+                            for boarded in boarding {
+                                let source = boarded.label, seconds: Double
+                                let boardingDwell = boarded.index > 0 && pattern.dwell.indices.contains(boarded.index) ? pattern.dwell[boarded.index] : 0
+                                seconds = pattern.cumulative[index] - pattern.cumulative[boarded.index] - boardingDwell
+                                let fixedCost = source.cost + seconds + (boarded.unknown ? 180 : 0) + (round > 0 ? preferences.effectiveTransferPenaltySeconds : 0)
+                                if fixedCost + boarded.wait * preferences.waitingWeight > ceiling(source) { continue }
+                                // Short-turn trains that stop short of this stop do not help: wait for
+                                // the sparser service that does reach it.
+                                var wait = boarded.wait
+                                if let near = boarded.railHeadway,
+                                   let far = railService(pIndex, from: boarded.index, to: index, ready: source.elapsed, cache: &railSlots[group]).headway?.midpoint,
+                                   far > near { wait *= far / near }
+                                let elapsed = source.elapsed + wait + seconds
+                                guard elapsed.isFinite, elapsed < 4 * 3600 else { continue }
+                                let cost = fixedCost + wait * preferences.waitingWeight
+                                if cost > ceiling(source) { continue }
+                                let label = Label(segments: source.segments + [Segment(pattern: pIndex, first: boarded.index, last: index)],
+                                    access: source.access, distances: source.distances, transferSeconds: source.transferSeconds,
+                                    elapsed: elapsed, walking: source.walking,
+                                    cost: cost,
+                                    lastStation: stop.stationID, hasRail: source.hasRail || pattern.route.mode != .bus,
+                                    family: source.family + "|" + pattern.route.parentID)
+                                label.bikes = source.bikes; label.supplyRisk = source.supplyRisk
+                                label.unknownWaits = source.unknownWaits + (boarded.unknown ? 1 : 0)
+                                label.previousSpread = seconds * (pattern.route.mode == .bus ? RidingTimeEstimate.Evidence.officialProfile : .railProfile).spreadFraction
+                                found.append((stop.stationID, label))
+                            }
+                            guard index < pattern.stops.count - 1 else { continue }
+                            for source in reached[stop.stationID] ?? [] {
+                                if source.segments.contains(where: { $0.pattern == pIndex }) { continue }
+                                if let last = source.segments.last {
+                                    let previousRoute = patterns[last.pattern].route
+                                    // Bus-only chains are already handled by the indexed bus planner.
+                                    // A mixed search must not expand the entire city's bus–bus graph
+                                    // before it has entered rail; one feeder on each side is retained.
+                                    // The indexed bus planner covers ordinary bus-bus changes.
+                                    // The round search adds bus-bus links when a real bicycle
+                                    // connection between them makes a new boarding point reachable.
+                                    if previousRoute.mode == .bus && pattern.route.mode == .bus &&
+                                        source.bikes[source.segments.count] == nil { continue }
+                                    if previousRoute.mode == .bus && pattern.route.mode == .bus && previousRoute.parentID == pattern.route.parentID { continue }
+                                    if patterns[last.pattern].stops[last.first].stationID == stop.stationID { continue }
+                                }
+                                let rail = pattern.route.mode != .bus
+                                let currentService = rail ? railService(pIndex, from: index, to: nil, ready: source.elapsed, cache: &railSlots[group]) : service(pIndex, ready: source.elapsed, cache: &serviceSlots[group])
+                                let official = estimates.value(routeID: pattern.route.parentID, stopID: stop.id, at: date)
+                                if let official, [-2,-3,-4].contains(official) { continue }
+                                // No rail service runs from here right now (e.g. a short-turn pattern
+                                // published as 0 for this period): never treat that as a short wait.
+                                if rail, official == nil, currentService.headway == nil { continue }
+                                let buffer = ConnectionTiming.buffer(first: round == 0, walking: source.lastWalk,
+                                    from: source.segments.last.map { patterns[$0.pattern].route.mode }, to: pattern.route.mode,
+                                    internalTransfer: source.internalWalk, samePlatform: source.segments.last.map {
+                                        patterns[$0.pattern].stops[$0.last].stationID == stop.stationID
+                                    } ?? false, previousSpread: source.previousSpread)
+                                let wait = BoardingTime.wait(official: official, readyAt: source.elapsed, buffer: buffer,
+                                    service: currentService, secondsOfDay: secondsOfDay, boardingOffset: pattern.cumulative[index], minimumServiceWait: minimumWaits[pIndex])
+                                if pattern.route.mode != .bus && wait.evidence != .official {
+                                    guard pattern.windows.indices.contains(index), let window = pattern.windows[index] else { continue }
+                                    let t = (secondsOfDay + source.elapsed + wait.seconds).truncatingRemainder(dividingBy: 86400)
+                                    let first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
+                                    if first <= last ? t < first || t > last : t < first && t > last { continue }
+                                }
+                                boarding.append((source, index, wait.seconds,
+                                                 rail && wait.evidence == .headway ? currentService.headway?.midpoint : nil,
+                                                 wait.evidence == .unknown))
+                            }
+                            // Keep independent arrival/walking tradeoffs without a combinatorial explosion.
+                            if boarding.count > 8 {
+                                boarding.sort { ($0.label.cost + $0.wait - pattern.cumulative[$0.index]) < ($1.label.cost + $1.wait - pattern.cumulative[$1.index]) }
+                                boarding = Array(boarding.prefix(8))
+                            }
                         }
-                        let rail = pattern.route.mode != .bus
-                        let currentService = rail ? railService(pIndex, from: index, to: nil, ready: source.elapsed) : service(pIndex, ready: source.elapsed)
-                        let official = estimates.value(routeID: pattern.route.parentID, stopID: stop.id, at: date)
-                        if let official, [-2,-3,-4].contains(official) { continue }
-                        // No rail service runs from here right now (e.g. a short-turn pattern
-                        // published as 0 for this period): never treat that as a short wait.
-                        if rail, official == nil, currentService.headway == nil { continue }
-                        let buffer = ConnectionTiming.buffer(first: round == 0, walking: source.lastWalk,
-                            from: source.segments.last.map { patterns[$0.pattern].route.mode }, to: pattern.route.mode,
-                            internalTransfer: source.internalWalk, samePlatform: source.segments.last.map {
-                                patterns[$0.pattern].stops[$0.last].stationID == stop.stationID
-                            } ?? false, previousSpread: source.previousSpread)
-                        let wait = BoardingTime.wait(official: official, readyAt: source.elapsed, buffer: buffer,
-                            service: currentService, secondsOfDay: secondsOfDay, boardingOffset: pattern.cumulative[index], minimumServiceWait: minimumWaits[pIndex])
-                        if pattern.route.mode != .bus && wait.evidence != .official {
-                            guard pattern.windows.indices.contains(index), let window = pattern.windows[index] else { continue }
-                            let t = (secondsOfDay + source.elapsed + wait.seconds).truncatingRemainder(dividingBy: 86400)
-                            let first = Double(window.firstMinute * 60), last = Double(window.lastMinute * 60)
-                            if first <= last ? t < first || t > last : t < first && t > last { continue }
-                        }
-                        boarding.append((source, index, wait.seconds,
-                                         rail && wait.evidence == .headway ? currentService.headway?.midpoint : nil,
-                                         wait.evidence == .unknown))
-                    }
-                    // Keep independent arrival/walking tradeoffs without a combinatorial explosion.
-                    if boarding.count > 8 {
-                        boarding.sort { ($0.label.cost + $0.wait - pattern.cumulative[$0.index]) < ($1.label.cost + $1.wait - pattern.cumulative[$1.index]) }
-                        boarding = Array(boarding.prefix(8))
-                    }
                 }
-            }
+                output[group] = found
+            } } } }
+            for list in expanded { for (id, label) in list { insert(label, in: &arrived, at: id) } }
             for (id, labels) in arrived {
                 guard let stop = stationStops[id] else { continue }
                 let egress = streetDistance(stop, to: destination)
@@ -504,6 +593,22 @@ public struct MultimodalPlanner: Sendable {
             }
             if round == 3 { break }
             var next: [String: [Label]] = [:]
+            if cycling {
+                // Bicycle links take most of this step; the stations reached for the first time
+                // are worked out in parallel before the links are followed in the usual order.
+                let missing = arrived.filter { id, labels in streetLinks[id] == nil && labels.contains(where: { $0.cost <= ceiling($0) }) }.keys.sorted()
+                let groupSize = max(1, (missing.count + groupCount - 1) / groupCount)
+                let chunks = stride(from: 0, to: missing.count, by: groupSize).map { missing[$0..<min(missing.count, $0 + groupSize)] }
+                var computed = [[(String, [(Link, BikeConnection?)])]](repeating: [], count: chunks.count)
+                computed.withUnsafeMutableBufferPointer { output in
+                    DispatchQueue.concurrentPerform(iterations: chunks.count) { chunk in
+                        let search = BikeConnectionSearch(network: bikeNetwork, availability: bikeAvailability,
+                            preferences: preferences, at: date, feederOnly: true)
+                        output[chunk] = chunks[chunk].map { ($0, streetConnections(from: $0, search: search)) }
+                    }
+                }
+                for list in computed { for (id, value) in list { streetLinks[id] = value } }
+            }
             for (id, labels) in arrived {
                 guard labels.contains(where: { $0.cost <= ceiling($0) }) else { continue }
                 for (link, bike) in connections(from: id) {
@@ -517,7 +622,7 @@ public struct MultimodalPlanner: Sendable {
                         let risk = bike.map { BikeRouting.supplyPenalty($0, availability: bikeAvailability, pickupAfter: label.elapsed, at: date) } ?? 0
                         let extra = JourneyPreferenceCost.score(elapsed: duration, walking: foot, waiting: 0, transfers: 0,
                             rentals: bike == nil ? 0 : 1, unknownWaits: 0, supplyRisk: risk, preferences: preferences)
-                        var value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
+                        let value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
                             transferSeconds: label.transferSeconds + [duration], elapsed: label.elapsed + duration,
                             walking: label.walking + foot, cost: label.cost + extra,
                             lastStation: link.id, hasRail: label.hasRail, family: label.family)
