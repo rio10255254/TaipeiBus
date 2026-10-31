@@ -2208,10 +2208,12 @@ private struct BannerTitle: View {
                         Text(text).lineLimit(large ? nil : 3).minimumScaleFactor(0.8)
                     }
                 }
+                // VoiceOver reads the sentence once, from an element covering the instruction's column,
+                // instead of word by word.
+                .accessibilityElement(children: .ignore)
+                .accessibilityHidden(true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // One element for the whole sentence, covering the instruction's column, instead of
-                // one per word.
-                .accessibilityRepresentation {
+                .background {
                     Color.clear.accessibilityElement().accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
                 }
             } else {
