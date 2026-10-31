@@ -2208,10 +2208,10 @@ private struct BannerTitle: View {
                         Text(text).lineLimit(large ? nil : 3).minimumScaleFactor(0.8)
                     }
                 }
-                .accessibilityHidden(true)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                // One element for the whole sentence that covers the instruction's column.
-                .background {
+                // One element for the whole sentence, covering the instruction's column, instead of
+                // one per word.
+                .accessibilityRepresentation {
                     Color.clear.accessibilityElement().accessibilityLabel(text).accessibilityAddTraits(.isStaticText)
                 }
             } else {
