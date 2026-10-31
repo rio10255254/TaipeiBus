@@ -17,7 +17,7 @@ final class RidingTrafficTests: XCTestCase {
         let stops = m.orderedStops(routeID: route.id, direction: "0")
         return (m, TransitRide(route: route, direction: "0", stops: stops, coordinates: stops.map(\.coordinate)))
     }
-    func replay(starts: [Double], rates: [Double], metadata: TransitMetadata) -> VehicleArrivalForecast {
+    func replay(starts: [Double], rates: [Double], metadata: TransitMetadata, estimates: EstimateFeed? = nil) -> VehicleArrivalForecast {
         var forecast = VehicleArrivalForecast()
         let line = metadata.line("observed", direction: "0")!
         for t in stride(from: 0.0, through: 90.0, by: 30) {
@@ -27,7 +27,7 @@ final class RidingTrafficTests: XCTestCase {
                 let raw = BusVehicle(id: "physical-\(index)", plate: "physical-\(index)", routeID: "observed", parentRouteID: "family", routeName: "630", direction: "0", destination: "終點", coordinate: point, rawCoordinate: point, heading: 90, speed: rates[index] * 3.6, observedAt: date, status: "0", lowFloor: true, provider: nil)
                 return VehicleTracker.accept(raw, previous: nil, metadata: metadata, now: date)
             }
-            forecast.ingest(buses, metadata: metadata, at: date)
+            forecast.ingest(buses, metadata: metadata, at: date, estimates: estimates)
         }
         return forecast
     }
@@ -82,6 +82,40 @@ final class RidingTrafficTests: XCTestCase {
         XCTAssertEqual(VehicleArrivalPrediction(seconds: 160, uncertaintySeconds: 30, evidence: .officialProfile, nearStop: false).label, "約 3 分")
         // 600 s ± 120 s: 480 s → 8 minutes before, 600 + 240 s → 14 minutes after.
         XCTAssertEqual(VehicleArrivalPrediction(seconds: 600, uncertaintySeconds: 120, evidence: .officialProfile, nearStop: false).rangeLabel, "參考範圍 8–14 分")
+    }
+    func testWithoutAProfileTheCountdownFollowsTheOfficialEstimates() throws {
+        // New Taipei: no station-to-station profile. The bus is the next to reach s1 (60 s), and the estimates
+        // at s1–s3 time the segments after it (200 s each).
+        let m = source().0
+        let feed = EstimateFeed(seconds: ["family:s0": 900, "family:s1": 60, "family:s2": 260, "family:s3": 460], updatedAt: now)
+        let forecast = replay(starts: [250], rates: [5], metadata: m, estimates: feed), bus = lastReport(start: 250, rate: 5, metadata: m)
+        let prediction = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
+        XCTAssertEqual(prediction.evidence, .officialEstimates)
+        XCTAssertEqual(prediction.seconds, 460, accuracy: 1)
+        XCTAssertTrue(prediction.hasUsableTime)
+        // A bus just ahead on the same segment is the one s1's estimate counts down to, so it is not borrowed.
+        let bunched = replay(starts: [250, 400], rates: [5, 5], metadata: m, estimates: feed)
+        let behind = try XCTUnwrap(bunched.prediction(bus, stopID: "s3", metadata: m, at: now))
+        XCTAssertNotEqual(behind.evidence, .officialEstimates)
+        // Without estimates, the bus's own pace as before.
+        XCTAssertNotEqual(replay(starts: [250], rates: [5], metadata: m).prediction(bus, stopID: "s3", metadata: m, at: now)?.evidence, .officialEstimates)
+    }
+    func testANextBusDisagreeingWithTheOfficialEstimateMeetsItHalfway() throws {
+        // The App's time rests on the official profile; the official estimate for the next bus says much later.
+        let m = try withOfficialProfile(source().0, seconds: 200)
+        let forecast = replay(starts: [250], rates: [5], metadata: m), bus = lastReport(start: 250, rate: 5, metadata: m)
+        let own = try XCTUnwrap(forecast.prediction(bus, stopID: "s3", metadata: m, at: now))
+        XCTAssertEqual(own.evidence, .officialProfile)
+        let display = forecast.display(bus, stopID: "s3", metadata: m, at: now, officialSeconds: 1_200)
+        let shown = try XCTUnwrap(display.prediction)
+        XCTAssertEqual(shown.evidence, .official)
+        XCTAssertEqual(shown.seconds, (own.seconds + 1_200) / 2, accuracy: 0.01)
+        // The range reaches both.
+        XCTAssertGreaterThanOrEqual(shown.uncertaintySeconds, (1_200 - own.seconds) / 2 - 0.01)
+        // A time from this bus's own pace or the city's is not averaged in: the official estimate stands alone.
+        let plain = source().0
+        let paced = replay(starts: [250], rates: [5], metadata: plain).display(bus, stopID: "s3", metadata: plain, at: now, officialSeconds: 1_200)
+        XCTAssertEqual(paced.prediction?.evidence, .official); XCTAssertEqual(paced.prediction?.seconds, 1_200)
     }
     func testOfficialProfileIsNotAppliedToABusWaitingAtItsFirstStop() throws {
         let m = try withOfficialProfile(source().0, seconds: 200)

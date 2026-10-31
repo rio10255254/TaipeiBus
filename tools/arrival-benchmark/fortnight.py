@@ -25,7 +25,8 @@ ROOT = Path(__file__).resolve().parents[2]
 CALENDAR = ROOT / 'ios/TransitCore/Sources/TransitCore/TransitServiceCalendar.swift'
 TAIL = 45 * 60
 BUCKETS = [(0, 5), (5, 10), (10, 20), (20, 30)]
-EVIDENCE = pd.CategoricalDtype(['limited', 'officialProfile', 'recentMovement', 'roadHistory', 'routeProgress'])
+EVIDENCE = pd.CategoricalDtype(['cityPace', 'limited', 'official', 'officialEstimates', 'officialProfile', 'recentMovement', 'roadHistory', 'routeProgress'])
+SHOWN_COLUMNS = ['shown_evidence', 'shown_s', 'shown_uncertainty_s']
 PREDICTION_COLUMNS = ['made_at', 'vehicle', 'stops_ahead', 'distance_m', 'evidence', 'predicted_s',
                       'uncertainty_s', 'shown', 'actual_arrive_s', 'label_min', 'range_low_min', 'range_high_min']
 
@@ -69,8 +70,15 @@ def load(folders):
     for folder in folders:
         folder = Path(folder)
         end = json.loads((folder / 'summary.json').read_text())['recordingEnd']
-        df = pd.read_csv(folder / 'predictions.csv.gz', usecols=PREDICTION_COLUMNS,
-                         dtype={'vehicle': str, 'evidence': str})
+        df = pd.read_csv(folder / 'predictions.csv.gz', usecols=lambda c: c in PREDICTION_COLUMNS + SHOWN_COLUMNS,
+                         dtype={'vehicle': str, 'evidence': str, 'shown_evidence': str})
+        if 'shown_s' in df:
+            # What was shown, which for the next bus may be the official estimate (replays from 2026-10-30 on).
+            shown = df.shown_s.notna()
+            df.loc[shown, 'predicted_s'] = df.shown_s[shown]
+            df.loc[shown, 'uncertainty_s'] = df.shown_uncertainty_s[shown]
+            df.loc[shown, 'evidence'] = df.shown_evidence[shown]
+            df = df.drop(columns=SHOWN_COLUMNS)
         # Only shown estimates with a known arrival are kept, in compact types, so two weeks fit in memory.
         df = df[(df.made_at <= end - TAIL) & (df.shown == 1) & df.actual_arrive_s.notna() & (df.predicted_s <= 1800)].copy()
         for column in ['stops_ahead', 'distance_m', 'predicted_s', 'uncertainty_s', 'actual_arrive_s',

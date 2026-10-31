@@ -275,6 +275,8 @@ struct PredictionRow {
     let stopsAhead: Int
     let distance: Double
     let prediction: VehicleArrivalPrediction?
+    /// What the rider is shown, which for the next bus may be the official estimate standing in.
+    let displayed: VehicleArrivalPrediction?
     let shown: Bool
     let age: Double
     let official: Int?
@@ -317,7 +319,7 @@ func processPoll(_ received: String) {
     }
     previousVehicles = result.vehicles
     // The App ingests each snapshot with the time it arrived.
-    forecast.ingest(result.vehicles, metadata: metadata, at: now)
+    forecast.ingest(result.vehicles, metadata: metadata, at: now, estimates: currentOfficial)
     observeCrossings(result.vehicles, at: now)
     guard pollCount % options.every == 0 else { return }
     for bus in result.vehicles {
@@ -330,7 +332,7 @@ func processPoll(_ received: String) {
             let display = forecast.display(bus, stopID: progress.stop.id, metadata: metadata, at: now, officialSeconds: official)
             predictions.append(PredictionRow(madeAt: now.timeIntervalSince1970, vehicle: bus.id, trip: trip,
                 route: bus.routeID, parent: bus.parentRouteID, direction: bus.direction, stop: progress.stop.id,
-                stopsAhead: index + 1, distance: progress.distance, prediction: prediction,
+                stopsAhead: index + 1, distance: progress.distance, prediction: prediction, displayed: display.prediction,
                 shown: display.prediction.map { !$0.nearStop } ?? false,
                 age: now.timeIntervalSince(bus.observedAt), official: official, speed: bus.hasSpeed ? bus.speed : -1))
         }
@@ -369,7 +371,7 @@ func format(_ value: Double?, _ digits: Int = 0) -> String {
 }
 
 let predictionWriter = GzipWriter(options.out + "/predictions.csv.gz", header:
-    "made_at,vehicle,route,parent,direction,stop,stops_ahead,distance_m,speed_kmh,age_s,evidence,predicted_s,uncertainty_s,usable,near_stop,shown,official_s,actual_arrive_s,arrive_bracket_s,actual_pass_s,pass_bracket_s,label_min,range_low_min,range_high_min")
+    "made_at,vehicle,route,parent,direction,stop,stops_ahead,distance_m,speed_kmh,age_s,evidence,predicted_s,uncertainty_s,usable,near_stop,shown,official_s,actual_arrive_s,arrive_bracket_s,actual_pass_s,pass_bracket_s,label_min,range_low_min,range_high_min,shown_evidence,shown_s,shown_uncertainty_s")
 /// The whole minutes in one of the App's own labels ("約 3 分", "參考範圍 8–14 分"), so the score uses
 /// exactly what a rider reads, whatever rounding the App version applies.
 func minutes(_ label: String) -> [Int] {
@@ -382,9 +384,11 @@ for row in predictions {
     let pass = crossing?.pass.flatMap { $0 >= row.madeAt - 30 ? $0 - row.madeAt : nil }
     if arrive != nil || pass != nil { matched += 1 }
     let prediction = row.prediction
-    let label = row.shown ? minutes(prediction?.label ?? "") : []
-    let range = row.shown ? minutes(prediction?.rangeLabel ?? "") : []
-    let shownColumns: [String] = [label.first, range.first, range.last].map { $0.map(String.init) ?? "" }
+    let displayed = row.shown ? row.displayed : nil
+    let label = minutes(displayed?.label ?? "")
+    let range = minutes(displayed?.rangeLabel ?? "")
+    let shownColumns: [String] = [label.first, range.first, range.last].map { $0.map(String.init) ?? "" } +
+        [displayed?.evidence.rawValue ?? "", format(displayed?.seconds), format(displayed?.uncertaintySeconds)]
     let columns: [String] = [
         format(row.madeAt), row.vehicle, row.route, row.parent, row.direction, row.stop, String(row.stopsAhead),
         format(row.distance), format(row.speed >= 0 ? row.speed : nil), format(row.age),

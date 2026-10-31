@@ -9,8 +9,9 @@ import Foundation
 /// 1. Crossings: three or more buses timed on this segment in the last 20 minutes; their median.
 /// 2. The official station-to-station profile for the hour, scaled by the hourly pace factor and refined by
 ///    one or two recent crossings (ForecastTuning.officialProfileWeight).
-/// 3. Official arrival estimates: for a trip leaving now, the difference of the next bus's estimates at the
-///    two stops. New Taipei publishes no station-to-station times (TDX's S2STravelTime does not cover it).
+/// 3. Official arrival estimates, while they are current: the difference of the estimates at the two stops,
+///    or, for the segment a counted-down bus is on, its next stop's own estimate. New Taipei publishes no
+///    station-to-station times (TDX's S2STravelTime does not cover it), so there this is the best evidence.
 /// 4. A pace: this bus's own recent pace (countdown), the route's recent traffic (rides), else the city's
 ///    measured pace (regions.json `ridePace`) or ForecastTuning's typical speed, scaled by the hour's
 ///    city pace factor (buses run far faster than the all-day pace at night, slower in the peaks).
@@ -116,6 +117,16 @@ public enum TravelTimeModel {
         guard let first = estimates.seconds[parentRouteID + ":" + from], let second = estimates.seconds[parentRouteID + ":" + to],
               first >= 0, second >= first, second - first <= 1_800 else { return nil }
         return Double(max(second - first, 10))
+    }
+
+    /// For a bus already on a segment and the next to reach its end stop: that stop's own official estimate,
+    /// as the whole segment's time (the shared rule takes the remaining `fraction` of it). Nil when the
+    /// estimate is a status code, stale or implausible.
+    public static func estimatedRemaining(_ estimates: EstimateFeed, parentRouteID: String, to: String,
+                                          fraction: Double, at date: Date) -> Double? {
+        guard fraction > 0, let ahead = estimates.value(routeID: parentRouteID, stopID: to, at: date),
+              (0...1_800).contains(ahead) else { return nil }
+        return Double(max(ahead, 10)) / fraction
     }
 
     static func median(_ values: [Double]) -> Double {

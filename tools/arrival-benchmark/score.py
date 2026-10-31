@@ -110,7 +110,11 @@ def score_predictions(folders):
                 if row['shown'] != '1':
                     continue
                 entry[1] += 1
-                predicted, uncertainty = float(row['predicted_s']), float(row['uncertainty_s'])
+                # What is shown, which for the next bus may be the official estimate (replays from 2026-10-30 on).
+                shown_s = row.get('shown_s') or row['predicted_s']
+                predicted = float(shown_s)
+                uncertainty = float(row.get('shown_uncertainty_s') or row['uncertainty_s'])
+                evidence = row.get('shown_evidence') or row['evidence']
                 minute, low, high = shown_minutes(row, predicted, uncertainty)
                 # The range a rider reads in whole minutes contains the arrival when it rounds into it.
                 in_range = low * 60 - 30 <= actual < high * 60 + 30
@@ -119,7 +123,7 @@ def score_predictions(folders):
                 displayed.add(minute * 60, actual)
                 brackets.append(float(row['arrive_bracket_s']))
                 by_bucket.setdefault(label, Stats()).add(predicted, actual, in_range)
-                by_evidence.setdefault(row['evidence'], Stats()).add(predicted, actual, in_range)
+                by_evidence.setdefault(evidence, Stats()).add(predicted, actual, in_range)
                 by_hour.setdefault(hour_band(float(row['made_at'])), Stats()).add(predicted, actual, in_range)
     return {
         'rows': rows, 'rows_with_actual_within_30min': matched,
@@ -189,7 +193,7 @@ def table(groups, title, with_range=True):
 
 
 EVIDENCE = {'roadHistory': '近期車輛通過紀錄', 'officialProfile': '官方分時段車程', 'recentMovement': '這輛車近期行駛',
-            'routeProgress': 'GPS 位置與沿線車程', 'limited': '資料有限'}
+            'routeProgress': 'GPS 位置與沿線車程', 'officialEstimates': '官方到站預估的站間差距', 'cityPace': '較遠路段依一般車速', 'official': '官方到站預估（下一班）', 'limited': '資料有限'}
 
 
 def report(metrics, summaries):
