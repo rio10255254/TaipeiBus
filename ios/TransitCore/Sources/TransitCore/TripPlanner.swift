@@ -98,16 +98,21 @@ public struct TransitTrip: Identifiable, Sendable {
 /// A branch and direction retain their own stop order. A trip never joins different branches into one ride.
 /// Build this index off the UI actor when metadata changes, then reuse it for destination searches.
 public struct TripPlanner: Sendable {
-    private struct Pattern: Sendable {
+    /// A class, so the search's many reads of a pattern share it instead of copying its arrays.
+    private final class Pattern: Sendable {
         let route: BusRoute
         let direction: String
         let stops: [BusStop]
         let distances: [Double]
         let fingerprint: UInt64
+        init(route: BusRoute, direction: String, stops: [BusStop], distances: [Double], fingerprint: UInt64) {
+            self.route = route; self.direction = direction; self.stops = stops; self.distances = distances; self.fingerprint = fingerprint
+        }
     }
     private struct Occurrence: Sendable { let pattern: Int; let index: Int }
     private struct Segment: Sendable { let pattern: Int; let board: Int; let alight: Int }
-    private struct Exit { let index: Int; let walk: Double }
+    /// An alighting stop near the destination, with the bicycle connection from it, if any.
+    private struct Exit { let index: Int; let walk: Double; var bike = -1 }
     private struct Candidate {
         let segments: [Segment]
         let access: Double
@@ -239,10 +244,17 @@ public struct TripPlanner: Sendable {
         }
         let origins = nearby(origin, connections: accessConnections), destinations = nearby(destination, connections: egressConnections)
         guard !origins.isEmpty, !destinations.isEmpty else { return [] }
+        // Bicycle connections are numbered so the search passes numbers, not the connections themselves.
+        var bikeList: [BikeConnection] = []
+        func bikeNumber(_ bike: BikeConnection?) -> Int {
+            guard let bike else { return -1 }
+            bikeList.append(bike); return bikeList.count - 1
+        }
         var exits: [Int: [Exit]] = [:]
         for station in destinations {
             for occurrence in occurrences[station.id] ?? [] {
-                exits[occurrence.pattern, default: []].append(Exit(index: occurrence.index, walk: station.distance))
+                exits[occurrence.pattern, default: []].append(Exit(index: occurrence.index, walk: station.distance,
+                    bike: bikeNumber(egressConnections[patterns[occurrence.pattern].stops[occurrence.index].stationID])))
             }
         }
         // Use source-specific times before limiting candidates: the shared rule (TravelTimeModel) with the
@@ -305,6 +317,9 @@ public struct TripPlanner: Sendable {
             estimates?.value(routeID: pattern.route.parentID, stopID: $0.id, at: date)
         } }
         let families = patterns.map { "\($0.route.parentID):\($0.direction)" }
+        // Routes compared by number instead of by name in the transfer loop.
+        let parentIndex = Dictionary(Set(patterns.map(\.route.parentID)).sorted().enumerated().map { ($0.element, $0.offset) }, uniquingKeysWith: { a, _ in a })
+        let parents = patterns.map { parentIndex[$0.route.parentID]! }
         let familyIndex = Dictionary(uniqueKeysWithValues: Set(families).sorted().enumerated().map { ($0.element,$0.offset) })
         let familyIDs = families.map { familyIndex[$0]! }
         let timeOfDay = BusServiceWindow.secondsOfDay(at: date)
@@ -360,43 +375,65 @@ public struct TripPlanner: Sendable {
         var bestComplete = Double.infinity, bestWithoutRental = Double.infinity
         let hasBikes = !accessConnections.isEmpty || !egressConnections.isEmpty
         var evaluated = 0, bounded = 0
-        func addVariant(_ segments: [Segment], access: Double, egress: Double, transfer: Double, connections: [Int: BikeConnection]) {
+        func addVariant(_ first: Segment, _ second: Segment?, access: Double, egress: Double, transfer: Double, startBike: Int, endBike: Int) {
+            let end = second == nil ? 1 : 2
+            /// The connections in the order they were always added: the start, then the end.
+            func connectionTable() -> [Int: BikeConnection] {
+                var table: [Int: BikeConnection] = [:]
+                if startBike >= 0 { table[0] = bikeList[startBike] }
+                if endBike >= 0 { table[end] = bikeList[endBike] }
+                return table
+            }
+            let rentals = (startBike >= 0 ? 1 : 0) + (endBike >= 0 ? 1 : 0)
             // Apply availability before ranking and limiting candidates: many cheap closed
             // routes must not crowd all usable alternatives out of the result window.
-            for segment in segments {
-                if let seconds = arrivals[segment.pattern][segment.board], [-2, -3, -4].contains(seconds) { return }
-            }
+            if let seconds = arrivals[first.pattern][first.board], seconds == -2 || seconds == -3 || seconds == -4 { return }
+            if let second, let seconds = arrivals[second.pattern][second.board], seconds == -2 || seconds == -3 || seconds == -4 { return }
             // Bound each family's work without collapsing different boarding/alighting
             // platforms before pedestrian routing can reveal barriers and detours.
-            let key = FamilyKey(first: familyIDs[segments[0].pattern],
-                second: segments.count > 1 ? familyIDs[segments[1].pattern] : -1,
-                bikes: connections.keys.reduce(0) { $0 | (1 << $1) })
-            let riding = segments.map { segment in
-                return routeTimes[segment.pattern][segment.alight] - routeTimes[segment.pattern][segment.board]
-            }
-            var walking = ([access] + (segments.count > 1 ? [transfer] : []) + [egress]).map { $0 * 1.25 / 1.2 }
-            for (index, bike) in connections { walking[index] = bike.totalSeconds }
-            let cycling = connections.values.reduce(0) { $0 + $1.rideSeconds + $1.handlingSeconds }
+            let key = FamilyKey(first: familyIDs[first.pattern],
+                second: second.map { familyIDs[$0.pattern] } ?? -1,
+                bikes: (startBike >= 0 ? 1 : 0) | (endBike >= 0 ? 1 << end : 0))
+            // Most variants end at the bounds below, so these sums are taken without building the
+            // arrays a retained candidate needs (and in the same order, so every total is identical).
+            let firstRiding = routeTimes[first.pattern][first.alight] - routeTimes[first.pattern][first.board]
+            let secondRiding = second.map { routeTimes[$0.pattern][$0.alight] - routeTimes[$0.pattern][$0.board] }
+            func walk(_ bike: Int, _ meters: Double) -> Double { bike >= 0 ? bikeList[bike].totalSeconds : meters * 1.25 / 1.2 }
+            let firstWalk = walk(startBike, access), transferWalk = second == nil ? nil : walk(-1, transfer), finalWalk = walk(endBike, egress)
+            var ridingTotal = 0 + firstRiding
+            if let secondRiding { ridingTotal = ridingTotal + secondRiding }
+            var walkingTotal = 0 + firstWalk
+            if let transferWalk { walkingTotal = walkingTotal + transferWalk }
+            walkingTotal = walkingTotal + finalWalk
+            // Two connections are summed in the table's own order, as they always were.
+            let only = startBike >= 0 ? startBike : endBike
+            let cycling = rentals == 2 ? connectionTable().values.reduce(0) { $0 + $1.rideSeconds + $1.handlingSeconds }
+                : rentals == 1 ? 0 + bikeList[only].rideSeconds + bikeList[only].handlingSeconds : 0
+            let segmentCount = second == nil ? 1 : 2
             // Waiting cannot make an itinerary faster or cheaper. Once a route family
             // has enough alternatives, avoid calculating the same timetable for a
             // candidate that cannot improve either its score or any retained tradeoff.
-            var minimumScore = JourneyPreferenceCost.score(elapsed: riding.reduce(0,+) + walking.reduce(0,+),
-                walking: max(0,walking.reduce(0,+) - cycling), waiting: 0, transfers: max(0,segments.count-1),
-                rentals: connections.count, unknownWaits: 0, preferences: preferences)
-            let first = segments[0]
-            let wait = initialWait(first.pattern,first.board,walking: walking[0],cycling: connections[0] != nil)
+            var minimumScore = JourneyPreferenceCost.score(elapsed: ridingTotal + walkingTotal,
+                walking: max(0,walkingTotal - cycling), waiting: 0, transfers: max(0,segmentCount-1),
+                rentals: rentals, unknownWaits: 0, preferences: preferences)
+            let wait = initialWait(first.pattern,first.board,walking: firstWalk,cycling: startBike >= 0)
             minimumScore += wait.seconds * preferences.waitingWeight + (wait.evidence == .unknown ? 180 : 0)
-            if segments.count > 1 { minimumScore += 90 * preferences.waitingWeight }
-            let complete = connections.isEmpty ? bestWithoutRental : bestComplete
+            if second != nil { minimumScore += 90 * preferences.waitingWeight }
+            let complete = rentals == 0 ? bestWithoutRental : bestComplete
             if preservePlatforms, minimumScore > complete + max(1200,complete * 0.35) { bounded += 1; return }
             if !preservePlatforms, let best = candidates[key]?.first, minimumScore >= best.score { bounded += 1; return }
-            let rideDistance = segments.reduce(0.0) { $0 + patterns[$1.pattern].distances[$1.alight] - patterns[$1.pattern].distances[$1.board] }
+            var rideDistance = 0.0 + patterns[first.pattern].distances[first.alight] - patterns[first.pattern].distances[first.board]
+            if let second { rideDistance = rideDistance + patterns[second.pattern].distances[second.alight] - patterns[second.pattern].distances[second.board] }
             if let bound = familyBounds[key], minimumScore >= bound.score,
                access >= bound.access, egress >= bound.egress,
                access + egress + transfer >= bound.walking, rideDistance >= bound.riding {
                 bounded += 1; return
             }
             evaluated += 1
+            let connections = connectionTable()
+            let segments = second.map { [first, $0] } ?? [first]
+            let riding = secondRiding.map { [firstRiding, $0] } ?? [firstRiding]
+            let walking = transferWalk.map { [firstWalk, $0, finalWalk] } ?? [firstWalk, finalWalk]
             let boardingArrivals = segments.map { arrivals[$0.pattern][$0.board] }
             let assessment = TripRanking.assess(riding: riding, walking: walking, arrivals: boardingArrivals, preferences: preferences,
                 minimumServiceWaits: segments.map { serviceWaits[$0.pattern] },
@@ -455,44 +492,49 @@ public struct TripPlanner: Sendable {
                     } }.min()!)
             }
         }
-        func add(_ segments: [Segment], access: Double, egress: Double, transfer: Double) {
+        /// Each way of reaching the first stop (walking, or a bicycle when one connects there) with
+        /// each way of leaving the last, in that order. The bicycles are looked up once by the caller.
+        func add(_ first: Segment, _ second: Segment? = nil, access: Double, egress: Double, transfer: Double,
+                 startBike: Int, endBike: Int) {
             if !hasBikes {
-                addVariant(segments, access: access, egress: egress, transfer: transfer, connections: [:]); return
+                addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: -1, endBike: -1); return
             }
-            guard let first = segments.first, let last = segments.last else { return }
-            let startID = patterns[first.pattern].stops[first.board].stationID
-            let endID = patterns[last.pattern].stops[last.alight].stationID
-            var starts: [BikeConnection?] = access <= maximumWalk ? [nil] : []
-            var ends: [BikeConnection?] = egress <= maximumWalk ? [nil] : []
-            if let bike = accessConnections[startID] { starts.append(bike) }
-            if let bike = egressConnections[endID] { ends.append(bike) }
-            for start in starts { for end in ends {
-                var connections: [Int: BikeConnection] = [:]
-                if let start { connections[0] = start }
-                if let end { connections[segments.count] = end }
-                addVariant(segments, access: access, egress: egress, transfer: transfer, connections: connections)
-            } }
+            if access <= maximumWalk {
+                if egress <= maximumWalk { addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: -1, endBike: -1) }
+                if endBike >= 0 { addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: -1, endBike: endBike) }
+            }
+            if startBike >= 0 {
+                if egress <= maximumWalk { addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: startBike, endBike: -1) }
+                if endBike >= 0 { addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: startBike, endBike: endBike) }
+            }
         }
+        let startBikes = accessConnections.mapValues { bikeNumber($0) }
         for start in origins {
             if Task.isCancelled { return [] }
             for board in occurrences[start.id] ?? [] {
                 if preservePlatforms, allowedBoards[board.pattern]?.contains(board.index) != true { continue }
                 let first = patterns[board.pattern]
                 guard board.index < first.stops.count - 1 else { continue }
-                for exit in bestExits[board.pattern][board.index].prefix(preservePlatforms ? 3 : 1) {
-                    add([Segment(pattern: board.pattern, board: board.index, alight: exit.index)],
-                        access: start.distance, egress: exit.walk, transfer: 0)
+                let exitLimit = preservePlatforms ? 3 : 1
+                let startBike = hasBikes ? (startBikes[first.stops[board.index].stationID] ?? -1) : -1
+                for exit in bestExits[board.pattern][board.index].prefix(exitLimit) {
+                    add(Segment(pattern: board.pattern, board: board.index, alight: exit.index),
+                        access: start.distance, egress: exit.walk, transfer: 0, startBike: startBike, endBike: exit.bike)
                 }
+                let firstParent = parents[board.pattern]
                 for interchange in (board.index + 1)..<first.stops.count {
                     let station = first.stops[interchange].stationID
                     for neighbor in transferStations[station] ?? [] {
                         for next in occurrences[neighbor.id] ?? [] {
+                            guard parents[next.pattern] != firstParent else { continue }
                             let second = patterns[next.pattern]
-                            guard second.route.parentID != first.route.parentID else { continue }
-                            for exit in bestExits[next.pattern][next.index].filter({ second.stops[$0.index].stationID != start.id }).prefix(preservePlatforms ? 3 : 1) {
-                                add([Segment(pattern: board.pattern, board: board.index, alight: interchange),
-                                     Segment(pattern: next.pattern, board: next.index, alight: exit.index)],
-                                    access: start.distance, egress: exit.walk, transfer: neighbor.distance)
+                            var used = 0
+                            for exit in bestExits[next.pattern][next.index] where second.stops[exit.index].stationID != start.id {
+                                if used == exitLimit { break }
+                                used += 1
+                                add(Segment(pattern: board.pattern, board: board.index, alight: interchange),
+                                    Segment(pattern: next.pattern, board: next.index, alight: exit.index),
+                                    access: start.distance, egress: exit.walk, transfer: neighbor.distance, startBike: startBike, endBike: exit.bike)
                             }
                         }
                     }
