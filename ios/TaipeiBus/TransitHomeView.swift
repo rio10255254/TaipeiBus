@@ -15,7 +15,8 @@ struct TransitHomeView: View {
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     private var journeyPreviewDetent: PresentationDetent {
         if dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 { return .fraction(0.82) }
-        return .height(viewportHeight > 0 && viewportHeight < 760 ? 420 : 510)
+        // On a short screen (iPhone SE) the preview leaves 470 points so the alternatives fit beside the first route.
+        return .height(viewportHeight > 0 && viewportHeight < 760 ? 470 : 510)
     }
     @State private var viewportHeight: CGFloat = 0
     @State private var showSearch = false
@@ -71,7 +72,7 @@ struct TransitHomeView: View {
         if showJourney {
             // A page update can briefly report the hosting content's ideal height.
             // Fixed detents already tell us which part of the map the sheet covers.
-            if journeyDetent == .height(420) { panel = 420 }
+            if journeyDetent == .height(470) { panel = 470 }
             else if journeyDetent == .height(510) { panel = 510 }
             else if journeyDetent == .height(560) { panel = 560 }
             else { panel = min(journeyPanelHeight, geometry.size.height) }
@@ -299,8 +300,9 @@ struct TransitHomeView: View {
                          route: { routeToPlace(place) }, close: { model.tappedPlace = nil })
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
         } else if !nearbyStations.isEmpty, let position = location.usableCoordinate {
-            HStack(spacing: 10) {
-                ForEach(nearbyStations) { station in
+            let largeText = dynamicTypeSize.isAccessibilitySize
+            (largeText ? AnyLayout(VStackLayout(spacing: 10)) : AnyLayout(HStackLayout(spacing: 10))) {
+                ForEach(largeText ? Array(nearbyStations.prefix(1)) : nearbyStations) { station in
                     Button { model.selectStation(station) } label: {
                         HStack(spacing: 10) {
                             Image(systemName: station.mode == .bus ? "bus.fill" : "tram.fill").liveFont(.caption, weight: .semibold)
@@ -309,8 +311,10 @@ struct TransitHomeView: View {
                                 .background(Circle().strokeBorder(RouteTint.color(for: ""), lineWidth: 1.6))
                             VStack(alignment: .leading, spacing: 2) {
                                 BilingualName(station).liveFont(.subheadline, weight: .semibold).lineLimit(1)
-                                Text(AppText.text("%@ · 直線 %@", station.localizedBearing, distanceLabel(position.distance(to: station.coordinate))))
-                                    .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                ViewThatFits(in: .horizontal) {
+                                    Text(AppText.text("%@ · 直線 %@", station.localizedBearing, distanceLabel(position.distance(to: station.coordinate)))).lineLimit(1)
+                                    Text(distanceLabel(position.distance(to: station.coordinate)) + " · " + station.localizedBearing).lineLimit(1)
+                                }.liveFont(.caption).foregroundStyle(.secondary)
                             }
                             Spacer(minLength: 0)
                         }.padding(.leading, 10).padding(.trailing, 12).padding(.vertical, 8 * CGFloat(live.appearance.spacingScale))
@@ -405,7 +409,8 @@ struct TransitHomeView: View {
                                 showingItinerary: $showJourneyItinerary,
                                 compact: journeyDetent == journeyPreviewDetent,
                                 expand: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = .large } },
-                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } })
+                                collapse: { withAnimation(reduceMotion ? nil : InterfaceMotion.panel) { journeyDetent = journeyPreviewDetent } },
+                                shortScreen: viewportHeight > 0 && viewportHeight < 760)
                 .environment(\.dynamicTypeSize, dynamicTypeSize)
                 .sheet(isPresented: $model.showingProPlans) { ProPurchaseView(purchases: model.purchases) }
                 .presentationDetents(planner.destination == nil || planner.started ? [.large] : [journeyPreviewDetent, .height(560), .large], selection: $journeyDetent)
@@ -1021,27 +1026,40 @@ private struct MapLocationControl: View {
     private var reduceMotion: Bool { InterfaceMotion.reduced(systemReduceMotion) }
     @ObservedObject var model: TransitAppModel
     @ObservedObject var location: LocationService
+    @State private var showsSettingsPrompt = false
     private var accent: Color { Color(liveHex:live.appearance.accentColor) }
     var body: some View {
+                // Without permission the button cannot follow anything; it offers Settings instead of
+                // turning orange as if the map were tracking the rider.
+                let denied = location.permissionDenied
                 Button {
-                    model.cycleUserTracking()
+                    if denied { Haptics.selection(); showsSettingsPrompt = true }
+                    else { model.cycleUserTracking() }
                 } label: {
                     ZStack {
                         if location.requesting { ProgressView().transition(.opacity) }
                         else {
-                            Image(systemName: model.userMapMode == .heading ? "location.north.line.fill" : model.userMapMode == .north ? "location.fill" : "location")
+                            Image(systemName: denied ? "location.slash" : model.userMapMode == .heading ? "location.north.line.fill" : model.userMapMode == .north ? "location.fill" : "location")
                                 .liveFont(.title3).symbolSwap(model.userMapMode)
                                 .transition(.opacity)
                         }
                     }.frame(width: MapChrome.controlSize, height: MapChrome.controlSize)
                     .animation(reduceMotion ? nil : InterfaceMotion.content, value: location.requesting)
                 }
-                .foregroundStyle(model.userMapMode == .free ? Color.primary : accent)
+                .foregroundStyle(denied ? Color.secondary : model.userMapMode == .free ? Color.primary : accent)
                 .phoneGlass(in: Circle())
                 .accessibilityIdentifier("map-location")
                 .accessibilityLabel(live.text("定位與地圖方向"))
-                .accessibilityValue(model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
-                .accessibilityHint(model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
+                .accessibilityValue(denied ? AppText.text("定位未開啟") : model.userMapMode == .heading ? AppText.text("手機方向") : model.userMapMode == .north ? AppText.text("北朝上") : AppText.text("自由瀏覽"))
+                .accessibilityHint(denied ? AppText.text("開啟設定") : model.userMapMode == .north ? AppText.text("切換為手機方向") : AppText.text("回到目前位置並朝北"))
+                .alert(AppText.text("定位未開啟"), isPresented: $showsSettingsPrompt) {
+                    Button(AppText.text("開啟設定")) {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }
+                    Button(AppText.text("取消"), role: .cancel) {}
+                } message: {
+                    Text(AppText.text("在「設定」允許「一路」使用位置，就能顯示附近站牌並從目前位置規劃。也可以直接搜尋站牌或選擇出發地。"))
+                }
     }
 }
 
@@ -1068,9 +1086,15 @@ private struct TransitPanel: View {
                 browseHeader
             }
             if model.loading {
-                LoadingRows(count: 5, label: live.text("取得站牌與路線中"))
-                    .padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label { Text(live.text("取得站牌與路線中")) } icon: { ProgressView().controlSize(.small) }
+                            .liveFont(.caption).foregroundStyle(.secondary).accessibilityHidden(true)
+                        LoadingRows(count: 5, label: live.text("取得站牌與路線中"))
+                    }.padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
+                }
+                .scrollDisabled(true)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             } else if model.loadError != nil, model.metadata.routes.isEmpty {
                 // Without route data nothing works, so say so plainly instead of "updating".
                 EmptyStateView(symbol: "wifi.exclamationmark", title: live.text("暫時無法取得站牌與路線"),
@@ -1158,17 +1182,19 @@ private struct TransitPanel: View {
                     .liveFont(.title2, weight: .bold)
                 Spacer()
                 if model.mode == .stops {
-                    Button { searchFocused = false; model.browseNearMe() } label: { Image(systemName: "location.fill") }
+                    Button { searchFocused = false; model.browseNearMe() } label: {
+                        Image(systemName: "location.fill").frame(width: 44, height: 44).contentShape(Rectangle())
+                    }
                         .accessibilityLabel(AppText.text("回到我附近")).accessibilityIdentifier("browse-near-me")
-                        .liveFont(.subheadline, weight: .semibold).frame(minHeight: 44)
+                        .liveFont(.subheadline, weight: .semibold)
                     Button {
                         searchFocused = false; model.sheetDetent = .height(390)
                         if !model.query.isEmpty { model.focusMap(.journey(stationResults.map(\.coordinate))) }
-                    } label: { Image(systemName: "map") }.frame(width: 44, height: 44)
+                    } label: { Image(systemName: "map").frame(width: 44, height: 44).contentShape(Rectangle()) }
                         .accessibilityLabel(AppText.text("在地圖查看站牌")).accessibilityIdentifier("station-results-map")
                         .disabled(stationResultQuery != model.query || stationResults.isEmpty)
                 }
-                Button { dismiss() } label: { Image(systemName: "xmark") }.frame(width: 36, height: 44)
+                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(Rectangle()) }
                     .accessibilityLabel(AppText.text("返回地圖"))
             }
             HStack(spacing: 9) {
@@ -1188,12 +1214,14 @@ private struct TransitPanel: View {
                     .onAppear { if systemRouteKeyboard { searchFocused = true } }
                 }
                 if model.mode == .routes, systemRouteKeyboard {
-                    Button { searchFocused = false; systemRouteKeyboard = false } label: { Image(systemName: "number") }
-                        .frame(width: 40, height: 44).accessibilityLabel(AppText.text("路線專用鍵盤"))
+                    Button { searchFocused = false; systemRouteKeyboard = false } label: {
+                        Image(systemName: "number").frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.accessibilityLabel(AppText.text("路線專用鍵盤"))
                 }
                 if !model.query.isEmpty {
-                    Button { model.query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
-                        .frame(width: 36, height: 40).accessibilityLabel(live.text("清除搜尋"))
+                    Button { model.query = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary).frame(width: 44, height: 44).contentShape(Rectangle())
+                    }.accessibilityLabel(live.text("清除搜尋"))
                         .transition(.opacity.combined(with: .scale(scale: 0.6)))
                 }
             }
@@ -1325,13 +1353,15 @@ private struct RouteSearchKeypad: View {
         VStack(spacing: 7) {
             HStack(spacing: 8) {
                 ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 18) {
+                    HStack(spacing: 2) {
                         ForEach(["A", "L", "E", "黃", "快", "內科", "市民", "南軟", "貓空", "懷恩", "區", "副"], id: \.self) { key in
-                            Button(AppText.text(key)) { enter(key) }.frame(minWidth: 28, minHeight: 40)
+                            Button { enter(key) } label: {
+                                Text(AppText.text(key)).padding(.horizontal, 8).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            }
                         }
                     }
                 }
-                Button(action: useKeyboard) { Image(systemName: "keyboard").frame(width: 44, height: 40) }
+                Button(action: useKeyboard) { Image(systemName: "keyboard").frame(width: 44, height: 44).contentShape(Rectangle()) }
                     .accessibilityLabel(AppText.text("一般文字鍵盤")).accessibilityIdentifier("route-text-keyboard")
             }.liveFont(.subheadline, weight: .medium)
             ForEach(keys, id: \.self) { row in
@@ -1357,6 +1387,16 @@ private struct StationDetails: View {
     @Environment(\.liveSettings) private var live
     @ObservedObject var model: TransitAppModel
     let station: Station
+
+    /// Two metro services of one line toward the same terminus (頂埔 and 亞東醫院 trains both
+    /// run to 南港展覽館) showed as two identical rows; the rider sees one direction.
+    private func distinctDirections(_ rows: [StationArrival]) -> [StationArrival] {
+        var seen = Set<String>()
+        return rows.filter { row in
+            guard row.stop.mode != .bus, let route = row.route else { return true }
+            return seen.insert(route.lineCode + "|" + route.localizedDestination(direction: row.stop.direction)).inserted
+        }
+    }
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 15)) { timeline in
