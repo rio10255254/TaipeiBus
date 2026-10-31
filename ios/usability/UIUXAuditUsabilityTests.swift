@@ -71,7 +71,7 @@ final class UIUXAuditUsabilityTests: JourneyUsabilityTestBase {
     private func dismissAlert(_ labels: [String]) {
         let alert = app.alerts.firstMatch
         guard alert.waitForExistence(timeout: 4) else { return }
-        for label in labels where alert.buttons[label].exists { alert.buttons[label].tap(); return }
+        for label in labels where alert.buttons[label].exists { alert.buttons[label].firstMatch.tap(); return }
         alert.buttons.element(boundBy: alert.buttons.count - 1).tap()
     }
     private static func typeName(_ type: XCUIElement.ElementType) -> String {

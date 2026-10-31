@@ -1389,9 +1389,11 @@ struct JourneyOptionsView: View {
         return Button { planner.select(option) } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
+                    // The duration keeps one line ("約 46 分鐘", not "約 46／分鐘"); the fare gives way first.
                     Text(timing?.conciseLabel ?? AppText.text("確認接駁中")).liveFont(.subheadline, weight: .semibold).monospacedDigit()
+                        .lineLimit(1).minimumScaleFactor(0.8).layoutPriority(1)
                     Spacer(minLength: 0)
-                    if let fare = model.fareLabel(option) { Text(fare).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).monospacedDigit() }
+                    if let fare = model.fareLabel(option) { Text(fare).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8) }
                     Image(systemName: "chevron.right").liveFont(.caption2).foregroundStyle(MapChrome.secondaryText)
                 }
                 HStack(spacing: 4) {

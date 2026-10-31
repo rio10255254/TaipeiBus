@@ -282,7 +282,18 @@ struct TransitHomeView: View {
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
             VoiceChatButton(chat: model.voiceChat)
-            JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
+            if dynamicTypeSize.isAccessibilitySize {
+                // At accessibility sizes the card would grow over the instruction banner; it scrolls
+                // within the space below the banner instead.
+                ScrollView {
+                    JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .defaultScrollAnchor(.bottom)
+                .frame(maxHeight: max(220, viewportHeight - bannerOffset - 72 * CGFloat(live.appearance.spacingScale)))
+            } else {
+                JourneyGuideCard(model: model, planner: planner) { showJourneyItinerary = true; journeyDetent = .large; showJourney = true }
+            }
         }
         }
         .smoothChanges(planner.currentStep)
