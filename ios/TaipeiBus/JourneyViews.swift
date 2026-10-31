@@ -743,8 +743,11 @@ private struct BoardingVehicleRow: View {
                         .liveFont(.subheadline, weight: .semibold, design: .rounded).monospacedDigit().lineLimit(1).minimumScaleFactor(0.8)
                         .liveNumericText(arrival, countsDown: true)
                     if large { Spacer(minLength: 4) }
-                    Label(tracking ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope").liveFont(.caption, weight: .semibold)
-                        .lineLimit(1).fixedSize()
+                    // Drawn as icon and text: inside a List row an automatic Label kept only the icon.
+                    HStack(spacing: 4) {
+                        Image(systemName: "scope")
+                        Text(tracking ? AppText.text("追蹤中") : AppText.text("追蹤")).lineLimit(1).fixedSize()
+                    }.liveFont(.caption, weight: .semibold)
                         .foregroundStyle(tracking ? Color.white : Color(liveHex: live.appearance.accentColor))
                         .padding(.horizontal, 10).frame(minHeight: 30)
                         .background(Color(liveHex: live.appearance.accentColor).opacity(tracking ? 1 : 0.12), in: Capsule())
