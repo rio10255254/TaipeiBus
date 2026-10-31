@@ -86,7 +86,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['dynamic-island', 'all', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['dynamic-island', 'all', 'uiux-audit', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -168,7 +168,7 @@ jobs:
   simulator:
     if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe' && inputs.usability_scope != 'dynamic-island'
     runs-on: macos-15
-    timeout-minutes: ${{ inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
+    timeout-minutes: ${{ inputs.usability_scope == 'uiux-audit' && 80 || inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -233,7 +233,7 @@ jobs:
             "$RUNNER_TEMP/TaipeiBus-simulator.app.zip"
       - name: Compile release app for iPhone
         # UI-only readiness reruns reuse the separate PR's device-build verification.
-        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing' && ((inputs.usability_scope != 'navigation-readiness' && inputs.usability_scope != 'experience-polish') || inputs.billing_tests)
+        if: inputs.usability_scope != 'routing-only' && inputs.usability_scope != 'metro-routing' && ((inputs.usability_scope != 'navigation-readiness' && inputs.usability_scope != 'experience-polish' && inputs.usability_scope != 'uiux-audit') || inputs.billing_tests)
         run: |
           set -euo pipefail
           xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBus \
@@ -684,6 +684,10 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'experience-polish' ]; then
             selection=('-only-testing:TaipeiBusUsabilityTests/TransitExperienceUsabilityTests')
+          fi
+          if [ '${{ inputs.usability_scope }}' = 'uiux-audit' ]; then
+            # A design review tour: every screen is captured with measured touch targets.
+            selection=('-only-testing:TaipeiBusUsabilityTests/UIUXAuditUsabilityTests')
           fi
           if [ '${{ inputs.usability_scope }}' = 'preview-boundary' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/MetroUsabilityTests/testRoutePreviewAndBackNeverStartNavigation'

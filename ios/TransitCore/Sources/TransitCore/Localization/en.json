@@ -1162,5 +1162,10 @@
   "臺北市公共運輸處公開資料，含臺北市與新北市公車，每 5 秒檢查定位。個別公車回報時間以車輛資訊為準。": "Public bus data for Taipei and New Taipei, checked every 5 seconds while active. Individual reporting times vary.",
   "YouBike 站點內建於 App，含臺北市與新北市。App 使用期間會預先載入兩市公開的車輛與空位資料，供自行車路線比較，並保留近期報告供再次開啟使用。臺北市資料約每分鐘更新，新北市約每 5 分鐘；實際借還以現場為準。": "Taipei and New Taipei stations ship with the app. While it is in use, the app preloads both cities’ public bike and dock counts for cycling comparisons and keeps recent reports for the next visit. Taipei updates about every minute, New Taipei about every 5 minutes; check at the dock.",
   "新北市 YouBike 資料說明": "New Taipei YouBike data",
-  "目前在服務範圍外，可手動選擇雙北的出發地": "Outside the service area. Choose a start in Taipei or New Taipei."
+  "目前在服務範圍外，可手動選擇雙北的出發地": "Outside the service area. Choose a start in Taipei or New Taipei.",
+  "定位未開啟": "Location is off",
+  "在「設定」允許「一路」使用位置，就能顯示附近站牌並從目前位置規劃。也可以直接搜尋站牌或選擇出發地。": "Allow OneRoad to use your location in Settings to see nearby stops and plan from where you are. You can also search for a stop or choose a start.",
+  "仍在查詢，網路較慢或深夜班次少時需要較久。": "Still searching. It takes longer on a slow connection or late at night when few buses run.",
+  "深夜多數公車與捷運已收班，可改查早上的首班。": "Most buses and the metro have stopped for the night. You can plan for the first morning service instead.",
+  "改為早上 6:00 出發": "Leave at 6:00 AM instead"
 }

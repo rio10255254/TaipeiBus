@@ -83,10 +83,19 @@ struct OfficialNoticesView: View {
                     }
                 }
             }
-        }.navigationTitle(AppText.text("交通公告"))
+        }.navigationTitle(AppText.text("交通公告")).navigationBarTitleDisplayMode(.inline)
+            .modifier(SolidListTop())
             .searchable(text: $query, prompt: AppText.text("路線或公告關鍵字"))
             .task { if store.fetchedAt.map({ Date().timeIntervalSince($0) > 300 }) ?? true { await store.load() } }
             .refreshable { await store.load() }
+    }
+}
+
+/// A long list scrolled under the title read as overlapping text; keep a clear edge under the bar.
+private struct SolidListTop: ViewModifier {
+    @ViewBuilder func body(content: Content) -> some View {
+        if #available(iOS 26, *) { content.scrollEdgeEffectStyle(.hard, for: .top) }
+        else { content.toolbarBackground(.visible, for: .navigationBar) }
     }
 }
 
