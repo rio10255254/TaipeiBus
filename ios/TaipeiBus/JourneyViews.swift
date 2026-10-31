@@ -2191,10 +2191,20 @@ private struct BannerTitle: View {
         let large = dynamicTypeSize.isAccessibilitySize
         Group {
             if parts.count < 2 {
-                // A sentence such as 「步行至 …」 has no name to keep whole; it wraps across the whole
-                // column. On an iPhone SE a long English stop name needs the third line.
-                Text(text).lineLimit(large ? 4 : 3).minimumScaleFactor(0.9)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                // A sentence such as 「步行至 …」 or 「從 內湖站出口1 進站」 stays on one line when it fits;
+                // otherwise it wraps only between words, so on an iPhone SE the stop name is never
+                // split in the middle (「果菜／市場」) or cut short.
+                ViewThatFits(in: .horizontal) {
+                    Text(text).lineLimit(1)
+                    ChipFlow(spacing: 5) {
+                        ForEach(Array(text.split(separator: " ").enumerated()), id: \.offset) { _, word in
+                            Text(word).lineLimit(1).minimumScaleFactor(0.75)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(text)
             } else {
                 ViewThatFits(in: .horizontal) {
                     Text(text).lineLimit(1)
