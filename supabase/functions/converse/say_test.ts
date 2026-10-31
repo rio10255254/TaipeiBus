@@ -41,6 +41,8 @@ Deno.test('a trip\'s places come out once both names are whole', () => {
 Deno.test('find_place names come out of its query; other actions and confirm give none', () => {
   assertEquals(peekAll(['{"say":"我查一下","actions":[{"type":"find_place","stop":"","route":"","destination":"","origin":"","time":"","then":"","query":"永康牛肉麵、老王牛肉麵"}]}']),
     [['永康牛肉麵', '老王牛肉麵']]);
+  assertEquals(peekAll(['{"say":"我找一下附近的爭鮮","actions":[{"type":"find_nearby","stop":"","route":"","destination":"","origin":"","time":"","then":"","query":"爭鮮"}]}']),
+    [['爭鮮']]);
   assertEquals(peekAll(['{"say":"好","actions":[{"type":"show_route","stop":"","route":"307","destination":"板橋"}]}']), [[]]);
   assertEquals(peekAll(['{"say":"要出發嗎？","actions":[],"confirm":{"type":"plan_trip",' + empty + '"destination":"板橋","origin":""}}']), [[]]);
 });

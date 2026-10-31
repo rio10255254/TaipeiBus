@@ -55,7 +55,7 @@ export class SayReader {
 }
 
 /// The places of the reply's first action, read out of the unfinished JSON as soon as each name is
-/// whole: a trip's destination and origin, or what find_place looks for. The phone starts looking them
+/// whole: a trip's destination and origin, or what find_place or find_nearby looks for. The phone starts looking them
 /// up on the map while the rest of the reply is still being written.
 export class PlacePeek {
   private text = '';
@@ -75,7 +75,7 @@ export class PlacePeek {
     const type = /"type"\s*:\s*"([a-z_]+)"/.exec(this.text.slice(actions));
     if (!type) return [];
     const rest = this.text.slice(actions + type.index);
-    if (type[1] === 'find_place') {
+    if (type[1] === 'find_place' || type[1] === 'find_nearby') {
       const query = PlacePeek.value(rest, 'query');
       if (query === undefined) return [];
       this.done = true;

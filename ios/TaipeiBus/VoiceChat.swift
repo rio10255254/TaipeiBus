@@ -187,6 +187,10 @@ final class VoiceConversation: ObservableObject {
     /// The planner's places or options offered as choices, in the order shown.
     private var planPlaces: [TravelPlace] = []
     private var planOptions: [String] = []
+    /// `planPlaces` are what 「找附近的…」 found: choosing one plans a trip to it.
+    private var nearbyChoices = false
+    /// The rider asked what is near: once the answer is spoken, the app finds it and says what it found.
+    private var nearbyQuery: String?
     /// A later leg of the trip was asked for (「下一段」); `planLeg` is the one whose place is being chosen.
     private var legRequest: Int?
     private var planLeg: Int?
@@ -258,6 +262,7 @@ final class VoiceConversation: ObservableObject {
         active = true; history = VoiceHistory(); pending = nil; choices = []; caption = ""; heard = ""
         speech.duplex = true; AssistantServer.warm()
         names = nil; language = Self.savedLanguage; compact = false; planning = false; planPlaces = []; planOptions = []; notices = nil
+        nearbyChoices = false; nearbyQuery = nil
         lastTurn = nil; reportable = false; reported = false
         // Built for Chinese even when listening in English, so switching languages needs no wait.
         Task { [weak self, model = self.model] in
@@ -491,7 +496,7 @@ final class VoiceConversation: ObservableObject {
             // One place offered: 「好」 takes it.
             if choices.count == 1, VoiceConfirmation.read(text) == .yes { return choosePlan(0) }
         }
-        planPlaces = []; planOptions = []; planLeg = nil
+        planPlaces = []; planOptions = []; planLeg = nil; nearbyChoices = false
         if let pending {
             switch VoiceConfirmation.read(text) {
             case .yes:
@@ -630,6 +635,8 @@ final class VoiceConversation: ObservableObject {
         work?.cancel()
         work = Task {
             if let sentence { await say(sentence, routes: routes) } else { await output.finishSpeaking() }
+            guard !Task.isCancelled, active else { return }
+            if let query = nearbyQuery { nearbyQuery = nil; await followNearby(query) }
             guard !Task.isCancelled, active else { return }
             if planning { planning = false; await followPlan() }
             guard !Task.isCancelled, active else { return }
@@ -789,8 +796,15 @@ final class VoiceConversation: ObservableObject {
     }
 
     private func choosePlan(_ index: Int) {
-        let places = planPlaces, options = planOptions, leg = planLeg
-        planPlaces = []; planOptions = []; choices = []; planLeg = nil
+        let places = planPlaces, options = planOptions, leg = planLeg, nearby = nearbyChoices
+        planPlaces = []; planOptions = []; choices = []; planLeg = nil; nearbyChoices = false
+        if nearby, places.indices.contains(index) {
+            // One of the places found nearby: a trip to that very place, not another branch of the same name.
+            model.planner.setDestination(places[index], metadata: model.metadata, currentLocation: model.location.usableCoordinate)
+            planning = true; compact = true
+            panelRequest = .routes
+            return respond(phrase("好，規劃到%@。", places[index].localizedName), followUp: true)
+        }
         if let leg, places.indices.contains(index) {
             model.resolveAssistantStop(leg, place: places[index])
             legRequest = leg; planning = true; compact = true
@@ -895,7 +909,13 @@ final class VoiceConversation: ObservableObject {
             }
         case .remindAlight:
             if !model.alightReminderOn { model.toggleAlightReminder() } else { model.requestAlightReminderAccess() }
-        case .lookup, .notices, .findPlace:
+        case .findNearby(let query):
+            nearbyQuery = query
+            model.assistant.lookAhead([query])
+        case .findPlace(let names):
+            // Asked to look again after a lookup already ran: what was found is shown rather than dropped.
+            if let name = names.first { nearbyQuery = name }
+        case .lookup, .notices:
             break
         }
     }
@@ -910,6 +930,31 @@ final class VoiceConversation: ObservableObject {
         let avoided = [last.avoid.bus ? "公車" : "", last.avoid.metro ? "捷運" : "", last.avoid.bike ? "YouBike" : ""].filter { !$0.isEmpty } + last.avoid.routes
         if !avoided.isEmpty { parts.append("避開 " + avoided.joined(separator: "、")) }
         return parts.joined(separator: "；")
+    }
+
+    /// What 「找附近的爭鮮」 found, said by the app itself rather than by asking the model again: the nearest
+    /// and how far, on its place card, with the next ones to choose; choosing one plans the trip there.
+    private func followNearby(_ query: String) async {
+        let found = await findPlaces([query]).first?.places ?? []
+        guard !Task.isCancelled, active else { return }
+        let here = model.location.usableCoordinate
+        let sorted = here.map { point in found.sorted { $0.coordinate.distance(to: point) < $1.coordinate.distance(to: point) } } ?? found
+        let places = Array(sorted.prefix(3))
+        JourneyDiagnostics.shared.record("voice nearby results=\(places.count)")
+        guard let nearest = places.first else {
+            return await say(phrase("附近找不到「%@」，可以換個說法，或說是哪一區的。", query))
+        }
+        planPlaces = places; nearbyChoices = true; choices = places.map(\.localizedName); compact = false
+        panelRequest = .place(nearest.mapItem)
+        let distance = here.map { distanceLabel(nearest.coordinate.distance(to: $0)) }
+        let first = distance.map { phrase("最近的是%@，%@。", nearest.localizedName, $0) } ?? phrase("找到%@。", nearest.localizedName)
+        await say(first + (places.count == 1 ? phrase("要去的話說「好」。") : phrase("要去哪一家可以直接說或點選。")))
+    }
+
+    /// A walking distance as it is said: 「約 350 公尺」, 「約 1.2 公里」.
+    private func distanceLabel(_ meters: Double) -> String {
+        meters < 1_000 ? phrase("約 %@ 公尺", String(max(50, Int((meters / 50).rounded()) * 50)))
+            : phrase("約 %@ 公里", String(format: "%.1f", meters / 1_000))
     }
 
     /// Each name looked up near the rider, with the station of that name first, for the model to choose from.

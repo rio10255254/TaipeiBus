@@ -23,6 +23,9 @@ public enum VoiceAction: Equatable, Sendable {
     /// Look these names up on the map near the rider and ask again with what was found: a place the
     /// model was not sure of (a misheard name, a chain with several branches).
     case findPlace([String])
+    /// The rider asked what is near (「找附近的爭鮮」): the app finds the nearest of it and says so itself,
+    /// without asking the model again.
+    case findNearby(String)
     /// Add a stop to the rider's favourites.
     case saveStop(String)
     /// Turn on the reminder to get off.
@@ -74,6 +77,7 @@ public enum VoiceAction: Equatable, Sendable {
             }
             guard !names.isEmpty else { return nil }
             self = .findPlace(Array(names.prefix(3)))
+        case "find_nearby": guard !text("query", limit: 40).isEmpty else { return nil }; self = .findNearby(text("query", limit: 40))
         case "save_stop": guard !text("stop").isEmpty else { return nil }; self = .saveStop(text("stop"))
         case "remind_alight": self = .remindAlight
         case "start_navigation": self = .startNavigation
@@ -220,6 +224,7 @@ extension VoiceAction {
         case .chooseOption(let option): "選第 \(option) 個方案"
         case .showLeg(let leg): "看第 \(leg) 段"
         case .lookup, .notices, .findPlace: "查詢"
+        case .findNearby(let query): "找附近的 \(query)"
         case .saveStop(let stop): "收藏 \(stop)"
         case .remindAlight: "下車提醒"
         }

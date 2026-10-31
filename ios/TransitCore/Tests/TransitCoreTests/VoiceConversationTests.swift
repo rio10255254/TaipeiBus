@@ -59,6 +59,8 @@ final class VoiceConversationTests: XCTestCase {
         let found = VoiceReply(json: ["say": "我查一下地點。", "actions": [action("find_place", ["query": "Apple 信義A13、 Apple 台北101,Apple 信義A13、a、b"])]])
         XCTAssertEqual(found?.actions, [.findPlace(["Apple 信義A13", "Apple 台北101", "a"])])
         XCTAssertEqual(VoiceReply(json: ["say": "我查一下地點。", "actions": [action("find_place")]])?.actions, [], "Nothing to look up is dropped")
+        XCTAssertEqual(VoiceReply(json: ["say": "我找一下附近的爭鮮", "actions": [action("find_nearby", ["query": " 爭鮮 "])]])?.actions, [.findNearby("爭鮮")])
+        XCTAssertEqual(VoiceReply(json: ["say": "我找一下", "actions": [action("find_nearby")]])?.actions, [], "Nothing to find is dropped")
     }
 
     func testShowLegNamesOneLegOfTheTrip() {

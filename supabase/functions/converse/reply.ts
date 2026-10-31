@@ -4,7 +4,7 @@
 
 export const ACTION_TYPES = [
   'none', 'show_stop', 'show_route', 'follow_vehicle', 'plan_trip', 'choose_option', 'show_leg', 'show_bike', 'show_place', 'lookup', 'web_search',
-  'notices', 'find_place', 'save_stop', 'remind_alight', 'start_navigation', 'boarded', 'alighted', 'end_trip',
+  'notices', 'find_place', 'find_nearby', 'save_stop', 'remind_alight', 'start_navigation', 'boarded', 'alighted', 'end_trip',
 ] as const;
 export type ActionType = typeof ACTION_TYPES[number];
 /// Change the trip: only ever asked as a question first, never run straight from a reply.
@@ -90,6 +90,8 @@ export const SYSTEM_PROMPT = `你是「台北公車」App 裡的語音助理，�
 - choose_option：選畫面上的第幾個方案（option，從 1 開始）。乘客指定方案又要出發時，actions 放 choose_option，confirm 放 start_navigation。
 - show_leg：「目前狀態」有「行程各段」時，乘客要看另一段（「下一段」「接下來呢」「到植物園之後呢」「看第三段」），或問怎麼去行程裡的某一站（「到龍山寺之後要怎麼去大稻埕」：大稻埕是第 3 段，就是 show_leg 3），option 寫那一段的編號（從 1 開始，「下一段」是畫面上這段加 1；某一段是「到」那一站的那段），say 只說「好，看第 N 段，到某地。」；不要用 plan_trip 重新規劃整個行程，方案好了 App 會自己說。
 - find_place：你說不出一個確定存在的地點時，先在地圖上查，不要猜：辨識文字不像真的地名而你也推不出是哪裡、或乘客只描述了地方而你不確定是哪一家（「那家很多人排隊的牛肉麵」）。query 寫最多三個最可能的正式名稱，用「、」隔開，say 只說「我查一下地點」，不要同時用 plan_trip。App 會在乘客附近搜尋，把結果（名稱、地址、距離）放進「地點搜尋」再問你一次。確定的地名（台北101、捷運站、大學）和連鎖品牌（World Gym、星巴克，App 會找最近的分店）直接用 plan_trip。
+- find_nearby：只用在乘客想知道附近有什麼、但沒說要去的時候（「找附近的爭鮮」「附近有沒有全家」「最近的星巴克在哪」「這附近哪裡有廁所」）。query 寫店名或類別（「爭鮮」「全家便利商店」「廁所」），say 只說「我找一下附近的爭鮮」這類一句話，不要說結果、距離或地址。App 會自己在乘客附近搜尋，說出最近的幾家並打開地點卡，不會再問你。附近的 YouBike 仍用 show_bike，附近的公車站牌仍用 show_stop，不用 find_nearby。
+- 句子裡有「帶我去」「我要去」「想去」「怎麼去」「到…」這類要去的意思時，就算有「附近」「最近的」，也一定用 plan_trip，不要用 find_nearby：例如「帶我去最近的星巴克」是 plan_trip，destination 寫「星巴克」，App 會找最近的分店規劃。
 - 「目前狀態」有「地點搜尋」時：從搜尋結果挑真正符合乘客意思的那一個，用結果裡的名稱照原本的要求 plan_trip（時間、後面幾站、偏好、避開都照舊）；同一個品牌或店的幾家分店（Apple 信義A13 和 Apple 台北101）而乘客沒指定分店時，直接選離乘客最近的那家 plan_trip，say 說用哪一家（「最近的是 Apple 信義A13，我用這裡規劃。」），不要問；只有結果是不同的地方或不同的店、選哪個都說得通時，才用 choices 列出結果裡的名稱讓乘客選；都不對就說找不到，請乘客換個說法。
 - 「目前狀態」有「規劃時找不到」時，是你剛才 plan_trip 的地名地圖找不到：結果裡有對的就用它重新 plan_trip，time、then、preference、avoid 照抄「剛才的要求」；都不對而你知道正式名稱時，用 find_place 查一次；還是不確定就請乘客說分店或附近的地標。這時 say 不要再複述整個行程，直接說改用哪裡（例如「應該是 Apple 信義A13，我改用這裡規劃。」）。
 - lookup：「目前狀態」裡沒有乘客要的即時資料時，寫出要查的站牌（stop）或路線（route），say 說「我查一下」。
@@ -192,7 +194,7 @@ function readAction(value: unknown): Action | null {
     case 'choose_option': return action.option >= 1 && action.option <= 3 ? action : null;
     case 'show_leg': return action.option >= 1 && action.option <= 10 ? action : null;
     case 'lookup': return action.stop || action.route ? action : null;
-    case 'web_search': case 'find_place': return action.query ? action : null;
+    case 'web_search': case 'find_place': case 'find_nearby': return action.query ? action : null;
     case 'show_place': return action.destination ? action : null;
     case 'save_stop': return action.stop ? action : null;
     default: return action;
