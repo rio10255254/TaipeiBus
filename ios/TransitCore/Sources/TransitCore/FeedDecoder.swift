@@ -41,11 +41,24 @@ public enum FeedDecoder {
         return (rows, (essential?["UpdateTime"] as? String).flatMap(taipeiDate))
     }
 
+    /// Every field of every catalog row passes through here, about two million times for the two cities,
+    /// so strings and numbers skip `String(describing:)` and only text with blank edges is trimmed.
     static func text(_ value: Any?) -> String {
         guard let value, !(value is NSNull) else { return "" }
-        return String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
+        let raw: String
+        if let string = value as? String { raw = string }
+        else if let number = value as? NSNumber { raw = number.stringValue }
+        else { raw = String(describing: value) }
+        guard let first = raw.unicodeScalars.first, let last = raw.unicodeScalars.last,
+              blank.contains(first) || blank.contains(last) else { return raw }
+        return raw.trimmingCharacters(in: blank)
     }
+    private static let blank = CharacterSet.whitespacesAndNewlines
     static func number(_ value: Any?) -> Double? {
+        if let number = value as? NSNumber, !(value is String) {
+            let result = number.doubleValue
+            return result.isFinite ? result : nil
+        }
         guard let result = Double(text(value)), result.isFinite else { return nil }
         return result
     }
@@ -69,125 +82,162 @@ public enum FeedDecoder {
     /// The same, with each source's id kept on its routes (`BusRoute.source`).
     public static func metadata(sources: [(source: String, feeds: [String: Data])]) throws -> TransitMetadata {
         var metadata = TransitMetadata()
+        // Each city's files are read on a core of their own, then merged in the order given.
+        let parts = concurrently(sources.count) { index in try source(feeds: sources[index].feeds) }
         for (index, entry) in sources.enumerated() {
             do {
-                var part = try source(feeds: entry.feeds)
+                var part = try parts[index].get()
                 for id in part.routes.keys { part.routes[id]?.source = entry.source }
                 if index == 0 { metadata = part } else { metadata.absorb(part) }
             } catch { if index == 0 { throw error } }
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
+        // The search index needs only the stations, so it is built while the routes' journeys are.
+        let stations = Array(metadata.stations.values)
+        let search = SearchIndexBuild()
+        let built = DispatchGroup()
+        DispatchQueue.global(qos: .userInitiated).async(group: built) { search.index = StationSearchIndex(stations: stations) }
         metadata.rebuildRouteCatalog()
-        metadata.stationSearch = StationSearchIndex(stations: Array(metadata.stations.values))
         metadata.rebuildJourneys()
+        built.wait()
+        metadata.stationSearch = search.index
         return metadata
     }
 
+    /// Holds the index built on another thread until the caller has waited for it.
+    private final class SearchIndexBuild: @unchecked Sendable { var index = StationSearchIndex() }
+    /// Results of `count` independent pieces of work, run in parallel and returned in order.
+    private static func concurrently<T>(_ count: Int, _ work: (Int) throws -> T) -> [Result<T, Error>] {
+        var results = [Result<T, Error>?](repeating: nil, count: count)
+        results.withUnsafeMutableBufferPointer { slots in
+            DispatchQueue.concurrentPerform(iterations: count) { index in slots[index] = Result { try work(index) } }
+        }
+        return results.map { $0! }
+    }
+
+    /// A city's feeds are independent files filling different parts of its catalog, so they are read in
+    /// parallel. A required feed that cannot be read fails the city; an optional one is left out.
     private static func source(feeds: [String: Data]) throws -> TransitMetadata {
+        let names = feeds.keys.sorted()
+        let parts = concurrently(names.count) { index in try feed(names[index], feeds[names[index]]!) }
         var metadata = TransitMetadata()
-        for (name, data) in feeds {
+        for (name, part) in zip(names, parts) {
             let required = name == "GetRoute" || name == "GetStop"
-            let decoded: ([[String: Any]], Date?)
-            do { decoded = try rows(data) }
-            catch { if required { throw error }; continue }
-            let (rows, _) = decoded
-            guard !rows.isEmpty else { if required { throw FeedError.invalid(name) }; continue }
+            guard let part = try? part.get() else {
+                if required { _ = try part.get() }
+                continue
+            }
             switch name {
-            case "GetProvider":
-                for row in rows {
-                    let id = text(row["id"]), name = text(row["nameZn"])
-                    guard !id.isEmpty else { continue }
-                    if !name.isEmpty { metadata.providers[id] = name }
-                    let english = text(row["nameEn"])
-                    if !english.isEmpty { metadata.englishProviders[id] = english }
-                }
-            case "GetRoute":
-                for row in rows {
-                    let id = text(row["pathAttributeId"]), parent = text(row["Id"])
-                    guard !id.isEmpty, !parent.isEmpty else { continue }
-                    var route = BusRoute(id: id, parentID: parent, name: text(row["nameZh"]),
-                                         variantName: text(row["pathAttributeName"]),
-                                         departure: text(row["departureZh"]), destination: text(row["destinationZh"]))
-                    route.englishName = text(row["nameEn"])
-                    route.englishVariantName = text(row["pathAttributeEname"])
-                    route.englishDeparture = text(row["departureEn"])
-                    route.englishDestination = text(row["destinationEn"])
-                    route.aliasName = text(row["aliasName"])
-                    for (direction, prefix) in [("0", "go"), ("1", "back")] {
-                        let holiday = "holiday" + prefix.prefix(1).uppercased() + String(prefix.dropFirst())
-                        route.serviceWindows[direction] = [prefix, holiday].compactMap { key in
-                            BusServiceWindow(first: text(row[key + "FirstBusTime"]), last: text(row[key + "LastBusTime"]))
-                        }
-                        let regular = BusDayService(window: BusServiceWindow(first: text(row[prefix + "FirstBusTime"]), last: text(row[prefix + "LastBusTime"])),
-                            headway: BusHeadway.envelope(["peakHeadway", "offPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
-                            departures: BusDayService.publishedDepartures(text(row["busTimeDesc"])))
-                        let off = BusDayService(window: BusServiceWindow(first: text(row[holiday + "FirstBusTime"]), last: text(row[holiday + "LastBusTime"])),
-                            headway: BusHeadway.envelope(["holidayPeakHeadway", "holidayOffPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
-                            departures: BusDayService.publishedDepartures(text(row["holidayBusTimeDesc"])))
-                        route.servicePlans[direction] = BusServicePlan(weekday: regular, holiday: off)
-                    }
-                    metadata.routes[id] = route
-                }
-            case "GetStop":
-                // Most of a station's stops share one English name; its aliases are worked out once.
-                var englishAliases: [String: [String]] = [:]
-                for row in rows {
-                    let id = text(row["Id"])
-                    guard !id.isEmpty, let lat = number(row["latitude"]), let lon = number(row["longitude"]) else { continue }
-                    let coordinate = Coordinate(latitude: lat, longitude: lon)
-                    guard coordinate.isInServiceArea else { continue }
-                    let name = text(row["nameZh"])
-                    // Published path references can retain explicitly withdrawn platforms.
-                    // Exclude that route's stop, while other active stops at the physical station remain available.
-                    guard !["裁撤", "停用", "暫停使用", "暂停使用"].contains(where: name.contains) else { continue }
-                    let stationID = text(row["stopLocationId"]).isEmpty ? id : text(row["stopLocationId"])
-                    var stop = BusStop(id: id, routeID: text(row["routeId"]), stationID: stationID,
-                                       name: name, direction: text(row["goBack"]),
-                                       sequence: Int(number(row["seqNo"]) ?? 0), coordinate: coordinate)
-                    stop.englishName = text(row["nameEn"])
-                    metadata.stops[id] = stop
-                    if metadata.stations[stationID] == nil {
-                        metadata.stations[stationID] = Station(id: stationID, name: stop.name, coordinate: coordinate,
-                                                               address: text(row["address"]), bearing: text(row["bearing"]), stopIDs: [])
-                    }
-                    if metadata.stations[stationID]?.englishName.isEmpty == true {
-                        metadata.stations[stationID]?.englishName = stop.englishName
-                    }
-                    metadata.stations[stationID]?.stopIDs.append(id)
-                    for name in [stop.name, text(row["nameEn"])] where !name.isEmpty {
-                        if metadata.stations[stationID]?.searchNames.contains(name) == false {
-                            metadata.stations[stationID]?.searchNames.append(name)
-                        }
-                    }
-                    let aliases = englishAliases[stop.englishName] ?? StationSearch.englishNames(stop.englishName)
-                    englishAliases[stop.englishName] = aliases
-                    for alias in aliases where !metadata.stations[stationID]!.searchNames.contains(alias) {
-                        metadata.stations[stationID]!.searchNames.append(alias)
-                    }
-                }
-            case "GetPathDetail":
-                for row in rows {
-                    let type = text(row["type"] ?? row["Type"])
-                    guard type.isEmpty || type == "0" else { continue }
-                    let id = text(row["pathAttributeId"] ?? row["PathAttributeId"])
-                    let stopID = text(row["stopId"] ?? row["StopId"])
-                    guard !id.isEmpty, !stopID.isEmpty else { continue }
-                    metadata.paths[id, default: []].append(StopReference(stopID: stopID,
-                        sequence: Int(number(row["sequenceNo"] ?? row["SequenceNo"]) ?? 0)))
-                }
-            case "GetBusShape":
-                for row in rows {
-                    guard let line = RouteLine.parse(wkt: text(row["wkt"])) else { continue }
-                    let sub = text(row["SubRouteID"])
-                    let key = (number(row["SubRouteID"]) ?? -1) > 0 ? "sub:\(sub)" : "route:\(text(row["RouteID"]))"
-                    let direction = text(row["GoBack"])
-                    if ["0", "1"].contains(direction) { metadata.directionalLines["\(key):\(direction)"] = line }
-                    if metadata.lines[key] == nil || direction == "0" { metadata.lines[key] = line }
-                }
+            case "GetProvider": metadata.providers = part.providers; metadata.englishProviders = part.englishProviders
+            case "GetRoute": metadata.routes = part.routes
+            case "GetStop": metadata.stops = part.stops; metadata.stations = part.stations
+            case "GetPathDetail": metadata.paths = part.paths
+            case "GetBusShape": metadata.lines = part.lines; metadata.directionalLines = part.directionalLines
             default: break
             }
         }
         guard !metadata.routes.isEmpty, !metadata.stations.isEmpty else { throw FeedError.invalid("路線／站牌") }
+        return metadata
+    }
+
+    /// One feed's rows, read into the parts of a catalog that feed provides.
+    private static func feed(_ name: String, _ data: Data) throws -> TransitMetadata {
+        var metadata = TransitMetadata()
+        let required = name == "GetRoute" || name == "GetStop"
+        let (rows, _) = try rows(data)
+        guard !rows.isEmpty else { if required { throw FeedError.invalid(name) }; return metadata }
+        switch name {
+        case "GetProvider":
+            for row in rows {
+                let id = text(row["id"]), name = text(row["nameZn"])
+                guard !id.isEmpty else { continue }
+                if !name.isEmpty { metadata.providers[id] = name }
+                let english = text(row["nameEn"])
+                if !english.isEmpty { metadata.englishProviders[id] = english }
+            }
+        case "GetRoute":
+            for row in rows {
+                let id = text(row["pathAttributeId"]), parent = text(row["Id"])
+                guard !id.isEmpty, !parent.isEmpty else { continue }
+                var route = BusRoute(id: id, parentID: parent, name: text(row["nameZh"]),
+                                     variantName: text(row["pathAttributeName"]),
+                                     departure: text(row["departureZh"]), destination: text(row["destinationZh"]))
+                route.englishName = text(row["nameEn"])
+                route.englishVariantName = text(row["pathAttributeEname"])
+                route.englishDeparture = text(row["departureEn"])
+                route.englishDestination = text(row["destinationEn"])
+                route.aliasName = text(row["aliasName"])
+                for (direction, prefix) in [("0", "go"), ("1", "back")] {
+                    let holiday = "holiday" + prefix.prefix(1).uppercased() + String(prefix.dropFirst())
+                    route.serviceWindows[direction] = [prefix, holiday].compactMap { key in
+                        BusServiceWindow(first: text(row[key + "FirstBusTime"]), last: text(row[key + "LastBusTime"]))
+                    }
+                    let regular = BusDayService(window: BusServiceWindow(first: text(row[prefix + "FirstBusTime"]), last: text(row[prefix + "LastBusTime"])),
+                        headway: BusHeadway.envelope(["peakHeadway", "offPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
+                        departures: BusDayService.publishedDepartures(text(row["busTimeDesc"])))
+                    let off = BusDayService(window: BusServiceWindow(first: text(row[holiday + "FirstBusTime"]), last: text(row[holiday + "LastBusTime"])),
+                        headway: BusHeadway.envelope(["holidayPeakHeadway", "holidayOffPeakHeadway"].compactMap { BusHeadway(published: text(row[$0])) }),
+                        departures: BusDayService.publishedDepartures(text(row["holidayBusTimeDesc"])))
+                    route.servicePlans[direction] = BusServicePlan(weekday: regular, holiday: off)
+                }
+                metadata.routes[id] = route
+            }
+        case "GetStop":
+            // Most of a station's stops share one English name; its aliases are worked out once.
+            var englishAliases: [String: [String]] = [:]
+            for row in rows {
+                let id = text(row["Id"])
+                guard !id.isEmpty, let lat = number(row["latitude"]), let lon = number(row["longitude"]) else { continue }
+                let coordinate = Coordinate(latitude: lat, longitude: lon)
+                guard coordinate.isInServiceArea else { continue }
+                let name = text(row["nameZh"])
+                // Published path references can retain explicitly withdrawn platforms.
+                // Exclude that route's stop, while other active stops at the physical station remain available.
+                guard !["裁撤", "停用", "暫停使用", "暂停使用"].contains(where: name.contains) else { continue }
+                let stationID = text(row["stopLocationId"]).isEmpty ? id : text(row["stopLocationId"])
+                var stop = BusStop(id: id, routeID: text(row["routeId"]), stationID: stationID,
+                                   name: name, direction: text(row["goBack"]),
+                                   sequence: Int(number(row["seqNo"]) ?? 0), coordinate: coordinate)
+                stop.englishName = text(row["nameEn"])
+                metadata.stops[id] = stop
+                // Taken out of the dictionary while it changes, so its arrays grow in place instead of
+                // being copied for every stop a busy station has.
+                var station = metadata.stations.removeValue(forKey: stationID)
+                    ?? Station(id: stationID, name: stop.name, coordinate: coordinate,
+                               address: text(row["address"]), bearing: text(row["bearing"]), stopIDs: [])
+                if station.englishName.isEmpty { station.englishName = stop.englishName }
+                station.stopIDs.append(id)
+                for name in [stop.name, stop.englishName] where !name.isEmpty && !station.searchNames.contains(name) {
+                    station.searchNames.append(name)
+                }
+                let aliases = englishAliases[stop.englishName] ?? StationSearch.englishNames(stop.englishName)
+                englishAliases[stop.englishName] = aliases
+                for alias in aliases where !station.searchNames.contains(alias) {
+                    station.searchNames.append(alias)
+                }
+                metadata.stations[stationID] = station
+            }
+        case "GetPathDetail":
+            for row in rows {
+                let type = text(row["type"] ?? row["Type"])
+                guard type.isEmpty || type == "0" else { continue }
+                let id = text(row["pathAttributeId"] ?? row["PathAttributeId"])
+                let stopID = text(row["stopId"] ?? row["StopId"])
+                guard !id.isEmpty, !stopID.isEmpty else { continue }
+                metadata.paths[id, default: []].append(StopReference(stopID: stopID,
+                    sequence: Int(number(row["sequenceNo"] ?? row["SequenceNo"]) ?? 0)))
+            }
+        case "GetBusShape":
+            for row in rows {
+                guard let line = RouteLine.parse(wkt: text(row["wkt"])) else { continue }
+                let sub = text(row["SubRouteID"])
+                let key = (number(row["SubRouteID"]) ?? -1) > 0 ? "sub:\(sub)" : "route:\(text(row["RouteID"]))"
+                let direction = text(row["GoBack"])
+                if ["0", "1"].contains(direction) { metadata.directionalLines["\(key):\(direction)"] = line }
+                if metadata.lines[key] == nil || direction == "0" { metadata.lines[key] = line }
+            }
+        default: break
+        }
         return metadata
     }
 
