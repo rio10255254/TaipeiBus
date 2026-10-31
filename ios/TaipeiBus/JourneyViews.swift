@@ -2147,10 +2147,9 @@ private struct WaitingBannerContent: View {
                         Text(ride.route.localizedDisplayName).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
                     }
                 }
-                // The instruction takes the room left beside the wait; hugging its own text made a
-                // narrow column on small screens that cut long stop names short.
+                // The instruction takes all the room left beside the wait; hugging its own text, with a
+                // spacer after it, made a narrow column on small screens that cut long stop names short.
                 .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
-                Spacer(minLength: 4)
                 VStack(alignment: .trailing, spacing: 2) {
                     let wait = ride.route.mode == .bus ? boarding.label : model.metroWaitLabel(ride, at: date)
                     Text(wait).liveFont(.title, weight: .bold, design: .rounded)
@@ -2203,8 +2202,10 @@ private struct BannerTitle: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityElement(children: .combine)
+                // One element for the whole sentence, not one per word.
+                .accessibilityElement(children: .ignore)
                 .accessibilityLabel(text)
+                .accessibilityAddTraits(.isStaticText)
             } else {
                 ViewThatFits(in: .horizontal) {
                     Text(text).lineLimit(1)
