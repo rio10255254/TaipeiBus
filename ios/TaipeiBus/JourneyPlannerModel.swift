@@ -291,6 +291,11 @@ final class JourneyPlannerModel: ObservableObject {
     private var primaryStreetKeys = Set<String>()
     private var hadTemporaryStreetFailure = false
     private var planBegan = 0.0
+    /// Milliseconds from the start of the current plan to each stage, for the timing state the usability tests read.
+    private(set) var timeline: [String: Int] = [:]
+    private func mark(_ stage: String) {
+        if timeline[stage] == nil { timeline[stage] = Int((ProcessInfo.processInfo.systemUptime - planBegan) * 1000) }
+    }
     private var recordedFirstChoice = false
     @Published private(set) var optionLabels: [String: String] = [:]
     @Published private(set) var optionReasons: [String: String] = [:]
@@ -907,7 +912,7 @@ final class JourneyPlannerModel: ObservableObject {
                     if result.trip?.variant.isEmpty == true { self.connectionBases[result.id] = result }
                     if result.verified, result.walkIssue == nil {
                         if !self.recordedFirstChoice {
-                            self.recordedFirstChoice = true
+                            self.recordedFirstChoice = true; self.mark("first_choice_ms")
                             JourneyDiagnostics.shared.record("first_choice_ms=\(Int((ProcessInfo.processInfo.systemUptime-self.planBegan)*1000))")
                         }
                         self.verifiedPool.removeAll { $0.id == result.id }
@@ -1275,7 +1280,7 @@ final class JourneyPlannerModel: ObservableObject {
         cancelRequests()
         hadTemporaryStreetFailure = false
         JourneyDiagnostics.shared.record("plan_start")
-        planBegan = ProcessInfo.processInfo.systemUptime; recordedFirstChoice = false; optionReasons = [:]
+        planBegan = ProcessInfo.processInfo.systemUptime; recordedFirstChoice = false; optionReasons = [:]; timeline = [:]
         verifiedPool = []; optionLabels = [:]; alternativeTransitSeconds = nil; comparisonChanged = false
         attemptedBikeConnections = []; connectionBases = [:]; searchedBikeGateways = false
         integratedSearchHasSupply = false; lastIntegratedBikeSearch = .distantPast; lastIntegratedSupplyAt = .distantPast
@@ -1308,6 +1313,7 @@ final class JourneyPlannerModel: ObservableObject {
             var recoveryCandidates: [JourneyOption] = []
             for await (trips, complete) in stream {
             guard !Task.isCancelled, token == generation else { return }
+            mark(complete ? "planner_ms" : "preliminary_ms")
             integratedSearchHasSupply = supply != nil; lastIntegratedBikeSearch = Date(); lastIntegratedSupplyAt = supply?.receivedAt ?? .distantPast
             let date = clock(Date())
             let observations = latestSnapshot.estimates, currentForecast = forecast
@@ -1350,6 +1356,7 @@ final class JourneyPlannerModel: ObservableObject {
                 pending.insert(whole, at: 0)
             }
             if options.isEmpty { options = Array(pending.prefix(3)); selectedID = nil }
+            if !options.isEmpty { mark("listed_ms") }
             planning = false; checkingWalks = true
             recoveryCandidates.append(contentsOf: pending)
             if pending.isEmpty || hadTemporaryStreetFailure { continue }
@@ -1397,6 +1404,7 @@ final class JourneyPlannerModel: ObservableObject {
             await refineLeadingStations(token: token)
             guard token == generation, !Task.isCancelled else { return }
             checkingWalks = false
+            mark("checked_ms")
             publishRecommendations()
             if verifiedPool.isEmpty { message = "步行接駁暫時無法確認，請稍後重試或查看其他交通方式。"; options = []; selectedID = nil }
             JourneyDiagnostics.shared.record("plan_end checked=\(verifiedPool.count) offered=\(options.count) temporary_service=\(hadTemporaryStreetFailure)")

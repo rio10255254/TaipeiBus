@@ -838,13 +838,16 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          optimization=()
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
-            selection+=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
+            optimization=('SWIFT_OPTIMIZATION_LEVEL=-O' 'SWIFT_COMPILATION_MODE=wholemodule')
           fi
           if [ -n "$BUS_UI_TEST_FILTER" ]; then
             [[ "$BUS_UI_TEST_FILTER" =~ ^TaipeiBusUsabilityTests/[A-Za-z0-9_]+(/[A-Za-z0-9_]+)?$ ]] || { echo 'Invalid UI test filter'; exit 1; }
             selection=("-only-testing:$BUS_UI_TEST_FILTER")
           fi
+          # A filter chooses the tests, not the build: the planning engine is still measured optimized.
+          selection+=(${optimization[@]+"${optimization[@]}"})
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \

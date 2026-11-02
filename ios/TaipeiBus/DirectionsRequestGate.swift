@@ -41,6 +41,19 @@ import Combine
     private var waiting: [Waiter] = []
     private var wake: Task<Void, Never>?
     private var blockedUntil = 0.0
+    /// How the budget has been spent since launch, for the timing state the usability tests read.
+    struct Statistics {
+        var started = [0, 0, 0]
+        var deferred = 0, throttled = 0, interrupted = 0
+        var waited = 0.0, longestWait = 0.0, busy = 0.0, longestRequest = 0.0
+        var summary: [String: Any] {
+            ["navigation": started[0], "first_choice": started[1], "alternatives": started[2], "deferred": deferred,
+             "throttled": throttled, "interrupted": interrupted, "wait_s": waited, "longest_wait_s": longestWait,
+             "busy_s": busy, "longest_request_s": longestRequest]
+        }
+    }
+    private(set) var statistics = Statistics()
+    private var enqueued: [UUID: Double] = [:], begun: [UUID: Double] = [:]
 
     init(window: Double = 60, limits: [Int] = [40, 36, 12], concurrency: Int = 2, spacing: Double = 0.35) {
         precondition(window > 0 && limits.count == 3 && limits.allSatisfy { $0 > 0 } && concurrency > 0 && spacing >= 0)
@@ -51,9 +64,11 @@ import Combine
         let now = ProcessInfo.processInfo.systemUptime
         if priority == .alternatives,
            blockedUntil > now || recent.filter({ now-$0 < window }).count >= limits[priority.rawValue] {
+            statistics.deferred += 1
             throw Deferred.optionalComparison
         }
         let id = UUID()
+        enqueued[id] = now
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 guard !Task.isCancelled else { continuation.resume(throwing: CancellationError()); return }
@@ -64,7 +79,13 @@ import Combine
         catch { release(id); throw error }
         return id
     }
-    func release(_ id: UUID) { active.remove(id); drain() }
+    func release(_ id: UUID) {
+        if let start = begun.removeValue(forKey: id) {
+            let seconds = ProcessInfo.processInfo.systemUptime - start
+            statistics.busy += seconds; statistics.longestRequest = max(statistics.longestRequest, seconds)
+        }
+        active.remove(id); drain()
+    }
     func calculate(_ operation: MKDirections, priority: Priority) async throws -> MKDirections.Response {
         try await execute(priority, cancel: { operation.cancel() }) { try await operation.calculate() }
     }
@@ -91,6 +112,7 @@ import Combine
     }
     private func cancel(_ id: UUID) {
         guard let index = waiting.firstIndex(where: { $0.id == id }) else { return }
+        enqueued[id] = nil
         waiting.remove(at:index).continuation.resume(throwing:CancellationError()); drain()
     }
     /// Public MapKit errors include both explicit throttling and a temporarily
@@ -103,6 +125,7 @@ import Combine
         let network = value.domain == NSURLErrorDomain &&
             [NSURLErrorTimedOut,NSURLErrorNetworkConnectionLost,NSURLErrorCannotConnectToHost].contains(value.code)
         guard throttle || interrupted || network else { return false }
+        if throttle { statistics.throttled += 1 } else { statistics.interrupted += 1 }
         blockedUntil = max(blockedUntil,ProcessInfo.processInfo.systemUptime + (throttle ? window : min(2,window)))
         drain(); return true
     }
@@ -126,6 +149,7 @@ import Combine
         if let last = recent.last { delay = max(delay,spacing - (now-last)) }
         let limit = limits[waiter.priority.rawValue]
         if waiter.priority == .alternatives, blockedUntil > now || recent.count >= limit {
+            statistics.deferred += 1; enqueued[waiter.id] = nil
             waiting.remove(at:index).continuation.resume(throwing:Deferred.optionalComparison); drain(); return
         }
         if recent.count >= limit { delay = max(delay,(recent[recent.count-limit] + window) - now) }
@@ -137,6 +161,9 @@ import Combine
             return
         }
         waiting.remove(at:index); recent.append(now); active.insert(waiter.id)
+        let waited = now - (enqueued.removeValue(forKey: waiter.id) ?? now)
+        statistics.started[waiter.priority.rawValue] += 1
+        statistics.waited += waited; statistics.longestWait = max(statistics.longestWait, waited); begun[waiter.id] = now
         waiter.continuation.resume(); drain()
     }
 }

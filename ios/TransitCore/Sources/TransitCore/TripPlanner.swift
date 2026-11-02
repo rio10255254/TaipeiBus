@@ -146,11 +146,6 @@ public struct TripPlanner: Sendable {
             return a.bikes < b.bikes
         }
     }
-    private struct BoardingKey: Hashable {
-        let pattern: Int
-        let index: Int
-        let cycling: Bool
-    }
     private struct Cell: Hashable {
         let x: Int; let y: Int
         init(_ coordinate: Coordinate) {
@@ -219,6 +214,8 @@ public struct TripPlanner: Sendable {
                      accessConnections: [String: BikeConnection] = [:], egressConnections: [String: BikeConnection] = [:],
                      bikeAvailability: BikeAvailability? = nil) -> [TransitTrip] {
         guard origin.isInServiceArea, destination.isInServiceArea, maximumWalk > 0, limit > 0 else { return [] }
+        // The search's helpers read these, not the whole planner, which every call used to retain and release.
+        let patterns = self.patterns, occurrences = self.occurrences, transferStations = self.transferStations
         func nearby(_ point: Coordinate, connections: [String: BikeConnection]) -> [(id: String, distance: Double)] {
             var matches: [(id: String, distance: Double)] = []
             var cycling: [(id: String, distance: Double)] = []
@@ -333,9 +330,13 @@ public struct TripPlanner: Sendable {
         // transfer combinations. This preserves every service, early boarding for
         // short trips, the nearest walk and the best downstream arrival.
         var allowedBoards: [Int: Set<Int>] = [:]
-        var firstWaits: [BoardingKey: BoardingWait] = [:]
+        // One slot per pattern stop and access mode, found by position instead of by hashing a key.
+        var waitSlots: [Int] = [], slotCount = 0
+        for pattern in patterns { waitSlots.append(slotCount); slotCount += pattern.stops.count * 2 }
+        var firstWaits = [BoardingWait?](repeating: nil, count: slotCount)
+        func waitSlot(_ pattern: Int, _ index: Int, cycling: Bool) -> Int { waitSlots[pattern] + index * 2 + (cycling ? 1 : 0) }
         func initialWait(_ pattern: Int, _ index: Int, walking: Double, cycling: Bool) -> BoardingWait {
-            let key = BoardingKey(pattern: pattern,index: index,cycling: cycling)
+            let key = waitSlot(pattern, index, cycling: cycling)
             if let cached = firstWaits[key] { return cached }
             let value = BoardingTime.wait(official: arrivals[pattern][index], readyAt: walking,
                 buffer: ConnectionTiming.buffer(first: true, walking: walking), service: services[pattern],
@@ -508,6 +509,29 @@ public struct TripPlanner: Sendable {
                 if endBike >= 0 { addVariant(first, second, access: access, egress: egress, transfer: transfer, startBike: startBike, endBike: endBike) }
             }
         }
+        /// The least `minimumScore` any two-ride variant from this boarding and interchange can have:
+        /// the first ride, the walk or ride to the first stop, its wait as already cached and one
+        /// transfer, with every term still to come taken as zero. Adding a term never lowers a
+        /// floating-point sum, so when even this floor misses the widest bound every such variant
+        /// would be counted as bounded, and the transfers can be skipped without changing any result.
+        /// Without a cached wait there is no floor: the first variant must still set that wait.
+        /// The floor relies on a second ride never taking negative time.
+        let ridesNeverShorten = routeTimes.allSatisfy { times in zip(times, times.dropFirst()).allSatisfy { $0 <= $1 } }
+        func transferFloor(_ board: Occurrence, interchange: Int, access: Double, startBike: Int) -> Double {
+            let ride = 0 + routeTimes[board.pattern][interchange] - routeTimes[board.pattern][board.index]
+            var floor = Double.infinity
+            for cycling in [false, true] {
+                if cycling ? startBike < 0 : hasBikes && access > maximumWalk { continue }
+                guard let wait = firstWaits[waitSlot(board.pattern, board.index, cycling: cycling)] else { return -.infinity }
+                let walk = cycling ? bikeList[startBike].totalSeconds : access * 1.25 / 1.2
+                var value = JourneyPreferenceCost.score(elapsed: ride + (0 + walk), walking: 0, waiting: 0, transfers: 1,
+                    rentals: cycling ? 1 : 0, unknownWaits: 0, preferences: preferences)
+                value += wait.seconds * preferences.waitingWeight + (wait.evidence == .unknown ? 180 : 0)
+                value += 90 * preferences.waitingWeight
+                floor = min(floor, value)
+            }
+            return floor
+        }
         let startBikes = accessConnections.mapValues { bikeNumber($0) }
         for start in origins {
             if Task.isCancelled { return [] }
@@ -523,6 +547,8 @@ public struct TripPlanner: Sendable {
                 }
                 let firstParent = parents[board.pattern]
                 for interchange in (board.index + 1)..<first.stops.count {
+                    if preservePlatforms, ridesNeverShorten, transferFloor(board, interchange: interchange, access: start.distance, startBike: startBike) >
+                        bestWithoutRental + max(1200, bestWithoutRental * 0.35) { continue }
                     let station = first.stops[interchange].stationID
                     for neighbor in transferStations[station] ?? [] {
                         for next in occurrences[neighbor.id] ?? [] {
