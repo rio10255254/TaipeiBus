@@ -95,8 +95,9 @@ public enum JourneyChoiceRanking {
     /// What an alternative gains and what it costs compared with the recommended route, the way a
     /// rider weighs them: 「快 2 分，要借還 YouBike」「少走 12 分，慢 3 分」. Nil when nothing differs enough.
     public static func tradeoff(for choice: JourneyChoice, versus recommended: JourneyChoice) -> String? {
-        let faster = Int(((recommended.elapsed - choice.elapsed) / 60).rounded())
-        let lessWalk = Int(((recommended.walking - choice.walking) / 60).rounded())
+        func minutes(_ seconds: Double) -> Int { seconds.isFinite ? Int((seconds / 60).rounded()) : 0 }
+        let faster = minutes(recommended.elapsed - choice.elapsed)
+        let lessWalk = minutes(recommended.walking - choice.walking)
         var gains: [String] = [], costs: [String] = []
         // A transfer or a rental is named first.
         if choice.transfers < recommended.transfers {
