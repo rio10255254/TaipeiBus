@@ -79,7 +79,11 @@ def source_checks(root):
         offset += length + 12
     require(raw[25] == 2 and b"tRNS" not in chunks, "App Store icon must be RGB without transparency.")
     for field in ("description_file", "what_to_test_file"):
-        require(bool((root / "release" / config[field]).read_text(encoding="utf-8").strip()), f"Missing {field}.")
+        copy = (root / "release" / config[field]).read_text(encoding="utf-8")
+        require(bool(copy.strip()), f"Missing {field}.")
+        # TestFlight rejects longer beta copy with HTTP 409, but only after the build has
+        # been archived and uploaded; fail here instead.
+        require(len(copy) <= 4000, f"TestFlight {field} exceeds its 4000-character limit ({len(copy)}).")
     store_copy = json.loads((root / "release/app-store.zh-Hant.json").read_text(encoding="utf-8"))
     # App Store Connect's documented version-information limits. Review notes and
     # keywords use UTF-8 bytes, unlike the character limits on customer-facing copy.
