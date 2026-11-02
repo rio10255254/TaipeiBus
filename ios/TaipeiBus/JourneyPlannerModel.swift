@@ -723,7 +723,13 @@ final class JourneyPlannerModel: ObservableObject {
                 transfers: max(0,option.rides.count-1), rentals: option.walks.filter { $0.bike != nil }.count,
                 unknownWaits: timing.unknownWaits)
         }
+        // The recommendation says why it leads; every other route says what it gains and what it
+        // costs against the recommendation (「快 2 分，要借還 YouBike」), as a rider would weigh them.
+        let lead = comparisons.first { $0.id == ranked.first?.id }
         optionReasons = Dictionary(uniqueKeysWithValues: comparisons.compactMap { choice in
+            if let lead, choice.id != lead.id {
+                return JourneyChoiceRanking.tradeoff(for: choice, versus: lead).map { (choice.id, $0) }
+            }
             guard let other = comparisons.first(where: { $0.id != choice.id }),
                   let reason = JourneyChoiceRanking.reason(for: choice, comparedTo: other) else { return nil }
             return (choice.id, reason)

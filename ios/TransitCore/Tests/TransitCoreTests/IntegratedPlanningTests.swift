@@ -165,6 +165,30 @@ final class IntegratedPlanningTests: XCTestCase {
         XCTAssertLessThan(same,internalWalk);XCTAssertLessThan(internalWalk,outside)
         XCTAssertGreaterThan(ConnectionTiming.buffer(first:false,walking:300,previousSpread:300),outside)
     }
+    func testABikeRentalMustSaveRealTimeToLeadButStaysOffered() {
+        // A bike that only replaces a walk at almost the same pace: the plain route leads.
+        let metro = JourneyChoice(id:"metro",group:"BL",elapsed:1440,walking:1020,waiting:180,transfers:0,rentals:0,unknownWaits:0)
+        let feeder = JourneyChoice(id:"bus+bike",group:"bus-bike",elapsed:1320,walking:120,waiting:300,transfers:0,rentals:1,unknownWaits:0)
+        let ranked = JourneyChoiceRanking.recommended([metro,feeder])
+        XCTAssertEqual(ranked.first,"metro")
+        XCTAssertTrue(ranked.contains("bus+bike"),"The cycling route stays offered")
+        // Five minutes or more is worth the rental.
+        let faster = JourneyChoice(id:"fast-bike",group:"bus-bike",elapsed:1080,walking:120,waiting:300,transfers:0,rentals:1,unknownWaits:0)
+        XCTAssertEqual(JourneyChoiceRanking.recommended([metro,faster]).first,"fast-bike")
+        // So is a rental that spares a much longer walk.
+        let farWalk = JourneyChoice(id:"far-walk",group:"BL",elapsed:1440,walking:1500,waiting:180,transfers:0,rentals:0,unknownWaits:0)
+        XCTAssertEqual(JourneyChoiceRanking.recommended([farWalk,feeder]).first,"bus+bike")
+    }
+    func testAlternativesSayWhatTheyGainAndWhatTheyCost() {
+        let metro = JourneyChoice(id:"metro",group:"BL",elapsed:1440,walking:1020,waiting:180,transfers:0,rentals:0,unknownWaits:0)
+        let feeder = JourneyChoice(id:"bus+bike",group:"bus-bike",elapsed:1320,walking:120,waiting:300,transfers:0,rentals:1,unknownWaits:0)
+        let transfer = JourneyChoice(id:"transfer",group:"R-BR",elapsed:1200,walking:600,waiting:240,transfers:1,rentals:0,unknownWaits:0)
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:feeder,versus:metro),"少走 15 分，要借還 YouBike")
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:metro,versus:feeder),"不用借還車，多走 15 分")
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:transfer,versus:metro),"快 4 分，多轉乘 1 次")
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:metro,versus:transfer),"不用轉乘，慢 4 分")
+        XCTAssertNil(JourneyChoiceRanking.tradeoff(for:metro,versus:metro))
+    }
     func testAlternativeSuggestionsRequireMeaningfulSavingsOrAnUnavailableConnection() {
         XCTAssertFalse(JourneyRevisionPolicy.shouldOffer(current:1800,alternative:1740,currentUsable:true))
         XCTAssertTrue(JourneyRevisionPolicy.shouldOffer(current:1800,alternative:1500,currentUsable:true))

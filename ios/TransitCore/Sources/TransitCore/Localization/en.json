@@ -1177,5 +1177,13 @@
   "在「設定」允許「一路」使用位置，就能顯示附近站牌並從目前位置規劃。也可以直接搜尋站牌或選擇出發地。": "Allow OneRoad to use your location in Settings to see nearby stops and plan from where you are. You can also search for a stop or choose a start.",
   "仍在查詢，網路較慢或深夜班次少時需要較久。": "Still searching. It takes longer on a slow connection or late at night when few buses run.",
   "深夜多數公車與捷運已收班，可改查早上的首班。": "Most buses and the metro have stopped for the night. You can plan for the first morning service instead.",
-  "改為早上 6:00 出發": "Leave at 6:00 AM instead"
+  "改為早上 6:00 出發": "Leave at 6:00 AM instead",
+  "不用轉乘": "No transfer",
+  "快 %@ 分": "%@ min faster",
+  "慢 %@ 分": "%@ min slower",
+  "要借還 YouBike": "needs a YouBike rental",
+  "借還 %@ 次": "%@ more bike rentals",
+  "多轉乘 %@ 次": "%@ more transfers",
+  "多走 %@ 分": "%@ min more walking",
+  "%@，%@": "%@, %@"
 }
