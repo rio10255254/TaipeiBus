@@ -55,7 +55,7 @@ import Combine
     private(set) var statistics = Statistics()
     private var enqueued: [UUID: Double] = [:], begun: [UUID: Double] = [:]
 
-    init(window: Double = 60, limits: [Int] = [40, 36, 12], concurrency: Int = 2, spacing: Double = 0.35) {
+    init(window: Double = 60, limits: [Int] = [40, 36, 12], concurrency: Int = 3, spacing: Double = 0.2) {
         precondition(window > 0 && limits.count == 3 && limits.allSatisfy { $0 > 0 } && concurrency > 0 && spacing >= 0)
         self.window = window; self.limits = limits; self.concurrency = concurrency; self.spacing = spacing
     }
