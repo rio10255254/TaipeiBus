@@ -92,6 +92,9 @@ public enum JourneyChoiceRanking {
     public static let rentalSaving = 300.0
     /// How much longer a walk the route without a rental may ask for and still be recommended.
     public static let rentalWalkAllowance = 900.0
+    /// A wait nobody can predict counts as this much longer when weighing a rental against it,
+    /// the same allowance the ranking score gives it.
+    public static let unknownWaitAllowance = 180.0
     /// What an alternative gains and what it costs compared with the recommended route, the way a
     /// rider weighs them: 「快 2 分，要借還 YouBike」「少走 12 分，慢 3 分」. Nil when nothing differs enough.
     public static func tradeoff(for choice: JourneyChoice, versus recommended: JourneyChoice) -> String? {
@@ -108,12 +111,15 @@ public enum JourneyChoiceRanking {
         func timeFirst(_ minutes: Int, _ walk: Int) -> Bool { minutes >= 2 && walk < minutes * 2 }
         let timeGains = [(faster, AppText.text("快 %@ 分", faster)), (lessWalk, AppText.text("少走 %@ 分", lessWalk))].filter { $0.0 >= 2 }
         gains += timeFirst(faster, lessWalk) ? timeGains.map(\.1) : timeGains.reversed().map(\.1)
+        if choice.unknownWaits < recommended.unknownWaits { gains.append(AppText.text("等車時間較確定")) }
         if choice.rentals > recommended.rentals {
             costs.append(choice.rentals - recommended.rentals == 1 ? AppText.text("要借還 YouBike") : AppText.text("借還 %@ 次", choice.rentals - recommended.rentals))
         }
         if choice.transfers > recommended.transfers { costs.append(AppText.text("多轉乘 %@ 次", choice.transfers - recommended.transfers)) }
         let timeCosts = [(-faster, AppText.text("慢 %@ 分", -faster)), (-lessWalk, AppText.text("多走 %@ 分", -lessWalk))].filter { $0.0 >= 2 }
         costs += timeFirst(-faster, -lessWalk) ? timeCosts.map(\.1) : timeCosts.reversed().map(\.1)
+        // A wait with no timetable or live estimate is why an otherwise equal route is not first.
+        if choice.unknownWaits > recommended.unknownWaits { costs.append(AppText.text("等車時間不確定")) }
         guard let gain = gains.first else { return nil }
         guard let cost = costs.first else { return gain }
         return AppText.text("%@，%@", gain, cost)
@@ -128,10 +134,13 @@ public enum JourneyChoiceRanking {
         guard var best = ordered.first(where: \.transitLed) ?? ordered.first else { return [] }
         // Renting a bike has to earn the top place with time, not only by replacing a walk at the
         // same pace: the best route without a rental is recommended unless the rental saves at least
-        // five minutes (or a tenth of the trip), or that route would mean a much longer walk. The
-        // cycling route stays in the list, labelled with what it gains and costs.
-        if best.rentals > 0, let plain = ordered.first(where: { $0.rentals == 0 && $0.transitLed && $0.unknownWaits <= best.unknownWaits }),
-           plain.elapsed - best.elapsed < max(rentalSaving, plain.elapsed * 0.1),
+        // five minutes (or a tenth of the trip), or that route would mean a much longer walk. A wait
+        // nobody can predict counts as three minutes longer, so a direct bus without a timetable is
+        // weighed fairly instead of falling back to a slower route with a transfer. The cycling route
+        // stays in the list, labelled with what it gains and costs.
+        if best.rentals > 0, let plain = ordered.first(where: { $0.rentals == 0 && $0.transitLed }),
+           plain.elapsed + unknownWaitAllowance * Double(max(0, plain.unknownWaits - best.unknownWaits)) - best.elapsed
+               < max(rentalSaving, plain.elapsed * 0.1),
            plain.walking <= best.walking + rentalWalkAllowance {
             best = plain
         }
