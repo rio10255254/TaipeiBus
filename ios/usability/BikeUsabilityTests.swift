@@ -43,8 +43,10 @@ final class BikeUsabilityTests: JourneyUsabilityTestBase {
         switchStation.tap()
         // A network failure must retain the usable trip, rather than clearing the warning
         // by accepting an unverified replacement. Hosted tests cover both outcomes.
+        // A successful switch clears the warning and its button; existence is checked first
+        // because asking a removed element whether it is enabled fails the test.
         XCTAssertTrue(app.staticTexts["journey-bike-status-0"].waitForExistence(timeout: 20))
-        let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in switchStation.isEnabled || !switchStation.exists }, object:nil)
+        let finished = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in !switchStation.exists || switchStation.isEnabled }, object:nil)
         XCTAssertEqual(XCTWaiter.wait(for:[finished],timeout:60),.completed)
         XCTAssertTrue(button("journey-start-navigation").isEnabled)
         let snapshot=state()
