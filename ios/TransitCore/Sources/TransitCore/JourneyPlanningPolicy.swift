@@ -88,6 +88,36 @@ public enum JourneyChoiceRanking {
         if extra <= -120 { return AppText.text("快約 %@ 分", Int((-extra / 60).rounded())) }
         return nil
     }
+    /// The least time a bike rental must save to be recommended over a route without one.
+    public static let rentalSaving = 300.0
+    /// How much longer a walk the route without a rental may ask for and still be recommended.
+    public static let rentalWalkAllowance = 900.0
+    /// What an alternative gains and what it costs compared with the recommended route, the way a
+    /// rider weighs them: 「快 2 分，要借還 YouBike」「少走 12 分，慢 3 分」. Nil when nothing differs enough.
+    public static func tradeoff(for choice: JourneyChoice, versus recommended: JourneyChoice) -> String? {
+        func minutes(_ seconds: Double) -> Int { seconds.isFinite ? Int((seconds / 60).rounded()) : 0 }
+        let faster = minutes(recommended.elapsed - choice.elapsed)
+        let lessWalk = minutes(recommended.walking - choice.walking)
+        var gains: [String] = [], costs: [String] = []
+        // A transfer or a rental is named first.
+        if choice.transfers < recommended.transfers {
+            gains.append(choice.transfers == 0 ? AppText.text("不用轉乘") : AppText.text("少轉乘 %@ 次", recommended.transfers - choice.transfers))
+        }
+        if choice.rentals == 0, recommended.rentals > 0 { gains.append(AppText.text("不用借還車")) }
+        // Time leads; walking is named first only when it differs at least twice as much.
+        func timeFirst(_ minutes: Int, _ walk: Int) -> Bool { minutes >= 2 && walk < minutes * 2 }
+        let timeGains = [(faster, AppText.text("快 %@ 分", faster)), (lessWalk, AppText.text("少走 %@ 分", lessWalk))].filter { $0.0 >= 2 }
+        gains += timeFirst(faster, lessWalk) ? timeGains.map(\.1) : timeGains.reversed().map(\.1)
+        if choice.rentals > recommended.rentals {
+            costs.append(choice.rentals - recommended.rentals == 1 ? AppText.text("要借還 YouBike") : AppText.text("借還 %@ 次", choice.rentals - recommended.rentals))
+        }
+        if choice.transfers > recommended.transfers { costs.append(AppText.text("多轉乘 %@ 次", choice.transfers - recommended.transfers)) }
+        let timeCosts = [(-faster, AppText.text("慢 %@ 分", -faster)), (-lessWalk, AppText.text("多走 %@ 分", -lessWalk))].filter { $0.0 >= 2 }
+        costs += timeFirst(-faster, -lessWalk) ? timeCosts.map(\.1) : timeCosts.reversed().map(\.1)
+        guard let gain = gains.first else { return nil }
+        guard let cost = costs.first else { return gain }
+        return AppText.text("%@，%@", gain, cost)
+    }
     /// Preserve meaningful time/effort/reliability tradeoffs across every travel mode.
     public static func recommended(_ choices: [JourneyChoice]) -> [String] {
         let ordered = choices.filter { $0.score.isFinite && $0.elapsed.isFinite && $0.elapsed >= 0 }.sorted {
@@ -95,7 +125,16 @@ public enum JourneyChoiceRanking {
             if $0.elapsed != $1.elapsed { return $0.elapsed < $1.elapsed }
             return $0.id < $1.id
         }
-        guard let best = ordered.first(where: \.transitLed) ?? ordered.first else { return [] }
+        guard var best = ordered.first(where: \.transitLed) ?? ordered.first else { return [] }
+        // Renting a bike has to earn the top place with time, not only by replacing a walk at the
+        // same pace: the best route without a rental is recommended unless the rental saves at least
+        // five minutes (or a tenth of the trip), or that route would mean a much longer walk. The
+        // cycling route stays in the list, labelled with what it gains and costs.
+        if best.rentals > 0, let plain = ordered.first(where: { $0.rentals == 0 && $0.transitLed && $0.unknownWaits <= best.unknownWaits }),
+           plain.elapsed - best.elapsed < max(rentalSaving, plain.elapsed * 0.1),
+           plain.walking <= best.walking + rentalWalkAllowance {
+            best = plain
+        }
         let frontier = ordered.filter { a in
             !ordered.contains { b in
                 b.id != a.id && b.elapsed <= a.elapsed && b.walking <= a.walking && b.transfers <= a.transfers &&
