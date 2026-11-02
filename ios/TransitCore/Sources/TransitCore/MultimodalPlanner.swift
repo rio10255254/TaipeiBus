@@ -442,15 +442,39 @@ public struct MultimodalPlanner: Sendable {
                 return best + max(1200, best * 0.35)
             }
             var arrived: [String: [Label]] = [:]
-            func insert(_ label: Label, in values: inout [String: [Label]], at id: String) {
+            func admit(_ label: Label, into pool: inout [Label]) {
                 // A cheaper but later label must not erase a path which can catch an
                 // earlier connection. Rental count and remaining boarding time both matter.
-                if let pool = values[id], pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
+                if pool.contains(where: { $0.cost <= label.cost && $0.elapsed <= label.elapsed && $0.walking <= label.walking &&
                     $0.bikes.count <= label.bikes.count && $0.hasRail == label.hasRail && $0.previousSpread <= label.previousSpread &&
                     $0.unknownWaits <= label.unknownWaits }) { return }
-                // The pool is changed where it is stored; a copy taken out and written back
-                // duplicated the whole pool on every insertion.
-                prune(&values[id, default: []], with: label)
+                prune(&pool, with: label)
+            }
+            /// The pools that inserting every label of `lists`, in order, into empty pools would give.
+            /// A station's pool depends only on the labels for that station, in their order, so the
+            /// stations are worked out in parallel; they are then stored in the order each first
+            /// appeared, which is the order inserting them one by one would have added them.
+            func pools(_ lists: [[(String, Label)]]) -> [String: [Label]] {
+                var order: [String] = [], position: [String: Int] = [:], grouped: [[Label]] = []
+                for list in lists { for (id, label) in list {
+                    if let index = position[id] { grouped[index].append(label) }
+                    else { position[id] = order.count; order.append(id); grouped.append([label]) }
+                } }
+                let groups = grouped
+                var merged = [[Label]](repeating: [], count: groups.count)
+                let size = max(1, (groups.count + groupCount - 1) / groupCount)
+                merged.withUnsafeMutableBufferPointer { output in
+                    DispatchQueue.concurrentPerform(iterations: (groups.count + size - 1) / size) { chunk in
+                        for index in (chunk * size)..<min(groups.count, (chunk + 1) * size) {
+                            var pool: [Label] = []
+                            for label in groups[index] { admit(label, into: &pool) }
+                            output[index] = pool
+                        }
+                    }
+                }
+                var values: [String: [Label]] = [:]
+                for (index, id) in order.enumerated() { values[id] = merged[index] }
+                return values
             }
             func prune(_ pool: inout [Label], with label: Label) {
                 pool.removeAll { label.cost <= $0.cost && label.elapsed <= $0.elapsed && label.walking <= $0.walking &&
@@ -562,7 +586,7 @@ public struct MultimodalPlanner: Sendable {
                 }
                 output[group] = found
             } } } }
-            for list in expanded { for (id, label) in list { insert(label, in: &arrived, at: id) } }
+            arrived = pools(expanded)
             for (id, labels) in arrived {
                 guard let stop = stationStops[id] else { continue }
                 let egress = streetDistance(stop, to: destination)
@@ -609,32 +633,48 @@ public struct MultimodalPlanner: Sendable {
                 }
                 for list in computed { for (id, value) in list { streetLinks[id] = value } }
             }
-            for (id, labels) in arrived {
-                guard labels.contains(where: { $0.cost <= ceiling($0) }) else { continue }
-                for (link, bike) in connections(from: id) {
-                    for label in labels {
-                        if label.cost > ceiling(label) { continue }
-                        if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
-                           stationStops[link.id]?.mode == .bus, bike == nil { continue }
-                        // Same platform changing trains still includes a short platform allowance.
-                        let duration = link.seconds
-                        let foot = bike.map { max(0, duration - $0.rideSeconds - $0.handlingSeconds) } ?? duration
-                        let risk = bike.map { BikeRouting.supplyPenalty($0, availability: bikeAvailability, pickupAfter: label.elapsed, at: date) } ?? 0
-                        let extra = JourneyPreferenceCost.score(elapsed: duration, walking: foot, waiting: 0, transfers: 0,
-                            rentals: bike == nil ? 0 : 1, unknownWaits: 0, supplyRisk: risk, preferences: preferences)
-                        let value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
-                            transferSeconds: label.transferSeconds + [duration], elapsed: label.elapsed + duration,
-                            walking: label.walking + foot, cost: label.cost + extra,
-                            lastStation: link.id, hasRail: label.hasRail, family: label.family)
-                        value.bikes = label.bikes
-                        if let bike { value.bikes[label.segments.count] = bike }
-                        value.supplyRisk = label.supplyRisk + risk; value.lastWalk = duration
-                        value.internalWalk = link.internalWalk; value.previousSpread = label.previousSpread
-                        value.unknownWaits = label.unknownWaits
-                        insert(value, in: &next, at: link.id)
+            // The labels each station's links lead to are made in parallel, then inserted in the
+            // order the stations, links and labels have always been visited, so the pools come out
+            // the same. Every link a station needs is worked out first; making labels only reads them.
+            // compactMap keeps the dictionary's own order; filter would build a new dictionary with another.
+            let sources = arrived.compactMap { id, labels in labels.contains(where: { $0.cost <= ceiling($0) }) ? (id: id, labels: labels) : nil }
+            for source in sources { _ = connections(from: source.id) }
+            let reachable = streetLinks
+            let sourceGroup = max(1, (sources.count + groupCount - 1) / groupCount)
+            let sourceChunks = stride(from: 0, to: sources.count, by: sourceGroup).map { $0..<min(sources.count, $0 + sourceGroup) }
+            var made = [[(String, Label)]](repeating: [], count: sourceChunks.count)
+            made.withUnsafeMutableBufferPointer { output in
+                DispatchQueue.concurrentPerform(iterations: sourceChunks.count) { chunk in
+                    var found: [(String, Label)] = []
+                    for source in sources[sourceChunks[chunk]] {
+                        for (link, bike) in reachable[source.id] ?? [] {
+                            for label in source.labels {
+                                if label.cost > ceiling(label) { continue }
+                                if let last = label.segments.last, patterns[last.pattern].route.mode == .bus,
+                                   stationStops[link.id]?.mode == .bus, bike == nil { continue }
+                                // Same platform changing trains still includes a short platform allowance.
+                                let duration = link.seconds
+                                let foot = bike.map { max(0, duration - $0.rideSeconds - $0.handlingSeconds) } ?? duration
+                                let risk = bike.map { BikeRouting.supplyPenalty($0, availability: bikeAvailability, pickupAfter: label.elapsed, at: date) } ?? 0
+                                let extra = JourneyPreferenceCost.score(elapsed: duration, walking: foot, waiting: 0, transfers: 0,
+                                    rentals: bike == nil ? 0 : 1, unknownWaits: 0, supplyRisk: risk, preferences: preferences)
+                                let value = Label(segments: label.segments, access: label.access, distances: label.distances + [link.distance],
+                                    transferSeconds: label.transferSeconds + [duration], elapsed: label.elapsed + duration,
+                                    walking: label.walking + foot, cost: label.cost + extra,
+                                    lastStation: link.id, hasRail: label.hasRail, family: label.family)
+                                value.bikes = label.bikes
+                                if let bike { value.bikes[label.segments.count] = bike }
+                                value.supplyRisk = label.supplyRisk + risk; value.lastWalk = duration
+                                value.internalWalk = link.internalWalk; value.previousSpread = label.previousSpread
+                                value.unknownWaits = label.unknownWaits
+                                found.append((link.id, value))
+                            }
+                        }
                     }
+                    output[chunk] = found
                 }
             }
+            next = pools(made)
             previous = next
             if profile { print("PLANNING_PHASE round=\(round) seconds=\(ProcessInfo.processInfo.systemUptime - began) nodes=\(previous.count) candidates=\(candidates.count) transfer_nodes=\(streetLinks.count)") }
         }
