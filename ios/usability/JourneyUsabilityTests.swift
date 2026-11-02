@@ -1567,3 +1567,37 @@ final class ZoomPerformanceUsabilityTests: JourneyUsabilityTestBase {
         capture("zoom-fixed-english-place-design")
     }
 }
+
+/// Measures planning on the real network: when the transit search finishes, when the first
+/// checked choice appears, when every walk is confirmed, and how the Apple Maps request budget
+/// was spent. The numbers are printed (STREET_TIMING) and attached for comparison between builds.
+final class StreetTimingUsabilityTests: JourneyUsabilityTestBase {
+    private func state() -> [String: Any] {
+        guard let bytes = app.staticTexts["journey-timing-state"].label.data(using: .utf8),
+              let value = try? JSONSerialization.jsonObject(with: bytes) as? [String: Any] else { return [:] }
+        return value
+    }
+    private func measure(_ name: String, _ arguments: [String]) {
+        launch(["--test-journey-selection", "--test-map-controls"] + arguments)
+        let done = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard self.app.staticTexts["journey-timing-state"].exists else { return false }
+            let value = self.state()
+            return (value["timeline"] as? [String: Any])?["checked_ms"] != nil
+        }, object: nil)
+        let finished = XCTWaiter.wait(for: [done], timeout: 420) == .completed
+        let value = state()
+        let options = value["options"] as? [[String: Any]] ?? []
+        let summary: [String: Any] = ["case": name, "finished": finished, "timeline": value["timeline"] ?? [:],
+            "streets": value["streets"] ?? [:], "options": options.count,
+            "verified": options.filter { $0["verified"] as? Bool == true }.count]
+        let text = (try? JSONSerialization.data(withJSONObject: summary, options: [.sortedKeys])).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        print("STREET_TIMING " + text)
+        let report = XCTAttachment(string: text); report.name = "street-timing-" + name; report.lifetime = .keepAlways; add(report)
+        capture("street-timing-" + name)
+        XCTAssertTrue(finished, "Every walk of the plan should be confirmed")
+        XCTAssertGreaterThan(options.count, 0)
+    }
+    func testNeihuToZhongxiaoFuxing() { measure("neihu", ["--preview-neihu-planning"]) }
+    func testNearbyTaipei101() { measure("taipei101", ["--preview-destination", "台北101"]) }
+    func testLongTripToTamsuiOldStreet() { measure("tamsui", ["--preview-destination", "淡水老街"]) }
+}

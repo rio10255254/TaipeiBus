@@ -136,7 +136,8 @@ struct TransitHomeView: View {
                                 "duration_label": timing?.label ?? "", "waiting_label": timing?.waitingLabel ?? "",
                                 "arrival_label": timing?.arrivalLabel ?? ""]
                         }
-                        let value: [String: Any] = ["itinerary": showJourneyItinerary, "route_panel_open": showJourney, "planning": planner.planning, "checking": planner.checkingWalks, "message": planner.message ?? "", "empty_message": planner.emptyOptionsMessage ?? "", "origin_ready": planner.origin != nil, "metadata_routes": model.metadata.routes.count, "selected": planner.selectedID ?? "", "started": planner.started, "step": planner.stepIndex, "suggestion": model.journeySuggestion?.id ?? "", "comparison_changed": planner.comparisonChanged, "options": records]
+                        let value: [String: Any] = ["itinerary": showJourneyItinerary, "route_panel_open": showJourney, "planning": planner.planning, "checking": planner.checkingWalks, "message": planner.message ?? "", "empty_message": planner.emptyOptionsMessage ?? "", "origin_ready": planner.origin != nil, "metadata_routes": model.metadata.routes.count, "selected": planner.selectedID ?? "", "started": planner.started, "step": planner.stepIndex, "suggestion": model.journeySuggestion?.id ?? "", "comparison_changed": planner.comparisonChanged, "options": records,
+                            "timeline": planner.timeline, "streets": DirectionsRequestGate.shared.statistics.summary]
                         let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
                         Text(data.map { String(decoding: $0, as: UTF8.self) } ?? "")
                             .font(.system(size: 1)).foregroundStyle(.clear).frame(width: 1, height: 1)
