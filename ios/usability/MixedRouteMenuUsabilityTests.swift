@@ -113,7 +113,13 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(dismiss.waitForExistence(timeout:120))
         let initial = readySuggestionState(), selected = initial["selected"] as? String
         XCTAssertEqual(initial["route_panel_open"] as? Bool,false)
-        XCTAssertLessThan(camera()["userFixAge"] as? Double ?? .infinity,12,"The stationary sensor fixture must keep sending fresh fixes")
+        // One sample can land just before the next fix under a loaded runner; the fixture is
+        // healthy when a fix younger than 12 s shows up within a few seconds (the app's own
+        // suggestion gate is 20 s).
+        let fresh = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in
+            (self.camera()["userFixAge"] as? Double ?? .infinity) < 12 }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[fresh],timeout:8),.completed,
+                       "The stationary sensor fixture must keep sending fresh fixes (last age \(camera()["userFixAge"] ?? "none"))")
         XCTAssertGreaterThanOrEqual(dismiss.frame.width,44);XCTAssertGreaterThanOrEqual(dismiss.frame.height,44)
         capture("journey-alternative-optional")
         dismiss.tap()
