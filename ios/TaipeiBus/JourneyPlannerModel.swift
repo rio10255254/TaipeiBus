@@ -894,38 +894,44 @@ final class JourneyPlannerModel: ObservableObject {
     private func verifyConnections(_ ordinary: [JourneyOption], cycling initial: [JourneyOption] = [], limit: Int = 12,
                                    discoverBikes: Bool = true, token: UUID) async {
         var walking = ordinary, cycling = initial
-        while !Task.isCancelled, token == generation {
-            if discoverBikes { cycling.append(contentsOf: takeBikeConnections(limit: limit)) }
-            var batch: [JourneyOption] = []
-            let batchLimit = verifiedPool.isEmpty ? 1 : 2
-            if !walking.isEmpty { batch.append(walking.removeFirst()) }
-            if batch.count < batchLimit, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
-            while batch.count < batchLimit, !walking.isEmpty { batch.append(walking.removeFirst()) }
-            while batch.count < batchLimit, !cycling.isEmpty { batch.append(cycling.removeFirst()) }
-            guard !batch.isEmpty else { return }
-            var serviceInterrupted = false
-            await withTaskGroup(of: JourneyOption?.self) { group in
-                for choice in batch { group.addTask { [weak self] in try? await self?.enrich(choice) } }
-                for await result in group {
-                    guard token == self.generation, !Task.isCancelled, let result else { continue }
-                    if result.walks.contains(where: \.temporaryStreetFailure) { serviceInterrupted = true }
-                    if result.trip?.variant.isEmpty == true { self.connectionBases[result.id] = result }
-                    if result.verified, result.walkIssue == nil {
-                        if !self.recordedFirstChoice {
-                            self.recordedFirstChoice = true; self.mark("first_choice_ms")
-                            JourneyDiagnostics.shared.record("first_choice_ms=\(Int((ProcessInfo.processInfo.systemUptime-self.planBegan)*1000))")
-                        }
-                        self.verifiedPool.removeAll { $0.id == result.id }
-                        self.verifiedPool.append(result); self.message = nil
-                        // Publish as soon as either half is ready, not after the slower half.
-                        self.publishRecommendations()
-                    }
+        // Ordinary routes and cycling alternatives take turns. Until a first choice is confirmed it has
+        // the requests to itself; after that two choices are checked at a time, and the next one
+        // starts as soon as either finishes instead of waiting for the slower of a pair.
+        var takeCycling = false, running = 0, serviceInterrupted = false
+        await withTaskGroup(of: JourneyOption?.self) { group in
+            func startNext() {
+                while !serviceInterrupted, !Task.isCancelled, token == generation, running < (verifiedPool.isEmpty ? 1 : 2) {
+                    if discoverBikes { cycling.append(contentsOf: takeBikeConnections(limit: limit)) }
+                    let choice: JourneyOption
+                    if takeCycling, !cycling.isEmpty { choice = cycling.removeFirst() }
+                    else if !walking.isEmpty { choice = walking.removeFirst() }
+                    else if !cycling.isEmpty { choice = cycling.removeFirst() }
+                    else { return }
+                    takeCycling.toggle(); running += 1
+                    group.addTask { [weak self] in try? await self?.enrich(choice) }
                 }
             }
-            // An outage is shared by the provider, not unique to a platform.
-            // Stop the batch and let the bounded recovery pass handle it instead
-            // of immediately sending the same failing access leg for every option.
-            if serviceInterrupted { return }
+            startNext()
+            while let finished = await group.next() {
+                running -= 1
+                if token == generation, !Task.isCancelled, let result = finished {
+                    // An outage is shared by the provider, not unique to a platform. No further
+                    // choice is started; the bounded recovery pass handles it instead of sending
+                    // the same failing access leg for every option.
+                    if result.walks.contains(where: \.temporaryStreetFailure) { serviceInterrupted = true }
+                    if result.trip?.variant.isEmpty == true { connectionBases[result.id] = result }
+                    if result.verified, result.walkIssue == nil {
+                        if !recordedFirstChoice {
+                            recordedFirstChoice = true; mark("first_choice_ms")
+                            JourneyDiagnostics.shared.record("first_choice_ms=\(Int((ProcessInfo.processInfo.systemUptime-planBegan)*1000))")
+                        }
+                        verifiedPool.removeAll { $0.id == result.id }
+                        verifiedPool.append(result); message = nil
+                        publishRecommendations()
+                    }
+                }
+                startNext()
+            }
         }
     }
     /// Compare single and combined access, transfer and egress connections. An indoor
@@ -1437,15 +1443,14 @@ final class JourneyPlannerModel: ObservableObject {
     private func enrich(_ option: JourneyOption, compareStations: Bool = false) async throws -> JourneyOption {
         var result = option
         var checked: [Int: WalkingLeg] = [:]
-        // Reserve both street slots for the leading choice's two ends. A second
-        // option no longer delays its first usable door-to-door result.
-        if !option.cycles, verifiedPool.isEmpty {
-            try await withThrowingTaskGroup(of: (Int, WalkingLeg).self) { group in
-                for index in option.walks.indices.filter({ !option.walks[$0].internalTransfer }).prefix(2) {
-                    group.addTask { [self] in (index, try await checkedWalk(option.walks[index])) }
-                }
-                for try await (index, leg) in group { checked[index] = leg }
-            }
+        // Every street walk of the choice is checked at once; the shared request gate decides how
+        // many run together. A walk's result does not depend on the others, so the order of the
+        // answers changes nothing. Cycling legs follow, in order, because each one's supply risk
+        // depends on when the legs before it end.
+        let walks = option.walks.indices.filter { !option.walks[$0].internalTransfer && option.walks[$0].bike == nil }
+        try await withThrowingTaskGroup(of: (Int, WalkingLeg).self) { group in
+            for index in walks { group.addTask { [self] in (index, try await checkedWalk(option.walks[index])) } }
+            for try await (index, leg) in group { checked[index] = leg }
         }
         for index in option.walks.indices {
             try Task.checkCancellation()
@@ -1552,11 +1557,14 @@ final class JourneyPlannerModel: ObservableObject {
     }
     private func verifyPair(_ leg: WalkingLeg, connection: BikeConnection) async throws -> WalkingLeg {
         var bike = BikeLeg(connection), result = leg
-        let access = try await walk(WalkingLeg(from: leg.from, to: bike.pickup.coordinate))
+        // The walk to the station, the ride and the walk on are independent requests, sent together.
+        let pickup = bike.pickup.coordinate, dropoff = bike.dropoff.coordinate
+        async let accessLeg = self.walk(WalkingLeg(from: leg.from, to: pickup))
+        async let streetLeg = self.walk(WalkingLeg(from: pickup, to: dropoff), transport: .cycling)
+        async let egressLeg = self.walk(WalkingLeg(from: dropoff, to: leg.to))
+        let (access, street, egress) = try await (accessLeg, streetLeg, egressLeg)
         guard access.verified else { result.duration = nil; result.temporaryStreetFailure = access.temporaryStreetFailure; return result }
-        let street = try await walk(WalkingLeg(from: bike.pickup.coordinate, to: bike.dropoff.coordinate), transport: .cycling)
         guard street.verified else { result.duration = nil; result.temporaryStreetFailure = street.temporaryStreetFailure; return result }
-        let egress = try await walk(WalkingLeg(from: bike.dropoff.coordinate, to: leg.to))
         guard egress.verified else { result.duration = nil; result.temporaryStreetFailure = egress.temporaryStreetFailure; return result }
         guard let accessSeconds = access.duration, let egressSeconds = egress.duration,
               let rideMeters = street.distance, let rideSeconds = street.duration, rideMeters > 0, rideSeconds > 0 else {
