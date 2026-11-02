@@ -179,11 +179,12 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         button("journey-all-options").tap()
         let last = options.last?["id"] as? String ?? ""
         let row = button("journey-option-"+last)
-        for _ in 0..<8 {
-            if row.isHittable { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        XCTAssertTrue(row.isHittable);capture("mixed-more-options-full-list");row.tap()
+        let list = app.scrollViews.firstMatch
+        // A row peeking above the home indicator reports hittable, but a tap there belongs to the
+        // system gesture. Scroll until the whole row sits clear of the bottom edge, as a rider would.
+        func clear() -> Bool { row.exists && row.isHittable && row.frame.maxY <= list.frame.maxY - 44 }
+        for _ in 0..<8 where !clear() { list.swipeUp() }
+        XCTAssertTrue(clear(),"The last reasonable route can be scrolled fully into view");capture("mixed-more-options-full-list");row.tap()
         XCTAssertTrue(button("journey-go-"+last).waitForExistence(timeout:10))
         XCTAssertEqual(state()["selected"] as? String,last)
         XCTAssertEqual(state()["started"] as? Bool,false)

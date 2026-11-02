@@ -2633,6 +2633,7 @@ final class TransitAppModel: ObservableObject {
         // The rider is on the way when the station they are heading to runs dry. Every offered
         // trip loses its station, so whichever one is opened shows the warning.
         if emptyPickup {
+            planner.holdsBikeStations = true
             var emptied = docks
             for pickup in planner.plannedPickupStations {
                 emptied[pickup.id] = BikeDock(stationID: pickup.id, rentable: 0, returnable: 12,

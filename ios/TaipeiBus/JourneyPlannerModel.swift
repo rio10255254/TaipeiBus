@@ -823,6 +823,10 @@ final class JourneyPlannerModel: ObservableObject {
     private var lastIntegratedBikeSearch = Date.distantPast
     private var lastIntegratedSupplyAt = Date.distantPast
     private var stationRefinements: [String: Date] = [:]
+    /// Set by the interface fixture where the station a rider is heading to runs out: the
+    /// offered stations stay as they are, so the warning and the manual switch can be checked
+    /// instead of being replaced by a quietly refined choice.
+    var holdsBikeStations = false
     private func bikeChoiceKey(_ option: JourneyOption) -> String {
         option.id + "|" + option.walks.enumerated().compactMap { index, leg in
             leg.bike.map { "\(index):\($0.pickup.id):\($0.dropoff.id)" }
@@ -832,6 +836,7 @@ final class JourneyPlannerModel: ObservableObject {
     /// the leading choices. Every alternative is ranked as a whole journey, including
     /// which departure its changed access/transfer can actually catch.
     private func refineLeadingStations(token: UUID) async {
+        guard !holdsBikeStations else { return }
         let leading = recommendations(at: Date()).filter(\.cycles).prefix(2)
         for original in leading {
             guard !Task.isCancelled, token == generation, !started else { return }

@@ -610,7 +610,14 @@ private struct JourneyBoardingContent: View {
 #if DEBUG
                     model.recordMapTap("show-arrivals")
 #endif
-                    model.showingArrivingVehicles = true
+                    // A presentation SwiftUI drops (another sheet still settling) would leave the flag on
+                    // and this button dead; clear it first so every tap presents the list.
+                    if model.showingArrivingVehicles {
+                        model.showingArrivingVehicles = false
+                        DispatchQueue.main.async { model.showingArrivingVehicles = true }
+                    } else {
+                        model.showingArrivingVehicles = true
+                    }
                 } label: {
                     HStack(spacing: 4) {
                         Text(AppText.text("到站車輛"))
@@ -1274,8 +1281,11 @@ struct JourneyOptionsView: View {
                         ForEach(Array(planner.featuredOptions.enumerated()), id: \.element.id) { index, option in
                             let current = option.id == planner.selectedID
                             Button { planner.select(option) } label: {
+                                // Every dot keeps a full-height slot of the same width, all of it tappable, so a
+                                // finger (or a test) lands on the intended page even while the current one widens.
                                 Capsule().fill(current ? Color.primary : Color.secondary.opacity(0.3))
-                                    .frame(width: current ? 16 : 6, height: 6).frame(width: current ? 28 : 18, height: 44)
+                                    .frame(width: current ? 16 : 6, height: 6).frame(width: 28, height: 44)
+                                    .contentShape(Rectangle())
                             }.accessibilityLabel(AppText.text("路線方案 %@", index + 1))
                                 .accessibilityValue(current ? AppText.text("已選擇") : "")
                                 .accessibilityIdentifier("journey-page-\(index)")
