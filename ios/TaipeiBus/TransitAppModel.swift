@@ -878,11 +878,17 @@ final class TransitAppModel: ObservableObject {
         showsBikeStations || selectedBikeStationID != nil || planner.cyclingInPlan ||
             (liveSettings.planning.bikeRouting && !planner.started)
     }
-    private func pollBikesInBackground() {
+    /// Interface checks run on explicitly fixed counts; neither the saved counts read at launch
+    /// nor a live fetch may replace them once the scenario is installed.
+    private var holdsFixtureBikeCounts: Bool {
 #if DEBUG
-        // Interface checks run on explicitly fixed counts; a live fetch must not replace them.
-        if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), previewNotice != nil { return }
+        return ProcessInfo.processInfo.arguments.contains("--usability-fixture") && previewNotice != nil
+#else
+        return false
 #endif
+    }
+    private func pollBikesInBackground() {
+        if holdsFixtureBikeCounts { return }
         guard runsLiveWork, needsBikeCounts, bikeTask == nil else { return }
         let token = UUID(); bikeGeneration = token
         let network = bikeNetwork
@@ -890,11 +896,9 @@ final class TransitAppModel: ObservableObject {
             guard let self else { return }
             defer { if self.bikeGeneration == token { self.bikeTask = nil } }
             let packet = await self.service.bikeAvailability(network: network)
-#if DEBUG
             // A download begun before the controlled UI scenario was installed
             // must not replace its explicit station counts afterwards.
-            if ProcessInfo.processInfo.arguments.contains("--usability-fixture"), self.previewNotice != nil { return }
-#endif
+            if self.holdsFixtureBikeCounts { return }
             if !Task.isCancelled, self.runsLiveWork, self.bikeGeneration == token,
                let packet, packet != self.bikeAvailability {
                 self.bikeAvailability = packet
@@ -1180,7 +1184,7 @@ final class TransitAppModel: ObservableObject {
                     bikeNetwork = await service.bikeNetwork()
                     planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
                 }
-                if let cached = await service.cachedBikeAvailability(network: bikeNetwork) {
+                if let cached = await service.cachedBikeAvailability(network: bikeNetwork), !holdsFixtureBikeCounts {
                     bikeAvailability = cached
                     planner.updateBikes(network: bikeNetwork, availability: cached)
                 }
