@@ -899,34 +899,38 @@ final class JourneyPlannerModel: ObservableObject {
         // starts as soon as either finishes instead of waiting for the slower of a pair.
         var takeCycling = false, running = 0, serviceInterrupted = false
         await withTaskGroup(of: JourneyOption?.self) { group in
-            while true {
+            func startNext() {
                 while !serviceInterrupted, !Task.isCancelled, token == generation, running < (verifiedPool.isEmpty ? 1 : 2) {
                     if discoverBikes { cycling.append(contentsOf: takeBikeConnections(limit: limit)) }
                     let choice: JourneyOption
                     if takeCycling, !cycling.isEmpty { choice = cycling.removeFirst() }
                     else if !walking.isEmpty { choice = walking.removeFirst() }
                     else if !cycling.isEmpty { choice = cycling.removeFirst() }
-                    else { break }
+                    else { return }
                     takeCycling.toggle(); running += 1
                     group.addTask { [weak self] in try? await self?.enrich(choice) }
                 }
-                guard let finished = await group.next() else { break }
+            }
+            startNext()
+            while let finished = await group.next() {
                 running -= 1
-                guard token == generation, !Task.isCancelled, let result = finished else { continue }
-                // An outage is shared by the provider, not unique to a platform. No further
-                // choice is started; the bounded recovery pass handles it instead of sending
-                // the same failing access leg for every option.
-                if result.walks.contains(where: \.temporaryStreetFailure) { serviceInterrupted = true }
-                if result.trip?.variant.isEmpty == true { connectionBases[result.id] = result }
-                if result.verified, result.walkIssue == nil {
-                    if !recordedFirstChoice {
-                        recordedFirstChoice = true; mark("first_choice_ms")
-                        JourneyDiagnostics.shared.record("first_choice_ms=\(Int((ProcessInfo.processInfo.systemUptime-planBegan)*1000))")
+                if token == generation, !Task.isCancelled, let result = finished {
+                    // An outage is shared by the provider, not unique to a platform. No further
+                    // choice is started; the bounded recovery pass handles it instead of sending
+                    // the same failing access leg for every option.
+                    if result.walks.contains(where: \.temporaryStreetFailure) { serviceInterrupted = true }
+                    if result.trip?.variant.isEmpty == true { connectionBases[result.id] = result }
+                    if result.verified, result.walkIssue == nil {
+                        if !recordedFirstChoice {
+                            recordedFirstChoice = true; mark("first_choice_ms")
+                            JourneyDiagnostics.shared.record("first_choice_ms=\(Int((ProcessInfo.processInfo.systemUptime-planBegan)*1000))")
+                        }
+                        verifiedPool.removeAll { $0.id == result.id }
+                        verifiedPool.append(result); message = nil
+                        publishRecommendations()
                     }
-                    verifiedPool.removeAll { $0.id == result.id }
-                    verifiedPool.append(result); message = nil
-                    publishRecommendations()
                 }
+                startNext()
             }
         }
     }
