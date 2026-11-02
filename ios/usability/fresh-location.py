@@ -15,7 +15,7 @@ while True:
         latitude = 25.0377 + (0.00012 if sequence % 2 else -0.00012) if jitter else 25.0377
         sequence += 1
         result = subprocess.run(['xcrun', 'simctl', 'location', device, 'set', f'{latitude:.6f},121.56'],
-                                capture_output=True, text=True, timeout=20)
+                                capture_output=True, text=True, timeout=8)
         if result.returncode:
             print('Simulator location refresh returned a temporary error.', flush=True)
     except subprocess.TimeoutExpired:

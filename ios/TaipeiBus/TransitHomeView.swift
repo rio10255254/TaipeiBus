@@ -16,7 +16,10 @@ struct TransitHomeView: View {
     private var journeyPreviewDetent: PresentationDetent {
         if dynamicTypeSize.isAccessibilitySize || live.appearance.textScale > 1.25 { return .fraction(0.82) }
         // On a short screen (iPhone SE) the preview leaves 470 points so the alternatives fit beside the first route.
-        return .height(viewportHeight > 0 && viewportHeight < 760 ? 470 : 510)
+        // English adds a line to the route card (JourneyPlanningView adds 22 points for it); without the same room
+        // here the page dots and 「全部路線」 slid into the home indicator, where taps belong to the system.
+        let base: CGFloat = viewportHeight > 0 && viewportHeight < 760 ? 470 : 510
+        return .height(base + (live.language == .english ? 22 : 0))
     }
     @State private var viewportHeight: CGFloat = 0
     @State private var showSearch = false

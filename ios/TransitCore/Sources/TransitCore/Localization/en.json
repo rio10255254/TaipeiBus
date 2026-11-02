@@ -1178,6 +1178,8 @@
   "仍在查詢，網路較慢或深夜班次少時需要較久。": "Still searching. It takes longer on a slow connection or late at night when few buses run.",
   "深夜多數公車與捷運已收班，可改查早上的首班。": "Most buses and the metro have stopped for the night. You can plan for the first morning service instead.",
   "改為早上 6:00 出發": "Leave at 6:00 AM instead",
+  "等車時間較確定": "more predictable wait",
+  "等車時間不確定": "unpredictable wait",
   "不用轉乘": "No transfer",
   "快 %@ 分": "%@ min faster",
   "慢 %@ 分": "%@ min slower",

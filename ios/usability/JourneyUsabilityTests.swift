@@ -335,8 +335,12 @@ final class JourneyUsabilityTests: JourneyUsabilityTestBase {
         // A started trip shows what remains (summaryLabel(remaining:), since 1.8.11), not the whole trip.
         let total = app.staticTexts["journey-total-duration"].label
         XCTAssertTrue(total.contains("剩餘約") || total.contains("剩餘行程約"), total)
+        // The card can still be settling into the dock when it first becomes accessible; a tap it
+        // misses must be answered by the next one rather than leaving the list unreachable.
+        let done = button("journey-vehicles-done")
         button("journey-all-vehicles").tap()
-        XCTAssertTrue(button("journey-vehicles-done").waitForExistence(timeout: 5))
+        if !done.waitForExistence(timeout: 5) { capture("arriving-vehicles-first-tap-missed"); button("journey-all-vehicles").tap() }
+        XCTAssertTrue(done.waitForExistence(timeout: 5))
         capture("all-departed-before-scroll")
         if !button("boarding-vehicle-TEST-04").exists { app.swipeUp() }
         XCTAssertTrue(button("boarding-vehicle-TEST-04").waitForExistence(timeout: 10))

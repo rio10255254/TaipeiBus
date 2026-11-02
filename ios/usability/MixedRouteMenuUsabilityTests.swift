@@ -113,7 +113,13 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         XCTAssertTrue(dismiss.waitForExistence(timeout:120))
         let initial = readySuggestionState(), selected = initial["selected"] as? String
         XCTAssertEqual(initial["route_panel_open"] as? Bool,false)
-        XCTAssertLessThan(camera()["userFixAge"] as? Double ?? .infinity,12,"The stationary sensor fixture must keep sending fresh fixes")
+        // One sample can land just before the next fix under a loaded runner; the fixture is
+        // healthy when a fix younger than 12 s shows up within a few seconds (the app's own
+        // suggestion gate is 20 s).
+        let fresh = XCTNSPredicateExpectation(predicate:NSPredicate { _,_ in
+            (self.camera()["userFixAge"] as? Double ?? .infinity) < 12 }, object:nil)
+        XCTAssertEqual(XCTWaiter.wait(for:[fresh],timeout:8),.completed,
+                       "The stationary sensor fixture must keep sending fresh fixes (last age \(camera()["userFixAge"] ?? "none"))")
         XCTAssertGreaterThanOrEqual(dismiss.frame.width,44);XCTAssertGreaterThanOrEqual(dismiss.frame.height,44)
         capture("journey-alternative-optional")
         dismiss.tap()
@@ -179,11 +185,12 @@ final class MixedRouteMenuUsabilityTests: JourneyUsabilityTestBase {
         button("journey-all-options").tap()
         let last = options.last?["id"] as? String ?? ""
         let row = button("journey-option-"+last)
-        for _ in 0..<8 {
-            if row.isHittable { break }
-            app.scrollViews.firstMatch.swipeUp()
-        }
-        XCTAssertTrue(row.isHittable);capture("mixed-more-options-full-list");row.tap()
+        let list = app.scrollViews.firstMatch
+        // A row peeking above the home indicator reports hittable, but a tap there belongs to the
+        // system gesture. Scroll until the whole row sits clear of the bottom edge, as a rider would.
+        func clear() -> Bool { row.exists && row.isHittable && row.frame.maxY <= list.frame.maxY - 44 }
+        for _ in 0..<8 where !clear() { list.swipeUp() }
+        XCTAssertTrue(clear(),"The last reasonable route can be scrolled fully into view");capture("mixed-more-options-full-list");row.tap()
         XCTAssertTrue(button("journey-go-"+last).waitForExistence(timeout:10))
         XCTAssertEqual(state()["selected"] as? String,last)
         XCTAssertEqual(state()["started"] as? Bool,false)

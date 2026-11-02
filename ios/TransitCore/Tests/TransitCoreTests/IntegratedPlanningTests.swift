@@ -179,6 +179,25 @@ final class IntegratedPlanningTests: XCTestCase {
         let farWalk = JourneyChoice(id:"far-walk",group:"BL",elapsed:1440,walking:1500,waiting:180,transfers:0,rentals:0,unknownWaits:0)
         XCTAssertEqual(JourneyChoiceRanking.recommended([farWalk,feeder]).first,"bus+bike")
     }
+    func testADirectBusWithoutATimetableIsWeighedAgainstARentalInsteadOfASlowerTransfer() {
+        // 大安森林公園→萬華龍山寺: cycling to the metro is quickest, a direct bus with no published
+        // departures is almost as quick, and a bus-then-metro trip with known waits is slower still.
+        let bike = JourneyChoice(id:"bike+BL",group:"BL",elapsed:1914,walking:240,waiting:180,transfers:0,rentals:1,unknownWaits:0)
+        let direct = JourneyChoice(id:"bus 38",group:"38",elapsed:2007,walking:660,waiting:300,transfers:0,rentals:0,unknownWaits:1)
+        let transfer = JourneyChoice(id:"bus+BL",group:"bus-BL",elapsed:2100,walking:600,waiting:300,transfers:1,rentals:0,unknownWaits:0)
+        let ranked = JourneyChoiceRanking.recommended([bike,direct,transfer])
+        XCTAssertEqual(ranked.first,"bus 38","A rental saving under five minutes, even with the unknown wait counted, does not lead")
+        XCTAssertTrue(ranked.contains("bike+BL"))
+        // With the unknown wait counted the rental saves five minutes, so it leads.
+        let slowDirect = JourneyChoice(id:"bus 38",group:"38",elapsed:2150,walking:660,waiting:300,transfers:0,rentals:0,unknownWaits:1)
+        XCTAssertEqual(JourneyChoiceRanking.recommended([bike,slowDirect,transfer]).first,"bike+BL")
+    }
+    func testAnUnpredictableWaitIsNamedAsTheReasonARouteIsNotFirst() {
+        let known = JourneyChoice(id:"617",group:"617",elapsed:2040,walking:240,waiting:300,transfers:0,rentals:0,unknownWaits:0)
+        let unknown = JourneyChoice(id:"617副",group:"617副",elapsed:1980,walking:60,waiting:300,transfers:0,rentals:0,unknownWaits:1)
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:unknown,versus:known),"少走 3 分，等車時間不確定")
+        XCTAssertEqual(JourneyChoiceRanking.tradeoff(for:known,versus:unknown),"等車時間較確定，多走 3 分")
+    }
     func testAlternativesSayWhatTheyGainAndWhatTheyCost() {
         let metro = JourneyChoice(id:"metro",group:"BL",elapsed:1440,walking:1020,waiting:180,transfers:0,rentals:0,unknownWaits:0)
         let feeder = JourneyChoice(id:"bus+bike",group:"bus-bike",elapsed:1320,walking:120,waiting:300,transfers:0,rentals:1,unknownWaits:0)
