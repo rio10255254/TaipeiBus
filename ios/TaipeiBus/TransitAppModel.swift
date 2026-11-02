@@ -2620,6 +2620,8 @@ final class TransitAppModel: ObservableObject {
         for (id, dock) in stocked(bikeNetwork.stations(near: boarding, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
         for (id, dock) in stocked(bikeNetwork.stations(near: finish, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
         for (id, dock) in stocked(bikeNetwork.stations(near: destination, radius: 600, limit: 12), rentable: 6) { docks[id] = dock }
+        // Held before the first counts arrive, so no search started by them can swap in another station.
+        if emptyPickup { planner.holdsBikeStations = true }
         bikeAvailability = BikeAvailability(docks: docks, receivedAt: now)
         planner.updateBikes(network: bikeNetwork, availability: bikeAvailability)
         previewNotice = "介面驗證用行程 · 非即時車位"
@@ -2637,7 +2639,6 @@ final class TransitAppModel: ObservableObject {
         // The rider is on the way when the station they are heading to runs dry. Every offered
         // trip loses its station, so whichever one is opened shows the warning.
         if emptyPickup {
-            planner.holdsBikeStations = true
             var emptied = docks
             for pickup in planner.plannedPickupStations {
                 emptied[pickup.id] = BikeDock(stationID: pickup.id, rentable: 0, returnable: 12,

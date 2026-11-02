@@ -825,7 +825,8 @@ final class JourneyPlannerModel: ObservableObject {
     private var stationRefinements: [String: Date] = [:]
     /// Set by the interface fixture where the station a rider is heading to runs out: the
     /// offered stations stay as they are, so the warning and the manual switch can be checked
-    /// instead of being replaced by a quietly refined choice.
+    /// instead of being replaced by a quietly refined choice or a newly found whole-trip ride
+    /// from another station (which reuses the same option id).
     var holdsBikeStations = false
     private func bikeChoiceKey(_ option: JourneyOption) -> String {
         option.id + "|" + option.walks.enumerated().compactMap { index, leg in
@@ -1053,7 +1054,7 @@ final class JourneyPlannerModel: ObservableObject {
     /// Late counts and new bike-reachable corridors are verified without clearing the
     /// inspected route. An explicitly started journey cancels all remaining work.
     private func discoverBikeConnections() {
-        guard !started, !planning, !checkingWalks, bikeRefinementTask == nil else { return }
+        guard !holdsBikeStations, !started, !planning, !checkingWalks, bikeRefinementTask == nil else { return }
         let shouldSearch = bikeAvailability != nil && lastMetadata != nil && origin != nil && destination != nil &&
             (!integratedSearchHasSupply || (bikeAvailability?.receivedAt ?? .distantPast) > lastIntegratedSupplyAt ||
                 Date().timeIntervalSince(lastIntegratedBikeSearch) >= 60)
