@@ -1000,8 +1000,8 @@ struct TripConditionsBar: View {
                         if let credit = comparison.credit { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
                     }
                     Spacer(minLength: 0)
-                    Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption).frame(width: 44, height: 44).contentShape(Rectangle()) }
-                        .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
+                    Button { self.comparison = nil } label: { CloseGlyph() }
+                        .buttonStyle(.plain).accessibilityLabel(AppText.text("關閉"))
                 }
                 .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: MapChrome.shape(.row))
                 .accessibilityIdentifier("journey-comparison")
@@ -1443,8 +1443,9 @@ struct VoiceAssistantView: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 8)
+                // The consent text is long; the orb steps back so the choices stay on a small screen.
                 VoiceOrb(mood: mood, level: speech.meter, reduceMotion: reduceMotion)
-                    .frame(width: 250, height: 250)
+                    .frame(width: phase == .consent ? 120 : 250, height: phase == .consent ? 120 : 250)
                     .scaleEffect(shown ? 1 : 0.55)
                     .contentShape(Circle())
                     .onTapGesture(perform: orbTapped)
@@ -1743,6 +1744,9 @@ struct VoiceOrb: View {
     var reduceMotion = false
     /// The small orb in cards and on the search screen.
     var compact = false
+    /// Light with no outline, for the orb that sits on the map itself: the colour is blurred further and
+    /// thins out to nothing at the edge of its frame, and the core loses its rim.
+    var diffuse = false
 
     static func colors(_ mood: Mood) -> [Color] {
         switch mood {
@@ -1780,15 +1784,16 @@ struct VoiceOrb: View {
             ZStack {
                 // Two layers of blurred colour turning opposite ways read as moving liquid. They are
                 // drawn once and turned by Core Animation, so the orb costs no main-thread work per frame.
-                OrbDiscs(colors: colors, side: side, compact: compact, turning: turning)
+                OrbDiscs(colors: colors, side: side, compact: compact, turning: turning, soft: diffuse)
                     .frame(width: side, height: side)
                 Circle().fill(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0)], center: .center,
                                              startRadius: 0, endRadius: side * 0.3))
                     .frame(width: side * 0.6, height: side * 0.6)
                     .blendMode(.plusLighter)
                 Circle().fill(.white.opacity(0.16))
-                    .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: compact ? 0.5 : 1))
+                    .overlay(Circle().strokeBorder(.white.opacity(diffuse ? 0 : 0.4), lineWidth: compact ? 0.5 : 1))
                     .frame(width: side * (compact ? 0.5 : 0.34), height: side * (compact ? 0.5 : 0.34))
+                    .blur(radius: diffuse ? side * 0.05 : 0)
                 Image(systemName: symbol)
                     .font(.system(size: side * (compact ? 0.24 : 0.13), weight: .semibold))
                     .foregroundStyle(.white)
@@ -1799,6 +1804,13 @@ struct VoiceOrb: View {
             }
             .modifier(VoiceSwell(level: level, amount: mood == .listening ? 0.22 : 0))
             .frame(width: box.size.width, height: box.size.height)
+            .mask {
+                if diffuse {
+                    RadialGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.5),
+                                           .init(color: .black.opacity(0.4), location: 0.76), .init(color: .clear, location: 1)],
+                                   center: .center, startRadius: 0, endRadius: side / 2)
+                } else { Rectangle().padding(-side) }
+            }
         }
         .animation(.easeInOut(duration: 0.45), value: mood)
     }
@@ -1812,9 +1824,10 @@ private struct OrbDiscs: UIViewRepresentable {
     let side: CGFloat
     let compact: Bool
     let turning: Bool
+    var soft = false
     func makeUIView(context: Context) -> OrbDiscsView { OrbDiscsView() }
     func updateUIView(_ view: OrbDiscsView, context: Context) {
-        view.configure(colors: colors, side: side, compact: compact, turning: turning, scale: context.environment.displayScale)
+        view.configure(colors: colors, side: side, compact: compact, turning: turning, scale: context.environment.displayScale, soft: soft)
     }
 }
 
@@ -1840,9 +1853,10 @@ final class OrbDiscsView: UIView {
     }
     required init?(coder: NSCoder) { nil }
     @objc private func returnedToForeground() { applyMotion() }
-    func configure(colors: [Color], side: CGFloat, compact: Bool, turning: Bool, scale: CGFloat) {
-        self.compact = compact
-        let key = "\(colors)|\(side)|\(compact)|\(scale)"
+    private var soft = false
+    func configure(colors: [Color], side: CGFloat, compact: Bool, turning: Bool, scale: CGFloat, soft: Bool = false) {
+        self.compact = compact; self.soft = soft
+        let key = "\(colors)|\(side)|\(compact)|\(scale)|\(soft)"
         if side > 0, key != drawn {
             drawn = key
             let resized = side != self.side
@@ -1853,7 +1867,7 @@ final class OrbDiscsView: UIView {
         if turning != self.turning || discs.animation(forKey: "breathe") == nil { self.turning = turning; applyMotion() }
     }
     private func draw(colors: [Color], side: CGFloat, scale: CGFloat) {
-        let blur = side * (compact ? 0.08 : 0.12), innerBlur = side * (compact ? 0.06 : 0.1)
+        let blur = side * (soft ? 0.17 : compact ? 0.08 : 0.12), innerBlur = side * (soft ? 0.12 : compact ? 0.06 : 0.1)
         let outerImage = Self.image(Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
             .frame(width: side * 0.78, height: side * 0.78).padding(side * 0.25).blur(radius: blur), scale: scale)
         let innerImage = Self.image(Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))

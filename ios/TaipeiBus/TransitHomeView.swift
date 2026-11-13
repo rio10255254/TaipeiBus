@@ -606,6 +606,10 @@ struct TransitHomeView: View {
         .onChange(of: model.loading) { _, loading in
             if !loading, planner.destination != nil, planner.options.isEmpty { planner.plan(metadata: model.metadata) }
         }
+        .onChange(of: model.mapDismissRevision) { _, _ in
+            // In the stop search the station goes back to the list it came from; otherwise its sheet closes.
+            if showSearch { model.returnToBrowse() } else { model.clearSelection(); showDetails = false }
+        }
         .onChange(of: model.selectionRevision) { _, _ in
             let wasShowingDetails = showDetails
             selectionOverlay.update(nil)
@@ -870,15 +874,11 @@ private struct MapPlaceCard: View {
             Button(action: route) {
                 Label(live.text("路線"), systemImage: "arrow.triangle.turn.up.right.diamond.fill")
                     .liveFont(.subheadline, weight: .semibold).labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 14).frame(minHeight: 40)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
             }
             .buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
             .accessibilityIdentifier("place-card-route")
-            Button(action: close) {
-                Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
-                    .frame(width: 44, height: 44).contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
+            Button(action: close) { CloseGlyph() }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
         }
         .padding(.leading, 12).padding(.trailing, 0).padding(.vertical, 10)
         .phoneGlass(in: live.shape(.panel))
@@ -929,21 +929,22 @@ private struct HomeSearchRow: View {
             .accessibilityLabel(live.text("搜尋目的地"))
             .accessibilityIdentifier("home-destination-search")
             if !hasSelection, let voice {
-                // The voice assistant: the moving colours of its own screen, in a button of its own, never
-                // content inside the search glass (there it rendered as a blurred glow on phones). The
-                // orb is drawn larger and clipped, so its colour fills the circle edge to edge.
+                // The voice assistant: the moving colours of its own screen, as light rather than a drawn
+                // button. Nothing clips or outlines it: the colour is strongest under the microphone and thins
+                // out past the control's own 56 points, spilling a little onto the glass beside it. The
+                // layout and the tap area stay the same circle as the other controls.
                 Button {
                     Haptics.stage()
                     voice()
                 } label: {
-                    VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true)
-                        .frame(width: 72, height: 72).frame(width: 56, height: 56)
-                        .clipShape(Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5))
-                        .shadow(color: Color(red: 0.5, green: 0.4, blue: 1).opacity(0.35), radius: 8, y: 3)
+                    VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true, diffuse: true)
+                        .frame(width: 100, height: 100).allowsHitTesting(false)
+                        .frame(width: 56, height: 56)
                         .contentShape(Circle())
                 }
                 .buttonStyle(VoicePressStyle())
+                // Under its neighbours, so the spill tints their glass instead of covering their symbols.
+                .zIndex(-1)
                 .accessibilityLabel(live.text("語音助理"))
                 .accessibilityIdentifier("home-voice")
             }
@@ -1216,7 +1217,7 @@ private struct TransitPanel: View {
                         .accessibilityLabel(AppText.text("在地圖查看站牌")).accessibilityIdentifier("station-results-map")
                         .disabled(stationResultQuery != model.query || stationResults.isEmpty)
                 }
-                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(Rectangle()) }
+                Button { dismiss() } label: { CloseGlyph() }.buttonStyle(.plain)
                     .accessibilityLabel(AppText.text("返回地圖"))
             }
             HStack(spacing: 9) {
@@ -1278,7 +1279,7 @@ private struct TransitPanel: View {
                         .symbolSwap(saved).symbolBounce(saved)
                 }.accessibilityLabel(saved ? AppText.text("移除收藏站牌") : AppText.text("收藏站牌"))
             }
-            Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+            Button { dismiss() } label: { CloseGlyph() }.buttonStyle(.plain)
                 .accessibilityLabel(AppText.text("返回地圖")).accessibilityIdentifier("transit-details-close")
         }.padding(.leading, 6 * CGFloat(live.appearance.spacingScale)).padding(.trailing, 12 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
     }

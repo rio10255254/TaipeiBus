@@ -246,10 +246,10 @@ struct VoiceChatPanel: View {
             if let pending = chat.pending {
                 HStack(spacing: 8) {
                     Button { chat.confirm(true) } label: {
-                        Text(pending.question).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 36)
+                        Text(pending.question).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).accessibilityIdentifier("voice-chat-confirm")
                     Button { chat.confirm(false) } label: {
-                        Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 36).padding(.horizontal, 6)
+                        Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 44).padding(.horizontal, 6)
                     }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -266,9 +266,9 @@ struct VoiceChatPanel: View {
         .sensoryFeedback(.impact(weight: .light, intensity: 0.6), trigger: chat.phase) { _, new in new == .speaking }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .phoneGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .phoneGlass(in: RoundedRectangle(cornerRadius: MapChrome.Corner.card.rawValue, style: .continuous))
         // While it speaks, a tap stops it and listens: the way to cut in without waiting.
-        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MapChrome.Corner.card.rawValue, style: .continuous))
         .onTapGesture { if chat.phase == .speaking { chat.interrupt() } }
         .alert(AppText.text("回報這次回答？"), isPresented: $askingReport) {
             Button(AppText.text("回報")) { chat.reportLastAnswer() }
@@ -324,8 +324,8 @@ private struct PlaceChoiceCard: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
         }
         .buttonStyle(.plain)
         .scaleEffect(shown ? 1 : 0.94).opacity(shown ? 1 : 0)
@@ -345,7 +345,7 @@ struct VoiceChatButton: View {
                 Spacer()
                 Button { Haptics.stage(); chat.start() } label: {
                     Label(AppText.text("問一下"), systemImage: "mic.fill").font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .padding(.horizontal, 14).frame(minHeight: 44)
                 }
                 .buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                 .accessibilityIdentifier("voice-chat-navigation")

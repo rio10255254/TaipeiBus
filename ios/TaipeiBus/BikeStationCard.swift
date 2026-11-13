@@ -57,11 +57,7 @@ struct BikeStationCard: View {
                             .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    Button(action: close) {
-                        Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
-                            .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
-                            .frame(width: 44, height: 44).contentShape(Rectangle())
-                    }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
+                    Button(action: close) { CloseGlyph() }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
                         .accessibilityIdentifier("bike-station-close")
                 }
                 HStack(spacing: 14) {
@@ -85,7 +81,7 @@ struct BikeStationCard: View {
                             }
                             Text(AppText.text(returning ? "附近可還 %@ · %@" : "最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
                                 .liveFont(.subheadline, weight: .semibold).lineLimit(1)
-                        }.padding(.horizontal, 14).frame(minHeight: 40)
+                        }.padding(.horizontal, 14).frame(minHeight: 44)
                     }
                     .buttonStyle(MapActionStyle())
                     .accessibilityIdentifier("bike-station-alternative")

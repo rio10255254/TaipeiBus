@@ -158,6 +158,7 @@ struct JourneyPlanningView: View {
                             Button(live.text("更改")) { edit(origin: false) }
                         } else {
                             Button { model.finishJourney(); dismiss() } label: {
+                                // A toolbar item carries its own glass on iOS 26, so this one stays a plain cross.
                                 Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.primary).frame(width: 44, height: 44).contentShape(Rectangle())
                             }.accessibilityLabel(AppText.text("關閉路線"))
                                 .accessibilityIdentifier("journey-close")
@@ -1526,8 +1527,8 @@ private struct JourneyTimingExplanation: View {
             HStack(alignment: .top, spacing: 12) {
                 Text(AppText.text("行程時間說明")).liveFont(.headline).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(action: close) { Image(systemName: "xmark.circle.fill").liveFont(.title3).frame(width: 48, height: 48) }
-                    .buttonStyle(.plain).foregroundStyle(MapChrome.secondaryText)
+                Button(action: close) { CloseGlyph() }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(AppText.text("關閉時間說明")).accessibilityIdentifier("journey-time-close")
             }.padding(.horizontal, 20).padding(.top, 12)
             ScrollView { breakdown }
@@ -1895,9 +1896,8 @@ struct JourneyAlternativePrompt: View {
                     .padding(.horizontal, 14).frame(minHeight: 44)
             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-alternative-accept")
             Button { model.dismissJourneySuggestion() } label: {
-                Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain).foregroundStyle(MapChrome.secondaryText)
+                CloseGlyph()
+            }.buttonStyle(.plain)
                 .accessibilityLabel(AppText.text("保留目前路線"))
                 .accessibilityIdentifier("journey-alternative-dismiss")
         }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
@@ -1980,7 +1980,7 @@ struct JourneyGuideCard: View {
                         if model.alightReminderState == .needsPermission {
                             Button { model.requestAlightReminderAccess() } label: {
                                 Label(model.alightReminderStatus, systemImage: "bell.badge")
-                                    .liveFont(.caption, weight: .semibold).frame(minHeight: 40)
+                                    .liveFont(.caption, weight: .semibold).frame(minHeight: 44)
                             }.buttonStyle(MapActionStyle(tint: MapChrome.caution))
                                 .accessibilityIdentifier("journey-reminder-permission")
                         }
@@ -2293,7 +2293,8 @@ private struct RidingBannerContent: View {
                     BannerTitle(text: (progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : live.text("下車 · ") + ride.alighting.localizedName)
                     if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                 }
-                Spacer(minLength: 4)
+                // The stop to get off at takes the room; the time keeps a fixed column, as in the waiting banner.
+                .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 2) {
                     let alighting = model.onboardStopTimeLabel(ride, stopID:ride.alighting.id,at:date)
                     Text(alighting)
@@ -2303,7 +2304,7 @@ private struct RidingBannerContent: View {
                         Text(AppText.remainingStops(count+1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                             .liveNumericText(count, countsDown: true)
                     }
-                }.frame(maxWidth: large ? .infinity : live.language == .english ? 120 : 112, alignment: large ? .leading : .trailing).tripStageMatch("banner-figure")
+                }.frame(width: large ? nil : live.language == .english ? 120 : 112, alignment: large ? .leading : .trailing).tripStageMatch("banner-figure")
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
