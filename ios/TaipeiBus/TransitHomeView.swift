@@ -168,8 +168,14 @@ struct TransitHomeView: View {
                 ZStack(alignment: .top) {
                     if model.metadata.routes.isEmpty, model.loadError != nil {
                         // Without any route data the app cannot plan; say it plainly instead of "updating".
-                        Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
+                        // The notice is also the way out: a tap asks for the data again.
+                        Button { Haptics.selection(); model.retry() } label: {
+                            Label(live.text("無法取得路線資料 · 點一下重試"), systemImage: "arrow.clockwise")
+                                .liveFont(.caption, weight: .semibold).padding(12).frame(minHeight: 44)
+                        }
+                            .buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                             .background(.regularMaterial, in: live.shape(.label))
+                            .accessibilityIdentifier("route-data-retry")
                             .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -1417,7 +1423,9 @@ private struct StationDetails: View {
         TimelineView(.periodic(from: .now, by: 15)) { timeline in
             let rows = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
             VStack(alignment: .leading, spacing: 0) {
-                Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                if !station.address.isEmpty {
+                    Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                }
                 HStack(spacing: 8) {
                     Button { model.startStationWalk(station) } label: {
                         Label(live.text("步行"), systemImage: "figure.walk")
@@ -1450,7 +1458,7 @@ private struct StationDetails: View {
                         } label: {
                             HStack(spacing: 12) {
                                 RouteBadge(name: row.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
-                                Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
+                                Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? AppText.text("方向未提供")))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
                                 let wait = row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
@@ -1484,7 +1492,7 @@ private struct StationDetails: View {
                     Divider()
                 }
                 if station.mode == .bus {
-                    Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                    Text(live.text("已過站的公車不會列出，距離依車輛定位估算。到站時間是這條路線的下一班，不代表特定車輛。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
                 } else {
                     Text(AppText.text("依官方班距估計")).liveFont(.caption).foregroundStyle(.secondary)
                     ForEach(model.metadata.metro.station(station.id)?.exits ?? []) { exit in
@@ -1700,7 +1708,7 @@ private struct VehicleDetails: View {
                         Label { Text(speed).monospacedDigit().liveNumericText(speed) } icon: {
                             Image(systemName: "speedometer").foregroundStyle(.secondary)
                         }.liveFont(.subheadline, weight: .semibold, design: .rounded)
-                        Text(live.text("GPS 回報 km/h")).liveFont(.caption).foregroundStyle(.secondary)
+                        Text(live.text("時速 km/h")).liveFont(.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 5) {
                         Label {
@@ -1732,7 +1740,7 @@ private struct VehicleDetails: View {
                     if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction, variantOnly: true) }
                 } label: { Text(live.text("查看路線")).frame(maxWidth: .infinity, minHeight: 48) }.buttonStyle(MapActionStyle())
             }.liveFont(.subheadline, weight: .semibold)
-            if !vehicle.aligned { Text(live.text("目前顯示原始 GPS，尚未匹配道路軌跡")).liveFont(.caption).foregroundStyle(.secondary) }
+            if !vehicle.aligned { Text(live.text("位置尚未對齊道路，僅供參考")).liveFont(.caption).foregroundStyle(.secondary) }
             let upcoming = model.upcomingStops
             if !upcoming.isEmpty {
                 Divider()
@@ -1859,7 +1867,7 @@ private struct AppInformationView: View {
                         SettingsLabel(title: AppText.text("地圖"), symbol: "map.fill", color: .green)
                     }.accessibilityIdentifier("settings-map")
                     NavigationLink { FareSettingsView(model: model) } label: {
-                        Label(AppText.text("車資"), systemImage: "ticket")
+                        SettingsLabel(title: AppText.text("車資"), symbol: "ticket.fill", color: .orange)
                     }.accessibilityIdentifier("settings-fares")
                     NavigationLink {
                         List { CommuteHabitSettings(habits: model.commuteHabits) }
