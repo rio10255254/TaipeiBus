@@ -224,6 +224,7 @@ private struct MapContextLabelContent: View, Equatable {
                                     .frame(width: 32, height: 32)
                                     .background(model.followingTrain ? Color.accentColor : Color.accentColor.opacity(0.12), in: Circle())
                                     .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: model.followingTrain)
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             .accessibilityLabel(model.followingTrain ? AppText.text("停止跟隨") : AppText.text("跟隨列車"))
                             .accessibilityIdentifier("map-metro-train-follow")

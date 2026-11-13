@@ -1902,8 +1902,9 @@ struct NativeBusMap: UIViewRepresentable {
             (style.layer(withIdentifier: "selected-route-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
             (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? MapChrome.walkingDark : MapChrome.walkingLight))
             (style.layer(withIdentifier: "journey-walking-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
+            (style.layer(withIdentifier: "journey-cycling-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
             (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#34363C" : "#E6E3DB"))
-            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names"] {
+            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names", "bike-station-counts"] {
                 if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
                     names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F2F2F7" : "#1F3F66"))
                     names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#1C1D20" : "#FFFFFF"))
@@ -1954,11 +1955,30 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
                 model.recordMapTap("map-tap:no-bus")
 #endif
-                if let station { model.tappedPlace = nil; model.selectStation(station) }
-                else if let bike = nearestBikeStation(at: point, map: map) { model.selectBikeStation(bike) }
+                // A YouBike dock often stands beside a stop: whichever is nearer the finger is the one meant.
+                let bike = nearestBikeStation(at: point, map: map)
+                var bikeCloser = false
+                if let bike, let dock = model.bikeNetwork.station(bike) {
+                    if let station {
+                        let dockPoint = map.convert(dock.coordinate.locationCoordinate, toPointTo: map)
+                        let stopPoint = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                        bikeCloser = hypot(dockPoint.x - point.x, dockPoint.y - point.y) < hypot(stopPoint.x - point.x, stopPoint.y - point.y)
+                    } else { bikeCloser = true }
+                }
+                if let bike, bikeCloser { model.selectBikeStation(bike) }
+                else if let station { model.tappedPlace = nil; model.selectStation(station) }
                 else if model.selectedBikeStationID != nil { model.selectedBikeStationID = nil }
                 else { selectPlace(at: point, map: map) }
                 return
+            }
+            // A stop directly under the finger wins over a bus that merely stands beside it.
+            if let station {
+                let stopPoint = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                let busPosition = buses.pose(id: id, time: CACurrentMediaTime(), now: Date())?.coordinate ?? bus.coordinate
+                let busPoint = map.convert(busPosition.locationCoordinate, toPointTo: map)
+                if hypot(stopPoint.x - point.x, stopPoint.y - point.y) < hypot(busPoint.x - point.x, busPoint.y - point.y) {
+                    model.tappedPlace = nil; model.selectStation(station); return
+                }
             }
             // Only rendered 3D buildings can occlude a bus. Cached building
             // footprints must not block taps in the flat, zoomed-out city view.

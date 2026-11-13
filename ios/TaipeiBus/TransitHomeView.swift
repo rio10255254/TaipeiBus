@@ -877,9 +877,10 @@ private struct MapPlaceCard: View {
             Button(action: close) {
                 Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
                     .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
-            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
         }
-        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
+        .padding(.leading, 12).padding(.trailing, 0).padding(.vertical, 10)
         .phoneGlass(in: live.shape(.panel))
         .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
     }
