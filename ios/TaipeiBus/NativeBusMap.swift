@@ -1421,7 +1421,7 @@ struct NativeBusMap: UIViewRepresentable {
                       let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
                 // Fly in behind the train; the chase camera takes over from there.
                 let elevation = PreparedMetroTrain(report: report, network: model.metadata.metro)?.renderPose(at: Date())?.elevation ?? 0
-                chaseHeading = nil; chaseOrbit = 0
+                chaseHeading = nil; chaseOrbit = 0; chaseScale = 1; chasePinched = false
                 let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: elevation < -3 ? 340 : 290,
                     pitch: elevation < -3 ? 46 : 62, heading: pose.heading)
                 moveCamera(camera, map: map, duration: 0.8)
@@ -1620,7 +1620,7 @@ struct NativeBusMap: UIViewRepresentable {
             guard !cameraMoving else { return }
             // Fingers on the map own the camera: following waits for them, and a moment more for the
             // zoom to coast to rest, instead of pulling against the gesture.
-            if model.following || model.userMapMode != .free,
+            if model.following || model.followingTrain || model.userMapMode != .free,
                map.gestureRecognizers?.contains(where: { $0.state == .began || $0.state == .changed }) == true {
                 followSuspendedUntil = max(followSuspendedUntil, now + 0.3)
             }
@@ -1695,6 +1695,9 @@ struct NativeBusMap: UIViewRepresentable {
         /// and Reduce Motion keeps the plain centred follow.
         private var chaseHeading: Double?
         private var chaseOrbit = 0.0
+        /// How much closer or farther than its own framing the rider pinched the chase camera.
+        private var chaseScale = 1.0
+        private var chasePinched = false
         private func chaseCamera(_ camera: MLNMapCamera, pose: VehiclePose, trainID: String, at date: Date, dt: Double) -> MLNMapCamera {
             let center = Coordinate(latitude: camera.centerCoordinate.latitude, longitude: camera.centerCoordinate.longitude)
             if reduceMotion { camera.centerCoordinate = pose.coordinate.locationCoordinate; return camera }
@@ -1709,7 +1712,10 @@ struct NativeBusMap: UIViewRepresentable {
             camera.heading = (heading + 360).truncatingRemainder(dividingBy: 360)
             let pitch: Double = underground ? 46 : standing ? 54 : 62
             camera.pitch += CGFloat(pitch - Double(camera.pitch)) * CGFloat(ease(1.2))
-            let altitude: Double = standing ? 430 : underground ? 340 : 290
+            let framing: Double = standing ? 430 : underground ? 340 : 290
+            // Picking the train up again after a pinch, the camera keeps the distance the rider chose.
+            if chasePinched { chasePinched = false; chaseScale = min(4, max(0.5, camera.altitude / framing)) }
+            let altitude = framing * chaseScale
             camera.altitude += (altitude - camera.altitude) * ease(1.8)
             let lead = standing ? 0.0 : 32.0, radians = pose.heading * .pi / 180
             let ahead = Coordinate(latitude: pose.coordinate.latitude + cos(radians) * lead / 111_320,
@@ -1766,7 +1772,11 @@ struct NativeBusMap: UIViewRepresentable {
                 let turned = reason.contains(.gestureRotate)
                 let keepsBus = model.following && model.selectedVehicleID != nil && !model.followingTrain
                 let keepsRider = model.userMapMode != .free && !turned
-                if !dragged, keepsBus || keepsRider {
+                // The train's chase camera steers and tilts by itself, so only a zoom is the rider's to keep.
+                let zoomOnly = reason.intersection([.gestureRotate, .gestureTilt]).isEmpty
+                let keepsTrain = model.followingTrain && model.selectedTrainID != nil && zoomOnly
+                if !dragged, keepsBus || keepsRider || keepsTrain {
+                    if keepsTrain { chasePinched = true }
                     followSuspendedUntil = max(followSuspendedUntil, CACurrentMediaTime() + 0.35)
                     DispatchQueue.main.async { [weak self] in
                         if let self, let map = self.map { self.applyPendingInset(map) }
