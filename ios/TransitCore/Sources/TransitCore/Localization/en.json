@@ -21,7 +21,6 @@
   "更多行程選項": "More trip options",
   "知道了": "Got it",
   "推薦順序": "Route ranking",
-  "先確認實際步行，再比較可趕上的班次、候車與搭車時間。推薦兼顧時間、少走路與少轉乘；較快方案會另外保留。班距推估會標示範圍，班次不足則標示待確認。抵達時間包含走路、候車與搭車。": "We check walking connections before comparing buses you can catch, waiting and riding time. Recommendations balance time, walking and transfers. Faster alternatives are kept when useful. Estimated service intervals show a range; missing service remains unconfirmed. Arrival includes walking, waiting and riding.",
   "臺北車站": "Taipei Main Station",
   "臺北101": "Taipei 101",
   "西門町": "Ximending",
@@ -39,7 +38,6 @@
   "公車規劃範圍外": "Outside the bus planning area",
   "到站車輛": "Arriving buses",
   "到站時間說明": "About arrival times",
-  "候車以官方下一班到站時間為主。官方未指定車牌；各車紀錄足夠才顯示分鐘數，否則先看位置與站數。地圖平順銜接已收到的定位，保留短暫緩衝。點「到站車輛」可查看時間說明。": "Use the official next-bus time while waiting. The source does not identify its vehicle. Individual times appear only with enough evidence. The map smoothly replays received positions with a short buffer. See Arriving buses for details.",
   " · 已離開上車站": " · Past the boarding stop",
   " · 位置更新中": " · Updating position",
   "往 ": "To ",
@@ -1187,5 +1185,7 @@
   "無法取得路線資料 · 點一下重試": "Can't load route data · Tap to retry",
   "已過站的公車不會列出，距離依車輛定位估算。到站時間是這條路線的下一班，不代表特定車輛。": "Buses that have passed are not listed; distances are estimated from vehicle positions. Arrival times are for the route's next bus, not a specific vehicle.",
   "時速 km/h": "Speed · km/h",
-  "位置尚未對齊道路，僅供參考": "Position not yet matched to the road; for reference only"
+  "位置尚未對齊道路，僅供參考": "Position not yet matched to the road; for reference only",
+  "倒數以官方下一班到站時間為準。個別車輛的資料足夠時才顯示分鐘數，否則顯示位置與站數。點「到站車輛」可看每輛車的說明。": "The countdown follows the official next-bus time. A bus shows minutes only when its data is reliable; otherwise you see its position and stops away. Tap Arriving buses for details on each bus.",
+  "推薦路線兼顧總時間、少走路與少轉乘；更快的路線會另外列出。抵達時間已包含走路、候車與搭車。": "Recommended routes balance total time, less walking and fewer transfers; faster routes are listed separately. Arrival time already includes walking, waiting and riding."
 }
