@@ -832,13 +832,13 @@ struct AIJourneyAssistantView: View {
                     .foregroundStyle(.secondary).accessibilityIdentifier("ai-listening")
             }
             if let issue = speech.problem { Text(issue).font(.footnote).foregroundStyle(.secondary) }
-            Button(AppText.text("理解並規劃")) { session.run(session.input) }
+            Button(AppText.text("規劃路線")) { session.run(session.input) }
                 .disabled(session.busy || trimmed.isEmpty || trimmed.count > 600)
                 .accessibilityIdentifier("ai-extract")
         } footer: {
             Text(OnlineJourneyReader.enabled
-                 ? AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。手機先理解，需要時由線上 AI（Claude）協助；地點與路線由 Apple 地圖處理。")
-                 : AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。文字只在手機上理解，地點與路線由 Apple 地圖處理。"))
+                 ? AppText.text("沒說出發地和時間，就從目前位置、現在出發。需要時由線上 AI（Claude）協助理解。")
+                 : AppText.text("沒說出發地和時間，就從目前位置、現在出發。文字只在手機上理解。"))
         }
     }
 
@@ -865,6 +865,7 @@ struct AIJourneyAssistantView: View {
                     Text(AppText.text("%@ 秒", "\(max(0, Int(timeline.date.timeIntervalSince(session.startedAt))))"))
                         .monospacedDigit().foregroundStyle(.secondary)
                 }
+                Button(AppText.text("取消")) { session.cancel() }.buttonStyle(.borderless).accessibilityIdentifier("ai-cancel")
             }.accessibilityIdentifier("ai-progress")
         }
     }
@@ -884,7 +885,10 @@ struct AIJourneyAssistantView: View {
             switch problem {
             case .location:
                 Text(AppText.text("需要目前位置才能從這裡出發。")).font(.headline)
-                Button(AppText.text("開啟定位")) { location.request() }
+                Button(location.permissionDenied ? AppText.text("開啟定位設定") : AppText.text("開啟定位")) {
+                    if location.permissionDenied, let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    else { location.request() }
+                }
                 Text(AppText.text("或輸入出發地：")).font(.footnote).foregroundStyle(.secondary)
             case .unsavedDestination(let word), .unsavedOrigin(let word):
                 Text(AppText.text("還沒有儲存「%@」，輸入它的地址或附近地點：", word)).font(.headline)
@@ -996,7 +1000,7 @@ struct TripConditionsBar: View {
                         if let credit = comparison.credit { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
                     }
                     Spacer(minLength: 0)
-                    Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
+                    Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption).frame(width: 44, height: 44).contentShape(Rectangle()) }
                         .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
                 }
                 .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: MapChrome.shape(.row))
@@ -1064,7 +1068,7 @@ struct TripConditionsBar: View {
             Menu {
                 Button(AppText.text("用說的修改"), systemImage: "mic") { session.listen(refining: true) }
                     .accessibilityIdentifier("assistant-trip-respeak")
-                Button(AppText.text("重新說一次"), systemImage: "arrow.counterclockwise") { session.listen() }
+                Button(AppText.text("再說一次"), systemImage: "arrow.counterclockwise") { session.listen() }
                 Button(AppText.text("改回一般路線"), systemImage: "xmark") { model.forgetAssistantTrip() }
                     .accessibilityIdentifier("assistant-trip-dismiss")
             } label: {
@@ -1557,7 +1561,7 @@ struct VoiceAssistantView: View {
         case .permission:
             choices(AppText.text("允許並開始說話"), "voice-allow", primary: { session.allowVoice() })
         case .blocked:
-            choices(AppText.text("打開設定"), "voice-settings", primary: {
+            choices(AppText.text("開啟設定"), "voice-settings", primary: {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             })
         case .consent:
@@ -1571,7 +1575,7 @@ struct VoiceAssistantView: View {
                 Spacer(minLength: 0)
                 mainButton
                 Spacer(minLength: 0)
-                side("arrow.counterclockwise", AppText.text("重說"), "voice-restart") { session.listen() }
+                side("arrow.counterclockwise", AppText.text("再說一次"), "voice-restart") { session.listen() }
                     .disabled(phase != .listening)
             }
             .padding(.horizontal, 8)
@@ -2210,7 +2214,7 @@ struct VoiceGlowView: View {
             return Choice(primary: AppText.text("允許並開始說話"), id: "voice-allow", action: { session.allowVoice() }, other: typing)
         case .blocked:
             let openURL = openURL
-            return Choice(primary: AppText.text("打開設定"), id: "voice-settings", action: {
+            return Choice(primary: AppText.text("開啟設定"), id: "voice-settings", action: {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }, other: typing)
         case .consent:
@@ -2300,6 +2304,7 @@ struct VoiceGlowView: View {
                 Button { session.dismissVoice() } label: {
                     Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
                         .frame(width: 30, height: 30).background(.thinMaterial, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(VoicePressStyle()).foregroundStyle(.secondary)
                 .accessibilityLabel(AppText.text("關閉")).accessibilityIdentifier("voice-close")

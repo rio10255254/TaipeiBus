@@ -198,6 +198,7 @@ struct VoiceChatPanel: View {
                 Button { chat.end() } label: {
                     Image(systemName: "xmark").font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                         .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle()).padding(.horizontal, -6)
                 }
                 .buttonStyle(.plain).accessibilityLabel(AppText.text("結束對話")).accessibilityIdentifier("voice-chat-close")
             }
@@ -410,7 +411,7 @@ struct VoiceChatSettings: View {
                 Text(AppText.text("聆聽"))
             } footer: {
                 Text(cloud
-                     ? AppText.text("每句話的錄音會經由本 App 的伺服器交給所選的辨識服務（Groq 上的 Whisper，或 OpenAI 的語音模型）轉成文字，中英夾雜、店名和口音都聽得比較準；選的服務無法使用時自動改用另一個，都不行時才用手機上的辨識。錄音只用來轉文字，不保存。說「我是說…」更正時，之後會自動多等一下。")
+                     ? AppText.text("錄音會經由本 App 的伺服器交給辨識服務（Groq 上的 Whisper 或 OpenAI）轉成文字，中英夾雜、店名和口音比較準；無法使用時改用手機上的辨識。錄音只用來轉文字，不保存。")
                      : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
             }
             Section {
@@ -459,7 +460,7 @@ struct VoiceChatSettings: View {
             } header: {
                 Text(AppText.text("隱私與資料"))
             } footer: {
-                Text(AppText.text("只用雲端：手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的辨識為準，句子也只由 Claude 理解，不用手機上的規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))
+                Text(AppText.text("只用雲端：語音辨識和理解都只交給伺服器；伺服器沒回應時會直接告訴你，不會改用手機上的結果。每句話會多等一下。"))
             }
         }
     }
