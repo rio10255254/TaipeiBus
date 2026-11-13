@@ -200,6 +200,10 @@ public enum FeedDecoder {
                                    sequence: Int(number(row["seqNo"]) ?? 0), coordinate: coordinate)
                 stop.englishName = text(row["nameEn"])
                 metadata.stops[id] = stop
+                // Expressway routes list markers such as 「國道1號41Km(虛擬站不停靠)」 so the line can be drawn
+                // and timed. No bus stops there: the marker stays in the route's stop order but is never a
+                // station, so it cannot be searched, shown as a nearby stop, boarded, alighted or transferred at.
+                if name.contains("虛擬站") || name.contains("不停靠") { continue }
                 // Taken out of the dictionary while it changes, so its arrays grow in place instead of
                 // being copied for every stop a busy station has.
                 var station = metadata.stations.removeValue(forKey: stationID)
