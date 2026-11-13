@@ -179,7 +179,7 @@ struct VoiceChatPanel: View {
                 // A wrong answer can be sent to the developer, once the rider agrees.
                 if chat.reportable {
                     Button { if !chat.reported { askingReport = true } } label: {
-                        Image(systemName: chat.reported ? "checkmark.bubble" : "exclamationmark.bubble")
+                        Image(systemName: chat.reported ? "checkmark.bubble" : "exclamationmark.bubble").symbolSwap(chat.reported)
                             .font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                             .background(Color(uiColor: .tertiarySystemFill), in: Circle())
                     }
@@ -189,13 +189,13 @@ struct VoiceChatPanel: View {
                 }
                 // The language it listens in: a visitor can talk English to the Chinese app, and back.
                 Button { chat.switchLanguage() } label: {
-                    Text(verbatim: chat.language == .english ? "EN" : "中").font(.footnote.weight(.bold))
+                    Text(verbatim: chat.language == .english ? "EN" : "中").font(.footnote.weight(.bold)).contentTransition(.opacity)
                         .frame(minWidth: 32, minHeight: 32).background(Color(uiColor: .tertiarySystemFill), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(chat.language == .english ? AppText.text("改用中文聽") : AppText.text("改用英文聽"))
                 .accessibilityIdentifier("voice-chat-language")
-                Button { chat.end() } label: {
+                Button { Haptics.ended(); chat.end() } label: {
                     Image(systemName: "xmark").font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                         .background(Color(uiColor: .tertiarySystemFill), in: Circle())
                         .frame(width: 44, height: 44).contentShape(Rectangle()).padding(.horizontal, -6)
@@ -245,10 +245,10 @@ struct VoiceChatPanel: View {
             }
             if let pending = chat.pending {
                 HStack(spacing: 8) {
-                    Button { chat.confirm(true) } label: {
+                    Button { Haptics.selection(); chat.confirm(true) } label: {
                         Text(pending.question).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).accessibilityIdentifier("voice-chat-confirm")
-                    Button { chat.confirm(false) } label: {
+                    Button { Haptics.selection(); chat.confirm(false) } label: {
                         Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 44).padding(.horizontal, 6)
                     }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                 }
@@ -261,6 +261,7 @@ struct VoiceChatPanel: View {
         .animation(motion, value: chat.compact)
         .animation(motion, value: chat.pending != nil)
         .animation(motion, value: chat.reportable)
+        .animation(motion, value: chat.language)
         .animation(motion, value: speech.transcript.isEmpty)
         // A light tap when the answer starts and when listening starts again.
         .sensoryFeedback(.impact(weight: .light, intensity: 0.6), trigger: chat.phase) { _, new in new == .speaking }
@@ -327,7 +328,7 @@ private struct PlaceChoiceCard: View {
             .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
             .contentShape(RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PhonePressStyle())
         .scaleEffect(shown ? 1 : 0.94).opacity(shown ? 1 : 0)
         .onAppear { withAnimation(motion?.delay(delay)) { shown = true } }
         .accessibilityElement(children: .combine)

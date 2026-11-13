@@ -96,6 +96,7 @@ struct JourneyPlanningView: View {
                     .smoothChanges(searchingPlaces)
                     .smoothChanges(showingItinerary)
                     .smoothChanges(model.language)
+                    .smoothChanges(assistant.busy)
                     .id("journey-scroll-top")
             }
             .onChange(of: showingItinerary) { _, showing in
@@ -444,11 +445,11 @@ struct JourneyPlanningView: View {
                 }
                 if !editingOrigin, !planner.started {
                     CommuteHabitSuggestions(habits: model.commuteHabits, library: model.commutes) { saved in
-                        model.previewSavedJourney(saved)
+                        Haptics.selection(); model.previewSavedJourney(saved)
                         focused = false; editingDestination = false; showingItinerary = false; collapse()
                     }
                     JourneySavedShortcuts(model: model) { saved in
-                        model.previewSavedJourney(saved)
+                        Haptics.selection(); model.previewSavedJourney(saved)
                         focused = false; editingDestination = false; showingItinerary = false; collapse()
                     }
                 }
@@ -570,6 +571,7 @@ struct JourneyPlanningView: View {
         }
     }
     private func choose(_ place: TravelPlace) {
+        Haptics.selection()
         searchReturnToItinerary = false
         focused = false
         if editingOrigin { planner.setOrigin(place, metadata: model.metadata) }
@@ -886,7 +888,7 @@ private struct BoardedVehiclePicker: View {
                     if vehicles.isEmpty { Text(AppText.text("暫無車輛位置，稍後再選擇")).foregroundStyle(MapChrome.secondaryText) }
                     ForEach(vehicles) { approach in
                         Button {
-                            model.confirmBoardedVehicle(approach.vehicle, ride: ride); dismiss()
+                            Haptics.selection(); model.confirmBoardedVehicle(approach.vehicle, ride: ride); dismiss()
                         } label: {
                             HStack {
                                 Text(approach.vehicle.plate).monospaced()
@@ -901,7 +903,7 @@ private struct BoardedVehiclePicker: View {
         }.presentationDetents([.medium, .large])
             .sheet(isPresented: $showingScanner) {
                 BoardingPlateScanner(model: model, ride: ride) { bus in
-                    model.confirmBoardedVehicle(bus, ride: ride)
+                    Haptics.selection(); model.confirmBoardedVehicle(bus, ride: ride)
                     showingScanner = false; dismiss()
                 }
             }
@@ -1344,6 +1346,8 @@ struct JourneyOptionsView: View {
                 }.accessibilityIdentifier("journey-refresh-options")
             }
         }
+        // The placeholder rows give way to the first routes instead of being swapped for them.
+        .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.content, value: awaitingFirst)
     }
     @ViewBuilder private var emptyOptionActions: some View {
         Button { planner.plan(metadata:model.metadata) } label: {
@@ -1444,6 +1448,7 @@ struct JourneyOptionsView: View {
                     .liveFont(compact ? .title2 : .title3, weight: .bold, design: .rounded)
                     .monospacedDigit().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                     .accessibilityIdentifier("journey-preview-duration-" + option.id)
+                    .liveNumericText(timing?.conciseLabel, countsDown: true)
                 if let label = planner.optionLabels[option.id] {
                     Text(live.text(label == "推薦" && planner.checkingWalks ? "比較中" : label)).liveFont(.caption2, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
@@ -1514,6 +1519,7 @@ private struct JourneyArrivalTime: View {
     let duration: JourneyDuration
     var body: some View {
         Text(duration.expectedArrivalLabel + (duration.timeZoneNote().map { " · " + $0 } ?? ""))
+            .liveNumericText(duration.expectedArrivalLabel)
             .liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit()
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -1575,7 +1581,7 @@ struct JourneyItineraryView: View {
                             HStack(alignment: .top, spacing: 8) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(planner.started ? duration.summaryLabel(remaining: true) : duration.conciseLabel)
-                                        .liveFont(.headline).monospacedDigit()
+                                        .liveFont(.headline).monospacedDigit().liveNumericText(duration.conciseLabel, countsDown: true)
                                     JourneyArrivalTime(duration: duration)
                                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
                                 Spacer()
@@ -1717,7 +1723,7 @@ struct BikeStationAlert: View {
     var body: some View {
         // Tap when the station the rider is heading to stops being usable, not when an
         // existing alert is shown again.
-        content.sensoryFeedback(.warning, trigger: planner.bikeAlert?.station.id) { _, new in new != nil }
+        content.smoothChanges(planner.bikeAlert?.station.id).sensoryFeedback(.warning, trigger: planner.bikeAlert?.station.id) { _, new in new != nil }
     }
     @ViewBuilder private var content: some View {
         if let alert = planner.bikeAlert {
@@ -2362,9 +2368,9 @@ struct MetroBoardingRows: View {
                     Text(wait).liveFont(.subheadline, weight: .bold).monospacedDigit().liveNumericText(wait, countsDown: true)
                     if let tracked = model.nextTrackedTrain(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
                                                             alightingStationID: ride.alighting.stationID, at: date) {
-                        Button { model.toggleTrainTracking(tracked.train.id) } label: {
+                        Button { model.toggleTrainTracking(tracked.train.id); Haptics.toggle(model.selectedTrainID == tracked.train.id) } label: {
                             Label(model.selectedTrainID == tracked.train.id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
-                                .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44)
+                                .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44).smoothChanges(model.selectedTrainID)
                         }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-estimated")
                             .accessibilityHint(model.selectedTrainID == tracked.train.id ? AppText.text("停止追蹤") : "")
                     }
@@ -2378,9 +2384,9 @@ struct MetroBoardingRows: View {
                         let countdown = MetroCountdown.label(arrival.remaining(at: date))
                         Text(countdown).liveFont(.subheadline, weight: .semibold).monospacedDigit().liveNumericText(countdown, countsDown: true)
                         if let id = arrival.trainID, model.metroTrain(id) != nil {
-                            Button { model.toggleTrainTracking(id) } label: {
+                            Button { model.toggleTrainTracking(id); Haptics.toggle(model.selectedTrainID == id) } label: {
                                 Label(model.selectedTrainID == id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
-                                    .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44)
+                                    .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44).smoothChanges(model.selectedTrainID)
                             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-arrival-" + id)
                                 .accessibilityHint(model.selectedTrainID == id ? AppText.text("停止追蹤") : "")
                         }

@@ -1015,6 +1015,9 @@ struct TripConditionsBar: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(trip == nil ? "journey-conditions" : "assistant-trip")
+        .smoothChanges(comparison?.text)
+        .smoothChanges(comparing)
+        .smoothChanges(editing)
         .sheet(isPresented: $choosingTime) { timeSheet }
         // A comparison belongs to the routes it compared.
         .onChange(of: planner.options.map(\.id)) { _, _ in comparison = nil }
@@ -1146,6 +1149,7 @@ struct TripConditionsBar: View {
             Task { @MainActor in
                 let result = await OnlineJourneyReader.compare(summaries, request: request, pro: pro)
                 comparison = (text: result?.text ?? AppText.text("暫時無法比較，請直接看下方路線。"), credit: result?.credit)
+                if result != nil { Haptics.success() } else { Haptics.warning() }
                 comparing = false
             }
         } label: {
@@ -1454,7 +1458,7 @@ struct VoiceAssistantView: View {
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity, minHeight: 170, alignment: .top)
                 Spacer(minLength: 8)
-                controls.padding(.bottom, 10)
+                controls.padding(.bottom, 10).animation(reduceMotion ? nil : InterfaceMotion.chrome, value: phase)
             }
             .padding(.horizontal, 24)
             .opacity(shown ? 1 : 0)
@@ -1510,7 +1514,7 @@ struct VoiceAssistantView: View {
             }
             .padding(.horizontal, 14).frame(height: 34)
             .background(.thinMaterial, in: Capsule())
-            .animation(.snappy, value: phase)
+            .animation(reduceMotion ? nil : .snappy, value: phase)
             .accessibilityIdentifier("voice-status")
             HStack {
                 Spacer()
@@ -2186,7 +2190,7 @@ struct VoiceGlowView: View {
                         .onChange(of: proxy.frame(in: .global)) { _, frame in reportCard(frame) }
                 })
                 .padding(.horizontal, 12).padding(.bottom, 6)
-                .offset(y: shown ? 0 : 220)
+                .offset(y: shown || reduceMotion ? 0 : 220)
                 .opacity(shown ? 1 : 0)
         }
         .onAppear { reveal(true) }
@@ -2287,7 +2291,7 @@ struct VoiceGlowView: View {
         .background(.regularMaterial, in: MapChrome.shape(.card))
         .overlay(MapChrome.shape(.card).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: phase)
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: phase)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -2344,7 +2348,7 @@ struct VoiceStylePicker: View {
         return Button {
             guard !chosen else { return }
             Haptics.selection()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
         } label: {
             VStack(spacing: 10) {
                 preview(style)

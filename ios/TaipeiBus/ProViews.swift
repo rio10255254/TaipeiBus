@@ -50,10 +50,11 @@ struct ProPurchaseView: View {
                     }
                     VStack(spacing:10) {
                         ForEach(ProPlan.allCases) { plan in
-                            Button { selected = plan } label: {
+                            Button { if selected != plan { Haptics.selection() }; selected = plan } label: {
                                 HStack(spacing:12) {
                                     Image(systemName:selected == plan ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(selected == plan ? Brand.accent : Color.secondary)
+                                        .symbolSwap(selected == plan)
                                     Text(plan.title).fontWeight(.semibold)
                                     if plan == .yearly, let saving = yearlySaving {
                                         Text(AppText.text("省 %@%%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
@@ -248,7 +249,7 @@ struct SavedJourneysView: View {
             }
             ForEach(library.journeys) { saved in
                 // Tapping a saved trip previews its route, with or without an active subscription.
-                Button { model.previewSavedJourney(saved); model.showSavedJourneyRequested = true } label: {
+                Button { Haptics.selection(); model.previewSavedJourney(saved); model.showSavedJourneyRequested = true } label: {
                     VStack(alignment:.leading,spacing:5) {
                         Label(saved.title,systemImage:saved.symbol).font(.headline)
                         Text((saved.origin?.localizedName ?? AppText.text("目前位置"))+" → "+saved.destination.localizedName)
@@ -320,7 +321,7 @@ struct TripPreferenceView: View {
     var body: some View {
         NavigationStack {
             List(RoutePreference.allCases) { choice in
-                Button { model.setTripPreference(choice); dismiss() } label: {
+                Button { Haptics.selection(); model.setTripPreference(choice); dismiss() } label: {
                     HStack { Text(choice.title); Spacer(); if choice == (model.tripPreference ?? model.commutes.preference) { Image(systemName:"checkmark") } }
                 }.accessibilityIdentifier("trip-preference-"+choice.rawValue)
             }.navigationTitle(AppText.text("路線偏好")).navigationBarTitleDisplayMode(.inline)
@@ -339,7 +340,7 @@ struct LiveTrainsChip: View {
             let active = minutesLeft > 0
             let trials = model.freeTrialsLeft
             Button {
-                if !active && trials > 0 { model.startLiveTrainTrial() } else if !active { model.showingProPlans = true }
+                if !active && trials > 0 { Haptics.selection(); model.startLiveTrainTrial() } else if !active { model.showingProPlans = true }
             } label: {
                 Label(active ? AppText.text("即時列車 · 剩 %@ 分", minutesLeft)
                              : trials > 0 ? AppText.text("顯示即時列車 · 今日剩 %@ 次", trials) : AppText.text("即時列車 · Pro"),

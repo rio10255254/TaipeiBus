@@ -2213,7 +2213,8 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction
         following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
-        Haptics.selection()
+        // Only a tap is answered with a tick: confirming boarding has its own, and restoring the map has none.
+        if userInitiated { Haptics.selection() }
     }
     func routes(query: String) -> [RouteSearchResult] {
         var seen = Set<String>()

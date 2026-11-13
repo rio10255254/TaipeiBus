@@ -124,8 +124,8 @@ private struct OfficialNoticeDetail: View {
                         operation = Task { @MainActor in
                             do {
                                 let result = try await OnDeviceJourneyAssistant.excerpt(document)
-                                try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit
-                            } catch { if !Task.isCancelled { failed = true } }
+                                try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit; Haptics.success()
+                            } catch { if !Task.isCancelled { failed = true; Haptics.warning() } }
                             busy = false
                         }
                     }.disabled(busy)

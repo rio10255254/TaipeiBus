@@ -178,12 +178,12 @@ struct JourneyBikeStations: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Text(AppText.text(returning ? "還車" : "借車")).liveFont(.caption).foregroundStyle(.secondary)
-                        if compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint) }
+                        if compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).liveNumericText(count) }
                     }
                     Text(station.localizedName).liveFont(compact ? .caption : .subheadline, weight: .medium)
                         .lineLimit(compact ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if !compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).fixedSize() }
+                if !compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).fixedSize().liveNumericText(count) }
                 Image(systemName: "chevron.right").liveFont(.caption2).foregroundStyle(.secondary)
             }.padding(.horizontal, 10).padding(.vertical, 7).frame(maxWidth: .infinity, minHeight: 48)
         }.buttonStyle(MapActionStyle())

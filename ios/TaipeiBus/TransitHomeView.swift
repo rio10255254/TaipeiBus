@@ -354,7 +354,7 @@ struct TransitHomeView: View {
                     HStack(spacing:8) {
                         ForEach(commutes.journeys) { saved in
                             Button {
-                                model.previewSavedJourney(saved); showJourneyItinerary = false
+                                Haptics.selection(); model.previewSavedJourney(saved); showJourneyItinerary = false
                                 journeyDetent = journeyPreviewDetent; showJourney = true
                             } label: {
                                 Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
@@ -977,7 +977,7 @@ private struct HomeSearchRow: View {
                     Button {
                         if model.canReturnToRouteOverview { model.returnToRouteOverview() }
                         else if model.canReturnToRouteStation { model.returnToRouteStation() }
-                        else { model.clearSelection() }
+                        else { Haptics.selection(); model.clearSelection() }
                     } label: {
                         Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 56, height: 56).contentShape(Circle())
                     }
@@ -1122,7 +1122,7 @@ private struct TransitPanel: View {
                 // Without route data nothing works, so say so plainly instead of "updating".
                 EmptyStateView(symbol: "wifi.exclamationmark", title: live.text("暫時無法取得站牌與路線"),
                                message: live.text("請確認網路連線後重新整理。")) {
-                    Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
+                    Button(live.text("重新整理")) { Haptics.selection(); model.retry() }.buttonStyle(.bordered)
                         .accessibilityIdentifier("browse-load-retry")
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -1157,6 +1157,7 @@ private struct TransitPanel: View {
         }
         .smoothChanges(model.mode)
         .smoothChanges(systemRouteKeyboard)
+        .smoothChanges(model.loading)
         .smoothChanges(isBrowsing)
         .smoothChanges(model.language)
         .onAppear {
@@ -1205,7 +1206,7 @@ private struct TransitPanel: View {
                     .liveFont(.title2, weight: .bold)
                 Spacer()
                 if model.mode == .stops {
-                    Button { searchFocused = false; model.browseNearMe() } label: {
+                    Button { Haptics.selection(); searchFocused = false; model.browseNearMe() } label: {
                         Image(systemName: "location.fill").frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                         .accessibilityLabel(AppText.text("回到我附近")).accessibilityIdentifier("browse-near-me")
@@ -1260,7 +1261,7 @@ private struct TransitPanel: View {
 
     private var detailHeader: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
+            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { Haptics.selection(); model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
                 .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("返回搜尋"))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.selectedStation?.localizedName ?? model.selectedVehicle?.localizedRouteName ?? model.selectedRouteName ?? AppText.text("公車動態"))
@@ -1756,8 +1757,9 @@ private struct VehicleDetails: View {
                         HStack {
                             BilingualName(progress.stop).lineLimit(2)
                             Spacer(minLength: 8)
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: progress.stop.id, at: timeline.date)))
-                                .foregroundStyle(.secondary).monospacedDigit().accessibilityIdentifier("browse-official-arrival-" + progress.stop.id)
+                            let arrival = EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: progress.stop.id, at: timeline.date))
+                            Text(arrival)
+                                .foregroundStyle(.secondary).monospacedDigit().liveNumericText(arrival, countsDown: true).accessibilityIdentifier("browse-official-arrival-" + progress.stop.id)
                         }.liveFont(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(RowPressStyle())
                 }
