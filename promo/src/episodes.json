@@ -1,0 +1,18 @@
+{
+  "voice": { "voiceId": "fQj4gJSexpu8RDE2Ii5m", "model": "eleven_v4", "language": "zh" },
+  "episodes": [
+    {
+      "id": "test", "label": "#0 測試", "theme": "night", "title": "站牌寫三分鐘\n**車到底在哪**？",
+      "endLine": "公車、捷運、YouBike，一路接到底", "outro": "App Store 免費下載", "liftFrom": 1,
+      "lines": [
+        { "text": "站牌寫三分鐘，\n**車到底在哪**？", "say": "站牌寫三分鐘，車到底在哪？", "beats": 8, "cues": [[0.2, "pop"]] },
+        { "text": "打開地圖，\n**直接看它開過來**。", "say": "打開地圖，直接看它開過來。", "beats": 8, "cues": [[0, "whoosh"], [2, "pop"], [4, "chime"]] }
+      ],
+      "shots": [
+        { "screen": "test", "pose": { "x": 0, "y": 620, "s": 1.25, "rx": 8, "ry": -10, "rz": 2 } },
+        { "screen": "test", "pose": { "x": 0, "y": 60, "s": 1.5, "rx": 4, "ry": 8 }, "lifts": [{ "rect": [560, 1900, 1100, 2180], "z": 150, "at": 2, "glow": true }],
+          "taps": [{ "x": 700, "y": 1400, "at": 1 }], "stickers": [{ "text": "市政府站", "sub": "BL18", "x": 780, "y": 520, "at": 4, "tone": "amber" }] }
+      ]
+    }
+  ]
+}
