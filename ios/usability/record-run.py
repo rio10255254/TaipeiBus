@@ -26,7 +26,9 @@ with log_path.open("w") as log:
         if recorder.poll() is None:
             recorder.send_signal(signal.SIGINT)
             try:
-                recorder.wait(timeout=30)
+                # A quarter of an hour of footage takes far longer to close than a short clip; a file
+                # cut off before its index is written cannot be played at all.
+                recorder.wait(timeout=180)
             except subprocess.TimeoutExpired:
                 recorder.terminate()
                 recorder.wait(timeout=10)
