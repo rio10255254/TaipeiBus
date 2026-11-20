@@ -72,6 +72,8 @@ set ||= client.request(:post, '/v1/appPreviewSets', {}, data: {
 path = "/v1/appPreviewSets/#{set.fetch('id')}/appPreviews"
 name, checksum = File.basename(file), Digest::MD5.hexdigest(bytes)
 state = ->(item) { item.dig('attributes', 'assetDeliveryState', 'state') }
+# Receiving the file and transcoding it are reported separately; the second is what the store shows.
+video = ->(item) { item.dig('attributes', 'videoDeliveryState', 'state') }
 current = nil
 client.all(path).each do |item|
   same = item.dig('attributes', 'fileName') == name && item.dig('attributes', 'sourceFileChecksum') == checksum && state.call(item) != 'FAILED'
@@ -101,13 +103,13 @@ end
 deadline = Time.now + 900
 loop do
   current = client.request(:get, "/v1/appPreviews/#{current.fetch('id')}").fetch('data')
-  break if state.call(current) == 'COMPLETE'
-  if state.call(current) == 'FAILED'
-    warn JSON.generate(current.dig('attributes', 'assetDeliveryState', 'errors'))
+  break if state.call(current) == 'COMPLETE' && [nil, 'COMPLETE'].include?(video.call(current))
+  if state.call(current) == 'FAILED' || video.call(current) == 'FAILED'
+    warn JSON.generate([current.dig('attributes', 'assetDeliveryState', 'errors'), current.dig('attributes', 'videoDeliveryState', 'errors')])
     abort 'Apple could not process the app preview.'
   end
   if Time.now > deadline
-    puts "The app preview is uploaded and still processing at Apple (#{state.call(current)}). Run this operation again later to confirm it."
+    puts "The app preview is uploaded and still processing at Apple (file #{state.call(current)}, video #{video.call(current)}). Run this operation again later to confirm it."
     exit 0
   end
   sleep 20
@@ -118,4 +120,5 @@ unless current.dig('attributes', 'previewFrameTimeCode') == frame
     type: 'appPreviews', id: current.fetch('id'), attributes: { previewFrameTimeCode: frame }
   })
 end
-puts "Verified the processed app preview on update #{release.version} (poster frame #{frame}); the update is still a draft."
+puts "Verified the app preview on update #{release.version}: file #{state.call(current)}, video #{video.call(current) || 'state not reported'}, " \
+  "#{current.dig('attributes', 'videoUrl') ? 'playable copy ready' : 'no playable copy yet'}, poster frame #{frame}. The update is still a draft."
