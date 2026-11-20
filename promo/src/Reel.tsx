@@ -3,7 +3,7 @@ import { AbsoluteFill, Audio, Easing, staticFile, useCurrentFrame } from 'remoti
 import script from './episodes.json';
 import timings from './timing.json';
 import './fonts';
-import { BEAT, Caption, EndCard, FPS, Headline, Phone, Pose, Rect, Stage, Sticker, Tag, Tap, clamp, lerp, pop, ramp } from './kit';
+import { BEAT, Caption, EndCard, FPS, Headline, Phone, Pose, Pulse, Rect, Stage, Sticker, Tag, Tap, clamp, lerp, pop, ramp } from './kit';
 import { ThemeName } from './theme';
 
 /** `on`: the screen (of this shot's swaps) the region belongs to; the shot's first screen when left out. */
@@ -20,6 +20,8 @@ type Shot = {
   drift?: number;
   lifts?: Lift[];
   taps?: { x: number; y: number; at: number }[];
+  /** Rings on the glass from a beat until another (the end of the shot when left out). */
+  pulses?: { x: number; y: number; at: number; until?: number }[];
   stickers?: { text: string; sub?: string; x: number; y: number; at: number; out?: number; tone?: 'amber' | 'paper' | 'night' | 'go'; tilt?: number; size?: number }[];
   /** Screens that follow within the shot: pushed in from the right or cross-faded, at a beat. */
   swaps?: { at: number; screen: string; how?: 'slide' | 'fade' }[];
@@ -110,7 +112,8 @@ export const Reel: React.FC<{ id: string }> = ({ id }) => {
       <Stage theme={ep.theme} t={t} dim={shot.dim ? shot.dim * ramp(t, slot.start, slot.start + 0.5) : 0}>
         <Tag label={ep.label} t={t} ink={ep.theme === 'mist' || ep.theme === 'sand' ? '#152030' : '#F7FAFF'} />
         <Phone pose={pose} screens={screens} lifts={lifts} shine={Math.sin(t * 0.7) * 0.5 + (pose.ry ?? 0) / 60}>
-          {(shot.taps ?? []).map((tap, j) => <Tap key={j} x={tap.x} y={tap.y} t={t} at={beat(tap.at)} />)}
+          {(shot.pulses ?? []).map((p, j) => <Pulse key={`p${i}-${j}`} x={p.x} y={p.y} t={t} at={beat(p.at)} until={p.until != null ? beat(p.until) : slot.start + slot.length - 0.3} />)}
+          {(shot.taps ?? []).map((tap, j) => <Tap key={`t${i}-${j}`} x={tap.x} y={tap.y} t={t} at={beat(tap.at)} />)}
         </Phone>
         <Headline text={ep.title} t={t} theme={ep.theme} out={tm.slots[0].start + tm.slots[0].length - 0.3} />
         {(shot.stickers ?? []).map((s, j) => (

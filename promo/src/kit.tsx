@@ -126,7 +126,7 @@ export const Phone: React.FC<{
           if (k <= 0.001) return null;
           return (
             <div key={i} style={{ position: 'absolute', left: EDGE + BEZEL + x0 * PHONE.px, top: EDGE + BEZEL + y0 * PHONE.px, width: w, height: h,
-              transform: `translate3d(0, ${-l.z * 0.10 * k}px, ${l.z * k}px) scale(${1 + 0.035 * k})`, borderRadius: 26 * PHONE.px * 3, overflow: 'hidden',
+              transform: `translate3d(0, 0, ${l.z * k}px) scale(${1 + 0.05 * k})`, borderRadius: 26 * PHONE.px * 3, overflow: 'hidden',
               boxShadow: `0 ${18 * k}px ${46 * k}px rgba(6,12,26,${0.42 * Math.min(1, k)}), 0 ${4 * k}px ${10 * k}px rgba(6,12,26,${0.3 * Math.min(1, k)})${l.glow ? `, 0 0 0 ${4 * k}px rgba(255,185,64,${0.9 * Math.min(1, k)})` : ''}`,
               opacity: Math.min(1, k * 4) }}>
               <Img src={shotUrl(top.name)} style={{ position: 'absolute', left: -x0 * PHONE.px, top: -y0 * PHONE.px, width: SCREEN_W, height: SCREEN_H }} />
@@ -160,6 +160,22 @@ export const Tap: React.FC<{ x: number; y: number; t: number; at: number }> = ({
       <div style={{ position: 'absolute', left: -size * 0.24, top: -size * 0.24, width: size * 0.48, height: size * 0.48, borderRadius: '50%',
         background: 'rgba(255,255,255,.92)', boxShadow: '0 6px 18px rgba(10,20,40,.45), inset 0 -3px 8px rgba(40,70,120,.25)',
         opacity: down, transform: `scale(${1.25 - 0.3 * down})` }} />
+    </div>
+  );
+};
+
+/** Rings spreading from a point on the glass (screenshot pixels): this is live, look here. */
+export const Pulse: React.FC<{ x: number; y: number; t: number; at: number; until: number; color?: string }> = ({ x, y, t, at, until, color = '255,185,64' }) => {
+  if (t < at || t > until + 0.4) return null;
+  const fade = ramp(t, at, at + 0.2) * (1 - ramp(t, until, until + 0.4));
+  const size = 260 * PHONE.px * 3;
+  return (
+    <div style={{ position: 'absolute', left: x * PHONE.px, top: y * PHONE.px, width: 0, height: 0, opacity: fade }}>
+      {[0, 0.5].map((phase) => {
+        const k = ((t - at) / 1.0 + phase) % 1;
+        return <div key={phase} style={{ position: 'absolute', left: -size / 2, top: -size / 2, width: size, height: size, borderRadius: '50%',
+          border: `4px solid rgba(${color},${0.95 * (1 - k)})`, background: `rgba(${color},${0.16 * (1 - k)})`, transform: `scale(${0.25 + k * 0.85})` }} />;
+      })}
     </div>
   );
 };

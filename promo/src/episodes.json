@@ -1,18 +1,318 @@
 {
-  "voice": { "voiceId": "fQj4gJSexpu8RDE2Ii5m", "model": "eleven_v4", "language": "zh" },
-  "episodes": [
+ "voice": {
+  "voiceId": "fQj4gJSexpu8RDE2Ii5m",
+  "model": "eleven_v4",
+  "language": "zh"
+ },
+ "episodes": [
+  {
+   "id": "ep1",
+   "label": "#1 公車到哪了",
+   "theme": "night",
+   "title": "站牌寫三分鐘\n**車到底在哪**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
     {
-      "id": "test", "label": "#0 測試", "theme": "night", "title": "站牌寫三分鐘\n**車到底在哪**？",
-      "endLine": "公車、捷運、YouBike，一路接到底", "outro": "App Store 免費下載", "liftFrom": 1,
-      "lines": [
-        { "text": "站牌寫三分鐘，\n**車到底在哪**？", "say": "站牌寫三分鐘，車到底在哪？", "beats": 8, "cues": [[0.2, "pop"]] },
-        { "text": "打開地圖，\n**直接看它開過來**。", "say": "打開地圖，直接看它開過來。", "beats": 8, "cues": [[0, "whoosh"], [2, "pop"], [4, "chime"]] }
-      ],
-      "shots": [
-        { "screen": "test", "pose": { "x": 0, "y": 620, "s": 1.25, "rx": 8, "ry": -10, "rz": 2 } },
-        { "screen": "test", "pose": { "x": 0, "y": 60, "s": 1.5, "rx": 4, "ry": 8 }, "lifts": [{ "rect": [560, 1900, 1100, 2180], "z": 150, "at": 2, "glow": true }],
-          "taps": [{ "x": 700, "y": 1400, "at": 1 }], "stickers": [{ "text": "市政府站", "sub": "BL18", "x": 780, "y": 520, "at": 4, "tone": "amber" }] }
+     "text": "站牌寫三分鐘，\n**車到底在哪**？",
+     "say": "[curious] 站牌寫三分鐘，車到底在哪？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
       ]
+     ]
+    },
+    {
+     "text": "打開地圖，\n**看它開過來**。",
+     "say": "打開地圖，看它開過來。",
+     "beats": 8,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       2,
+       "pop"
+      ],
+      [
+       4,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "點一下那輛車，\n**鏡頭跟著它走**。",
+     "say": "點一下那輛車，鏡頭跟著它走。",
+     "beats": 9,
+     "cues": [
+      [
+       1,
+       "tap"
+      ],
+      [
+       1.4,
+       "whoosh"
+      ],
+      [
+       4.5,
+       "pop"
+      ],
+      [
+       6,
+       "tap"
+      ]
+     ]
+    },
+    {
+     "text": "下一班還要多久，\n**一眼看完**。",
+     "say": "下一班還要多久，一眼看完。",
+     "beats": 9,
+     "cues": [
+      [
+       1,
+       "pop"
+      ],
+      [
+       2.5,
+       "pop"
+      ],
+      [
+       4.5,
+       "flip"
+      ],
+      [
+       6,
+       "chime"
+      ]
+     ]
     }
-  ]
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": 10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": -12,
+      "rz": 2
+     },
+     "drift": 0.04,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 2
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": -70,
+      "y": -120,
+      "s": 1.75,
+      "rx": 6,
+      "ry": 11,
+      "rz": -1
+     },
+     "drift": 0.05,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 0.5,
+       "until": 2
+      }
+     ],
+     "lifts": [
+      {
+       "rect": [
+        330,
+        1196,
+        912,
+        1352
+       ],
+       "z": 150,
+       "at": 2,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "車牌、路線",
+       "sub": "每輛車都看得到",
+       "x": 330,
+       "y": 560,
+       "at": 4,
+       "tone": "amber",
+       "tilt": -4
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": -60,
+      "y": -140,
+      "s": 1.7,
+      "rx": 4,
+      "ry": -8,
+      "rz": 1
+     },
+     "drift": 0.02,
+     "taps": [
+      {
+       "x": 640,
+       "y": 1272,
+       "at": 1
+      }
+     ],
+     "swaps": [
+      {
+       "at": 1.4,
+       "screen": "a-07-live-bus-with-details",
+       "how": "fade"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 3.2,
+     "screen": "a-07-live-bus-with-details",
+     "pose": {
+      "x": 0,
+      "y": -850,
+      "s": 1.9,
+      "rx": 3,
+      "ry": 7
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        60,
+        2436,
+        606,
+        2584
+       ],
+       "z": 150,
+       "at": 1.3,
+       "glow": true
+      }
+     ],
+     "taps": [
+      {
+       "x": 330,
+       "y": 2510,
+       "at": 2.8
+      }
+     ],
+     "stickers": [
+      {
+       "text": "跟隨公車",
+       "sub": "縮放也不會跟丟",
+       "x": 790,
+       "y": 880,
+       "at": 1.6,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "screen": "a-07-live-bus-with-details",
+     "pose": {
+      "x": -24,
+      "y": -800,
+      "s": 1.9,
+      "rx": 4,
+      "ry": -6
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        44,
+        1930,
+        1140,
+        2090
+       ],
+       "z": 160,
+       "at": 1,
+       "glow": true
+      },
+      {
+       "rect": [
+        44,
+        2090,
+        760,
+        2216
+       ],
+       "z": 110,
+       "at": 2.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "官方到站時間",
+       "x": 700,
+       "y": 330,
+       "at": 1.4,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "from": 4.5,
+     "enter": "flip",
+     "screen": "a-11-live-station-tag",
+     "pose": {
+      "x": -20,
+      "y": 300,
+      "s": 1.75,
+      "rx": 5,
+      "ry": 8
+     },
+     "drift": 0.04,
+     "lifts": [
+      {
+       "rect": [
+        380,
+        820,
+        1250,
+        1076
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "點站牌也看得到",
+       "x": 560,
+       "y": 1180,
+       "at": 2.2,
+       "tone": "paper",
+       "tilt": -2
+      }
+     ]
+    }
+   ]
+  }
+ ]
 }

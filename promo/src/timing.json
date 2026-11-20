@@ -16,5 +16,35 @@
         "voiceLength": 2.354
       }
     ]
+  },
+  "ep1": {
+    "total": 21.0,
+    "end": 17.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.939
+      },
+      {
+        "start": 4.0,
+        "length": 4.0,
+        "voiceStart": 4.14,
+        "voiceLength": 2.071
+      },
+      {
+        "start": 8.0,
+        "length": 4.5,
+        "voiceStart": 8.14,
+        "voiceLength": 2.745
+      },
+      {
+        "start": 12.5,
+        "length": 4.5,
+        "voiceStart": 12.64,
+        "voiceLength": 2.615
+      }
+    ]
   }
 }
