@@ -19,6 +19,8 @@ with log_path.open("w") as log:
             if recorder.poll() is not None or time.monotonic() > deadline:
                 raise RuntimeError("Interaction recorder did not start")
             time.sleep(0.25)
+        # The clock at the first recorded frame, to line the footage up with marks in the test log.
+        print(f"Recording started at {time.time():.2f}", flush=True)
         subprocess.run(sys.argv[1:], check=True)
     finally:
         if recorder.poll() is None:

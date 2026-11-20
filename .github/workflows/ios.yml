@@ -86,7 +86,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['dynamic-island', 'all', 'uiux-audit', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['dynamic-island', 'all', 'uiux-audit', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'app-store-preview', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -405,6 +405,10 @@ jobs:
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
+            # A simulator has no carrier, and its empty signal dots would be in every frame of the video.
+            xcrun simctl status_bar "$device" override --cellularMode active --cellularBars 4 --wifiBars 3 --batteryState charged --batteryLevel 100 || true
+          fi
           # CoreSimulator is already booted. simctl screenshots and XCTest do not
           # need a desktop Simulator window, whose LaunchServices RPC can stall.
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
@@ -822,6 +826,14 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'app-store-bike' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealYouBikeConnection')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
+            # Footage for the store's app preview: real screens at a viewer's pace, recorded whole.
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel1LiveBus'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel2PlanTrip'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel3StationWalk'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel4RouteSearch')
+            export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
+          fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'suggestions' ]; then
@@ -840,6 +852,7 @@ jobs:
           fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-performance' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'zoom-fix' ]; then recorder=(python3 ios/usability/record-run.py); fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then recorder=(python3 ios/usability/record-run.py); fi
           if [ '${{ inputs.usability_scope }}' = 'english-motion' ] || [ '${{ inputs.usability_scope }}' = 'walking-clarity' ] || [ '${{ inputs.usability_scope }}' = 'release-readiness' ]; then recorder=(python3 ios/usability/record-run.py); fi
           optimization=()
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ]; then
