@@ -112,7 +112,7 @@ EPISODES = [
             {"line": 3, "screen": S["busCard"], "pose": look(603, 2010, 1.72, 850, rx=4, ry=-6), "drift": 0.02,
              "lifts": [lift(CARD_NEXT, 1, 160, True), lift(CARD_SPEED, 2.5, 110)], "stickers": [note("官方到站時間", 700, 330, 1.4, tilt=3)]},
             {"line": 3, "from": 4.5, "enter": "flip", "screen": S["stationA"], "pose": {"x": -20, "y": 300, "s": 1.75, "rx": 5, "ry": 8}, "drift": 0.04,
-             "lifts": [lift([376, 820, 1130, 1078], 1.5, 150, True)], "stickers": [note("點站牌也看得到", 560, 1180, 2.2, tone="paper", tilt=-2)]},
+             "lifts": [lift([366, 812, 842, 1086], 1.5, 150, True)], "stickers": [note("點站牌也看得到", 560, 1180, 2.2, tone="paper", tilt=-2)]},
         ],
     },
     {
