@@ -397,6 +397,9 @@ jobs:
           fi
           if [[ '${{ inputs.usability_scope }}' = app-store* ]]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
+            # Store captures show Taipei's clock: on a UTC runner the status bar read 12:12 beside
+            # an arrival at 08:53, and every time carried a 「台北時間」 note.
+            sudo systemsetup -settimezone Asia/Taipei || true
           fi
           device=$(xcrun simctl create TaipeiBus-preview "$device_type" "$runtime")
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
