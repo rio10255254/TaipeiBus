@@ -9,6 +9,9 @@ import { ThemeName } from './theme';
 /** `on`: the screen (of this shot's swaps) the region belongs to; the shot's first screen when left out. */
 type Lift = { rect: Rect; z?: number; at: number; out?: number; glow?: boolean; on?: string };
 type Shot = {
+  /** The line this shot belongs to (its own position when left out) and the beat of that line it starts on. */
+  line?: number;
+  from?: number;
   screen: string;
   pose: Pose;
   /** How the phone gets here: rise from below (first shot), turn like a card and show the new screen, or glide (default). */
@@ -44,17 +47,19 @@ export const Reel: React.FC<{ id: string }> = ({ id }) => {
   const t = frame / FPS;
   const ep = EPISODES.find((e) => e.id === id)!;
   const tm = TIMING[id];
-  const n = clamp(tm.slots.findIndex((s) => t < s.start + s.length), -1, tm.slots.length - 1);
-  const i = n < 0 ? tm.slots.length - 1 : n;
-  const slot = tm.slots[i];
+  // Shots in order of time: each runs from its start to the next one's (the last to the end card).
+  const starts = ep.shots.map((s, j) => tm.slots[s.line ?? j].start + (s.from ?? 0) * BEAT);
+  let i = 0;
+  for (let j = 0; j < starts.length; j++) if (t >= starts[j]) i = j;
   const shot = ep.shots[i];
   const prev = i > 0 ? ep.shots[i - 1] : null;
+  const slot = { start: starts[i], length: (i + 1 < starts.length ? starts[i + 1] : tm.end) - starts[i] };
   const local = t - slot.start;
   const beat = (b: number) => slot.start + b * BEAT;
 
   // The camera: from where the last shot left the phone to this shot's pose, then a slow push in.
   const drifted = (s: Shot, k: number): Pose => ({ ...s.pose, s: s.pose.s * (1 + (s.drift ?? 0.03) * k) });
-  const arrive = shot.enter === 'flip' ? 0.7 : 0.75;
+  const arrive = Math.min(shot.enter === 'flip' ? 0.7 : 0.75, slot.length * 0.8);
   const k = ramp(t, slot.start - 0.02, slot.start + arrive, inOut);
   const from = prev ? drifted(prev, 1) : { ...shot.pose, y: shot.pose.y + 1500, s: shot.pose.s * 0.92, rx: 18 };
   let pose = mix(from, drifted(shot, clamp(local / slot.length)), k);
