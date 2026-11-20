@@ -8,6 +8,7 @@
   "marketingUrl": "https://rio10255254.github.io/TaipeiBus/",
   "privacyPolicyUrl": "https://rio10255254.github.io/TaipeiBus/privacy.html",
   "copyright": "2026 Rio",
+  "appPreview": { "file": "preview/app-preview.mp4", "posterFrame": "00:00:12:00" },
   "screenshotOrder": [
     "01-live-bus.png",
     "02-next-bus.png",

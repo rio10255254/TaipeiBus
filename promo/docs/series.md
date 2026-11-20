@@ -124,6 +124,38 @@
 | 2 | 台北、新北，**一路接到底**。 | 翻到路線比較，整支手機入鏡；交通工具圖示列浮起；標籤「公車＋捷運＋YouBike＋步行」。 |
 | 3 | 沒有廣告、不用登入。**App Store 免費下載**。 | 翻回 3D 公車，手機慢慢後退；標籤「沒有廣告」「不用登入」先後貼上，最後綠色「免費下載」，接片尾。 |
 
+## App Store 預覽影片
+
+商店頁面上截圖前面那支會自動播放的影片（App Preview），和上面八支不是同一種東西：Apple 的審核規則 2.3.4 只允許「App 本身的螢幕錄影」，可以加旁白、字幕和點擊提示，不能有手機外框、彩色背景或真人手指。所以這支另外做：
+
+| 項目 | 規格 |
+| --- | --- |
+| 畫面 | 886×1920、30 fps、26.5 秒（Apple 規定 15–30 秒、最多 30 fps）。錄影鋪滿整個畫面，上面只有字幕帶、點擊提示和片尾的名稱。 |
+| 素材 | `AppStoreScreenshotTests.testPreviewReel1…4`：在 6.9 吋模擬器上以即時資料操作真實的 App（跟車看公車、輸入目的地比路線看步驟、點站牌到步行導航、路線鍵盤到路線地圖），由 `.github/workflows/ios.yml` 的 `app-store-preview` 範圍逐段錄下。 |
+| 剪法 | 雲端模擬器每秒只畫 4–8 格，所以每段加速 2–3 倍播放、把影格融合到 30 fps；步驟之間以 0.3 秒疊化相接，等待資料的空檔全部剪掉。畫面內容沒有修改。 |
+| 字幕 | 影片在商店裡預設靜音，所以每句都有字幕，位置逐句選在不擋住該句重點的地方。 |
+| 聲音 | 同一位旁白、同一段配樂與聲音 logo；片尾不說「App Store 下載」（人已經在商店裡了）。 |
+
+| 段 | 台詞 | 畫面 |
+| --- | --- | --- |
+| 0 | 公車到哪了？**地圖上直接看** | 3D 地圖跟著一輛正在行駛的公車。 |
+| 1 | 點一下那輛車，**下一班幾分鐘到** | 點車輛標籤，卡片升起：往哪裡、下一站、幾分鐘到、時速。 |
+| 2 | 輸入目的地，**幾種走法一起比** | 點搜尋列 → 往內湖站的幾種走法與整趟時間。 |
+| 3 | 坐幾站、哪裡下車，**出發前先看清楚** | 點「步驟」→ 完整行程，往下捲。 |
+| 4 | 點站牌看到站時間，**再帶你走過去** | 點站牌 → 到站車輛 → 點「步行」→ App 內步行路線。 |
+| 片尾 | 一路，出門前看一眼。 | 路線地圖在底下繼續，壓暗後出現圖示、「一路 OneRoad」與「公車、捷運、YouBike，一路接到底」。 |
+
+```bash
+python3 scripts/make-preview-clips.py <錄影資料夾>     # 裁出 public/preview/*.mp4
+python3 scripts/make-voice.py store && python3 scripts/make-sound.py store
+npx remotion render src/index.ts StorePreview out/store-preview-raw.mp4 --codec=h264 --crf=14
+# 轉成 Apple 要的 H.264 High 4.0、AAC 256 kbps，放到上架流程讀的位置
+ffmpeg -i out/store-preview-raw.mp4 -c:v libx264 -profile:v high -level 4.0 -pix_fmt yuv420p -r 30 -crf 17 -maxrate 10M -bufsize 20M -g 30 \
+  -c:a aac -b:a 256k -ar 48000 -ac 2 -movflags +faststart ../ios/release/preview/app-preview.mp4
+```
+
+剪接點、字幕位置與點擊座標在 `src/preview.json`。上傳用 TestFlight 工作流程的 `store-preview` 操作（`ios/release/store_preview.rb`），只放進可編輯的草稿版本，不送審。
+
 ## 製作
 
 ```bash
