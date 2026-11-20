@@ -18,10 +18,11 @@ PX = (620 - 2 * (7 + 10)) / 1206  # page pixels per screenshot pixel at scale 1 
 S = {
     "bus": "a-07-live-bus-in-3d",
     "busCard": "a-07-live-bus-with-details",
-    "station": "a-11-live-station-tag",
+    "stationA": "a-11-live-station-tag",  # beside the bus above, in the same minutes
+    "station": "b-11-live-station-tag",
     "compare": "b-02-trip-choices",
     "steps": "b-06-full-itinerary",
-    "walk": "a-12-in-app-walking",
+    "walk": "b-12-in-app-walking",
     "keypad": "a-03-route-keypad",
     "home": "a-01-nearby-map",
 }
@@ -61,7 +62,7 @@ BUS_AT = (1045, 1270)
 CARD_FOLLOW = [60, 2436, 606, 2584]
 CARD_NEXT = [44, 1930, 1140, 2090]
 CARD_SPEED = [44, 2090, 760, 2216]
-STATION_TAG = [380, 820, 1200, 1076]
+STATION_TAG = [376, 820, 840, 1078]
 STATION_DOT = (602, 1112)
 CMP_BEST = [70, 1816, 1136, 2270]
 CMP_TIME = [90, 1840, 880, 2090]
@@ -69,10 +70,13 @@ CMP_MODES = [100, 2110, 840, 2190]
 CMP_ALT1 = [70, 2300, 590, 2440]
 CMP_ALT2 = [616, 2300, 1136, 2440]
 CMP_STEPS = (1015, 2135)
-STEP_HEAD = [44, 410, 1180, 610]
-STEP_WALK = [44, 700, 1180, 900]
-STEP_BL = [44, 970, 1180, 1500]
-STEP_BR = [44, 1780, 1180, 2250]
+STEP_HEAD = [44, 410, 1180, 620]
+STEP_BIKE = [44, 700, 1180, 1262]
+BIKE_PICKUP = [170, 788, 970, 926]
+BIKE_RETURN = [170, 940, 970, 1080]
+STEP_METRO = [44, 1310, 1180, 1802]
+STEP_WALK = [44, 1870, 1180, 2072]
+STEP_ARRIVE = [44, 2130, 1180, 2272]
 STEP_GO = [54, 2360, 1150, 2500]
 WALK_BANNER = [44, 194, 1162, 480]
 WALK_ROUTE = [0, 1180, 1206, 1360]
@@ -107,7 +111,7 @@ EPISODES = [
              "stickers": [note("跟隨公車", 790, 880, 1.6, tilt=3, sub="縮放也不會跟丟")]},
             {"line": 3, "screen": S["busCard"], "pose": {"x": -24, "y": -800, "s": 1.9, "rx": 4, "ry": -6}, "drift": 0.02,
              "lifts": [lift(CARD_NEXT, 1, 160, True), lift(CARD_SPEED, 2.5, 110)], "stickers": [note("官方到站時間", 700, 330, 1.4, tilt=3)]},
-            {"line": 3, "from": 4.5, "enter": "flip", "screen": S["station"], "pose": {"x": -20, "y": 300, "s": 1.75, "rx": 5, "ry": 8}, "drift": 0.04,
+            {"line": 3, "from": 4.5, "enter": "flip", "screen": S["stationA"], "pose": {"x": -20, "y": 300, "s": 1.75, "rx": 5, "ry": 8}, "drift": 0.04,
              "lifts": [lift([380, 820, 1250, 1076], 1.5, 150, True)], "stickers": [note("點站牌也看得到", 560, 1180, 2.2, tone="paper", tilt=-2)]},
         ],
     },
@@ -144,12 +148,12 @@ EPISODES = [
         ],
         "shots": [
             {"line": 0, "screen": S["steps"], "pose": whole(), "drift": 0.04},
-            {"line": 1, "screen": S["steps"], "pose": look(603, 720, 1.75, 780, ry=8), "drift": 0.04,
-             "lifts": [lift(STEP_HEAD, 1, 140, True), lift(STEP_WALK, 3, 120)]},
-            {"line": 2, "screen": S["steps"], "pose": look(603, 1260, 1.8, 800, ry=-7), "drift": 0.02,
-             "lifts": [lift(STEP_BL, 1, 150, True)], "stickers": [note("坐幾站都寫好", 780, 330, 2, tilt=3)]},
-            {"line": 2, "from": 5, "screen": S["steps"], "pose": look(603, 2010, 1.8, 800, ry=6), "drift": 0.02,
-             "lifts": [lift(STEP_BR, 0.8, 150, True)], "stickers": [note("轉乘也一樣", 300, 330, 1.6, tone="paper", tilt=-3)]},
+            {"line": 1, "screen": S["steps"], "pose": look(603, 760, 1.75, 780, ry=8), "drift": 0.04,
+             "lifts": [lift(STEP_HEAD, 1, 140, True, out=4.5), lift(STEP_BIKE, 3, 130)]},
+            {"line": 2, "screen": S["steps"], "pose": look(603, 1556, 1.8, 800, ry=-7), "drift": 0.02,
+             "lifts": [lift(STEP_METRO, 1, 150, True)], "stickers": [note("坐幾站都寫好", 780, 330, 2, tilt=3)]},
+            {"line": 2, "from": 5, "screen": S["steps"], "pose": look(603, 2080, 1.8, 780, ry=6), "drift": 0.02,
+             "lifts": [lift(STEP_WALK, 0.8, 140, True), lift(STEP_ARRIVE, 1.8, 120)], "stickers": [note("出站後怎麼走", 300, 330, 1.6, tone="paper", tilt=-3)]},
             {"line": 3, "enter": "flip", "screen": S["walk"], "pose": look(603, 420, 1.75, 620, ry=-7), "drift": 0.03,
              "lifts": [lift(WALK_BANNER, 1.5, 150, True)], "stickers": [note("步行導航", 300, 1130, 2.4, tilt=-3)]},
             {"line": 3, "from": 5, "screen": S["walk"], "pose": look(603, 2000, 1.75, 800, ry=7), "drift": 0.03,
@@ -177,6 +181,29 @@ EPISODES = [
             {"line": 3, "screen": S["walk"], "pose": {"x": 0, "y": -330, "s": 1.5, "rx": 5, "ry": 6}, "drift": 0.02,
              "lifts": [lift(WALK_DONE, 2, 150, True)], "taps": [{"x": 870, "y": 2390, "at": 3.5}],
              "stickers": [note("趕得上", 300, 430, 4, tone="go", tilt=-4, size=58)]},
+        ],
+    },
+    {
+        "id": "ep5", "label": "#5 最後一段路", "theme": "moss", "title": "走到捷運站\n**還要十五分鐘**？", **END,
+        "lines": [
+            {"text": "走到捷運站，\n**還要十五分鐘**？", "say": "[tired] 走到捷運站，還要十五分鐘？", "beats": 8, "cues": [[0.2, "pop"]]},
+            {"text": "規劃路線時，\n**YouBike 一起排進去**。", "say": "規劃路線時，YouBike 一起排進去。", "beats": 9, "cues": [[0, "whoosh"], [1.5, "pop"], [3.5, "pop"], [4, "chime"]]},
+            {"text": "借車站有幾輛、\n**還車站有幾格**。", "say": "借車站有幾輛、還車站有幾格。", "beats": 10, "cues": [[1, "tap"], [1.5, "whoosh"], [4.4, "pop"], [5.8, "pop"], [6.2, "chime"]]},
+            {"text": "有車、有位，\n**它才會這樣排**。", "say": "有車、有位，它才會這樣排。", "beats": 9, "cues": [[0, "whoosh"], [1, "pop"], [2.5, "stamp"], [5, "pop"]]},
+        ],
+        "shots": [
+            {"line": 0, "screen": S["compare"], "pose": whole(ry=10, rz=-2, x=-10), "drift": 0.04},
+            {"line": 1, "screen": S["compare"], "pose": look(603, 2040, 1.85, 780, ry=-7), "drift": 0.03,
+             "lifts": [lift(CMP_BEST, 1.5, 150, True), lift(CMP_ALT2, 3.5, 120)],
+             "stickers": [note("YouBike 接駁", 760, 330, 2, tilt=3)]},
+            {"line": 2, "screen": S["compare"], "pose": look(900, 2100, 2.1, 780, ry=8), "drift": 0.02,
+             "taps": [{"x": CMP_STEPS[0], "y": CMP_STEPS[1], "at": 1}], "swaps": [{"at": 1.5, "screen": S["steps"], "how": "slide"}]},
+            {"line": 2, "from": 3.4, "screen": S["steps"], "pose": look(580, 950, 2.05, 780, ry=-6), "drift": 0.03,
+             "lifts": [lift(BIKE_PICKUP, 1, 160, True), lift(BIKE_RETURN, 2.4, 160, True)],
+             "stickers": [note("即時車位", 780, 1130, 3, tilt=3)]},
+            {"line": 3, "screen": S["steps"], "pose": look(603, 1000, 1.7, 760, ry=7), "drift": 0.03,
+             "lifts": [lift(STEP_BIKE, 1, 140, True)],
+             "stickers": [note("有車有位才提出", 540, 300, 2.5, tone="go", tilt=-2), note("數量以現場為準", 540, 1180, 5, tone="paper", tilt=2, size=40)]},
         ],
     },
     {
@@ -239,8 +266,8 @@ EPISODES = [
              "lifts": [lift(BUS_TAG, 1, 150, True)], "stickers": [note("看公車", 320, 520, 1.1, tilt=-4, size=58)]},
             {"line": 1, "from": 2.6, "enter": "flip", "screen": S["compare"], "pose": look(603, 2040, 1.75, 800, ry=-7), "drift": 0.02,
              "lifts": [lift(CMP_BEST, 1, 150, True)], "stickers": [note("比路線", 760, 340, 1.1, tilt=3, size=58)]},
-            {"line": 1, "from": 5.2, "enter": "flip", "screen": S["steps"], "pose": look(603, 1260, 1.8, 800, ry=7), "drift": 0.02,
-             "lifts": [lift(STEP_BL, 1, 150, True)], "stickers": [note("看步驟", 320, 330, 1.1, tilt=-3, size=58)]},
+            {"line": 1, "from": 5.2, "enter": "flip", "screen": S["steps"], "pose": look(603, 1556, 1.8, 800, ry=7), "drift": 0.02,
+             "lifts": [lift(STEP_METRO, 1, 150, True)], "stickers": [note("看步驟", 320, 330, 1.1, tilt=-3, size=58)]},
             {"line": 1, "from": 7.8, "enter": "flip", "screen": S["walk"], "pose": look(603, 420, 1.75, 640, ry=-7), "drift": 0.02,
              "lifts": [lift(WALK_BANNER, 1, 150, True)], "stickers": [note("走到站牌", 760, 1100, 1.1, tilt=3, size=58)]},
             {"line": 1, "from": 10.4, "enter": "flip", "screen": S["keypad"], "pose": look(603, 600, 1.78, 640, ry=7), "drift": 0.02,
