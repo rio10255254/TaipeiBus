@@ -256,5 +256,41 @@
         "voiceLength": 3.839
       }
     ]
+  },
+  "store": {
+    "total": 26.5,
+    "end": 23.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.617
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 2.831
+      },
+      {
+        "start": 8.5,
+        "length": 5.0,
+        "voiceStart": 8.64,
+        "voiceLength": 4.236
+      },
+      {
+        "start": 13.5,
+        "length": 4.5,
+        "voiceStart": 13.64,
+        "voiceLength": 3.74
+      },
+      {
+        "start": 18.0,
+        "length": 5.0,
+        "voiceStart": 18.14,
+        "voiceLength": 3.188
+      }
+    ]
   }
 }

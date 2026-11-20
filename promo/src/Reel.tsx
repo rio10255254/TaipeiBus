@@ -28,7 +28,7 @@ type Shot = {
   dim?: number;
 };
 type Episode = {
-  id: string; label: string; theme: ThemeName; title: string; endLine: string; outro: string; note?: string;
+  id: string; kind?: string; label: string; theme: ThemeName; title: string; endLine: string; outro: string; note?: string;
   lines: { text: string; say?: string; beats?: number }[];
   shots: Shot[];
 };
