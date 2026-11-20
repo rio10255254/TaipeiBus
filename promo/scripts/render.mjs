@@ -13,7 +13,7 @@ mkdirSync(preview ? 'out/preview' : 'out', { recursive: true });
 for (const id of ids) {
   const started = Date.now();
   const file = preview ? `out/preview/${id}.mp4` : `out/oneroad-${id}.mp4`;
-  const flags = ['--browser-executable=/opt/pw-browsers/chromium', '--timeout=300000', '--concurrency=4', '--log=error',
+  const flags = ['--browser-executable=/opt/pw-browsers/chromium', '--timeout=300000', ...(extra.some((e) => e.startsWith('--concurrency')) ? [] : ['--concurrency=4']), '--log=error',
     ...(preview ? ['--scale=0.5', '--every-nth-frame=2'] : ['--crf=17']), ...extra];
   const r = spawnSync('npx', ['remotion', 'render', 'src/index.ts', `Reel-${id}`, file, ...flags], { stdio: 'inherit' });
   if (r.status !== 0) process.exit(r.status ?? 1);

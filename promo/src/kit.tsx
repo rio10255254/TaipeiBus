@@ -124,9 +124,12 @@ export const Phone: React.FC<{
           const w = (x1 - x0) * PHONE.px, h = (y1 - y0) * PHONE.px;
           const k = clamp(l.k, 0, 1.2);
           if (k <= 0.001) return null;
+          // A row as wide as the screen rises less, so it stays inside the frame when the phone fills the page.
+          const wide = x1 - x0 > 900;
+          const rise = wide ? Math.min(l.z, 80) : l.z;
           return (
             <div key={i} style={{ position: 'absolute', left: EDGE + BEZEL + x0 * PHONE.px, top: EDGE + BEZEL + y0 * PHONE.px, width: w, height: h,
-              transform: `translate3d(0, 0, ${l.z * k}px) scale(${1 + 0.05 * k})`, borderRadius: 26 * PHONE.px * 3, overflow: 'hidden',
+              transform: `translate3d(0, 0, ${rise * k}px) scale(${1 + (wide ? 0.012 : 0.05) * k})`, borderRadius: 26 * PHONE.px * 3, overflow: 'hidden',
               boxShadow: `0 ${18 * k}px ${46 * k}px rgba(6,12,26,${0.42 * Math.min(1, k)}), 0 ${4 * k}px ${10 * k}px rgba(6,12,26,${0.3 * Math.min(1, k)})${l.glow ? `, 0 0 0 ${4 * k}px rgba(255,185,64,${0.9 * Math.min(1, k)})` : ''}`,
               opacity: Math.min(1, k * 4) }}>
               <Img src={shotUrl(top.name)} style={{ position: 'absolute', left: -x0 * PHONE.px, top: -y0 * PHONE.px, width: SCREEN_W, height: SCREEN_H }} />
