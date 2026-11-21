@@ -7,14 +7,15 @@ The recordings come from the `app-store-preview` scope of .github/workflows/ios.
 walkthroughs of the real app on a 6.9-inch simulator; times below are seconds into each file, read
 off the PREVIEW_MARK lines in its log).
 
-A hosted simulator draws in bursts: frames a few milliseconds apart, then nothing for a tenth of a
-second or more. Played as recorded that stutters, however it is cut. So the walkthroughs make every
-turn, zoom and scroll at a quarter of the speed it should have, and here each clip is played that
-much faster, which closes most of the gaps, and the few that are left are filled with frames
-estimated from the motion on either side (ffmpeg's motion-compensated interpolation). The last
-column printed is the share of frames that still repeat the one before: on a moving clip it should
-be near zero. Clips are written to public/preview/ a quarter larger than the App Store's
-886 x 1920, so the edit's camera can close in without softening.
+A hosted simulator draws in bursts, and the app itself hitches on it: frames a few milliseconds
+apart, then nothing moving for a tenth of a second or more. Played as recorded that stutters,
+however it is cut. So the walkthroughs make every turn, zoom and scroll at a quarter of the speed
+it should have, and here each clip is played that much faster, which closes most of the gaps. The
+frames in which nothing moved are then dropped, and the gaps they leave are filled with frames
+estimated from the motion on either side (ffmpeg's motion-compensated interpolation), placed by the
+recording's own timestamps. The last column printed is the share of frames that still repeat the
+one before: on a moving clip it should be near zero. Clips are written to public/preview/ a quarter
+larger than the App Store's 886 x 1920, so the edit's camera can close in without softening.
 """
 import re
 from concurrent.futures import ThreadPoolExecutor
@@ -55,8 +56,10 @@ def cut(source, name):
     first -= LEAD * speed
     out = OUT / f"{name}.mp4"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{first:.3f}", "-to", f"{last:.3f}", "-i", str(source / folder / f"preview-{reel}.mp4"),
-        "-vf", f"setpts=(PTS-STARTPTS)/{speed},scale=1108:-2:flags=lanczos,crop=1108:2400,"
-               "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none,format=yuv420p",
+        # Frames in which nothing moved are the app itself hitching on the hosted machine. They go first,
+        # so that what is estimated across each hitch is the motion, not a copy of the frame before it.
+        "-vf", f"mpdecimate,setpts=(PTS-STARTPTS)/{speed},scale=1108:-2:flags=lanczos,crop=1108:2400,"
+               "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none:search_param=64,format=yuv420p",
         "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "19", "-g", "15", "-movflags", "+faststart", str(out)], check=True)
     seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
     return f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames"
