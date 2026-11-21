@@ -716,6 +716,16 @@ struct SettingsIcon: View {
 }
 
 /// A Settings row label: the coloured tile and the title in the primary colour, also inside links and buttons.
+/// The one close control of cards, sheets and prompts: a small cross on a quiet disc, as on Apple Maps.
+/// The disc is 30 points; the tap area around it is the full 44.
+struct CloseGlyph: View {
+    var body: some View {
+        Image(systemName: "xmark").font(.system(size: 13, weight: .bold)).foregroundStyle(.secondary)
+            .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
+            .frame(width: 44, height: 44).contentShape(Rectangle())
+    }
+}
+
 struct SettingsLabel: View {
     let title: String
     let symbol: String

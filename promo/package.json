@@ -1,0 +1,24 @@
+{
+  "name": "oneroad-promo",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "studio": "remotion studio",
+    "typecheck": "tsc --noEmit",
+    "voice": "python3 scripts/make-voice.py",
+    "sound": "python3 scripts/make-sound.py",
+    "render": "node scripts/render.mjs"
+  },
+  "dependencies": {
+    "@fontsource/noto-sans-tc": "^5.3.1",
+    "@fontsource/inter": "^5.2.8",
+    "@remotion/cli": "4.0.539",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "remotion": "4.0.539"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.3"
+  }
+}

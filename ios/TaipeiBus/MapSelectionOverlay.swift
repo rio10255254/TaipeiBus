@@ -153,7 +153,7 @@ private struct MapContextLabelContent: View, Equatable {
                             HStack(spacing: 5) {
                                 RouteBadge(name: first.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? first.stop.routeID, tintName: first.route?.name ?? first.stop.routeID, compact: true)
                                 Text(first.estimateSeconds != nil || station.mode == .bus ? EstimateFeed.label(first.estimateSeconds) :
-                                        model.metroStationWaitLabel(serviceID: first.stop.serviceID, direction: first.stop.direction, stationID: first.stop.stationID, at: Date())).fontWeight(.semibold).monospacedDigit()
+                                        model.metroStationWaitLabel(serviceID: first.stop.serviceID, direction: first.stop.direction, stationID: first.stop.stationID, at: Date())).fontWeight(.semibold).monospacedDigit().liveNumericText(first.estimateSeconds, countsDown: true)
                                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
                             }.font(.caption).padding(.leading, 4).padding(.trailing, 10).frame(minHeight: 32)
                                 .background(.regularMaterial, in: Capsule())
@@ -218,12 +218,14 @@ private struct MapContextLabelContent: View, Equatable {
                             // One button starts and stops the chase camera; following shows as a filled chip.
                             Button {
                                 if model.followingTrain { model.followingTrain = false } else { model.metroRevisionForSelection() }
+                                Haptics.toggle(model.followingTrain)
                             } label: {
                                 Image(systemName: "scope").font(.subheadline.weight(.semibold))
                                     .foregroundStyle(model.followingTrain ? Color.white : Color.accentColor)
                                     .frame(width: 32, height: 32)
                                     .background(model.followingTrain ? Color.accentColor : Color.accentColor.opacity(0.12), in: Circle())
                                     .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: model.followingTrain)
+                                    .frame(width: 44, height: 44).contentShape(Rectangle())
                             }.buttonStyle(.plain)
                             .accessibilityLabel(model.followingTrain ? AppText.text("停止跟隨") : AppText.text("跟隨列車"))
                             .accessibilityIdentifier("map-metro-train-follow")

@@ -955,6 +955,9 @@ final class TransitAppModel: ObservableObject {
     @Published var tappedPlace: MapPlaceSelection?
     @Published var focusRevision = 0
     @Published var selectionRevision = 0
+    /// Bumped by a tap on empty map while a station is selected; the map screen lets go of the station
+    /// and closes its sheet.
+    @Published var mapDismissRevision = 0
     @Published var mapError: String?
     @Published var mapWasMoved = false
     @Published private(set) var userMapMode: UserMapMode = .free
@@ -2210,7 +2213,8 @@ final class TransitAppModel: ObservableObject {
         selectedStationID = nil; direction = vehicle.direction
         following = userInitiated ? beginFollowing(vehicle.id) : hasProAccess
         focusMap(.vehicle(vehicle.id))
-        Haptics.selection()
+        // Only a tap is answered with a tick: confirming boarding has its own, and restoring the map has none.
+        if userInitiated { Haptics.selection() }
     }
     func routes(query: String) -> [RouteSearchResult] {
         var seen = Set<String>()

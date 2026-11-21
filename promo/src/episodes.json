@@ -1,0 +1,2711 @@
+{
+ "voice": {
+  "voiceId": "fQj4gJSexpu8RDE2Ii5m",
+  "model": "eleven_v4",
+  "language": "zh"
+ },
+ "episodes": [
+  {
+   "id": "ep1",
+   "label": "#1 公車到哪了",
+   "theme": "night",
+   "title": "站牌寫三分鐘\n**車到底在哪**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "站牌寫三分鐘，\n**車到底在哪**？",
+     "say": "[curious] 站牌寫三分鐘，車到底在哪？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "打開地圖，\n**看它開過來**。",
+     "say": "打開地圖，看它開過來。",
+     "beats": 8,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       2,
+       "pop"
+      ],
+      [
+       4,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "點一下那輛車，\n**鏡頭跟著它走**。",
+     "say": "點一下那輛車，鏡頭跟著它走。",
+     "beats": 9,
+     "cues": [
+      [
+       1,
+       "tap"
+      ],
+      [
+       1.4,
+       "whoosh"
+      ],
+      [
+       4.5,
+       "pop"
+      ],
+      [
+       6,
+       "tap"
+      ]
+     ]
+    },
+    {
+     "text": "下一班還要多久，\n**一眼看完**。",
+     "say": "下一班還要多久，一眼看完。",
+     "beats": 9,
+     "cues": [
+      [
+       1,
+       "pop"
+      ],
+      [
+       2.5,
+       "pop"
+      ],
+      [
+       4.5,
+       "flip"
+      ],
+      [
+       6,
+       "chime"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": 10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": -12,
+      "rz": 2
+     },
+     "drift": 0.04,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 2
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": -70,
+      "y": -120,
+      "s": 1.75,
+      "rx": 6,
+      "ry": 11,
+      "rz": -1
+     },
+     "drift": 0.05,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 0.5,
+       "until": 2
+      }
+     ],
+     "lifts": [
+      {
+       "rect": [
+        330,
+        1196,
+        912,
+        1352
+       ],
+       "z": 150,
+       "at": 2,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "車牌、路線",
+       "x": 330,
+       "y": 560,
+       "at": 4,
+       "tone": "amber",
+       "tilt": -4,
+       "sub": "每輛車都看得到"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": -60,
+      "y": -140,
+      "s": 1.7,
+      "rx": 4,
+      "ry": -8,
+      "rz": 1
+     },
+     "drift": 0.02,
+     "taps": [
+      {
+       "x": 640,
+       "y": 1272,
+       "at": 1
+      }
+     ],
+     "swaps": [
+      {
+       "at": 1.4,
+       "screen": "a-07-live-bus-with-details",
+       "how": "fade"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 3.2,
+     "screen": "a-07-live-bus-with-details",
+     "pose": {
+      "x": 22,
+      "y": -859,
+      "s": 1.8,
+      "rx": 3,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        60,
+        2436,
+        606,
+        2584
+       ],
+       "z": 150,
+       "at": 1.3,
+       "glow": true
+      }
+     ],
+     "taps": [
+      {
+       "x": 330,
+       "y": 2510,
+       "at": 2.8
+      }
+     ],
+     "stickers": [
+      {
+       "text": "跟隨公車",
+       "x": 800,
+       "y": 840,
+       "at": 1.6,
+       "tone": "amber",
+       "tilt": 3,
+       "sub": "縮放也不會跟丟"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "screen": "a-07-live-bus-with-details",
+     "pose": {
+      "x": 0,
+      "y": -694,
+      "s": 1.72,
+      "rx": 4,
+      "ry": -6,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        44,
+        1930,
+        1140,
+        2090
+       ],
+       "z": 160,
+       "at": 1,
+       "glow": true
+      },
+      {
+       "rect": [
+        44,
+        2090,
+        760,
+        2216
+       ],
+       "z": 110,
+       "at": 2.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "官方到站時間",
+       "x": 700,
+       "y": 330,
+       "at": 1.4,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "from": 4.5,
+     "enter": "flip",
+     "screen": "a-11-live-station-tag",
+     "pose": {
+      "x": -20,
+      "y": 300,
+      "s": 1.75,
+      "rx": 5,
+      "ry": 8
+     },
+     "drift": 0.04,
+     "lifts": [
+      {
+       "rect": [
+        366,
+        812,
+        842,
+        1086
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "點站牌也看得到",
+       "x": 560,
+       "y": 1180,
+       "at": 2.2,
+       "tone": "paper",
+       "tilt": -2
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep2",
+   "label": "#2 怎麼去最快",
+   "theme": "mist",
+   "title": "搭公車、捷運\n**還是騎車**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "搭公車、捷運，\n**還是騎車**？",
+     "say": "[curious] 搭公車、捷運，還是騎車？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "輸入目的地，\n**幾種走法一起比**。",
+     "say": "輸入目的地，幾種走法一起比。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       3,
+       "pop"
+      ],
+      [
+       4,
+       "pop"
+      ],
+      [
+       5,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "走路、等車都算進去，\n**幾點到直接寫給你**。",
+     "say": "走路、等車都算進去，幾點到直接寫給你。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       3.5,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "看完步驟，\n**按出發才開始帶路**。",
+     "say": "看完步驟，按出發才開始帶路。",
+     "beats": 10,
+     "cues": [
+      [
+       1,
+       "tap"
+      ],
+      [
+       1.5,
+       "whoosh"
+      ],
+      [
+       5,
+       "pop"
+      ],
+      [
+       7,
+       "tap"
+      ],
+      [
+       7.2,
+       "chime"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": -10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": 10,
+      "rz": -2
+     },
+     "drift": 0.04
+    },
+    {
+     "line": 1,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 0,
+      "y": -676,
+      "s": 1.8,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        70,
+        1816,
+        1136,
+        2270
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true,
+       "out": 5
+      },
+      {
+       "rect": [
+        70,
+        2300,
+        590,
+        2440
+       ],
+       "z": 120,
+       "at": 3,
+       "out": 7
+      },
+      {
+       "rect": [
+        616,
+        2300,
+        1136,
+        2440
+       ],
+       "z": 120,
+       "at": 4,
+       "out": 7
+      }
+     ],
+     "stickers": [
+      {
+       "text": "公車・捷運・YouBike",
+       "x": 540,
+       "y": 470,
+       "at": 5,
+       "tone": "amber",
+       "tilt": -2,
+       "size": 46
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 85,
+      "y": -713,
+      "s": 2.1,
+      "rx": 3,
+      "ry": 8,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        90,
+        1836,
+        880,
+        2112
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      },
+      {
+       "rect": [
+        100,
+        2110,
+        840,
+        2190
+       ],
+       "z": 120,
+       "at": 3.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "整趟時間",
+       "x": 790,
+       "y": 620,
+       "at": 1.5,
+       "tone": "amber",
+       "tilt": 3,
+       "sub": "含走路與等車"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": -303,
+      "y": -805,
+      "s": 2.1,
+      "rx": 4,
+      "ry": -8,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "taps": [
+      {
+       "x": 1015,
+       "y": 2135,
+       "at": 1
+      }
+     ],
+     "swaps": [
+      {
+       "at": 1.5,
+       "screen": "b-06-full-itinerary",
+       "how": "slide"
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "from": 3.4,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": -689,
+      "s": 1.55,
+      "rx": 4,
+      "ry": 6,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        54,
+        2360,
+        1150,
+        2500
+       ],
+       "z": 160,
+       "at": 1.6,
+       "glow": true
+      }
+     ],
+     "taps": [
+      {
+       "x": 603,
+       "y": 2430,
+       "at": 3.6
+      }
+     ],
+     "stickers": [
+      {
+       "text": "按了才開始導航",
+       "x": 800,
+       "y": 950,
+       "at": 2,
+       "tone": "go",
+       "tilt": -2
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep3",
+   "label": "#3 每一步先看清楚",
+   "theme": "sand",
+   "title": "轉車最怕\n**坐過站**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "轉車最怕\n**坐過站**？",
+     "say": "[worried] 轉車最怕坐過站？",
+     "beats": 7,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "出發前，\n**整趟先看一遍**。",
+     "say": "出發前，整趟先看一遍。",
+     "beats": 8,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       3,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "哪裡上車、坐幾站、\n**哪裡下車**。",
+     "say": "哪裡上車、坐幾站、哪裡下車。",
+     "beats": 10,
+     "cues": [
+      [
+       1,
+       "pop"
+      ],
+      [
+       2,
+       "chime"
+      ],
+      [
+       5,
+       "whoosh"
+      ],
+      [
+       5.8,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "走到站牌，\n**App 裡直接帶你走**。",
+     "say": "走到站牌，App 裡直接帶你走。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       5,
+       "whoosh"
+      ],
+      [
+       5.8,
+       "pop"
+      ],
+      [
+       6.4,
+       "chime"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": -12,
+      "rz": 2
+     },
+     "drift": 0.04
+    },
+    {
+     "line": 1,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": 264,
+      "s": 1.66,
+      "rx": 4,
+      "ry": 8,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        28,
+        396,
+        1178,
+        626
+       ],
+       "z": 140,
+       "at": 1,
+       "glow": true,
+       "out": 4.5
+      },
+      {
+       "rect": [
+        28,
+        704,
+        1178,
+        1262
+       ],
+       "z": 130,
+       "at": 3
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": -360,
+      "s": 1.68,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        28,
+        1314,
+        1178,
+        1806
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "坐幾站都寫好",
+       "x": 800,
+       "y": 1010,
+       "at": 2,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 5,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": -808,
+      "s": 1.68,
+      "rx": 4,
+      "ry": 6,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        28,
+        1866,
+        1178,
+        2076
+       ],
+       "z": 140,
+       "at": 0.8,
+       "glow": true
+      },
+      {
+       "rect": [
+        28,
+        2126,
+        1178,
+        2276
+       ],
+       "z": 120,
+       "at": 1.8
+      }
+     ],
+     "stickers": [
+      {
+       "text": "出站後怎麼走",
+       "x": 800,
+       "y": 590,
+       "at": 1.6,
+       "tone": "paper",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "enter": "flip",
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": 418,
+      "s": 1.75,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        50,
+        194,
+        1156,
+        480
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "步行導航",
+       "x": 300,
+       "y": 1130,
+       "at": 2.4,
+       "tone": "amber",
+       "tilt": -3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "from": 5,
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": -746,
+      "s": 1.75,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        0,
+        1180,
+        1206,
+        1360
+       ],
+       "z": 90,
+       "at": 0.6
+      },
+      {
+       "rect": [
+        48,
+        1980,
+        1162,
+        2500
+       ],
+       "z": 150,
+       "at": 0.8,
+       "glow": true
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep4",
+   "label": "#4 這班車趕不趕得上",
+   "theme": "slate",
+   "title": "這班車\n**要不要用跑的**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "這班車，\n**要不要用跑的**？",
+     "say": "[rushed] 這班車，要不要用跑的？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "車還有幾分鐘，\n**點站牌就知道**。",
+     "say": "車還有幾分鐘，點站牌就知道。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "tap"
+      ],
+      [
+       1.6,
+       "pop"
+      ],
+      [
+       3,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "走過去要多久，\n**地圖上直接帶路**。",
+     "say": "走過去要多久，地圖上直接帶路。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       4.5,
+       "whoosh"
+      ],
+      [
+       5.3,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "趕不趕得上，\n**出門前就知道**。",
+     "say": "趕不趕得上，出門前就知道。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       2,
+       "pop"
+      ],
+      [
+       3.5,
+       "tap"
+      ],
+      [
+       4,
+       "chime"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "b-11-live-station-tag",
+     "pose": {
+      "x": -10,
+      "y": 700,
+      "s": 1.3,
+      "rx": 10,
+      "ry": 10,
+      "rz": -2
+     },
+     "drift": 0.04,
+     "pulses": [
+      {
+       "x": 602,
+       "y": 1112,
+       "at": 2
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "screen": "b-11-live-station-tag",
+     "pose": {
+      "x": -99,
+      "y": 138,
+      "s": 2.1,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.04,
+     "pulses": [
+      {
+       "x": 602,
+       "y": 1112,
+       "at": 0.2,
+       "until": 1
+      }
+     ],
+     "taps": [
+      {
+       "x": 602,
+       "y": 1112,
+       "at": 1
+      }
+     ],
+     "lifts": [
+      {
+       "rect": [
+        376,
+        820,
+        840,
+        1078
+       ],
+       "z": 150,
+       "at": 1.6,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "官方到站時間",
+       "x": 380,
+       "y": 1130,
+       "at": 3,
+       "tone": "amber",
+       "tilt": -3
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "enter": "flip",
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": -21,
+      "s": 1.75,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        0,
+        1180,
+        1206,
+        1360
+       ],
+       "z": 120,
+       "at": 1.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "走這條",
+       "x": 300,
+       "y": 420,
+       "at": 2.2,
+       "tone": "paper",
+       "tilt": -4
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 4.5,
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": -855,
+      "s": 1.78,
+      "rx": 4,
+      "ry": -6,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        60,
+        2130,
+        560,
+        2310
+       ],
+       "z": 150,
+       "at": 0.8,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "4 分鐘走得到",
+       "x": 760,
+       "y": 520,
+       "at": 1.4,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": -631,
+      "s": 1.5,
+      "rx": 5,
+      "ry": 6,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        620,
+        2320,
+        1118,
+        2456
+       ],
+       "z": 150,
+       "at": 2,
+       "glow": true
+      }
+     ],
+     "taps": [
+      {
+       "x": 870,
+       "y": 2390,
+       "at": 3.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "趕得上",
+       "x": 300,
+       "y": 620,
+       "at": 4,
+       "tone": "go",
+       "tilt": -4,
+       "size": 58
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep5",
+   "label": "#5 最後一段路",
+   "theme": "moss",
+   "title": "走到捷運站\n**還要十五分鐘**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "走到捷運站，\n**還要十五分鐘**？",
+     "say": "[tired] 走到捷運站，還要十五分鐘？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "規劃路線時，\n**YouBike 一起排進去**。",
+     "say": "規劃路線時，YouBike 一起排進去。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       3.5,
+       "pop"
+      ],
+      [
+       4,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "借車站有幾輛、\n**還車站有幾格**。",
+     "say": "借車站有幾輛、還車站有幾格。",
+     "beats": 10,
+     "cues": [
+      [
+       1,
+       "tap"
+      ],
+      [
+       1.5,
+       "whoosh"
+      ],
+      [
+       4.4,
+       "pop"
+      ],
+      [
+       5.8,
+       "pop"
+      ],
+      [
+       6.2,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "有車、有位，\n**它才會這樣排**。",
+     "say": "有車、有位，它才會這樣排。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       2.5,
+       "stamp"
+      ],
+      [
+       5,
+       "pop"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": -10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": 10,
+      "rz": -2
+     },
+     "drift": 0.04
+    },
+    {
+     "line": 1,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 0,
+      "y": -689,
+      "s": 1.85,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        70,
+        1816,
+        1136,
+        2270
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      },
+      {
+       "rect": [
+        616,
+        2300,
+        1136,
+        2440
+       ],
+       "z": 120,
+       "at": 3.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "YouBike 接駁",
+       "x": 760,
+       "y": 480,
+       "at": 2,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": -303,
+      "y": -805,
+      "s": 2.1,
+      "rx": 4,
+      "ry": 8,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "taps": [
+      {
+       "x": 1015,
+       "y": 2135,
+       "at": 1
+      }
+     ],
+     "swaps": [
+      {
+       "at": 1.5,
+       "screen": "b-06-full-itinerary",
+       "how": "slide"
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 3.4,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 23,
+      "y": 180,
+      "s": 2.05,
+      "rx": 4,
+      "ry": -6,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        170,
+        788,
+        970,
+        926
+       ],
+       "z": 160,
+       "at": 1,
+       "glow": true
+      },
+      {
+       "rect": [
+        170,
+        940,
+        970,
+        1080
+       ],
+       "z": 160,
+       "at": 2.4,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "即時車位",
+       "x": 780,
+       "y": 1130,
+       "at": 3,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": 57,
+      "s": 1.7,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        28,
+        704,
+        1178,
+        1262
+       ],
+       "z": 140,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "有車有位才提出",
+       "x": 540,
+       "y": 300,
+       "at": 2.5,
+       "tone": "go",
+       "tilt": -2
+      },
+      {
+       "text": "數量以現場為準",
+       "x": 800,
+       "y": 990,
+       "at": 5,
+       "tone": "paper",
+       "tilt": 2,
+       "size": 40
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep6",
+   "label": "#6 找路線、找站牌",
+   "theme": "sand",
+   "title": "找一班公車\n**還在慢慢打字**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "找一班公車，\n**還在慢慢打字**？",
+     "say": "[teasing] 找一班公車，還在慢慢打字？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "紅、藍、棕、綠，\n**按一下就帶入**。",
+     "say": "紅、藍、棕、綠，按一下就帶入。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1.5,
+       "tap"
+      ],
+      [
+       3,
+       "tap"
+      ],
+      [
+       4.5,
+       "tap"
+      ]
+     ]
+    },
+    {
+     "text": "路線馬上出來，\n**起訖站寫清楚**。",
+     "say": "路線馬上出來，起訖站寫清楚。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       2.5,
+       "pop"
+      ],
+      [
+       3,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "附近的站牌，\n**打開就在首頁**。",
+     "say": "附近的站牌，打開就在首頁。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       2.5,
+       "pop"
+      ],
+      [
+       4,
+       "pop"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "a-03-route-keypad",
+     "pose": {
+      "x": 10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": -12,
+      "rz": 2
+     },
+     "drift": 0.04
+    },
+    {
+     "line": 1,
+     "screen": "a-03-route-keypad",
+     "pose": {
+      "x": 0,
+      "y": -598,
+      "s": 1.5,
+      "rx": 4,
+      "ry": -6,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "taps": [
+      {
+       "x": 374,
+       "y": 1988,
+       "at": 1.5
+      },
+      {
+       "x": 832,
+       "y": 1988,
+       "at": 3
+      },
+      {
+       "x": 602,
+       "y": 2290,
+       "at": 4.5
+      }
+     ],
+     "lifts": [
+      {
+       "rect": [
+        270,
+        1924,
+        478,
+        2052
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true,
+       "out": 2.8
+      },
+      {
+       "rect": [
+        728,
+        1924,
+        936,
+        2052
+       ],
+       "z": 150,
+       "at": 3,
+       "glow": true,
+       "out": 4.3
+      },
+      {
+       "rect": [
+        498,
+        2226,
+        706,
+        2354
+       ],
+       "z": 150,
+       "at": 4.5,
+       "glow": true,
+       "out": 5.8
+      }
+     ],
+     "stickers": [
+      {
+       "text": "藍",
+       "x": 330,
+       "y": 470,
+       "at": 1.7,
+       "tone": "night",
+       "tilt": -5,
+       "size": 120
+      },
+      {
+       "text": "2",
+       "x": 560,
+       "y": 450,
+       "at": 3.2,
+       "tone": "night",
+       "tilt": 3,
+       "size": 120
+      },
+      {
+       "text": "7",
+       "x": 770,
+       "y": 480,
+       "at": 4.7,
+       "tone": "night",
+       "tilt": -2,
+       "size": 120
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "screen": "a-03-route-keypad",
+     "pose": {
+      "x": 0,
+      "y": 435,
+      "s": 1.78,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        50,
+        374,
+        1156,
+        504
+       ],
+       "z": 120,
+       "at": 1
+      },
+      {
+       "rect": [
+        44,
+        676,
+        1160,
+        812
+       ],
+       "z": 160,
+       "at": 2.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "起點 → 終點",
+       "x": 810,
+       "y": 980,
+       "at": 3,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "enter": "flip",
+     "screen": "a-01-nearby-map",
+     "pose": {
+      "x": 0,
+      "y": -955,
+      "s": 1.78,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        48,
+        2180,
+        584,
+        2316
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      },
+      {
+       "rect": [
+        618,
+        2180,
+        1162,
+        2316
+       ],
+       "z": 150,
+       "at": 2.5,
+       "glow": true
+      },
+      {
+       "rect": [
+        50,
+        2350,
+        824,
+        2498
+       ],
+       "z": 120,
+       "at": 4
+      }
+     ],
+     "stickers": [
+      {
+       "text": "最近的兩個站牌",
+       "x": 540,
+       "y": 330,
+       "at": 3,
+       "tone": "amber",
+       "tilt": -2
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "ep7",
+   "label": "#7 打開就能用",
+   "theme": "slate",
+   "title": "查個公車\n**還要先看廣告**？",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "一路，App Store 免費下載。",
+   "liftFrom": 1,
+   "endBeats": 8,
+   "lines": [
+    {
+     "text": "查個公車，\n**還要先看廣告**？",
+     "say": "[annoyed] 查個公車，還要先看廣告？",
+     "beats": 8,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "一路沒有廣告，\n**也不用登入**。",
+     "say": "一路沒有廣告，也不用登入。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1.5,
+       "stamp"
+      ],
+      [
+       3,
+       "stamp"
+      ],
+      [
+       4.5,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "規劃、導航、到站時間，\n**全部免費**。",
+     "say": "規劃、導航、到站時間，全部免費。",
+     "beats": 11,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       3.4,
+       "flip"
+      ],
+      [
+       4.4,
+       "pop"
+      ],
+      [
+       6.8,
+       "flip"
+      ],
+      [
+       7.8,
+       "pop"
+      ],
+      [
+       8.4,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "台北、新北，\n**打開就看得到**。",
+     "say": "台北、新北，打開就看得到。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       2,
+       "stamp"
+      ],
+      [
+       3.5,
+       "pop"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "b-11-live-station-tag",
+     "pose": {
+      "x": -10,
+      "y": 760,
+      "s": 1.3,
+      "rx": 10,
+      "ry": 10,
+      "rz": -2
+     },
+     "drift": 0.04
+    },
+    {
+     "line": 1,
+     "screen": "a-01-nearby-map",
+     "pose": {
+      "x": 0,
+      "y": -707,
+      "s": 1.7,
+      "rx": 4,
+      "ry": -6,
+      "rz": 0
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        50,
+        2350,
+        824,
+        2498
+       ],
+       "z": 150,
+       "at": 4.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "沒有廣告",
+       "x": 320,
+       "y": 400,
+       "at": 1.5,
+       "tone": "amber",
+       "tilt": -5,
+       "size": 64
+      },
+      {
+       "text": "不用登入",
+       "x": 760,
+       "y": 560,
+       "at": 3,
+       "tone": "paper",
+       "tilt": 4,
+       "size": 64
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "enter": "flip",
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 0,
+      "y": -780,
+      "s": 1.75,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        70,
+        1816,
+        1136,
+        2270
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "路線規劃",
+       "x": 760,
+       "y": 340,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": 3
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 3.4,
+     "enter": "flip",
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": 438,
+      "s": 1.75,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        50,
+        194,
+        1156,
+        480
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "導航",
+       "x": 300,
+       "y": 1100,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": -4
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "from": 6.8,
+     "enter": "flip",
+     "screen": "a-07-live-bus-with-details",
+     "pose": {
+      "x": 0,
+      "y": -687,
+      "s": 1.7,
+      "rx": 4,
+      "ry": 6,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        44,
+        1930,
+        1140,
+        2090
+       ],
+       "z": 160,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "到站時間",
+       "x": 720,
+       "y": 330,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": 3
+      },
+      {
+       "text": "全部免費",
+       "x": 330,
+       "y": 1120,
+       "at": 1.8,
+       "tone": "go",
+       "tilt": -4,
+       "size": 60
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "enter": "flip",
+     "screen": "a-01-nearby-map",
+     "pose": {
+      "x": 0,
+      "y": -530,
+      "s": 1.5,
+      "rx": 6,
+      "ry": -8
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        48,
+        2180,
+        584,
+        2316
+       ],
+       "z": 140,
+       "at": 3.5
+      },
+      {
+       "rect": [
+        618,
+        2180,
+        1162,
+        2316
+       ],
+       "z": 140,
+       "at": 3.9
+      }
+     ],
+     "stickers": [
+      {
+       "text": "台北＋新北",
+       "x": 540,
+       "y": 360,
+       "at": 2,
+       "tone": "amber",
+       "tilt": -3,
+       "size": 64
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "launch",
+   "label": "全新改版",
+   "theme": "night",
+   "title": "一路 1.9\n**全新上線**",
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "App Store 免費下載",
+   "outroSay": "今天出門，就用一路。",
+   "liftFrom": 1,
+   "endBeats": 9,
+   "lines": [
+    {
+     "text": "一路，\n**全新上線**。",
+     "say": "[excited] 一路，全新上線！",
+     "beats": 6,
+     "cues": [
+      [
+       0.2,
+       "pop"
+      ],
+      [
+       1.5,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "看公車、比路線、看步驟、\n走到站牌、查路線，\n**全都在這**。",
+     "say": "看公車、比路線、看步驟、走到站牌、查路線，全都在這。",
+     "beats": 16,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       1,
+       "pop"
+      ],
+      [
+       2.6,
+       "flip"
+      ],
+      [
+       3.6,
+       "pop"
+      ],
+      [
+       5.2,
+       "flip"
+      ],
+      [
+       6.2,
+       "pop"
+      ],
+      [
+       7.8,
+       "flip"
+      ],
+      [
+       8.8,
+       "pop"
+      ],
+      [
+       10.4,
+       "flip"
+      ],
+      [
+       11.4,
+       "pop"
+      ],
+      [
+       13,
+       "whoosh"
+      ],
+      [
+       13.6,
+       "chime"
+      ]
+     ]
+    },
+    {
+     "text": "台北、新北，\n**一路接到底**。",
+     "say": "台北、新北，一路接到底。",
+     "beats": 8,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1.5,
+       "pop"
+      ],
+      [
+       3,
+       "stamp"
+      ]
+     ]
+    },
+    {
+     "text": "沒有廣告、不用登入。\n**App Store 免費下載**。",
+     "say": "沒有廣告、不用登入。App Store 免費下載。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "flip"
+      ],
+      [
+       1.2,
+       "stamp"
+      ],
+      [
+       2.6,
+       "stamp"
+      ],
+      [
+       5,
+       "chime"
+      ]
+     ]
+    }
+   ],
+   "shots": [
+    {
+     "line": 0,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": 10,
+      "y": 720,
+      "s": 1.3,
+      "rx": 10,
+      "ry": -12,
+      "rz": 2
+     },
+     "drift": 0.04,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 1.5
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": -70,
+      "y": -120,
+      "s": 1.75,
+      "rx": 6,
+      "ry": 9,
+      "rz": -1
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        330,
+        1196,
+        912,
+        1352
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "看公車",
+       "x": 320,
+       "y": 520,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": -4,
+       "size": 58
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "from": 2.6,
+     "enter": "flip",
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 0,
+      "y": -780,
+      "s": 1.75,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        70,
+        1816,
+        1136,
+        2270
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "比路線",
+       "x": 760,
+       "y": 340,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": 3,
+       "size": 58
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "from": 5.2,
+     "enter": "flip",
+     "screen": "b-06-full-itinerary",
+     "pose": {
+      "x": 0,
+      "y": -374,
+      "s": 1.8,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        28,
+        1314,
+        1178,
+        1806
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "看步驟",
+       "x": 790,
+       "y": 1030,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": 3,
+       "size": 58
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "from": 7.8,
+     "enter": "flip",
+     "screen": "b-12-in-app-walking",
+     "pose": {
+      "x": 0,
+      "y": 438,
+      "s": 1.75,
+      "rx": 4,
+      "ry": -7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        50,
+        194,
+        1156,
+        480
+       ],
+       "z": 150,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "走到站牌",
+       "x": 760,
+       "y": 1100,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": 3,
+       "size": 58
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "from": 10.4,
+     "enter": "flip",
+     "screen": "a-03-route-keypad",
+     "pose": {
+      "x": 0,
+      "y": 295,
+      "s": 1.78,
+      "rx": 4,
+      "ry": 7,
+      "rz": 0
+     },
+     "drift": 0.02,
+     "lifts": [
+      {
+       "rect": [
+        44,
+        676,
+        1160,
+        812
+       ],
+       "z": 160,
+       "at": 1,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "查路線",
+       "x": 320,
+       "y": 1050,
+       "at": 1.1,
+       "tone": "amber",
+       "tilt": -4,
+       "size": 58
+      }
+     ]
+    },
+    {
+     "line": 1,
+     "from": 13,
+     "enter": "flip",
+     "screen": "b-11-live-station-tag",
+     "pose": {
+      "x": 0,
+      "y": -40,
+      "s": 0.92,
+      "rx": 6,
+      "ry": -10
+     },
+     "drift": 0.02,
+     "stickers": [
+      {
+       "text": "看公車",
+       "x": 190,
+       "y": 400,
+       "at": 0.4,
+       "tone": "amber",
+       "tilt": -6,
+       "size": 46
+      },
+      {
+       "text": "比路線",
+       "x": 900,
+       "y": 480,
+       "at": 0.6,
+       "tone": "amber",
+       "tilt": 5,
+       "size": 46
+      },
+      {
+       "text": "看步驟",
+       "x": 170,
+       "y": 760,
+       "at": 0.8,
+       "tone": "paper",
+       "tilt": 4,
+       "size": 46
+      },
+      {
+       "text": "走到站牌",
+       "x": 910,
+       "y": 860,
+       "at": 1.0,
+       "tone": "paper",
+       "tilt": -4,
+       "size": 46
+      },
+      {
+       "text": "查路線",
+       "x": 200,
+       "y": 1110,
+       "at": 1.2,
+       "tone": "amber",
+       "tilt": -3,
+       "size": 46
+      }
+     ]
+    },
+    {
+     "line": 2,
+     "enter": "flip",
+     "screen": "b-02-trip-choices",
+     "pose": {
+      "x": 0,
+      "y": -60,
+      "s": 0.86,
+      "rx": 6,
+      "ry": 8
+     },
+     "drift": 0.03,
+     "lifts": [
+      {
+       "rect": [
+        100,
+        2110,
+        840,
+        2190
+       ],
+       "z": 150,
+       "at": 1.5,
+       "glow": true
+      }
+     ],
+     "stickers": [
+      {
+       "text": "公車＋捷運＋YouBike＋步行",
+       "x": 540,
+       "y": 452,
+       "at": 3,
+       "tone": "amber",
+       "tilt": -2,
+       "size": 44
+      }
+     ]
+    },
+    {
+     "line": 3,
+     "enter": "flip",
+     "screen": "a-07-live-bus-in-3d",
+     "pose": {
+      "x": 0,
+      "y": 40,
+      "s": 1.0,
+      "rx": 8,
+      "ry": 10
+     },
+     "drift": -0.06,
+     "pulses": [
+      {
+       "x": 1045,
+       "y": 1270,
+       "at": 1.5
+      }
+     ],
+     "stickers": [
+      {
+       "text": "沒有廣告",
+       "x": 250,
+       "y": 470,
+       "at": 1.2,
+       "tone": "amber",
+       "tilt": -6,
+       "size": 66
+      },
+      {
+       "text": "不用登入",
+       "x": 830,
+       "y": 620,
+       "at": 2.6,
+       "tone": "paper",
+       "tilt": 5,
+       "size": 66
+      },
+      {
+       "text": "免費下載",
+       "x": 540,
+       "y": 1170,
+       "at": 5,
+       "tone": "go",
+       "tilt": -2,
+       "size": 70
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "store",
+   "kind": "preview",
+   "label": "App Store 預覽",
+   "theme": "night",
+   "title": "",
+   "shots": [],
+   "endLine": "公車、捷運、YouBike，一路接到底",
+   "outro": "",
+   "outroSay": "一路，出門前看一眼。",
+   "outroAt": 0.9,
+   "liftFrom": 1,
+   "endBeats": 7,
+   "lines": [
+    {
+     "text": "公車到哪了？\n**地圖上直接看**",
+     "say": "公車到哪了？地圖上直接看。",
+     "beats": 8,
+     "cues": [
+      [
+       0.3,
+       "whoosh"
+      ]
+     ]
+    },
+    {
+     "text": "點一下那輛車，\n**開到哪、開多快都知道**",
+     "say": "點一下那輛車，開到哪、開多快都知道。",
+     "beats": 9,
+     "cues": [
+      [
+       2.14,
+       "tap"
+      ],
+      [
+       3.1,
+       "pop"
+      ]
+     ]
+    },
+    {
+     "text": "輸入目的地，\n**幾種走法一起比**",
+     "say": "輸入目的地，公車、捷運、YouBike 一起比。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       3.0,
+       "tap"
+      ],
+      [
+       3.6,
+       "whoosh"
+      ],
+      [
+       7.0,
+       "chime"
+      ],
+      [
+       9.3,
+       "tap"
+      ]
+     ]
+    },
+    {
+     "text": "坐幾站、哪裡下車，\n**出發前先看清楚**",
+     "say": "坐幾站、哪裡下車，出發前先看清楚。",
+     "beats": 9,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ]
+     ]
+    },
+    {
+     "text": "點站牌看到站時間，\n**再帶你走過去**",
+     "say": "點站牌看到站時間，再帶你走過去。",
+     "beats": 10,
+     "cues": [
+      [
+       0,
+       "whoosh"
+      ],
+      [
+       0.66,
+       "tap"
+      ],
+      [
+       1.4,
+       "pop"
+      ],
+      [
+       3.0,
+       "tap"
+      ],
+      [
+       3.8,
+       "whoosh"
+      ],
+      [
+       7,
+       "chime"
+      ]
+     ]
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,296 @@
+{
+  "test": {
+    "total": 12.0,
+    "end": 8.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.877
+      },
+      {
+        "start": 4.0,
+        "length": 4.0,
+        "voiceStart": 4.14,
+        "voiceLength": 2.354
+      }
+    ]
+  },
+  "ep1": {
+    "total": 21.0,
+    "end": 17.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.939
+      },
+      {
+        "start": 4.0,
+        "length": 4.0,
+        "voiceStart": 4.14,
+        "voiceLength": 2.071
+      },
+      {
+        "start": 8.0,
+        "length": 4.5,
+        "voiceStart": 8.14,
+        "voiceLength": 2.745
+      },
+      {
+        "start": 12.5,
+        "length": 4.5,
+        "voiceStart": 12.64,
+        "voiceLength": 2.615
+      }
+    ]
+  },
+  "ep2": {
+    "total": 22.5,
+    "end": 18.5,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.919
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 2.795
+      },
+      {
+        "start": 8.5,
+        "length": 5.0,
+        "voiceStart": 8.64,
+        "voiceLength": 4.327
+      },
+      {
+        "start": 13.5,
+        "length": 5.0,
+        "voiceStart": 13.64,
+        "voiceLength": 2.99
+      }
+    ]
+  },
+  "ep3": {
+    "total": 21.5,
+    "end": 17.5,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 3.5,
+        "voiceStart": 0.14,
+        "voiceLength": 2.569
+      },
+      {
+        "start": 3.5,
+        "length": 4.0,
+        "voiceStart": 3.64,
+        "voiceLength": 2.334
+      },
+      {
+        "start": 7.5,
+        "length": 5.0,
+        "voiceStart": 7.64,
+        "voiceLength": 3.109
+      },
+      {
+        "start": 12.5,
+        "length": 5.0,
+        "voiceStart": 12.64,
+        "voiceLength": 2.839
+      }
+    ]
+  },
+  "ep4": {
+    "total": 22.0,
+    "end": 18.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 1.698
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 2.58
+      },
+      {
+        "start": 8.5,
+        "length": 5.0,
+        "voiceStart": 8.64,
+        "voiceLength": 3.067
+      },
+      {
+        "start": 13.5,
+        "length": 4.5,
+        "voiceStart": 13.64,
+        "voiceLength": 2.46
+      }
+    ]
+  },
+  "ep5": {
+    "total": 22.0,
+    "end": 18.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 3.361
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 3.037
+      },
+      {
+        "start": 8.5,
+        "length": 5.0,
+        "voiceStart": 8.64,
+        "voiceLength": 3.33
+      },
+      {
+        "start": 13.5,
+        "length": 4.5,
+        "voiceStart": 13.64,
+        "voiceLength": 2.622
+      }
+    ]
+  },
+  "ep6": {
+    "total": 21.5,
+    "end": 17.5,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 3.325
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 3.64
+      },
+      {
+        "start": 8.5,
+        "length": 4.5,
+        "voiceStart": 8.64,
+        "voiceLength": 3.272
+      },
+      {
+        "start": 13.0,
+        "length": 4.5,
+        "voiceStart": 13.14,
+        "voiceLength": 2.672
+      }
+    ]
+  },
+  "ep7": {
+    "total": 22.5,
+    "end": 18.5,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.969
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 2.203
+      },
+      {
+        "start": 8.5,
+        "length": 5.5,
+        "voiceStart": 8.64,
+        "voiceLength": 3.739
+      },
+      {
+        "start": 14.0,
+        "length": 4.5,
+        "voiceStart": 14.14,
+        "voiceLength": 2.858
+      }
+    ]
+  },
+  "launch": {
+    "total": 24.5,
+    "end": 20.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 3.0,
+        "voiceStart": 0.14,
+        "voiceLength": 1.738
+      },
+      {
+        "start": 3.0,
+        "length": 8.0,
+        "voiceStart": 3.14,
+        "voiceLength": 6.064
+      },
+      {
+        "start": 11.0,
+        "length": 4.0,
+        "voiceStart": 11.14,
+        "voiceLength": 2.561
+      },
+      {
+        "start": 15.0,
+        "length": 5.0,
+        "voiceStart": 15.14,
+        "voiceLength": 3.839
+      }
+    ]
+  },
+  "store": {
+    "total": 26.5,
+    "end": 23.0,
+    "slots": [
+      {
+        "start": 0.0,
+        "length": 4.0,
+        "voiceStart": 0.14,
+        "voiceLength": 2.617
+      },
+      {
+        "start": 4.0,
+        "length": 4.5,
+        "voiceStart": 4.14,
+        "voiceLength": 3.617
+      },
+      {
+        "start": 8.5,
+        "length": 5.0,
+        "voiceStart": 8.64,
+        "voiceLength": 4.236
+      },
+      {
+        "start": 13.5,
+        "length": 4.5,
+        "voiceStart": 13.64,
+        "voiceLength": 3.74
+      },
+      {
+        "start": 18.0,
+        "length": 5.0,
+        "voiceStart": 18.14,
+        "voiceLength": 3.188
+      }
+    ]
+  }
+}

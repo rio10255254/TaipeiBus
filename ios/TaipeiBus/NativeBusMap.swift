@@ -1421,7 +1421,7 @@ struct NativeBusMap: UIViewRepresentable {
                       let pose = MetroTrainProjection.pose(report, network: model.metadata.metro, at: Date()) else { return }
                 // Fly in behind the train; the chase camera takes over from there.
                 let elevation = PreparedMetroTrain(report: report, network: model.metadata.metro)?.renderPose(at: Date())?.elevation ?? 0
-                chaseHeading = nil; chaseOrbit = 0
+                chaseHeading = nil; chaseOrbit = 0; chaseScale = 1; chasePinched = false
                 let camera = MLNMapCamera(lookingAtCenter: pose.coordinate.locationCoordinate, altitude: elevation < -3 ? 340 : 290,
                     pitch: elevation < -3 ? 46 : 62, heading: pose.heading)
                 moveCamera(camera, map: map, duration: 0.8)
@@ -1429,7 +1429,8 @@ struct NativeBusMap: UIViewRepresentable {
                 showPoint(position, altitude: 700, heading: 0, pitch: 0, map: map, duration: duration)
             case .station(let id):
                 guard let station = model.metadata.stations[id] else { return }
-                showPoint(station.coordinate, altitude: 480, heading: 0, pitch: 0, map: map, duration: duration)
+                // Keeps the way the rider has turned the map: only the position and scale change.
+                showPoint(station.coordinate, altitude: 480, heading: map.direction, pitch: 0, map: map, duration: duration)
             case .userLocation:
                 guard let point = model.location.displayCoordinate, point.isInServiceArea else { return }
                 let heading = model.userMapMode == .heading ? model.location.currentHeading ?? map.direction : 0
@@ -1617,6 +1618,12 @@ struct NativeBusMap: UIViewRepresentable {
             // Tile loading can delay a flight beyond its requested duration. Wait
             // for MapLibre's completion before following or avoiding buildings.
             guard !cameraMoving else { return }
+            // Fingers on the map own the camera: following waits for them, and a moment more for the
+            // zoom to coast to rest, instead of pulling against the gesture.
+            if model.following || model.followingTrain || model.userMapMode != .free,
+               map.gestureRecognizers?.contains(where: { $0.state == .began || $0.state == .changed }) == true {
+                followSuspendedUntil = max(followSuspendedUntil, now + 0.3)
+            }
             if now >= followSuspendedUntil { keepSelectedVehicleVisible(map, at: now) }
             guard !cameraMoving else { return }
             if model.userMapMode != .free, now >= followSuspendedUntil,
@@ -1637,9 +1644,12 @@ struct NativeBusMap: UIViewRepresentable {
                !reduceMotion || now - lastFollowTime > 0.25,
                let pose = buses.pose(id: id, time: now, now: date), !pose.stale {
                 let center = Coordinate(latitude: map.centerCoordinate.latitude, longitude: map.centerCoordinate.longitude)
-                if center.distance(to: pose.coordinate) > (reduceMotion ? 0.5 : 0.015) {
+                let aim = reduceMotion ? pose.coordinate : followAim(pose, at: now, dt: dt)
+                if center.distance(to: aim) > (reduceMotion ? 0.5 : 0.015) {
                     let camera = map.camera
-                    let target = center.interpolate(to: pose.coordinate, fraction: reduceMotion ? 1 : 1 - exp(-dt / 0.10))
+                    // Taking over from a flight or a pinch, the camera closes the gap gently and then holds on tightly.
+                    let settle = 0.10 + 0.30 * exp(-(now - followEngagedAt) / 0.5)
+                    let target = center.interpolate(to: aim, fraction: reduceMotion ? 1 : 1 - exp(-dt / settle))
                     camera.centerCoordinate = target.locationCoordinate
                     map.setCamera(camera, animated: false)
                     fullRateUntil = now + 0.3
@@ -1652,12 +1662,42 @@ struct NativeBusMap: UIViewRepresentable {
             }
         }
 
+        /// Where the camera looks while following a bus: a little ahead of it, so more of the road to come
+        /// is in view than the road behind. The lead grows with the bus's speed (none while it stands at a
+        /// stop or a light) and swings round gradually, so a turn sweeps instead of snapping.
+        private var followEngagedAt: CFTimeInterval = 0
+        private var followLeadID = ""
+        private var followLeadEast = 0.0, followLeadNorth = 0.0
+        private var followSpeed = 0.0
+        private var followLastPoint: Coordinate?
+        private func followAim(_ pose: VehiclePose, at now: CFTimeInterval, dt: Double) -> Coordinate {
+            let resumed = now - lastFollowTime > 0.2
+            if resumed { followEngagedAt = now }
+            if followLeadID != pose.id {
+                followLeadID = pose.id; followLeadEast = 0; followLeadNorth = 0; followSpeed = 0; followLastPoint = nil
+            }
+            if let last = followLastPoint, !resumed {
+                let speed = min(25, last.distance(to: pose.coordinate) / dt)
+                followSpeed += (speed - followSpeed) * (1 - exp(-dt / 0.8))
+            }
+            followLastPoint = pose.coordinate
+            let lead = min(26, followSpeed * 2.2), radians = pose.heading * .pi / 180
+            let ease = 1 - exp(-dt / 0.9)
+            followLeadEast += (sin(radians) * lead - followLeadEast) * ease
+            followLeadNorth += (cos(radians) * lead - followLeadNorth) * ease
+            return Coordinate(latitude: pose.coordinate.latitude + followLeadNorth / 111_320,
+                              longitude: pose.coordinate.longitude + followLeadEast / (111_320 * cos(pose.coordinate.latitude * .pi / 180)))
+        }
+
         /// A chase camera for a followed train: it settles behind the train and turns with the
         /// track, looking a little ahead while moving. At a platform it lifts and drifts slowly
         /// around the station, then swings back behind as the train leaves. Every change is eased,
         /// and Reduce Motion keeps the plain centred follow.
         private var chaseHeading: Double?
         private var chaseOrbit = 0.0
+        /// How much closer or farther than its own framing the rider pinched the chase camera.
+        private var chaseScale = 1.0
+        private var chasePinched = false
         private func chaseCamera(_ camera: MLNMapCamera, pose: VehiclePose, trainID: String, at date: Date, dt: Double) -> MLNMapCamera {
             let center = Coordinate(latitude: camera.centerCoordinate.latitude, longitude: camera.centerCoordinate.longitude)
             if reduceMotion { camera.centerCoordinate = pose.coordinate.locationCoordinate; return camera }
@@ -1672,7 +1712,10 @@ struct NativeBusMap: UIViewRepresentable {
             camera.heading = (heading + 360).truncatingRemainder(dividingBy: 360)
             let pitch: Double = underground ? 46 : standing ? 54 : 62
             camera.pitch += CGFloat(pitch - Double(camera.pitch)) * CGFloat(ease(1.2))
-            let altitude: Double = standing ? 430 : underground ? 340 : 290
+            let framing: Double = standing ? 430 : underground ? 340 : 290
+            // Picking the train up again after a pinch, the camera keeps the distance the rider chose.
+            if chasePinched { chasePinched = false; chaseScale = min(4, max(0.5, camera.altitude / framing)) }
+            let altitude = framing * chaseScale
             camera.altitude += (altitude - camera.altitude) * ease(1.8)
             let lead = standing ? 0.0 : 32.0, radians = pose.heading * .pi / 180
             let ahead = Coordinate(latitude: pose.coordinate.latitude + cos(radians) * lead / 111_320,
@@ -1722,6 +1765,24 @@ struct NativeBusMap: UIViewRepresentable {
                 lastFocusWasLeavingCity = false
                 cameraMoveToken += 1; cameraMoving = false
                 places.flying = false
+                // Zooming, tilting or turning the map is a closer look at what is being followed, as in
+                // Apple Maps; only dragging the map away lets go of it. Following pauses while the fingers
+                // are down (see `tick`) and picks the bus or the rider up again afterwards.
+                let dragged = !reason.intersection([.gesturePan, .resetNorth]).isEmpty
+                let turned = reason.contains(.gestureRotate)
+                let keepsBus = model.following && model.selectedVehicleID != nil && !model.followingTrain
+                let keepsRider = model.userMapMode != .free && !turned
+                // The train's chase camera steers and tilts by itself, so only a zoom is the rider's to keep.
+                let zoomOnly = reason.intersection([.gestureRotate, .gestureTilt]).isEmpty
+                let keepsTrain = model.followingTrain && model.selectedTrainID != nil && zoomOnly
+                if !dragged, keepsBus || keepsRider || keepsTrain {
+                    if keepsTrain { chasePinched = true }
+                    followSuspendedUntil = max(followSuspendedUntil, CACurrentMediaTime() + 0.35)
+                    DispatchQueue.main.async { [weak self] in
+                        if let self, let map = self.map { self.applyPendingInset(map) }
+                    }
+                    return
+                }
                 DispatchQueue.main.async { [weak self] in
                     self?.model.mapWasMoved = true
                     self?.model.following = false
@@ -1902,8 +1963,9 @@ struct NativeBusMap: UIViewRepresentable {
             (style.layer(withIdentifier: "selected-route-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
             (style.layer(withIdentifier: "journey-walking-line") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? MapChrome.walkingDark : MapChrome.walkingLight))
             (style.layer(withIdentifier: "journey-walking-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
+            (style.layer(withIdentifier: "journey-cycling-casing") as? MLNLineStyleLayer)?.lineColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#101215" : "#FFFFFF"))
             (style.layer(withIdentifier: "building-3d") as? MLNFillExtrusionStyleLayer)?.fillExtrusionColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#34363C" : "#E6E3DB"))
-            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names"] {
+            for id in ["journey-stop-names", "journey-waypoint-names", "journey-destination-name", "nearby-station-names", "bike-station-counts"] {
                 if let names = style.layer(withIdentifier: id) as? MLNSymbolStyleLayer {
                     names.textColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#F2F2F7" : "#1F3F66"))
                     names.textHaloColor = NSExpression(forConstantValue: UIColor(liveHex: darkMode ? "#1C1D20" : "#FFFFFF"))
@@ -1954,11 +2016,30 @@ struct NativeBusMap: UIViewRepresentable {
 #if DEBUG
                 model.recordMapTap("map-tap:no-bus")
 #endif
-                if let station { model.tappedPlace = nil; model.selectStation(station) }
-                else if let bike = nearestBikeStation(at: point, map: map) { model.selectBikeStation(bike) }
+                // A YouBike dock often stands beside a stop: whichever is nearer the finger is the one meant.
+                let bike = nearestBikeStation(at: point, map: map)
+                var bikeCloser = false
+                if let bike, let dock = model.bikeNetwork.station(bike) {
+                    if let station {
+                        let dockPoint = map.convert(dock.coordinate.locationCoordinate, toPointTo: map)
+                        let stopPoint = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                        bikeCloser = hypot(dockPoint.x - point.x, dockPoint.y - point.y) < hypot(stopPoint.x - point.x, stopPoint.y - point.y)
+                    } else { bikeCloser = true }
+                }
+                if let bike, bikeCloser { model.selectBikeStation(bike); revealAboveCard(point, map: map) }
+                else if let station { model.tappedPlace = nil; model.selectStation(station) }
                 else if model.selectedBikeStationID != nil { model.selectedBikeStationID = nil }
                 else { selectPlace(at: point, map: map) }
                 return
+            }
+            // A stop directly under the finger wins over a bus that merely stands beside it.
+            if let station {
+                let stopPoint = map.convert(station.coordinate.locationCoordinate, toPointTo: map)
+                let busPosition = buses.pose(id: id, time: CACurrentMediaTime(), now: Date())?.coordinate ?? bus.coordinate
+                let busPoint = map.convert(busPosition.locationCoordinate, toPointTo: map)
+                if hypot(stopPoint.x - point.x, stopPoint.y - point.y) < hypot(busPoint.x - point.x, busPoint.y - point.y) {
+                    model.tappedPlace = nil; model.selectStation(station); return
+                }
             }
             // Only rendered 3D buildings can occlude a bus. Cached building
             // footprints must not block taps in the flat, zoomed-out city view.
@@ -2006,6 +2087,13 @@ struct NativeBusMap: UIViewRepresentable {
         private func selectPlace(at point: CGPoint, map: MLNMapView) {
             let browsing = model.selectedStationID == nil && model.selectedRouteID == nil &&
                 model.selectedVehicleID == nil && model.planner.selected == nil && !model.cityFleetMode
+            // A station is a light selection, like a place or a YouBike dock: tapping empty map lets go of it.
+            // A route, a bus or a trip stays, so a stray tap never loses what the rider is following.
+            if model.selectedStationID != nil, model.selectedRouteID == nil, model.selectedVehicleID == nil,
+               model.selectedTrainID == nil, model.planner.selected == nil, !model.stationWalk.isActive, !model.cityFleetMode {
+                model.mapDismissRevision += 1
+                return
+            }
             guard browsing else { return }
             let rect = CGRect(x: point.x - 24, y: point.y - 24, width: 48, height: 48)
             let features = map.visibleFeatures(in: rect, styleLayerIdentifiers: Self.placeLayerIDs)
@@ -2023,6 +2111,18 @@ struct NativeBusMap: UIViewRepresentable {
                 coordinate: Coordinate(latitude: feature.coordinate.latitude, longitude: feature.coordinate.longitude))
             model.tappedPlace = model.tappedPlace == place ? nil : place
             Haptics.selection()
+            if model.tappedPlace != nil { revealAboveCard(point, map: map) }
+        }
+
+        /// The card for a tapped place or dock rises over the bottom of the map. A pin tapped down there
+        /// glides up clear of it, so the card never covers the thing it describes.
+        private func revealAboveCard(_ point: CGPoint, map: MLNMapView) {
+            let limit = map.bounds.maxY - map.contentInset.bottom - 84
+            guard point.y > limit, !model.following, model.userMapMode == .free else { return }
+            let centre = map.convert(map.centerCoordinate, toPointTo: map)
+            let camera = savedCamera(map.camera)
+            camera.centerCoordinate = map.convert(CGPoint(x: centre.x, y: centre.y + point.y - limit), toCoordinateFrom: map)
+            moveCamera(camera, map: map, duration: 0.35)
         }
         static let placeLayerIDs: Set<String> = ["poi", "poi_dense", "poi_dense_street", "poi_landmark"]
         static func placeCategory(_ kind: String) -> (name: String, symbol: String, hex: String, darkHex: String, classes: [String])? {

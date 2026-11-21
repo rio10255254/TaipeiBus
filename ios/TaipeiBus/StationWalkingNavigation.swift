@@ -145,7 +145,7 @@ struct StationWalkingDock: View {
                     }
                     Spacer(minLength: 4)
                     Button { Haptics.ended(); model.finishStationWalk() } label: {
-                        Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 40, height: 40)
+                        Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 44, height: 44)
                     }
                     .buttonStyle(MapActionStyle(tint: Color.primary))
                     .accessibilityLabel(AppText.text("返回站牌")).accessibilityIdentifier("station-walk-close")

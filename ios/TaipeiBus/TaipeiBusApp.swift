@@ -208,11 +208,8 @@ private struct MotionLabView: View {
             switch component {
             case "orb":
                 // As on the home screen, beside the search field.
-                VoiceOrb(mood: .calm, compact: true)
-                    .frame(width: 72, height: 72).frame(width: 56, height: 56)
-                    .clipShape(Circle())
-                    .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5))
-                    .shadow(color: Color(red: 0.5, green: 0.4, blue: 1).opacity(0.35), radius: 8, y: 3)
+                VoiceOrb(mood: .calm, compact: true, diffuse: true)
+                    .frame(width: 100, height: 100).frame(width: 56, height: 56)
             case "orb-large":
                 VoiceOrb(mood: .listening).frame(width: 250, height: 250)
             case "glow":

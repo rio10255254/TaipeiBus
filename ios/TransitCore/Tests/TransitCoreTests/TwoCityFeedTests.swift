@@ -39,6 +39,23 @@ final class TwoCityFeedTests: XCTestCase {
         XCTAssertEqual(rows.map(\.stop.routeID), ["200", "100"])
     }
 
+    func testExpresswayMarkersStayInTheRouteButAreNeverStations() throws {
+        // New Taipei lists markers such as 「國道1號41Km(虛擬站不停靠)」 between real stops. A rider can neither
+        // board nor get off there, so trips must not start, end or change buses at one.
+        let express = try city(route: 300, path: 30, name: "9001", stops: [
+            (301, 8000, "板橋", 121.46), (302, 8001, "國道1號41Km(虛擬站不停靠)", 121.47), (303, 8002, "台北車站", 121.517)])
+        let metadata = try FeedDecoder.metadata(sources: [express])
+        XCTAssertEqual(metadata.orderedStops(routeID: "30", direction: "0").map(\.id), ["301", "302", "303"],
+                       "the marker keeps its place in the route's stop order")
+        XCTAssertNil(metadata.stations["8001"])
+        XCTAssertEqual(Set(metadata.stations.keys), ["8000", "8002"])
+        XCTAssertTrue(metadata.stationSearch.search("國道", near: .taipei).isEmpty)
+        let marker = try XCTUnwrap(metadata.stops["302"]).coordinate
+        let trips = TripPlanner(metadata: metadata).plan(from: marker, to: Coordinate(latitude: 25.04, longitude: 121.517),
+                                                         maximumWalk: 1_200, limit: 6)
+        XCTAssertTrue(trips.allSatisfy { trip in trip.rides.allSatisfy { $0.boarding.id != "302" && $0.alighting.id != "302" } })
+    }
+
     func testALaterCityNeverReplacesAnIdAndAnUnreadableOneIsLeftOut() throws {
         let taipei = try city(route: 100, path: 10, name: "307", stops: [(101, 5000, "西門", 121.508)])
         // Should the numbering ever overlap, the first city's route and stop stay as they were.

@@ -57,10 +57,7 @@ struct BikeStationCard: View {
                             .liveFont(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
-                    Button(action: close) {
-                        Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
-                            .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
-                    }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+                    Button(action: close) { CloseGlyph() }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
                         .accessibilityIdentifier("bike-station-close")
                 }
                 HStack(spacing: 14) {
@@ -84,14 +81,14 @@ struct BikeStationCard: View {
                             }
                             Text(AppText.text(returning ? "附近可還 %@ · %@" : "最近可借 %@ · %@", nearest.station.localizedName, distanceLabel(nearest.distance)))
                                 .liveFont(.subheadline, weight: .semibold).lineLimit(1)
-                        }.padding(.horizontal, 14).frame(minHeight: 40)
+                        }.padding(.horizontal, 14).frame(minHeight: 44)
                     }
                     .buttonStyle(MapActionStyle())
                     .accessibilityIdentifier("bike-station-alternative")
                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                 }
             }
-            .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
+            .padding(.leading, 12).padding(.trailing, 0).padding(.vertical, 10)
             .modifier(BikeStationSurface(embedded: embedded, shape: live.shape(.panel)))
             .accessibilityElement(children: .contain).accessibilityIdentifier("bike-station-card")
             .accessibilityLabel(AppText.text("YouBike %@，可借 %@，可還 %@", station.localizedName,
@@ -181,12 +178,12 @@ struct JourneyBikeStations: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 5) {
                         Text(AppText.text(returning ? "還車" : "借車")).liveFont(.caption).foregroundStyle(.secondary)
-                        if compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint) }
+                        if compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).liveNumericText(count) }
                     }
                     Text(station.localizedName).liveFont(compact ? .caption : .subheadline, weight: .medium)
                         .lineLimit(compact ? 1 : 2).frame(maxWidth: .infinity, alignment: .leading)
                 }
-                if !compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).fixedSize() }
+                if !compact { Text(status).liveFont(.caption, weight: .semibold).monospacedDigit().foregroundStyle(tint).fixedSize().liveNumericText(count) }
                 Image(systemName: "chevron.right").liveFont(.caption2).foregroundStyle(.secondary)
             }.padding(.horizontal, 10).padding(.vertical, 7).frame(maxWidth: .infinity, minHeight: 48)
         }.buttonStyle(MapActionStyle())

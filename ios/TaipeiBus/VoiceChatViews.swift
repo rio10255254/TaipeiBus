@@ -179,7 +179,7 @@ struct VoiceChatPanel: View {
                 // A wrong answer can be sent to the developer, once the rider agrees.
                 if chat.reportable {
                     Button { if !chat.reported { askingReport = true } } label: {
-                        Image(systemName: chat.reported ? "checkmark.bubble" : "exclamationmark.bubble")
+                        Image(systemName: chat.reported ? "checkmark.bubble" : "exclamationmark.bubble").symbolSwap(chat.reported)
                             .font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                             .background(Color(uiColor: .tertiarySystemFill), in: Circle())
                     }
@@ -189,15 +189,16 @@ struct VoiceChatPanel: View {
                 }
                 // The language it listens in: a visitor can talk English to the Chinese app, and back.
                 Button { chat.switchLanguage() } label: {
-                    Text(verbatim: chat.language == .english ? "EN" : "中").font(.footnote.weight(.bold))
+                    Text(verbatim: chat.language == .english ? "EN" : "中").font(.footnote.weight(.bold)).contentTransition(.opacity)
                         .frame(minWidth: 32, minHeight: 32).background(Color(uiColor: .tertiarySystemFill), in: Capsule())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(chat.language == .english ? AppText.text("改用中文聽") : AppText.text("改用英文聽"))
                 .accessibilityIdentifier("voice-chat-language")
-                Button { chat.end() } label: {
+                Button { Haptics.ended(); chat.end() } label: {
                     Image(systemName: "xmark").font(.footnote.weight(.bold)).frame(width: 32, height: 32)
                         .background(Color(uiColor: .tertiarySystemFill), in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle()).padding(.horizontal, -6)
                 }
                 .buttonStyle(.plain).accessibilityLabel(AppText.text("結束對話")).accessibilityIdentifier("voice-chat-close")
             }
@@ -244,11 +245,11 @@ struct VoiceChatPanel: View {
             }
             if let pending = chat.pending {
                 HStack(spacing: 8) {
-                    Button { chat.confirm(true) } label: {
-                        Text(pending.question).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 36)
+                    Button { Haptics.selection(); chat.confirm(true) } label: {
+                        Text(pending.question).font(.subheadline.weight(.semibold)).frame(maxWidth: .infinity, minHeight: 44)
                     }.buttonStyle(.borderedProminent).buttonBorderShape(.capsule).accessibilityIdentifier("voice-chat-confirm")
-                    Button { chat.confirm(false) } label: {
-                        Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 36).padding(.horizontal, 6)
+                    Button { Haptics.selection(); chat.confirm(false) } label: {
+                        Text(AppText.text("先不要")).font(.subheadline).frame(minHeight: 44).padding(.horizontal, 6)
                     }.buttonStyle(.bordered).buttonBorderShape(.capsule)
                 }
                 .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -260,14 +261,15 @@ struct VoiceChatPanel: View {
         .animation(motion, value: chat.compact)
         .animation(motion, value: chat.pending != nil)
         .animation(motion, value: chat.reportable)
+        .animation(motion, value: chat.language)
         .animation(motion, value: speech.transcript.isEmpty)
         // A light tap when the answer starts and when listening starts again.
         .sensoryFeedback(.impact(weight: .light, intensity: 0.6), trigger: chat.phase) { _, new in new == .speaking }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .phoneGlass(in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .phoneGlass(in: RoundedRectangle(cornerRadius: MapChrome.Corner.card.rawValue, style: .continuous))
         // While it speaks, a tap stops it and listens: the way to cut in without waiting.
-        .contentShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MapChrome.Corner.card.rawValue, style: .continuous))
         .onTapGesture { if chat.phase == .speaking { chat.interrupt() } }
         .alert(AppText.text("回報這次回答？"), isPresented: $askingReport) {
             Button(AppText.text("回報")) { chat.reportLastAnswer() }
@@ -323,10 +325,10 @@ private struct PlaceChoiceCard: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .contentShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .background(Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MapChrome.Corner.row.rawValue, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PhonePressStyle())
         .scaleEffect(shown ? 1 : 0.94).opacity(shown ? 1 : 0)
         .onAppear { withAnimation(motion?.delay(delay)) { shown = true } }
         .accessibilityElement(children: .combine)
@@ -344,7 +346,7 @@ struct VoiceChatButton: View {
                 Spacer()
                 Button { Haptics.stage(); chat.start() } label: {
                     Label(AppText.text("問一下"), systemImage: "mic.fill").font(.subheadline.weight(.semibold))
-                        .padding(.horizontal, 14).frame(minHeight: 40)
+                        .padding(.horizontal, 14).frame(minHeight: 44)
                 }
                 .buttonStyle(PhonePressStyle()).phoneGlass(in: Capsule())
                 .accessibilityIdentifier("voice-chat-navigation")
@@ -410,7 +412,7 @@ struct VoiceChatSettings: View {
                 Text(AppText.text("聆聽"))
             } footer: {
                 Text(cloud
-                     ? AppText.text("每句話的錄音會經由本 App 的伺服器交給所選的辨識服務（Groq 上的 Whisper，或 OpenAI 的語音模型）轉成文字，中英夾雜、店名和口音都聽得比較準；選的服務無法使用時自動改用另一個，都不行時才用手機上的辨識。錄音只用來轉文字，不保存。說「我是說…」更正時，之後會自動多等一下。")
+                     ? AppText.text("錄音會經由本 App 的伺服器交給辨識服務（Groq 上的 Whisper 或 OpenAI）轉成文字，中英夾雜、店名和口音比較準；無法使用時改用手機上的辨識。錄音只用來轉文字，不保存。")
                      : AppText.text("只用手機上的辨識，錄音不會離開手機；中英夾雜的店名比較容易聽錯。說「我是說…」更正時，之後會自動多等一下。"))
             }
             Section {
@@ -459,7 +461,7 @@ struct VoiceChatSettings: View {
             } header: {
                 Text(AppText.text("隱私與資料"))
             } footer: {
-                Text(AppText.text("只用雲端：手機只負責即時顯示你說的話、判斷你說完了沒和插話；你說了什麼一律以伺服器的辨識為準，句子也只由 Claude 理解，不用手機上的規則。伺服器出問題時會直接告訴你，不會改用手機上的結果，方便確認雲端服務本身的表現。每句話會多等一下伺服器；回答仍由 iPhone 的語音念出。"))
+                Text(AppText.text("只用雲端：語音辨識和理解都只交給伺服器；伺服器沒回應時會直接告訴你，不會改用手機上的結果。每句話會多等一下。"))
             }
         }
     }
