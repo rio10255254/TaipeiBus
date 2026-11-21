@@ -8,26 +8,31 @@ import { clamp, lerp, pop, ramp } from './kit';
 import { C } from './theme';
 
 /**
- * The App Store's app preview. Apple allows only screen recordings of the app itself, with captions
- * and touch marks over them, so there is no phone frame or page here: the recording fills the frame
- * (886 × 1920, 30 fps) and everything else sits on top of it.
+ * The App Store's app preview (886 × 1920, 30 fps). Apple allows only screen recordings of the app
+ * itself, with text and touch marks added, so the picture is always the real recording: it sits as
+ * a rounded screen on the brand's night page, with the line's headline above it, set the same way
+ * as the store screenshots. There is no phone, hand or mock-up.
  *
- * The recordings play at the speed they were made. What keeps the film moving between the app's own
- * animations is the edit: every shot has a camera that drifts or pushes in on what the line is about,
- * and shots arrive by sliding or pushing through rather than dissolving.
+ * What keeps it moving between the app's own animations is the edit: each shot has a camera that
+ * drifts or closes in inside the screen, screens arrive by sliding over or pushing through the last,
+ * and the page behind them shifts with every line.
  */
 export const PREVIEW = { w: 886, h: 1920, fps: 30 };
 const { w: W, h: H } = PREVIEW;
+/** The screen on the page. Everything inside it is laid out in the recording's own 886 × 1920. */
+const SCREEN = { w: 694, x: 96, y: 398, r: 64 };
+const K = SCREEN.w / W;
+const SCREEN_H = Math.round(H * K);
 
 /** Where the camera looks (a point in the recording, in frame pixels) and how close, at a second of the shot. */
 type Key = { at: number; x?: number; y?: number; s?: number };
-type Enter = 'cut' | 'left' | 'right' | 'up' | 'through';
+type Enter = 'cut' | 'blend' | 'left' | 'right' | 'through';
 type Clip = {
   /** The line this footage plays under, and how many seconds into that line it cuts in (or `t`, a second of the film). */
   line: number; at?: number; t?: number;
   /** A file in public/preview, the second of it on screen at the cut, and how fast it plays. */
   file: string; from: number; rate?: number;
-  /** How the shot arrives over the one before. */
+  /** How the screen arrives over the one before; `blend` is for two takes of the same still screen. */
   enter?: Enter;
   camera?: Key[];
   /** Touch marks: seconds after the cut, at a point of the recording. */
@@ -40,13 +45,13 @@ type Timing = { total: number; end: number; slots: { start: number; length: numb
 
 const EP = (script as unknown as { episodes: { id: string; endLine: string; lines: Line[] }[] }).episodes.find((e) => e.id === 'store')!;
 const TM = (timings as unknown as Record<string, Timing>).store;
-/** `captions`: how far down the frame each line's caption sits, chosen so it never covers what the line is about. */
-const CUT = cut as unknown as { captions: number[]; clips: Clip[] };
+/** `kickers`: the small label over each line's headline. */
+const CUT = cut as unknown as { kickers: string[]; clips: Clip[] };
 export const previewFrames = Math.round(TM.total * PREVIEW.fps);
 
-/** A shot starts arriving this long before its cut and has landed this long after. */
+/** A screen starts arriving this long before its cut and has landed this long after. */
 const LEAD = 0.14;
-const LAND = 0.34;
+const LAND = 0.42;
 const glide = Easing.bezier(0.45, 0, 0.2, 1);
 const arrive = Easing.bezier(0.16, 0.84, 0.24, 1);
 
@@ -57,68 +62,74 @@ function cameraAt(clip: Clip, local: number, length: number) {
   const k = b.at > a.at ? glide(clamp((local - a.at) / (b.at - a.at))) : 0;
   const s = lerp(a.s ?? 1, b.s ?? 1, k);
   const x = lerp(a.x ?? W / 2, b.x ?? W / 2, k), y = lerp(a.y ?? H / 2, b.y ?? H / 2, k);
-  // The point looked at goes to the middle of the frame, as far as the picture's edges allow.
+  // The point looked at goes to the middle of the screen, as far as the picture's edges allow.
   return { s, tx: Math.min(0, Math.max(W - W * s, W / 2 - x * s)), ty: Math.min(0, Math.max(H - H * s, H / 2 - y * s)) };
 }
 
 const Touch: React.FC<{ x: number; y: number; t: number; at: number }> = ({ x, y, t, at }) => {
-  if (t < at - 0.3 || t > at + 0.9) return null;
+  if (t < at - 0.3 || t > at + 0.95) return null;
   const down = ramp(t, at - 0.26, at, Easing.out(Easing.cubic)) * (1 - ramp(t, at + 0.1, at + 0.45));
-  const ring = ramp(t, at, at + 0.6, Easing.out(Easing.cubic)), ring2 = ramp(t, at + 0.12, at + 0.85, Easing.out(Easing.cubic));
+  const ring = ramp(t, at, at + 0.6, Easing.out(Easing.cubic)), ring2 = ramp(t, at + 0.12, at + 0.9, Easing.out(Easing.cubic));
   const circle = (size: number, k: number, width: number) => (
     <div style={{ position: 'absolute', left: -size / 2, top: -size / 2, width: size, height: size, borderRadius: '50%',
       border: `${width}px solid rgba(255,185,64,${0.95 * (1 - k)})`, transform: `scale(${0.4 + k * 1.25})` }} />
   );
   return (
     <div style={{ position: 'absolute', left: x, top: y, width: 0, height: 0 }}>
-      {circle(150, ring, 5)}
-      {t > at + 0.12 ? circle(210, ring2, 3) : null}
-      <div style={{ position: 'absolute', left: -38, top: -38, width: 76, height: 76, borderRadius: '50%', background: 'rgba(255,255,255,.92)',
-        boxShadow: '0 8px 22px rgba(10,20,40,.5), inset 0 0 0 4px rgba(255,185,64,.95)', opacity: down, transform: `scale(${1.35 - 0.35 * down})` }} />
+      {circle(170, ring, 6)}
+      {t > at + 0.12 ? circle(240, ring2, 4) : null}
+      <div style={{ position: 'absolute', left: -44, top: -44, width: 88, height: 88, borderRadius: '50%', background: 'rgba(255,255,255,.94)',
+        boxShadow: '0 10px 26px rgba(10,20,40,.5), inset 0 0 0 5px rgba(255,185,64,.95)', opacity: down, transform: `scale(${1.35 - 0.35 * down})` }} />
     </div>
   );
 };
 
-const Shot: React.FC<{ clip: Clip; start: number; end: number; next?: Enter; t: number }> = ({ clip, start, end, next, t }) => {
+/** One take of the recording, as a screen on the page. */
+const Screen: React.FC<{ clip: Clip; start: number; end: number; next?: Enter; t: number; leave: number }> = ({ clip, start, end, next, t, leave }) => {
   const rate = clip.rate ?? 1;
   const enter = start <= 0 ? 'cut' : clip.enter ?? 'left';
   const lead = enter === 'cut' ? 0 : Math.min(LEAD, clip.from / rate);
   const first = Math.round((start - lead) * PREVIEW.fps);
-  const last = Math.round((end + LAND + 0.05) * PREVIEW.fps);
+  const leaving = next !== undefined && next !== 'cut' && next !== 'blend';
+  // A screen stays under the next one only while that one is still arriving.
+  const last = Math.round((end + (leaving ? LAND + 0.05 : next === 'blend' ? 0.16 : 0)) * PREVIEW.fps);
   const local = t - start, length = end - start;
   const cam = cameraAt(clip, Math.max(0, local), length);
-  // Arriving over the last shot, and later giving way to the next.
-  const inK = enter === 'cut' ? 1 : arrive(clamp((t - (start - lead)) / (lead + LAND)));
-  const outK = next && next !== 'cut' ? arrive(clamp((t - (end - LEAD)) / (LEAD + LAND))) : 0;
-  let x = 0, y = 0, scale = 1, opacity = 1;
-  if (enter === 'left') x += (1 - inK) * W;
-  if (enter === 'right') x -= (1 - inK) * W;
-  if (enter === 'up') { y += (1 - inK) * H * 0.55; opacity *= clamp(inK * 2.2); }
-  if (enter === 'through') { scale *= 0.82 + 0.18 * inK; opacity *= clamp(inK * 1.6); }
-  if (next === 'left') { x -= outK * W * 0.28; }
-  if (next === 'right') { x += outK * W * 0.28; }
-  if (next === 'up') { scale *= 1 - 0.06 * outK; }
-  if (next === 'through') { scale *= 1 + 0.34 * outK; opacity *= 1 - outK; }
-  const shade = next && next !== 'through' ? 0.42 * outK : 0;
-  const moving = inK < 1 && enter !== 'cut';
+  // Arriving over the last screen, and later giving way to the next.
+  const inK = enter === 'cut' ? 1 : enter === 'blend' ? ramp(t, start - lead, start + 0.12, glide) : arrive(clamp((t - (start - lead)) / (lead + LAND)));
+  const outK = leaving ? arrive(clamp((t - (end - LEAD)) / (LEAD + LAND))) : 0;
+  let x = 0, scale = 1, opacity = 1, turn = 0;
+  if (enter === 'left') { x += (1 - inK) * (W - SCREEN.x + 40); turn += (1 - inK) * 2.4; }
+  if (enter === 'right') { x -= (1 - inK) * (SCREEN.x + SCREEN.w + 40); turn -= (1 - inK) * 2.4; }
+  if (enter === 'through') { scale *= 0.8 + 0.2 * inK; opacity *= clamp(inK * 1.7); }
+  if (enter === 'blend') opacity *= inK;
+  if (next === 'left') { x -= outK * (SCREEN.x + SCREEN.w * 0.72); scale *= 1 - 0.07 * outK; opacity *= 1 - clamp(outK * 1.15); }
+  if (next === 'right') { x += outK * (SCREEN.x + SCREEN.w * 0.72); scale *= 1 - 0.07 * outK; opacity *= 1 - clamp(outK * 1.15); }
+  if (next === 'through') { scale *= 1 + 0.16 * outK; opacity *= 1 - clamp(outK * 1.3); }
+  // The close takes the screen down and away.
+  scale *= 1 - 0.1 * leave; opacity *= 1 - leave;
+  const float = Math.sin(t * 0.9) * 4;
   return (
     <Sequence from={first} durationInFrames={Math.max(1, last - first)} layout="none">
-      <AbsoluteFill style={{ transform: `translate(${x}px, ${y}px) scale(${scale})`, opacity, overflow: 'hidden',
-        borderRadius: moving ? 44 * (1 - inK) : 0, boxShadow: moving ? `0 0 ${90 * (1 - inK) + 30}px rgba(4,8,18,${0.55 * (1 - inK * 0.6)})` : undefined }}>
-        <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transformOrigin: '0 0', transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
-          <OffthreadVideo src={staticFile(`preview/${clip.file}`)} muted startFrom={Math.max(0, Math.round((clip.from - lead * rate) * PREVIEW.fps))} playbackRate={rate}
-            style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, objectFit: 'cover' }} />
-          {(clip.spots ?? []).map((spot, j) => {
-            const k = ramp(local, spot.at, spot.at + 0.35, glide) * (1 - ramp(local, spot.until, spot.until + 0.3, glide));
-            if (k <= 0.002) return null;
-            const [x0, y0, x1, y1] = spot.rect;
-            return <div key={j} style={{ position: 'absolute', left: x0, top: y0, width: x1 - x0, height: y1 - y0, borderRadius: spot.radius ?? 36,
-              boxShadow: `0 0 0 3000px rgba(10,16,28,${0.46 * k}), inset 0 0 0 ${4 * k}px rgba(255,185,64,${0.95 * k})` }} />;
-          })}
-          {(clip.taps ?? []).map((tap, j) => <Touch key={j} x={tap.x} y={tap.y} t={local} at={tap.at} />)}
+      <div style={{ position: 'absolute', left: SCREEN.x, top: SCREEN.y, width: SCREEN.w, height: SCREEN_H, borderRadius: SCREEN.r, overflow: 'hidden', opacity,
+        transform: `translate(${x}px, ${float + 70 * leave}px) rotate(${turn}deg) scale(${scale})`,
+        boxShadow: '0 46px 110px rgba(2,6,16,.6), 0 10px 30px rgba(2,6,16,.38)' }}>
+        <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transformOrigin: '0 0', transform: `scale(${K})` }}>
+          <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transformOrigin: '0 0', transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
+            <OffthreadVideo src={staticFile(`preview/${clip.file}`)} muted startFrom={Math.max(0, Math.round((clip.from - lead * rate) * PREVIEW.fps))} playbackRate={rate}
+              style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, objectFit: 'cover' }} />
+            {(clip.spots ?? []).map((spot, j) => {
+              const k = ramp(local, spot.at, spot.at + 0.35, glide) * (1 - ramp(local, spot.until, spot.until + 0.3, glide));
+              if (k <= 0.002) return null;
+              const [x0, y0, x1, y1] = spot.rect;
+              return <div key={j} style={{ position: 'absolute', left: x0, top: y0, width: x1 - x0, height: y1 - y0, borderRadius: spot.radius ?? 36,
+                boxShadow: `0 0 0 3000px rgba(10,16,28,${0.5 * k}), inset 0 0 0 ${5 * k}px rgba(255,185,64,${0.95 * k})` }} />;
+            })}
+            {(clip.taps ?? []).map((tap, j) => <Touch key={j} x={tap.x} y={tap.y} t={local} at={tap.at} />)}
+          </div>
         </div>
-        {shade ? <AbsoluteFill style={{ background: `rgba(8,12,22,${shade})` }} /> : null}
-      </AbsoluteFill>
+        <div style={{ position: 'absolute', inset: 0, borderRadius: SCREEN.r, boxShadow: 'inset 0 0 0 2px rgba(255,255,255,.17)' }} />
+      </div>
     </Sequence>
   );
 };
@@ -126,51 +137,75 @@ const Shot: React.FC<{ clip: Clip; start: number; end: number; next?: Enter; t: 
 const runs = (text: string) => text.split(/(\*\*[^*]+\*\*)/).filter(Boolean).map((part) =>
   part.startsWith('**') ? { text: part.slice(2, -2), mark: true } : { text: part, mark: false });
 
-/** The line being spoken. The preview plays muted by default, so this carries the film on its own. */
-const Caption: React.FC<{ text: string; top: number; t: number; start: number; speak: number; end: number }> = ({ text, top, t, start, speak, end }) => {
-  const out = ramp(t, end - 0.2, end, Easing.in(Easing.cubic));
-  if (t < start - 0.02 || out >= 1) return null;
-  const spring = pop(t, start, 11, 0.62);
-  const parts = runs(text);
-  const total = parts.reduce((n, p) => n + [...p.text.replace(/\n/g, '')].length, 0);
-  const shown = clamp((t - start - 0.08) / Math.max(0.3, speak * 0.8)) * total;
-  let seen = 0;
-  const away = top < H / 2 ? -1 : 1;
+/** The line's headline, set like the store screenshots: a small label, then two lines, the second in amber. */
+const Headline: React.FC<{ index: number; text: string; kicker: string; t: number; start: number; end: number; speak: number }> = ({ index, text, kicker, t, start, end, speak }) => {
+  const out = ramp(t, end - 0.24, end, Easing.in(Easing.cubic));
+  if (t < start - 0.05 || out >= 1) return null;
+  const rows = text.split('\n').map((row) => row.replace(/[，。]$/, ''));
+  const label = ramp(t, start, start + 0.4, arrive);
   return (
-    <div style={{ position: 'absolute', left: 44, right: 44, top, display: 'flex', justifyContent: 'center', opacity: clamp(spring * 1.6) * (1 - out),
-      transform: `translateY(${((1 - spring) * 46 + out * 30) * away}px) scale(${0.9 + 0.1 * spring})` }}>
-      <div style={{ background: 'rgba(14,20,31,.93)', borderRadius: 36, padding: '26px 40px 30px', boxShadow: '0 22px 54px rgba(4,8,18,.45), inset 0 0 0 2px rgba(255,255,255,.08)',
-        fontFamily: FONT, fontWeight: 900, fontSize: 56, lineHeight: 1.3, letterSpacing: 1, color: '#F6F8FC', textAlign: 'center', whiteSpace: 'pre-wrap' }}>
-        {parts.map((p, i) => (
-          <span key={i} style={{ color: p.mark ? C.amber : undefined }}>
-            {[...p.text].map((ch, j) => {
-              if (ch === '\n') return <br key={j} />;
-              const k = clamp(shown - seen++);
-              return <span key={j} style={{ opacity: 0.18 + 0.82 * k, display: 'inline-block', transform: `translateY(${(1 - k) * 9}px) scale(${0.94 + 0.06 * k})` }}>{ch}</span>;
-            })}
-          </span>
-        ))}
+    <div style={{ position: 'absolute', left: 62, top: 84, right: 40, fontFamily: FONT, opacity: 1 - out, transform: `translateY(${-18 * out}px)` }}>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14, padding: '9px 22px 10px 10px', borderRadius: 40, background: 'rgba(255,185,64,.13)',
+        boxShadow: 'inset 0 0 0 2px rgba(255,185,64,.32)', opacity: label, transform: `translateX(${(1 - label) * -26}px)` }}>
+        <Img src={staticFile('icon.png')} style={{ width: 40, height: 40, borderRadius: 10 }} />
+        <span style={{ fontWeight: 700, fontSize: 30, letterSpacing: 3, color: C.amber }}>{kicker}</span>
+        <span style={{ fontFamily: LATIN, fontWeight: 600, fontSize: 24, color: 'rgba(255,214,140,.7)', letterSpacing: 1 }}>{index + 1}/{EP.lines.length}</span>
+      </div>
+      <div style={{ marginTop: 22 }}>
+        {rows.map((row, r) => {
+          const k = arrive(clamp((t - start - 0.08 - r * 0.1) / 0.55));
+          const marked = row.includes('**');
+          const sweep = ramp(t, start + 0.3 + speak * 0.45, start + 0.75 + speak * 0.45, glide);
+          return (
+            <div key={r} style={{ overflow: 'hidden', height: 92, marginTop: r ? -4 : 0 }}>
+              <div style={{ display: 'inline-block', position: 'relative', fontWeight: 900, fontSize: 70, lineHeight: '92px', letterSpacing: 1.5, whiteSpace: 'nowrap',
+                transform: `translateY(${(1 - k) * 96}px)`, opacity: clamp(k * 1.5) }}>
+                {marked ? <span style={{ position: 'absolute', left: -8, right: -8, bottom: 12, height: 30, borderRadius: 10, background: 'rgba(255,185,64,.24)',
+                  transformOrigin: '0 50%', transform: `scaleX(${sweep})` }} /> : null}
+                {runs(row).map((p, i) => <span key={i} style={{ position: 'relative', color: p.mark ? C.amber : '#F6F8FC' }}>{p.text}</span>)}
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 };
 
-/** The close: the app keeps running underneath, softened, with its name over it. */
+/** The page: night blue, with two soft lights that drift and step along with the lines. */
+const Page: React.FC<{ t: number; line: number }> = ({ t, line }) => (
+  <AbsoluteFill style={{ background: 'linear-gradient(168deg, #1D2D49 0%, #121C30 52%, #0A111E 100%)', overflow: 'hidden' }}>
+    <div style={{ position: 'absolute', width: 1100, height: 1100, borderRadius: '50%', left: -420 + 130 * Math.sin(t * 0.23) + line * 70, top: 760 + 90 * Math.cos(t * 0.19),
+      background: 'radial-gradient(circle, rgba(255,185,64,.2) 0%, rgba(255,185,64,.06) 42%, rgba(255,185,64,0) 68%)' }} />
+    <div style={{ position: 'absolute', width: 1200, height: 1200, borderRadius: '50%', left: 260 - 110 * Math.sin(t * 0.17) - line * 60, top: -520 + 70 * Math.cos(t * 0.21),
+      background: 'radial-gradient(circle, rgba(96,150,232,.34) 0%, rgba(96,150,232,.1) 44%, rgba(96,150,232,0) 70%)' }} />
+    <div style={{ position: 'absolute', width: 900, height: 900, borderRadius: '50%', left: 380 + 80 * Math.cos(t * 0.15), top: 1380 + 60 * Math.sin(t * 0.2),
+      background: 'radial-gradient(circle, rgba(52,199,123,.12) 0%, rgba(52,199,123,0) 66%)' }} />
+  </AbsoluteFill>
+);
+
+/** The close: the name, the line it stands for, and the four ways it joins up. */
 const Close: React.FC<{ t: number; at: number; line: string }> = ({ t, at, line }) => {
-  if (t < at - 0.1) return null;
-  const dim = ramp(t, at - 0.1, at + 0.5, glide);
-  const icon = pop(t, at + 0.12, 10, 0.68);
-  const name = ramp(t, at + 0.4, at + 0.9, Easing.out(Easing.cubic));
-  const rule = ramp(t, at + 0.75, at + 1.5, glide);
-  const sub = ramp(t, at + 0.95, at + 1.45, Easing.out(Easing.cubic));
+  if (t < at) return null;
+  const icon = pop(t, at + 0.18, 10, 0.68);
+  const name = ramp(t, at + 0.45, at + 0.95, Easing.out(Easing.cubic));
+  const rule = ramp(t, at + 0.8, at + 1.5, glide);
+  const sub = ramp(t, at + 1.0, at + 1.5, Easing.out(Easing.cubic));
   return (
-    <AbsoluteFill style={{ background: `rgba(14,20,31,${0.8 * dim})`, alignItems: 'center', justifyContent: 'center', fontFamily: FONT, color: '#F6F8FC' }}>
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: -60 }}>
-        <Img src={staticFile('icon.png')} style={{ width: 232, height: 232, borderRadius: 52, boxShadow: '0 30px 70px rgba(0,0,0,.5)', opacity: clamp(icon * 1.4), transform: `scale(${0.6 + 0.4 * icon})` }} />
-        <div style={{ marginTop: 46, fontWeight: 900, fontSize: 148, letterSpacing: 10, lineHeight: 1, opacity: name, transform: `translateY(${(1 - name) * 28}px)` }}>一路</div>
-        <div style={{ marginTop: 14, fontFamily: LATIN, fontWeight: 600, fontSize: 42, letterSpacing: 6, opacity: 0.82 * name }}>OneRoad</div>
-        <div style={{ marginTop: 40, width: 420 * rule, height: 6, borderRadius: 3, background: C.amber }} />
-        <div style={{ marginTop: 34, fontWeight: 700, fontSize: 40, letterSpacing: 2, color: C.amber, opacity: sub, transform: `translateY(${(1 - sub) * 18}px)` }}>{line}</div>
+    <AbsoluteFill style={{ alignItems: 'center', justifyContent: 'center', fontFamily: FONT, color: '#F6F8FC' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginTop: -40 }}>
+        <Img src={staticFile('icon.png')} style={{ width: 240, height: 240, borderRadius: 54, boxShadow: '0 34px 80px rgba(0,0,0,.55)', opacity: clamp(icon * 1.4), transform: `scale(${0.6 + 0.4 * icon})` }} />
+        <div style={{ marginTop: 50, fontWeight: 900, fontSize: 150, letterSpacing: 10, lineHeight: 1, opacity: name, transform: `translateY(${(1 - name) * 30}px)` }}>一路</div>
+        <div style={{ marginTop: 16, fontFamily: LATIN, fontWeight: 600, fontSize: 42, letterSpacing: 6, opacity: 0.82 * name }}>OneRoad</div>
+        <div style={{ marginTop: 44, width: 440 * rule, height: 6, borderRadius: 3, background: C.amber }} />
+        <div style={{ marginTop: 36, fontWeight: 700, fontSize: 40, letterSpacing: 2, color: C.amber, opacity: sub, transform: `translateY(${(1 - sub) * 18}px)` }}>{line}</div>
+        <div style={{ marginTop: 46, display: 'flex', gap: 16 }}>
+          {['公車', '捷運', 'YouBike', '步行'].map((mode, i) => {
+            const k = pop(t, at + 1.35 + i * 0.12, 12, 0.7);
+            return <div key={mode} style={{ padding: '12px 26px 14px', borderRadius: 40, boxShadow: 'inset 0 0 0 2px rgba(246,248,252,.5)', fontWeight: 700, fontSize: 32,
+              letterSpacing: 1, opacity: clamp(k * 1.5), transform: `scale(${0.7 + 0.3 * k})` }}>{mode}</div>;
+          })}
+        </div>
       </div>
     </AbsoluteFill>
   );
@@ -180,19 +215,20 @@ export const StorePreview: React.FC = () => {
   const frame = useCurrentFrame();
   const t = frame / PREVIEW.fps;
   const starts = CUT.clips.map((c) => c.t ?? TM.slots[c.line].start + (c.at ?? 0));
+  const leave = ramp(t, TM.end - 0.12, TM.end + 0.4, glide);
+  // The lights step sideways as each line begins.
+  const line = TM.slots.reduce((sum, slot) => sum + ramp(t, slot.start - 0.1, slot.start + 0.7, glide), 0) - 1;
   return (
     <AbsoluteFill style={{ background: C.night }}>
-      {/* Under the close the app goes soft, so its own text does not sit behind the name. */}
-      <AbsoluteFill style={{ filter: t > TM.end - 0.1 ? `blur(${14 * ramp(t, TM.end - 0.1, TM.end + 0.6, glide)}px)` : undefined }}>
-        {CUT.clips.map((clip, i) => (
-          <Shot key={i} clip={clip} t={t} start={starts[i]} end={i + 1 < starts.length ? starts[i + 1] : TM.total}
-            next={i + 1 < starts.length ? CUT.clips[i + 1].enter ?? 'left' : undefined} />
-        ))}
-      </AbsoluteFill>
-      {EP.lines.map((line, j) => {
+      <Page t={t} line={line} />
+      {CUT.clips.map((clip, i) => (
+        <Screen key={i} clip={clip} t={t} leave={leave} start={starts[i]} end={i + 1 < starts.length ? starts[i + 1] : TM.end + 0.5}
+          next={i + 1 < starts.length ? CUT.clips[i + 1].enter ?? 'left' : undefined} />
+      ))}
+      {EP.lines.map((item, j) => {
         const slot = TM.slots[j];
-        return <Caption key={j} text={line.text} top={CUT.captions[j] ?? 150} t={t} start={slot.start + 0.1} speak={slot.voiceLength || slot.length * 0.6}
-          end={Math.min(slot.start + slot.length, TM.end) - 0.04} />;
+        return <Headline key={j} index={j} text={item.text} kicker={CUT.kickers[j] ?? ''} t={t} start={slot.start + 0.06} speak={slot.voiceLength || slot.length * 0.6}
+          end={Math.min(slot.start + slot.length, TM.end) - 0.02} />;
       })}
       <Close t={t} at={TM.end} line={EP.endLine} />
       <Audio src={staticFile('audio/store.mp3')} />
