@@ -636,12 +636,16 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         launch(["--preview-vehicle-route", route, "--test-map-controls"])
         XCTAssertTrue(button("停止跟車").waitForExistence(timeout: 90))
         waitRenderedMap { ($0["fleetVisible"] as? Int ?? 0) > 0 }
-        mark("bus-following"); hold(12)
+        // Long, unhurried gestures: the camera keeps the bus while the map turns and closes in,
+        // so the footage moves the whole time instead of jumping between settled views.
         let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
-        mark("bus-pinch"); map.pinch(withScale: 0.72, velocity: -0.6); hold(4)
+        mark("bus-following"); hold(9)
+        mark("bus-rotate"); map.rotate(.pi / 5, withVelocity: 0.4); hold(5)
+        mark("bus-zoom"); map.pinch(withScale: 1.4, velocity: 0.35); hold(8)
+        mark("bus-turn-back"); map.rotate(-.pi / 4, withVelocity: -0.4); hold(6)
         let details = button("車輛資訊")
         if details.waitForExistence(timeout: 5) {
-            mark("bus-details", details); details.tap(); hold(7)
+            mark("bus-details", details); details.tap(); hold(8)
         }
         mark("bus-end"); leaveMarks()
     }
@@ -649,20 +653,30 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         launch(["--test-map-controls", "--test-journey-selection"])
         let search = button("home-destination-search")
         XCTAssertTrue(search.waitForExistence(timeout: 90)); hold(2)
-        mark("plan-search", search); search.tap(); chooseNeihu(); mark("plan-chosen")
+        mark("plan-search", search); search.tap()
+        // Typed here rather than through chooseNeihu: its screenshots would freeze the picture mid-search.
+        let field = app.textFields["journey-search-field"]
+        if !field.waitForExistence(timeout: 10), button("搜尋目的地").isHittable { button("搜尋目的地").tap() }
+        XCTAssertTrue(field.waitForExistence(timeout: 10)); hold(0.8)
+        mark("plan-field", field); field.tap(); hold(0.8)
+        mark("plan-type"); field.typeText("內湖站")
+        let place = app.staticTexts["內湖站"].firstMatch
+        XCTAssertTrue(place.waitForExistence(timeout: 20)); hold(1.2)
+        mark("plan-place", place); place.tap(); mark("plan-chosen")
         let choices = app.buttons.matching(NSPredicate(format:"identifier == %@ OR identifier == %@","journey-all-options","journey-options")).firstMatch
         guard choices.waitForExistence(timeout: 90) else { mark("plan-closed"); leaveMarks(); return }
-        hold(1.5); mark("plan-all", choices); choices.tap()
+        hold(2.5); mark("plan-all", choices); choices.tap()
         XCTAssertTrue(firstOption.waitForExistence(timeout: 60)); waitForConfirmedChoices()
         mark("plan-choices"); hold(4.5)
         let id = String(firstOption.identifier.dropFirst("journey-option-".count))
         mark("plan-option", firstOption); button("journey-option-" + id).tap()
         let steps = button("journey-steps-" + id)
-        XCTAssertTrue(steps.waitForExistence(timeout: 15)); hold(2.5)
+        XCTAssertTrue(steps.waitForExistence(timeout: 15)); hold(4)
         mark("plan-steps", steps); steps.tap()
         XCTAssertTrue(app.navigationBars["行程"].waitForExistence(timeout: 10))
         mark("plan-itinerary"); hold(3.5)
-        app.swipeUp(velocity: .slow); mark("plan-scrolled"); hold(3.5)
+        app.swipeUp(velocity: .slow); mark("plan-scrolled"); hold(2.5)
+        app.swipeUp(velocity: .slow); mark("plan-scrolled-again"); hold(3)
         mark("plan-end"); leaveMarks()
     }
     func testPreviewReel3StationWalk() {
@@ -673,14 +687,16 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         mark("station-tag"); hold(3)
         mark("station-expand", expand); expand.press(forDuration: 0.15)
         let walk = button("map-station-walk")
-        XCTAssertTrue(walk.waitForExistence(timeout: 10)); hold(3.5)
+        XCTAssertTrue(walk.waitForExistence(timeout: 10)); hold(4)
         mark("station-walk", walk); walk.press(forDuration: 0.15)
         waitRenderedMap { ($0["stationWalkPoints"] as? Int ?? 0) >= 2 && ($0["cameraMoving"] as? Bool) == false }
-        mark("station-walking"); hold(6)
+        mark("station-walking"); hold(4)
+        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
+        mark("station-zoom"); map.pinch(withScale: 1.3, velocity: 0.3); hold(5)
         mark("station-end"); leaveMarks()
     }
     func testPreviewReel4RouteSearch() {
-        launch()
+        launch(["--test-map-controls"])
         XCTAssertTrue(nearest.waitForExistence(timeout: 90)); hold(3)
         let routes = button("point.topleft.down.to.point.bottomright.curvepath")
         mark("routes-open", routes); routes.press(forDuration: 0.15)
@@ -693,7 +709,10 @@ final class AppStoreScreenshotTests: JourneyUsabilityTestBase {
         XCTAssertTrue(route.waitForExistence(timeout: 10)); hold(1.5)
         mark("routes-result", route); route.tap()
         XCTAssertTrue(button("返回搜尋").waitForExistence(timeout: 10))
-        mark("routes-map"); hold(7)
+        mark("routes-map"); hold(5)
+        let map = app.descendants(matching: .any).matching(identifier: "native-map").firstMatch
+        mark("routes-zoom"); map.pinch(withScale: 1.5, velocity: 0.3); hold(4)
+        mark("routes-turn"); map.rotate(.pi / 6, withVelocity: 0.3); hold(5)
         mark("routes-end"); leaveMarks()
     }
     func testPrivacyAndSupportAreAccessible() {

@@ -408,6 +408,8 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
             # A simulator has no carrier, and its empty signal dots would be in every frame of the video.
             xcrun simctl status_bar "$device" override --cellularMode active --cellularBars 4 --wifiBars 3 --batteryState charged --batteryLevel 100 || true
+            # A new simulator greets the first keyboard with a panel about swipe typing, over half the screen.
+            xcrun simctl spawn "$device" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true || true
           fi
           # CoreSimulator is already booted. simctl screenshots and XCTest do not
           # need a desktop Simulator window, whose LaunchServices RPC can stall.
