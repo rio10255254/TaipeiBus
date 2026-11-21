@@ -43,12 +43,13 @@ CLIPS = {
     # after, and the edit dissolves between the two.
     "card": ("day/testPreviewReel1LiveBus", 181.0, 184.38, 1.8),
     "card-up": ("day/testPreviewReel1LiveBus", 187.7, 193.0, 1.6),
-    "search": ("slow/testPreviewReel2PlanTrip", 64.0, 76.5, 4.5),
-    "choices": ("slow/testPreviewReel2PlanTrip", 105.0, 118.0, 4.0),
+    # The trip is one run from typing to itinerary, so its times and its route agree from shot to shot.
+    "search": ("day/testPreviewReel2PlanTrip", 66.1, 70.2, 1.6),
+    "choices": ("day/testPreviewReel2PlanTrip", 105.3, 115.6, 2.6),
     # A list being dragged is laid out again by how far it has moved, not by time, and its speed is
     # ignored (scripts/scroll_clip.py). The last two numbers are the rows of the clip between the
     # sheet's title bar and its button.
-    "steps": ("slow/testPreviewReel2PlanTrip", 150.0, 166.0, 1.0, 340, 2040),
+    "steps": ("day/testPreviewReel2PlanTrip", 138.5, 150.0, 1.0, 340, 2150),
     "stop": ("slow/testPreviewReel3StationWalk", 137.2, 141.6, 1.5),
     "walk": ("slow/testPreviewReel3StationWalk", 154.9, 181.0, 5.6),
 }

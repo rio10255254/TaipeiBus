@@ -38,12 +38,14 @@ def _grey(frame, top, bottom):
     return frame[top + 60:bottom - 60, ::5].astype(np.float32).mean(axis=2)
 
 
-def _shift(ga, gb, reach=260):
+def _shift(ga, gb, reach=900):
     """How many rows the list moved up from one frame to another (negative when it moved back), and how well they then agree."""
-    costs = {}
-    for d in range(-reach, reach + 1):
-        x, y = (ga[d:], gb[:len(gb) - d]) if d >= 0 else (ga[:d], gb[-d:])
-        costs[d] = float(np.abs(x - y).mean())
+    def cost(d, step=1):
+        x, y = (ga[d::step], gb[:len(gb) - d:step]) if d >= 0 else (ga[:d:step], gb[-d::step])
+        return float(np.abs(x - y).mean())
+    # A flick can carry the list most of a screen between two frames: look that far, coarsely, then closely.
+    near = min(range(-300, reach + 1, 2), key=lambda d: cost(d, 3))
+    costs = {d: cost(d) for d in range(near - 4, near + 5)}
     best = min(costs, key=costs.get)
     if best - 1 in costs and best + 1 in costs:
         lo, mid, hi = costs[best - 1], costs[best], costs[best + 1]
@@ -96,7 +98,8 @@ def scroll_clip(source, out, first, last, top, bottom, still=0.8, travel=3.2, ho
         if at + 24 <= where[i] <= rest:
             keep.append(i)
             at = where[i]
-    wanted, kept = set(keep), {}
+    final = len(where) - 1
+    wanted, kept = set(keep) | {final}, {}
     for i, frame in enumerate(_frames(source, first, last)):
         if i in wanted:
             kept[i] = frame.copy()
@@ -105,6 +108,11 @@ def scroll_clip(source, out, first, last, top, bottom, still=0.8, travel=3.2, ho
     for before, after in zip(keep, keep[1:]):
         step, _ = _shift(_grey(kept[before], top, bottom), _grey(kept[after], top, bottom))
         where[after] = where[before] + step
+    # The frame at rest ends the scroll if it still shows the same rows; if not, the last frame on the way does.
+    step, apart = _shift(_grey(kept[keep[-1]], top, bottom), _grey(kept[final], top, bottom))
+    if final != keep[-1] and step > 0 and apart < 2.5:
+        where[final] = where[keep[-1]] + step
+        keep.append(final)
     end = where[keep[-1]]
     encode = subprocess.Popen(["ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(fps), "-i", "-",
         "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "19", "-g", "15", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(out)], stdin=subprocess.PIPE)
