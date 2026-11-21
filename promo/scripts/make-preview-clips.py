@@ -38,7 +38,11 @@ CLIPS = {
     # laid out again to move evenly for the given number of seconds (the word in place of a speed),
     # then the tap on it and its card.
     "orbit": ("day/testPreviewReel1LiveBus", 173.5, 181.0, "even", 3.9),
-    "card": ("day/testPreviewReel1LiveBus", 181.0, 190.6, 1.8),
+    # The recorder missed most of a second while the card came up and the map turned to make room for
+    # it. Nothing can be estimated across that much change, so the take stops before it and picks up
+    # after, and the edit dissolves between the two.
+    "card": ("day/testPreviewReel1LiveBus", 181.0, 184.38, 1.8),
+    "card-up": ("day/testPreviewReel1LiveBus", 187.7, 193.0, 1.6),
     "search": ("slow/testPreviewReel2PlanTrip", 64.0, 76.5, 4.5),
     "choices": ("slow/testPreviewReel2PlanTrip", 105.0, 118.0, 4.0),
     # A list being dragged is laid out again by how far it has moved, not by time, and its speed is
