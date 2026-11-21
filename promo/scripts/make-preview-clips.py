@@ -23,6 +23,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scroll_clip import even_clip, scroll_clip  # noqa: E402
+
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "public" / "preview"
 LEAD = 0.3  # seconds kept before each clip's first second, for the shot to arrive on (src/StorePreview.tsx)
@@ -31,13 +34,19 @@ LEAD = 0.3  # seconds kept before each clip's first second, for the shot to arri
 # walkthroughs on 21 November 2026: `day` at their natural pace (Actions run 44874816397), where the
 # bus's tag and card were caught, and `slow` with quarter-speed gestures (run 44878895138).
 CLIPS = {
-    # One take: the map turning around a bus in service, then a tap on it and its card.
-    "bus": ("day/testPreviewReel1LiveBus", 173.5, 190.6, 1.8),
+    # One take in two parts, cut where the picture is still: the map turning around a bus in service,
+    # laid out again to move evenly for the given number of seconds (the word in place of a speed),
+    # then the tap on it and its card.
+    "orbit": ("day/testPreviewReel1LiveBus", 173.5, 181.0, "even", 3.9),
+    "card": ("day/testPreviewReel1LiveBus", 181.0, 190.6, 1.8),
     "search": ("slow/testPreviewReel2PlanTrip", 64.0, 76.5, 4.5),
-    "choices": ("slow/testPreviewReel2PlanTrip", 100.4, 117.6, 4.0),
-    "steps": ("slow/testPreviewReel2PlanTrip", 148.5, 168.4, 4.0),
-    "stop": ("slow/testPreviewReel3StationWalk", 133.6, 138.4, 2.0),
-    "walk": ("slow/testPreviewReel3StationWalk", 154.9, 181.0, 6.5),
+    "choices": ("slow/testPreviewReel2PlanTrip", 105.0, 118.0, 4.0),
+    # A list being dragged is laid out again by how far it has moved, not by time, and its speed is
+    # ignored (scripts/scroll_clip.py). The last two numbers are the rows of the clip between the
+    # sheet's title bar and its button.
+    "steps": ("slow/testPreviewReel2PlanTrip", 150.0, 166.0, 1.0, 340, 2040),
+    "stop": ("slow/testPreviewReel3StationWalk", 137.2, 141.6, 1.5),
+    "walk": ("slow/testPreviewReel3StationWalk", 154.9, 181.0, 5.6),
 }
 
 
@@ -51,15 +60,25 @@ def repeats(path):
 
 
 def cut(source, name):
-    reel, first, last, speed = CLIPS[name]
+    reel, first, last, speed, *list_rows = CLIPS[name]
     folder, reel = reel.split("/")
-    first -= LEAD * speed
     out = OUT / f"{name}.mp4"
+    if speed == "even":
+        even_clip(source / folder / f"preview-{reel}.mp4", out, first, last, *list_rows)
+        seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
+        return f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames"
+    first -= LEAD * speed
+    if list_rows:
+        scroll_clip(source / folder / f"preview-{reel}.mp4", out, first + LEAD * speed, last, *list_rows)
+        seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
+        return f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames"
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{first:.3f}", "-to", f"{last:.3f}", "-i", str(source / folder / f"preview-{reel}.mp4"),
         # Frames in which nothing moved are the app itself hitching on the hosted machine. They go first,
         # so that what is estimated across each hitch is the motion, not a copy of the frame before it.
         "-vf", f"mpdecimate,setpts=(PTS-STARTPTS)/{speed},scale=1108:-2:flags=lanczos,crop=1108:2400,"
-               "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none:search_param=64,format=yuv420p",
+               "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none:search_param=64,"
+               # A clip that ends on a still screen ends at its last moving frame; hold that frame for the edit to leave on.
+               "tpad=stop_mode=clone:stop_duration=1.5,format=yuv420p",
         "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "19", "-g", "15", "-movflags", "+faststart", str(out)], check=True)
     seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
     return f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames"
