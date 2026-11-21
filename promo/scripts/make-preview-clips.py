@@ -17,6 +17,7 @@ be near zero. Clips are written to public/preview/ a quarter larger than the App
 886 x 1920, so the edit's camera can close in without softening.
 """
 import re
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import sys
 from pathlib import Path
@@ -25,21 +26,17 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "public" / "preview"
 LEAD = 0.3  # seconds kept before each clip's first second, for the shot to arrive on (src/StorePreview.tsx)
 
-# name: (recording, first second, last second, speed)
+# name: (recording, first second, last second, speed). The recordings are two runs of the same
+# walkthroughs on 21 November 2026: `day` at their natural pace (Actions run 44874816397), where the
+# bus's tag and card were caught, and `slow` with quarter-speed gestures (run 44878895138).
 CLIPS = {
     # One take: the map turning around a bus in service, then a tap on it and its card.
-    "bus": ("testPreviewReel1LiveBus", 173.5, 190.6, 1.8),
-    "search": ("testPreviewReel2PlanTrip", 66.1, 70.2, 1.6),
-    "choices": ("testPreviewReel2PlanTrip", 105.3, 115.6, 2.6),
-    # The itinerary arriving, then its two scrolls; the still seconds between them are left out.
-    "steps-1": ("testPreviewReel2PlanTrip", 135.9, 138.6, 1.3),
-    "steps-2": ("testPreviewReel2PlanTrip", 141.8, 144.8, 1.3),
-    "steps-3": ("testPreviewReel2PlanTrip", 148.0, 150.6, 1.3),
-    "stop-1": ("testPreviewReel3StationWalk", 111.2, 113.8, 1.25),
-    "stop-2": ("testPreviewReel3StationWalk", 118.3, 119.7, 1.0),
-    "walk-1": ("testPreviewReel3StationWalk", 122.9, 125.4, 1.2),
-    "walk-2": ("testPreviewReel3StationWalk", 129.9, 133.2, 1.6),
-    "route": ("testPreviewReel4RouteSearch", 113.8, 119.2, 1.0),
+    "bus": ("day/testPreviewReel1LiveBus", 173.5, 190.6, 1.8),
+    "search": ("slow/testPreviewReel2PlanTrip", 64.0, 76.5, 4.5),
+    "choices": ("slow/testPreviewReel2PlanTrip", 100.4, 117.6, 4.0),
+    "steps": ("slow/testPreviewReel2PlanTrip", 148.5, 168.4, 4.0),
+    "stop": ("slow/testPreviewReel3StationWalk", 133.6, 138.4, 2.0),
+    "walk": ("slow/testPreviewReel3StationWalk", 154.9, 181.0, 6.5),
 }
 
 
@@ -52,21 +49,27 @@ def repeats(path):
     return sum(1 for v in change if v < 0.05) / max(1, len(change))
 
 
+def cut(source, name):
+    reel, first, last, speed = CLIPS[name]
+    folder, reel = reel.split("/")
+    first -= LEAD * speed
+    out = OUT / f"{name}.mp4"
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{first:.3f}", "-to", f"{last:.3f}", "-i", str(source / folder / f"preview-{reel}.mp4"),
+        "-vf", f"setpts=(PTS-STARTPTS)/{speed},scale=1108:-2:flags=lanczos,crop=1108:2400,"
+               "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none,format=yuv420p",
+        "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "19", "-g", "15", "-movflags", "+faststart", str(out)], check=True)
+    seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
+    return f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames"
+
+
 def main():
-    source = Path(sys.argv[1])
-    wanted = sys.argv[2:]
+    source = Path(sys.argv[1])  # holds day/ and slow/, each with that run's preview-*.mp4
+    names = [name for name in CLIPS if not sys.argv[2:] or name in sys.argv[2:]]
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, (reel, first, last, speed) in CLIPS.items():
-        if wanted and name not in wanted:
-            continue
-        first -= LEAD * speed
-        out = OUT / f"{name}.mp4"
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{first:.3f}", "-to", f"{last:.3f}", "-i", str(source / f"preview-{reel}.mp4"),
-            "-vf", f"setpts=(PTS-STARTPTS)/{speed},scale=1108:-2:flags=lanczos,crop=1108:2400,"
-                   "minterpolate=fps=30:mi_mode=mci:mc_mode=aobmc:me_mode=bidir:vsbmc=1:scd=none,format=yuv420p",
-            "-an", "-c:v", "libx264", "-preset", "slow", "-crf", "19", "-g", "15", "-movflags", "+faststart", str(out)], check=True)
-        seconds = float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", str(out)]))
-        print(f"{name}: {seconds:.2f} s, {out.stat().st_size // 1024} KB, {repeats(out) * 100:.0f}% repeated frames", flush=True)
+    # Estimating motion is slow and single-threaded, so the clips are cut side by side.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for line in pool.map(lambda name: cut(source, name), names):
+            print(line, flush=True)
 
 
 if __name__ == "__main__":
