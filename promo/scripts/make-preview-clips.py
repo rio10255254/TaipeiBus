@@ -51,7 +51,7 @@ CLIPS = {
     # sheet's title bar and its button.
     "steps": ("day/testPreviewReel2PlanTrip", 138.5, 150.0, 1.0, 340, 2150),
     "stop": ("slow/testPreviewReel3StationWalk", 137.2, 141.6, 1.5),
-    "walk": ("slow/testPreviewReel3StationWalk", 154.9, 181.0, 5.6),
+    "walk": ("slow/testPreviewReel3StationWalk", 155.2, 181.0, "even", 3.4),
 }
 
 
