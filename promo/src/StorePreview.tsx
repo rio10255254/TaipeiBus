@@ -6,6 +6,10 @@ import timings from './timing.json';
 import { FONT, LATIN } from './fonts';
 import { clamp, lerp, pop, ramp } from './kit';
 import { C } from './theme';
+import { BusScene } from './sim/BusScene';
+import { Touch } from './sim/chrome';
+import { TripScene } from './sim/TripScene';
+import { WalkScene } from './sim/WalkScene';
 
 /**
  * The App Store's app preview (886 × 1920, 30 fps). Apple allows only screen recordings of the app
@@ -30,8 +34,10 @@ type Enter = 'cut' | 'blend' | 'left' | 'right' | 'through';
 type Clip = {
   /** The line this footage plays under, and how many seconds into that line it cuts in (or `t`, a second of the film). */
   line: number; at?: number; t?: number;
-  /** A file in public/preview, the second of it on screen at the cut, and how fast it plays. */
-  file: string; from: number; rate?: number;
+  /** A recording: a file in public/preview, the second of it on screen at the cut, and how fast it plays. */
+  file?: string; from?: number; rate?: number;
+  /** Or a shot drawn here: the app's map rendered frame by frame, with the times (seconds into the shot) of its touches. */
+  sim?: 'bus' | 'trip' | 'walk'; at1?: number; at2?: number;
   /** How the screen arrives over the one before; `blend` is for two takes of the same still screen. */
   enter?: Enter;
   camera?: Key[];
@@ -66,29 +72,11 @@ function cameraAt(clip: Clip, local: number, length: number) {
   return { s, tx: Math.min(0, Math.max(W - W * s, W / 2 - x * s)), ty: Math.min(0, Math.max(H - H * s, H / 2 - y * s)) };
 }
 
-const Touch: React.FC<{ x: number; y: number; t: number; at: number }> = ({ x, y, t, at }) => {
-  if (t < at - 0.3 || t > at + 0.95) return null;
-  const down = ramp(t, at - 0.26, at, Easing.out(Easing.cubic)) * (1 - ramp(t, at + 0.1, at + 0.45));
-  const ring = ramp(t, at, at + 0.6, Easing.out(Easing.cubic)), ring2 = ramp(t, at + 0.12, at + 0.9, Easing.out(Easing.cubic));
-  const circle = (size: number, k: number, width: number) => (
-    <div style={{ position: 'absolute', left: -size / 2, top: -size / 2, width: size, height: size, borderRadius: '50%',
-      border: `${width}px solid rgba(255,185,64,${0.95 * (1 - k)})`, transform: `scale(${0.4 + k * 1.25})` }} />
-  );
-  return (
-    <div style={{ position: 'absolute', left: x, top: y, width: 0, height: 0 }}>
-      {circle(170, ring, 6)}
-      {t > at + 0.12 ? circle(240, ring2, 4) : null}
-      <div style={{ position: 'absolute', left: -44, top: -44, width: 88, height: 88, borderRadius: '50%', background: 'rgba(255,255,255,.94)',
-        boxShadow: '0 10px 26px rgba(10,20,40,.5), inset 0 0 0 5px rgba(255,185,64,.95)', opacity: down, transform: `scale(${1.35 - 0.35 * down})` }} />
-    </div>
-  );
-};
-
 /** One take of the recording, as a screen on the page. */
 const Screen: React.FC<{ clip: Clip; start: number; end: number; next?: Enter; t: number; leave: number }> = ({ clip, start, end, next, t, leave }) => {
   const rate = clip.rate ?? 1;
   const enter = start <= 0 ? 'cut' : clip.enter ?? 'left';
-  const lead = enter === 'cut' ? 0 : Math.min(LEAD, clip.from / rate);
+  const lead = enter === 'cut' ? 0 : clip.sim ? LEAD : Math.min(LEAD, (clip.from ?? 0) / rate);
   const first = Math.round((start - lead) * PREVIEW.fps);
   const leaving = next !== undefined && next !== 'cut' && next !== 'blend';
   // A screen stays under the next one only while that one is still arriving.
@@ -116,8 +104,11 @@ const Screen: React.FC<{ clip: Clip; start: number; end: number; next?: Enter; t
         boxShadow: '0 46px 110px rgba(2,6,16,.6), 0 10px 30px rgba(2,6,16,.38)' }}>
         <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transformOrigin: '0 0', transform: `scale(${K})` }}>
           <div style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, transformOrigin: '0 0', transform: `translate(${cam.tx}px, ${cam.ty}px) scale(${cam.s})` }}>
-            <OffthreadVideo src={staticFile(`preview/${clip.file}`)} muted startFrom={Math.max(0, Math.round((clip.from - lead * rate) * PREVIEW.fps))} playbackRate={rate}
-              style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, objectFit: 'cover' }} />
+            {clip.sim === 'bus' ? <BusScene t={Math.max(0, local)} tap={clip.at1 ?? 5} /> : clip.sim === 'trip' ? <TripScene t={Math.max(0, local)} />
+              : clip.sim === 'walk' ? <WalkScene t={Math.max(0, local)} open={clip.at1 ?? 0.3} go={clip.at2 ?? 1.5} /> : (
+                <OffthreadVideo src={staticFile(`preview/${clip.file}`)} muted startFrom={Math.max(0, Math.round(((clip.from ?? 0) - lead * rate) * PREVIEW.fps))} playbackRate={rate}
+                  style={{ position: 'absolute', left: 0, top: 0, width: W, height: H, objectFit: 'cover' }} />
+              )}
             {(clip.spots ?? []).map((spot, j) => {
               const k = ramp(local, spot.at, spot.at + 0.35, glide) * (1 - ramp(local, spot.until, spot.until + 0.3, glide));
               if (k <= 0.002) return null;
