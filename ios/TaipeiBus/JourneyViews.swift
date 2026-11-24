@@ -96,6 +96,7 @@ struct JourneyPlanningView: View {
                     .smoothChanges(searchingPlaces)
                     .smoothChanges(showingItinerary)
                     .smoothChanges(model.language)
+                    .smoothChanges(assistant.busy)
                     .id("journey-scroll-top")
             }
             .onChange(of: showingItinerary) { _, showing in
@@ -116,7 +117,7 @@ struct JourneyPlanningView: View {
                     if case .walk(let index) = planner.currentStep { model.showWalkOnMap(index) }
                     dismiss()
                 } label: {
-                    Label(AppText.text("開始導航"), systemImage: "location.fill")
+                    Label(AppText.text("出發"), systemImage: "location.fill")
                         .liveFont(.body, weight: .bold).frame(maxWidth: .infinity, minHeight: 52)
                 }.buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go)).accessibilityIdentifier("journey-start-navigation")
                     .disabled(planner.selected.map { !planner.canUse($0) } ?? true)
@@ -158,7 +159,8 @@ struct JourneyPlanningView: View {
                             Button(live.text("更改")) { edit(origin: false) }
                         } else {
                             Button { model.finishJourney(); dismiss() } label: {
-                                Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.primary).frame(width: 36, height: 36)
+                                // A toolbar item carries its own glass on iOS 26, so this one stays a plain cross.
+                                Image(systemName: "xmark").font(.body.weight(.semibold)).foregroundStyle(.primary).frame(width: 44, height: 44).contentShape(Rectangle())
                             }.accessibilityLabel(AppText.text("關閉路線"))
                                 .accessibilityIdentifier("journey-close")
                         }
@@ -166,7 +168,6 @@ struct JourneyPlanningView: View {
                     if !planner.started, !showingItinerary {
                         ToolbarItem(placement: .topBarLeading) {
                             Menu {
-                                Button(live.text("查看行程")) { showingItinerary = true; expand() }.disabled(planner.selected == nil)
                                 Button(AppText.text("重新比較路線")) { planner.refreshRecommendations() }
                                 Button(AppText.text("推薦順序說明")) { showingRankingInfo = true }
                                 Button(AppText.text("儲存行程")) {
@@ -176,7 +177,7 @@ struct JourneyPlanningView: View {
                                     if model.purchases.hasPro { showingTripPreference = true } else { showingPro = true }
                                 }.accessibilityIdentifier("journey-preference-pro")
                                 Button(live.text("其他交通方式")) { planner.openAppleTransit() }
-                            } label: { Image(systemName: "ellipsis").foregroundStyle(.primary).frame(width: 36, height: 36) }
+                            } label: { Image(systemName: "ellipsis").foregroundStyle(.primary).frame(width: 44, height: 44).contentShape(Rectangle()) }
                                 .accessibilityLabel(live.text("更多行程選項"))
                                 .accessibilityIdentifier("journey-plan-more")
                         }
@@ -187,7 +188,7 @@ struct JourneyPlanningView: View {
         .alert(AppText.text("推薦順序"), isPresented: $showingRankingInfo) {
             Button(AppText.text("知道了"), role: .cancel) {}
         } message: {
-            Text(AppText.text("先確認實際步行，再比較可趕上的班次、候車與搭車時間。推薦兼顧時間、少走路與少轉乘；較快方案會另外保留。班距推估會標示範圍，班次不足則標示待確認。抵達時間包含走路、候車與搭車。"))
+            Text(AppText.text("推薦路線兼顧總時間、少走路與少轉乘；更快的路線會另外列出。抵達時間已包含走路、候車與搭車。"))
         }
         .sheet(isPresented:$showingPro) { ProPurchaseView(purchases:model.purchases) }
         .sheet(isPresented:$showingSaveJourney) { SaveJourneyView(model:model) }
@@ -386,7 +387,8 @@ struct JourneyPlanningView: View {
                     .onSubmit { submit() }
                 if resolving || search.searching { ProgressView().transition(.opacity) }
                 else if !query.isEmpty {
-                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText) }
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(MapChrome.secondaryText).frame(width: 44, height: 44).contentShape(Rectangle()) }
+                        .padding(.trailing, -12)
                         .accessibilityLabel(live.text("清除搜尋"))
                         .transition(.opacity.combined(with: .scale(scale: 0.6)))
                 }
@@ -394,7 +396,7 @@ struct JourneyPlanningView: View {
                     // Say it, as in any search box: a trip or a place is planned right here, a question goes
                     // to the voice assistant.
                     Button { focused = false; assistant.listen(inline: true) { text, others in hearSearch(text, others: others) } } label: {
-                        Image(systemName: "mic.fill").foregroundStyle(MapChrome.secondaryText).frame(width: 32, height: 32)
+                        Image(systemName: "mic.fill").foregroundStyle(MapChrome.secondaryText).frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                     .buttonStyle(.borderless).disabled(assistant.busy)
                     .accessibilityLabel(AppText.text("用說的搜尋")).accessibilityIdentifier("journey-search-voice")
@@ -443,11 +445,11 @@ struct JourneyPlanningView: View {
                 }
                 if !editingOrigin, !planner.started {
                     CommuteHabitSuggestions(habits: model.commuteHabits, library: model.commutes) { saved in
-                        model.previewSavedJourney(saved)
+                        Haptics.selection(); model.previewSavedJourney(saved)
                         focused = false; editingDestination = false; showingItinerary = false; collapse()
                     }
                     JourneySavedShortcuts(model: model) { saved in
-                        model.previewSavedJourney(saved)
+                        Haptics.selection(); model.previewSavedJourney(saved)
                         focused = false; editingDestination = false; showingItinerary = false; collapse()
                     }
                 }
@@ -569,6 +571,7 @@ struct JourneyPlanningView: View {
         }
     }
     private func choose(_ place: TravelPlace) {
+        Haptics.selection()
         searchReturnToItinerary = false
         focused = false
         if editingOrigin { planner.setOrigin(place, metadata: model.metadata) }
@@ -629,7 +632,7 @@ private struct JourneyBoardingContent: View {
                     .foregroundStyle(MapChrome.secondaryText)
                     .accessibilityLabel(live.text("到站時間說明"))
                     .popover(isPresented: $showTimingInfo) {
-                        Text(live.text("候車以官方下一班到站時間為主。官方未指定車牌；各車紀錄足夠才顯示分鐘數，否則先看位置與站數。地圖平順銜接已收到的定位，保留短暫緩衝。點「到站車輛」可查看時間說明。"))
+                        Text(live.text("倒數以官方下一班到站時間為準。個別車輛的資料足夠時才顯示分鐘數，否則顯示位置與站數。點「到站車輛」可看每輛車的說明。"))
                             .liveFont(.subheadline).padding(20).frame(maxWidth: 300).presentationCompactAdaptation(.popover)
                     }
             }
@@ -702,7 +705,7 @@ struct VehicleArrivalsView: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 BoardingVehicleRow(model: model, ride: ride, approach: approach, date: timeline.date)
                                 let display = model.arrivalDisplay(approach.vehicle, stopID: ride.boarding.id, at: timeline.date)
-                                DisclosureGroup("時間說明") {
+                                DisclosureGroup(AppText.text("到站時間說明")) {
                                     Text(display.positionLabel)
                                     if let prediction = display.prediction { Text(prediction.rangeLabel) }
                                     Text(display.explanation)
@@ -842,10 +845,10 @@ private struct OnboardStopsView: View {
                             HStack(spacing: 12) {
                                 Image(systemName: stop.id == ride.alighting.id ? "arrow.down.circle.fill" : "circle.fill")
                                     .font(.system(size: stop.id == ride.alighting.id ? 20 : 8))
-                                    .foregroundStyle(stop.id == ride.alighting.id ? Color.orange : Color.secondary).frame(width: 24)
+                                    .foregroundStyle(stop.id == ride.alighting.id ? MapChrome.caution : Color.secondary).frame(width: 24)
                                 VStack(alignment: .leading, spacing: 3) {
                                     BilingualName(stop).liveFont(.subheadline, weight: stop.id == ride.alighting.id ? .bold : .regular)
-                                    if stop.id == ride.alighting.id { Text(AppText.text("在這裡下車")).liveFont(.caption).foregroundStyle(.orange) }
+                                    if stop.id == ride.alighting.id { Text(AppText.text("在這裡下車")).liveFont(.caption).foregroundStyle(MapChrome.caution) }
                                 }
                                 Spacer(minLength: 4)
                                 VStack(alignment: .trailing, spacing: 2) {
@@ -885,7 +888,7 @@ private struct BoardedVehiclePicker: View {
                     if vehicles.isEmpty { Text(AppText.text("暫無車輛位置，稍後再選擇")).foregroundStyle(MapChrome.secondaryText) }
                     ForEach(vehicles) { approach in
                         Button {
-                            model.confirmBoardedVehicle(approach.vehicle, ride: ride); dismiss()
+                            Haptics.selection(); model.confirmBoardedVehicle(approach.vehicle, ride: ride); dismiss()
                         } label: {
                             HStack {
                                 Text(approach.vehicle.plate).monospaced()
@@ -900,7 +903,7 @@ private struct BoardedVehiclePicker: View {
         }.presentationDetents([.medium, .large])
             .sheet(isPresented: $showingScanner) {
                 BoardingPlateScanner(model: model, ride: ride) { bus in
-                    model.confirmBoardedVehicle(bus, ride: ride)
+                    Haptics.selection(); model.confirmBoardedVehicle(bus, ride: ride)
                     showingScanner = false; dismiss()
                 }
             }
@@ -1057,7 +1060,7 @@ private struct JourneyWaitingActions: View {
                         .liveFont(.body, weight: .semibold).fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, minHeight: 50)
                 }.buttonStyle(MapActionStyle(prominent: stillWalking)).tripStageMatch("dock-secondary")
                     .disabled(planner.selected?.verified != true || planner.selected?.walkIssue != nil)
-                    .accessibilityHint(AppText.text("在目前地圖查看步行路線"))
+                    .accessibilityHint(cycling ? AppText.text("在地圖查看騎乘路線") : AppText.text("在目前地圖查看步行路線"))
                     .accessibilityIdentifier("journey-walk-to-stop")
                 }
                 Button(action: board) {
@@ -1339,10 +1342,12 @@ struct JourneyOptionsView: View {
             }
             if planner.comparisonChanged, !planner.checkingWalks, !compact {
                 Button { planner.refreshRecommendations() } label: {
-                    Label(AppText.text("查看推薦"), systemImage: "arrow.clockwise").liveFont(.subheadline).frame(minHeight: 44)
+                    Label(AppText.text("查看推薦"), systemImage: "arrow.uturn.backward").liveFont(.subheadline).frame(minHeight: 44)
                 }.accessibilityIdentifier("journey-refresh-options")
             }
         }
+        // The placeholder rows give way to the first routes instead of being swapped for them.
+        .animation(InterfaceMotion.reduced(systemReduceMotion) ? nil : InterfaceMotion.content, value: awaitingFirst)
     }
     @ViewBuilder private var emptyOptionActions: some View {
         Button { planner.plan(metadata:model.metadata) } label: {
@@ -1443,6 +1448,7 @@ struct JourneyOptionsView: View {
                     .liveFont(compact ? .title2 : .title3, weight: .bold, design: .rounded)
                     .monospacedDigit().fixedSize(horizontal: false, vertical: true).layoutPriority(1)
                     .accessibilityIdentifier("journey-preview-duration-" + option.id)
+                    .liveNumericText(timing?.conciseLabel, countsDown: true)
                 if let label = planner.optionLabels[option.id] {
                     Text(live.text(label == "推薦" && planner.checkingWalks ? "比較中" : label)).liveFont(.caption2, weight: .semibold).foregroundStyle(MapChrome.secondaryText)
                         .lineLimit(2).fixedSize(horizontal: false, vertical: true)
@@ -1458,7 +1464,7 @@ struct JourneyOptionsView: View {
             }
             if let warning = model.noticeWarning(option) {
                 Label(AppText.text("公告提到 %@：%@", warning.route, warning.notice.title), systemImage: "exclamationmark.triangle.fill")
-                    .liveFont(.caption).foregroundStyle(.orange).lineLimit(spacious ? nil : 2)
+                    .liveFont(.caption).foregroundStyle(MapChrome.caution).lineLimit(spacious ? nil : 2)
                     .transition(.opacity.combined(with: .move(edge: .top)))
                     .accessibilityIdentifier("journey-notice-" + option.id)
             }
@@ -1513,6 +1519,7 @@ private struct JourneyArrivalTime: View {
     let duration: JourneyDuration
     var body: some View {
         Text(duration.expectedArrivalLabel + (duration.timeZoneNote().map { " · " + $0 } ?? ""))
+            .liveNumericText(duration.expectedArrivalLabel)
             .liveFont(.subheadline).foregroundStyle(MapChrome.secondaryText).monospacedDigit()
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -1526,8 +1533,8 @@ private struct JourneyTimingExplanation: View {
             HStack(alignment: .top, spacing: 12) {
                 Text(AppText.text("行程時間說明")).liveFont(.headline).fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
-                Button(action: close) { Image(systemName: "xmark.circle.fill").liveFont(.title3).frame(width: 48, height: 48) }
-                    .buttonStyle(.plain).foregroundStyle(MapChrome.secondaryText)
+                Button(action: close) { CloseGlyph() }
+                    .buttonStyle(.plain)
                     .accessibilityLabel(AppText.text("關閉時間說明")).accessibilityIdentifier("journey-time-close")
             }.padding(.horizontal, 20).padding(.top, 12)
             ScrollView { breakdown }
@@ -1574,7 +1581,7 @@ struct JourneyItineraryView: View {
                             HStack(alignment: .top, spacing: 8) {
                                 VStack(alignment: .leading, spacing: 4) {
                                     Text(planner.started ? duration.summaryLabel(remaining: true) : duration.conciseLabel)
-                                        .liveFont(.headline).monospacedDigit()
+                                        .liveFont(.headline).monospacedDigit().liveNumericText(duration.conciseLabel, countsDown: true)
                                     JourneyArrivalTime(duration: duration)
                                 }.accessibilityElement(children: .combine).accessibilityIdentifier("journey-duration-breakdown")
                                 Spacer()
@@ -1641,7 +1648,7 @@ private struct JourneyWalkingStep: View {
             Spacer(minLength: 0)
             if !walked, !leg.internalTransfer, planner.currentStep == .walk(index) {
                 Button { model.showWalkOnMap(index); showMap() } label: {
-                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 40, height: 44)
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44)
                 }.accessibilityLabel(planner.started ? AppText.text("步行導航到%@", target) : AppText.text("預覽步行至%@", target))
                     .accessibilityIdentifier("journey-in-app-walk-\(index)")
             }
@@ -1697,7 +1704,7 @@ private struct JourneyCyclingStep: View {
             Spacer(minLength: 0)
             if !done, planner.currentStep == .walk(index) {
                 Button { model.showWalkOnMap(index); showMap() } label: {
-                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 40, height: 44)
+                    Image(systemName: "arrow.triangle.turn.up.right.diamond").liveFont(.title3).frame(width: 44, height: 44)
                 }.accessibilityLabel(AppText.text("在地圖查看騎乘路線"))
                     .accessibilityIdentifier("journey-in-app-bike-\(index)")
             }
@@ -1716,7 +1723,7 @@ struct BikeStationAlert: View {
     var body: some View {
         // Tap when the station the rider is heading to stops being usable, not when an
         // existing alert is shown again.
-        content.sensoryFeedback(.warning, trigger: planner.bikeAlert?.station.id) { _, new in new != nil }
+        content.smoothChanges(planner.bikeAlert?.station.id).sensoryFeedback(.warning, trigger: planner.bikeAlert?.station.id) { _, new in new != nil }
     }
     @ViewBuilder private var content: some View {
         if let alert = planner.bikeAlert {
@@ -1852,7 +1859,7 @@ struct JourneyArrivalView: View {
                     Text(AppText.text("上車前請確認「%@」走法。", ride.route.localizedDisplayName)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText)
                 }
                 if let eta, eta >= 0, let duration = walk?.duration, duration > Double(eta) + 45 {
-                    Text(live.text("步行時間較長，這班可能趕不上。")).liveFont(.caption).foregroundStyle(.orange)
+                    Text(live.text("步行時間較長，這班可能趕不上。")).liveFont(.caption).foregroundStyle(MapChrome.caution)
                 }
             }
         }
@@ -1895,9 +1902,8 @@ struct JourneyAlternativePrompt: View {
                     .padding(.horizontal, 14).frame(minHeight: 44)
             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-alternative-accept")
             Button { model.dismissJourneySuggestion() } label: {
-                Image(systemName: "xmark").liveFont(.subheadline, weight: .semibold).frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }.buttonStyle(.plain).foregroundStyle(MapChrome.secondaryText)
+                CloseGlyph()
+            }.buttonStyle(.plain)
                 .accessibilityLabel(AppText.text("保留目前路線"))
                 .accessibilityIdentifier("journey-alternative-dismiss")
         }.padding(.leading, 16).padding(.trailing, 5).padding(.vertical, 10)
@@ -1907,6 +1913,7 @@ struct JourneyAlternativePrompt: View {
 
 struct JourneyGuideCard: View {
     @Environment(\.liveSettings) private var live
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ObservedObject var model: TransitAppModel
     @ObservedObject var planner: JourneyPlannerModel
     let showJourney: () -> Void
@@ -1939,7 +1946,7 @@ struct JourneyGuideCard: View {
                         }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
                     } else if case .ride(let index) = planner.currentStep {
                         let ride = option.rides[index]
-                        HStack(spacing: 8) {
+                        HStack(spacing: 6) {
                             if ride.route.mode != .bus {
                                 TimelineView(.periodic(from:.now,by:1)) { timeline in
                                     MetroOnboardSummary(model:model,ride:ride,date:timeline.date,compact:true)
@@ -1948,11 +1955,11 @@ struct JourneyGuideCard: View {
                             Button { chooseVehicle = true } label: {
                                 Label(model.onboardPlate(for: ride) ?? AppText.text("選擇搭乘車牌"), systemImage: "bus")
                                     .liveFont(.subheadline, weight: .semibold).monospaced().lineLimit(1).minimumScaleFactor(0.8)
-                                    .padding(.horizontal, 14).frame(minHeight: 40)
+                                    .padding(.horizontal, 14).frame(minHeight: 44)
                             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("journey-onboard-vehicle")
                             if let bus = model.onboardVehicle(for: ride) {
                                 Button { model.trackApproachingVehicle(bus) } label: {
-                                    Image(systemName: "scope").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                                    Image(systemName: "scope").liveFont(.body, weight: .semibold).frame(width: 44, height: 44)
                                 }.buttonStyle(MapActionStyle()).accessibilityLabel(AppText.text("追蹤 ") + bus.plate)
                             }
                             }
@@ -1960,7 +1967,7 @@ struct JourneyGuideCard: View {
                             // Alighting reminder (Pro): a filled bell while it will notify before the stop.
                             Button { model.toggleAlightReminder() } label: {
                                 Image(systemName: model.alightReminderActive ? "bell.badge.fill" : model.purchases.hasPro ? "bell.slash" : "bell")
-                                    .liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                                    .liveFont(.body, weight: .semibold).frame(width: 44, height: 44)
                                     .symbolSwap(model.alightReminderActive).symbolBounce(model.alightReminderActive)
                             }.buttonStyle(MapActionStyle())
                                 .accessibilityLabel(model.alightReminderActive ? AppText.text("關閉下車提醒") : AppText.text("下車提醒"))
@@ -1969,7 +1976,7 @@ struct JourneyGuideCard: View {
                             // Icon-sized like the bell beside it, so the plate never has to shrink.
                             Button { showRideStops = true } label: {
                                 // Stops joined by a line, distinct from the itinerary list in the header.
-                                Image(systemName: "point.3.filled.connected.trianglepath.dotted").liveFont(.body, weight: .semibold).frame(width: 40, height: 40)
+                                Image(systemName: "point.3.filled.connected.trianglepath.dotted").liveFont(.body, weight: .semibold).frame(width: 44, height: 44)
                             }
                             .buttonStyle(MapActionStyle(tint: Color.primary))
                             .sheetSource("ride-stops", in: sheetSpace)
@@ -1979,7 +1986,7 @@ struct JourneyGuideCard: View {
                         if model.alightReminderState == .needsPermission {
                             Button { model.requestAlightReminderAccess() } label: {
                                 Label(model.alightReminderStatus, systemImage: "bell.badge")
-                                    .liveFont(.caption, weight: .semibold).frame(minHeight: 40)
+                                    .liveFont(.caption, weight: .semibold).frame(minHeight: 44)
                             }.buttonStyle(MapActionStyle(tint: MapChrome.caution))
                                 .accessibilityIdentifier("journey-reminder-permission")
                         }
@@ -1987,7 +1994,7 @@ struct JourneyGuideCard: View {
                             let next = option.rides[index + 1]
                             Text(AppText.text("接著轉搭 %@ · %@", next.route.localizedName, next.boarding.localizedName)).liveFont(.caption).foregroundStyle(MapChrome.secondaryText).lineLimit(2)
                         }
-                        HStack(spacing: 12) {
+                        (dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))) {
                             Button { model.returnToWaiting() } label: {
                                 Text(live.text("返回等車")).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
                             }.buttonStyle(MapActionStyle(tint: Color.primary)).tripStageMatch("dock-secondary")
@@ -2011,12 +2018,12 @@ struct JourneyGuideCard: View {
                             JourneyBikeStations(model: model, bike: bike, index: index, compact: true)
                             BikeStationAlert(model: model, planner: planner)
                         }
-                        HStack(spacing: 12) {
+                        (dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(spacing: 12)) : AnyLayout(HStackLayout(spacing: 12))) {
                             Button { if !planner.started { planner.begin() }; model.showWalkOnMap(index) } label: {
                                 Label(cycling ? live.text("看騎乘路線") : live.text("看步行路線"),
                                       systemImage: cycling ? "bicycle" : "figure.walk")
                                     .lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity, minHeight: 50)
-                            }.buttonStyle(MapActionStyle()).tripStageMatch("dock-secondary").accessibilityHint(AppText.text("在目前地圖查看步行路線"))
+                            }.buttonStyle(MapActionStyle()).tripStageMatch("dock-secondary").accessibilityHint(cycling ? AppText.text("在地圖查看騎乘路線") : AppText.text("在目前地圖查看步行路線"))
                             Button { if !planner.started { planner.begin() }; planner.advance() } label: {
                                 Text(live.text("已抵達")).lineLimit(1).frame(maxWidth: .infinity, minHeight: 50)
                             }.buttonStyle(MapActionStyle(prominent: true)).tripStageMatch("dock-primary")
@@ -2292,7 +2299,8 @@ private struct RidingBannerContent: View {
                     BannerTitle(text: (progress?.distance ?? 0) < -20 ? AppText.text("已通過「%@」", ride.alighting.localizedName) : live.text("下車 · ") + ride.alighting.localizedName)
                     if live.language == .english { Text(ride.alighting.name).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72)) }
                 }
-                Spacer(minLength: 4)
+                // The stop to get off at takes the room; the time keeps a fixed column, as in the waiting banner.
+                .frame(maxWidth: .infinity, alignment: .leading).layoutPriority(1)
                 VStack(alignment: .trailing, spacing: 2) {
                     let alighting = model.onboardStopTimeLabel(ride, stopID:ride.alighting.id,at:date)
                     Text(alighting)
@@ -2302,7 +2310,7 @@ private struct RidingBannerContent: View {
                         Text(AppText.remainingStops(count+1)).liveFont(.caption).foregroundStyle(Color.white.opacity(0.72))
                             .liveNumericText(count, countsDown: true)
                     }
-                }.frame(maxWidth: large ? .infinity : live.language == .english ? 120 : 112, alignment: large ? .leading : .trailing).tripStageMatch("banner-figure")
+                }.frame(width: large ? nil : live.language == .english ? 120 : 112, alignment: large ? .leading : .trailing).tripStageMatch("banner-figure")
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
             .accessibilityElement(children: .combine).accessibilityIdentifier("journey-alighting-time")
@@ -2360,9 +2368,9 @@ struct MetroBoardingRows: View {
                     Text(wait).liveFont(.subheadline, weight: .bold).monospacedDigit().liveNumericText(wait, countsDown: true)
                     if let tracked = model.nextTrackedTrain(routeID: ride.route.id, direction: ride.direction, boardingStationID: ride.boarding.stationID,
                                                             alightingStationID: ride.alighting.stationID, at: date) {
-                        Button { model.toggleTrainTracking(tracked.train.id) } label: {
+                        Button { model.toggleTrainTracking(tracked.train.id); Haptics.toggle(model.selectedTrainID == tracked.train.id) } label: {
                             Label(model.selectedTrainID == tracked.train.id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
-                                .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44)
+                                .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44).smoothChanges(model.selectedTrainID)
                         }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-estimated")
                             .accessibilityHint(model.selectedTrainID == tracked.train.id ? AppText.text("停止追蹤") : "")
                     }
@@ -2376,9 +2384,9 @@ struct MetroBoardingRows: View {
                         let countdown = MetroCountdown.label(arrival.remaining(at: date))
                         Text(countdown).liveFont(.subheadline, weight: .semibold).monospacedDigit().liveNumericText(countdown, countsDown: true)
                         if let id = arrival.trainID, model.metroTrain(id) != nil {
-                            Button { model.toggleTrainTracking(id) } label: {
+                            Button { model.toggleTrainTracking(id); Haptics.toggle(model.selectedTrainID == id) } label: {
                                 Label(model.selectedTrainID == id ? AppText.text("追蹤中") : AppText.text("追蹤"), systemImage: "scope")
-                                    .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44)
+                                    .liveFont(.caption, weight: .semibold).lineLimit(1).fixedSize().padding(8).frame(minHeight: 44).smoothChanges(model.selectedTrainID)
                             }.buttonStyle(MapActionStyle()).accessibilityIdentifier("metro-track-arrival-" + id)
                                 .accessibilityHint(model.selectedTrainID == id ? AppText.text("停止追蹤") : "")
                         }

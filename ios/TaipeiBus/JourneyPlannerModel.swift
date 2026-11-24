@@ -1344,14 +1344,17 @@ final class JourneyPlannerModel: ObservableObject {
             }.value
             guard !Task.isCancelled, token == generation else { return }
             // Verify several families plus their alternative platforms, not just the three eventual rows.
-            var selected: [TransitTrip] = []
+            // Half of each batch is kept for routes that need no rental: a bicycle shortens nearly every
+            // route, so by score alone its variants took every street check and the plain metro or bus
+            // routes were never confirmed, and so never offered.
             var families = Set<String>()
-            for trip in ordered where families.insert(trip.familyID + "|" + trip.bikeConnections.keys.sorted().map(String.init).joined(separator: "-")).inserted {
-                selected.append(trip); if selected.count >= min(12, budget.verification) { break }
+            let distinct = ordered.filter { trip in
+                families.insert(trip.familyID + "|" + trip.bikeConnections.keys.sorted().map(String.init).joined(separator: "-")).inserted
             }
-            for trip in ordered where !selected.contains(where: { $0.id == trip.id }) {
-                selected.append(trip); if selected.count >= budget.verification { break }
-            }
+            var selected = MultimodalPlanner.balanced(distinct, limit: min(12, budget.verification))
+            let leading = Set(selected.map(\.id))
+            selected += MultimodalPlanner.balanced(ordered.filter { !leading.contains($0.id) },
+                                                   limit: max(0, budget.verification - selected.count))
             if !complete { selected = Array(selected.filter { $0.bikeConnections.isEmpty }.prefix(1)) }
             if selected.isEmpty, !complete { selected = Array(ordered.filter { $0.bikeConnections.count <= 1 }.prefix(1)) }
             let building = ProcessInfo.processInfo.systemUptime

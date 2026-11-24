@@ -395,7 +395,16 @@ public struct MultimodalPlanner: Sendable {
             var representative: [Candidate] = []
             for pool in grouped.values { representative.append(contentsOf:pool.sorted { $0.score < $1.score }.prefix(3)) }
             representative.sort { $0.score == $1.score ? $0.label.family < $1.label.family : $0.score < $1.score }
-            let retained = representative.prefix(maximum)
+            // A bicycle makes nearly every route a little faster, so by score alone its variants fill the whole
+            // list and the plain ways of making the trip (the metro with a transfer, a second bus) never reach
+            // the rider. Half the places are kept for routes that need no rental; whatever they do not use
+            // goes to the best of the rest.
+            let plain = representative.filter { $0.label.bikes.isEmpty && $0.bike == nil }.prefix(maximum / 2)
+            let plainCount = plain.count
+            let withBikes = representative.filter { !($0.label.bikes.isEmpty && $0.bike == nil) }.prefix(maximum - plainCount)
+            let spare = maximum - plainCount - withBikes.count
+            let retained = Array(plain) + Array(withBikes) +
+                Array(representative.filter { $0.label.bikes.isEmpty && $0.bike == nil }.dropFirst(plainCount).prefix(max(0, spare)))
             let results = retained.map { candidate -> TransitTrip in
                 let label = candidate.label
                 let rides = label.segments.map { segment -> TransitRide in
@@ -681,6 +690,19 @@ public struct MultimodalPlanner: Sendable {
         let results = materialize(candidates, maximum: max(36, limit * 2))
         let unique = Dictionary((bus + results).map { ($0.id, $0) }, uniquingKeysWith: { a, b in a.score < b.score ? a : b })
         if profile { print("PLANNING_PHASE complete seconds=\(ProcessInfo.processInfo.systemUptime - began) materialized=\(unique.count)") }
-        return TripRanking.recommended(Array(unique.values), estimates: estimates, at: date, preferences: preferences, limit: limit, diverse: false)
+        let ordered = TripRanking.recommended(Array(unique.values), estimates: estimates, at: date, preferences: preferences,
+                                              limit: unique.count, diverse: false)
+        return Self.balanced(ordered, limit: limit)
+    }
+
+    /// The best `limit` trips, with half the places kept for trips that need no bicycle so that rentals,
+    /// which shave time off almost any route, cannot crowd every other way of travelling out of the list.
+    /// The order given (best first) is preserved.
+    public static func balanced(_ ordered: [TransitTrip], limit: Int) -> [TransitTrip] {
+        guard ordered.count > limit else { return ordered }
+        let plain = ordered.filter(\.bikeConnections.isEmpty)
+        var kept = Set(plain.prefix(limit / 2).map(\.id))
+        for trip in ordered where kept.count < limit { kept.insert(trip.id) }
+        return ordered.filter { kept.contains($0.id) }
     }
 }

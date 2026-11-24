@@ -1,0 +1,10 @@
+{
+ "kickers": ["即時公車", "車輛動態", "路線比較", "完整步驟", "站牌與步行"],
+ "clips": [
+  {"line": 0, "sim": "bus", "at1": 5.07, "camera": [{"at": 0, "s": 1.0}, {"at": 8.5, "s": 1.0}]},
+  {"line": 2, "file": "search.mp4", "from": 0.3, "enter": "left", "camera": [{"at": 0, "x": 443, "y": 600, "s": 1.07}, {"at": 2.2, "x": 443, "y": 700, "s": 1.02}], "taps": [{"at": 1.5, "x": 183, "y": 805}]},
+  {"line": 2, "at": 1.8, "sim": "trip", "enter": "through", "camera": [{"at": 0, "s": 1.0}, {"at": 3.2, "s": 1.0}], "spots": [{"at": 2.0, "until": 2.75, "rect": [50, 1338, 850, 1682], "radius": 44}], "taps": [{"at": 2.85, "x": 756, "y": 1578}]},
+  {"line": 3, "file": "steps.mp4", "from": 0.3, "enter": "left", "camera": [{"at": 0, "s": 1.0}, {"at": 4.5, "s": 1.03}]},
+  {"line": 4, "sim": "walk", "at1": 0.33, "at2": 1.5, "enter": "left", "camera": [{"at": 0, "s": 1.0}, {"at": 5, "s": 1.0}]}
+ ]
+}

@@ -1,4 +1,24 @@
-# Approved App Store gallery
+# App Store gallery for 1.9.0 (draft)
+
+Eight images, in the order of `screenshotOrder` in `app-store.zh-Hant.json`: the live 3D bus, the
+next-bus card, route comparison, a YouBike connection with live dock counts, in-app walking, a
+stop's arrivals, the route keypad and a closing page. They are drawn by
+`render-store-pages.mjs` (a coloured page, a label, a bold headline with one highlighted phrase,
+a line under it and a large real screen in a phone), after the WordCat gallery's layout.
+
+Every screen is an unmodified capture from `AppStoreScreenshotTests` on the iPhone 17 Pro Max
+simulator with live Taipei data (`ios.yml`, usability scope `app-store-features`; the runner is
+set to Taipei's time zone so the status bar agrees with the times on screen). The sources are in
+`screenshot-sources/store-1.9.0-*.png`; their hashes and capture runs are in
+`screenshots/manifest.json`. No vehicle, arrival time, dock count or control is drawn into a screen.
+
+```sh
+node ios/release/render-store-pages.mjs            # writes ios/release/screenshots/NN-*.png
+```
+
+The sections below describe the earlier galleries and are kept for their provenance.
+
+## Approved gallery for 1.8.0
 
 The nine approved images are now attached to the paused **1.8.0 (124.1.0)**
 App Store draft. Their original capture provenance below is retained; no pixels

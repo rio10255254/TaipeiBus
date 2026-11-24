@@ -54,7 +54,7 @@ struct OfficialNoticesView: View {
             Section {
                 Text(AppText.text("來源：臺北市公共運輸處新聞稿。發布日期不等於管制日期；請核對原文及附件。公告可能包含已結束的措施，未列出也不代表沒有異動。"))
                     .font(.footnote).foregroundStyle(.secondary)
-                if let date = store.fetchedAt { Text(AppText.text("取得時間：%@", date.formatted(date: .abbreviated, time: .shortened))) }
+                if let date = store.fetchedAt { Text(AppText.text("取得時間：%@", date.formatted(date: .abbreviated, time: .shortened))).font(.footnote).foregroundStyle(.secondary) }
                 if store.failed {
                     Text(AppText.text("無法更新公告；下列內容可能不是最新資料，請查看官網。"))
                     Button(AppText.text("重試")) { Task { await store.load() } }
@@ -124,8 +124,8 @@ private struct OfficialNoticeDetail: View {
                         operation = Task { @MainActor in
                             do {
                                 let result = try await OnDeviceJourneyAssistant.excerpt(document)
-                                try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit
-                            } catch { if !Task.isCancelled { failed = true } }
+                                try Task.checkCancellation(); excerpts = result.paragraphs; credit = result.credit; Haptics.success()
+                            } catch { if !Task.isCancelled { failed = true; Haptics.warning() } }
                             busy = false
                         }
                     }.disabled(busy)
@@ -135,7 +135,7 @@ private struct OfficialNoticeDetail: View {
                 ForEach(Array(excerpts.enumerated()), id: \.offset) { Text($0.element) }
                 if let credit, !excerpts.isEmpty { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
             } header: { Text(AppText.text("原文重點摘錄")) }
-            footer: { Text(AppText.text("模型僅選取原文段落（同意線上理解時由 Anthropic 的 Claude 或 Groq 上的開源模型，否則在手機上），可能省略重要條件；請務必核對全文、管制日期、方向及附件。摘錄不會更動路線規劃或到站時間。")) }
+            footer: { Text(AppText.text("摘錄由 AI 從原文選出段落，可能漏掉重要條件；請核對全文、管制日期、方向及附件。")) }
             Section(AppText.text("公告全文")) { Text(notice.body).textSelection(.enabled) }
         }.navigationTitle(AppText.text("交通公告")).navigationBarTitleDisplayMode(.inline)
             .onDisappear { operation?.cancel() }

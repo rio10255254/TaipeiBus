@@ -168,8 +168,14 @@ struct TransitHomeView: View {
                 ZStack(alignment: .top) {
                     if model.metadata.routes.isEmpty, model.loadError != nil {
                         // Without any route data the app cannot plan; say it plainly instead of "updating".
-                        Text(live.text("路線資料暫時無法取得，請稍後再試")).liveFont(.caption).padding(12)
+                        // The notice is also the way out: a tap asks for the data again.
+                        Button { Haptics.selection(); model.retry() } label: {
+                            Label(live.text("無法取得路線資料 · 點一下重試"), systemImage: "arrow.clockwise")
+                                .liveFont(.caption, weight: .semibold).padding(12).frame(minHeight: 44)
+                        }
+                            .buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
                             .background(.regularMaterial, in: live.shape(.label))
+                            .accessibilityIdentifier("route-data-retry")
                             .padding(.top, 96 * CGFloat(live.appearance.spacingScale)).padding(.horizontal, 16 * CGFloat(live.appearance.spacingScale))
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
@@ -348,7 +354,7 @@ struct TransitHomeView: View {
                     HStack(spacing:8) {
                         ForEach(commutes.journeys) { saved in
                             Button {
-                                model.previewSavedJourney(saved); showJourneyItinerary = false
+                                Haptics.selection(); model.previewSavedJourney(saved); showJourneyItinerary = false
                                 journeyDetent = journeyPreviewDetent; showJourney = true
                             } label: {
                                 Label(saved.title,systemImage:saved.symbol).liveFont(.subheadline,weight:.semibold)
@@ -599,6 +605,10 @@ struct TransitHomeView: View {
         }
         .onChange(of: model.loading) { _, loading in
             if !loading, planner.destination != nil, planner.options.isEmpty { planner.plan(metadata: model.metadata) }
+        }
+        .onChange(of: model.mapDismissRevision) { _, _ in
+            // In the stop search the station goes back to the list it came from; otherwise its sheet closes.
+            if showSearch { model.returnToBrowse() } else { model.clearSelection(); showDetails = false }
         }
         .onChange(of: model.selectionRevision) { _, _ in
             let wasShowingDetails = showDetails
@@ -864,16 +874,13 @@ private struct MapPlaceCard: View {
             Button(action: route) {
                 Label(live.text("路線"), systemImage: "arrow.triangle.turn.up.right.diamond.fill")
                     .liveFont(.subheadline, weight: .semibold).labelStyle(.titleAndIcon)
-                    .padding(.horizontal, 14).frame(minHeight: 40)
+                    .padding(.horizontal, 14).frame(minHeight: 44)
             }
             .buttonStyle(MapActionStyle(prominent: true, tint: MapChrome.go))
             .accessibilityIdentifier("place-card-route")
-            Button(action: close) {
-                Image(systemName: "xmark").liveFont(.caption, weight: .bold).foregroundStyle(.secondary)
-                    .frame(width: 30, height: 30).background(Circle().fill(Color.secondary.opacity(0.14)))
-            }.buttonStyle(.plain).accessibilityLabel(live.text("關閉")).frame(width: 36, height: 44)
+            Button(action: close) { CloseGlyph() }.buttonStyle(.plain).accessibilityLabel(live.text("關閉"))
         }
-        .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 10)
+        .padding(.leading, 12).padding(.trailing, 0).padding(.vertical, 10)
         .phoneGlass(in: live.shape(.panel))
         .accessibilityElement(children: .contain).accessibilityIdentifier("place-card")
     }
@@ -922,21 +929,22 @@ private struct HomeSearchRow: View {
             .accessibilityLabel(live.text("搜尋目的地"))
             .accessibilityIdentifier("home-destination-search")
             if !hasSelection, let voice {
-                // The voice assistant: the moving colours of its own screen, in a button of its own, never
-                // content inside the search glass (there it rendered as a blurred glow on phones). The
-                // orb is drawn larger and clipped, so its colour fills the circle edge to edge.
+                // The voice assistant: the moving colours of its own screen, as light rather than a drawn
+                // button. Nothing clips or outlines it: the colour is strongest under the microphone and thins
+                // out past the control's own 56 points, spilling a little onto the glass beside it. The
+                // layout and the tap area stay the same circle as the other controls.
                 Button {
                     Haptics.stage()
                     voice()
                 } label: {
-                    VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true)
-                        .frame(width: 72, height: 72).frame(width: 56, height: 56)
-                        .clipShape(Circle())
-                        .overlay(Circle().strokeBorder(.white.opacity(0.35), lineWidth: 0.5))
-                        .shadow(color: Color(red: 0.5, green: 0.4, blue: 1).opacity(0.35), radius: 8, y: 3)
+                    VoiceOrb(mood: .calm, reduceMotion: reduceMotion, compact: true, diffuse: true)
+                        .frame(width: 100, height: 100).allowsHitTesting(false)
+                        .frame(width: 56, height: 56)
                         .contentShape(Circle())
                 }
                 .buttonStyle(VoicePressStyle())
+                // Under its neighbours, so the spill tints their glass instead of covering their symbols.
+                .zIndex(-1)
                 .accessibilityLabel(live.text("語音助理"))
                 .accessibilityIdentifier("home-voice")
             }
@@ -969,7 +977,7 @@ private struct HomeSearchRow: View {
                     Button {
                         if model.canReturnToRouteOverview { model.returnToRouteOverview() }
                         else if model.canReturnToRouteStation { model.returnToRouteStation() }
-                        else { model.clearSelection() }
+                        else { Haptics.selection(); model.clearSelection() }
                     } label: {
                         Image(systemName: "xmark").liveFont(.subheadline, weight: .bold).frame(width: 56, height: 56).contentShape(Circle())
                     }
@@ -1114,7 +1122,7 @@ private struct TransitPanel: View {
                 // Without route data nothing works, so say so plainly instead of "updating".
                 EmptyStateView(symbol: "wifi.exclamationmark", title: live.text("暫時無法取得站牌與路線"),
                                message: live.text("請確認網路連線後重新整理。")) {
-                    Button(live.text("重新整理")) { model.retry() }.buttonStyle(.bordered)
+                    Button(live.text("重新整理")) { Haptics.selection(); model.retry() }.buttonStyle(.bordered)
                         .accessibilityIdentifier("browse-load-retry")
                 }.frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -1149,6 +1157,7 @@ private struct TransitPanel: View {
         }
         .smoothChanges(model.mode)
         .smoothChanges(systemRouteKeyboard)
+        .smoothChanges(model.loading)
         .smoothChanges(isBrowsing)
         .smoothChanges(model.language)
         .onAppear {
@@ -1197,7 +1206,7 @@ private struct TransitPanel: View {
                     .liveFont(.title2, weight: .bold)
                 Spacer()
                 if model.mode == .stops {
-                    Button { searchFocused = false; model.browseNearMe() } label: {
+                    Button { Haptics.selection(); searchFocused = false; model.browseNearMe() } label: {
                         Image(systemName: "location.fill").frame(width: 44, height: 44).contentShape(Rectangle())
                     }
                         .accessibilityLabel(AppText.text("回到我附近")).accessibilityIdentifier("browse-near-me")
@@ -1209,7 +1218,7 @@ private struct TransitPanel: View {
                         .accessibilityLabel(AppText.text("在地圖查看站牌")).accessibilityIdentifier("station-results-map")
                         .disabled(stationResultQuery != model.query || stationResults.isEmpty)
                 }
-                Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44).contentShape(Rectangle()) }
+                Button { dismiss() } label: { CloseGlyph() }.buttonStyle(.plain)
                     .accessibilityLabel(AppText.text("返回地圖"))
             }
             HStack(spacing: 9) {
@@ -1252,7 +1261,7 @@ private struct TransitPanel: View {
 
     private var detailHeader: some View {
         HStack(alignment: .center, spacing: 8) {
-            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
+            Button { if model.canReturnToRouteOverview { model.returnToRouteOverview() } else if model.canReturnToRouteStation { model.returnToRouteStation() } else { Haptics.selection(); model.returnToBrowse() } } label: { Image(systemName: "chevron.left").liveFont(.body, weight: .semibold).frame(width: 44, height: 44) }
                 .accessibilityLabel(model.canReturnToRouteOverview ? AppText.text("返回路線") : model.canReturnToRouteStation ? AppText.text("返回站牌") : live.text("返回搜尋"))
             VStack(alignment: .leading, spacing: 3) {
                 Text(model.selectedStation?.localizedName ?? model.selectedVehicle?.localizedRouteName ?? model.selectedRouteName ?? AppText.text("公車動態"))
@@ -1271,7 +1280,7 @@ private struct TransitPanel: View {
                         .symbolSwap(saved).symbolBounce(saved)
                 }.accessibilityLabel(saved ? AppText.text("移除收藏站牌") : AppText.text("收藏站牌"))
             }
-            Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 44, height: 44) }
+            Button { dismiss() } label: { CloseGlyph() }.buttonStyle(.plain)
                 .accessibilityLabel(AppText.text("返回地圖")).accessibilityIdentifier("transit-details-close")
         }.padding(.leading, 6 * CGFloat(live.appearance.spacingScale)).padding(.trailing, 12 * CGFloat(live.appearance.spacingScale)).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
     }
@@ -1417,7 +1426,9 @@ private struct StationDetails: View {
         TimelineView(.periodic(from: .now, by: 15)) { timeline in
             let rows = StationArrival.rows(station: station, metadata: model.metadata, snapshot: model.snapshot, now: timeline.date)
             VStack(alignment: .leading, spacing: 0) {
-                Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                if !station.address.isEmpty {
+                    Text(station.address).liveFont(.caption).foregroundStyle(.secondary).padding(.bottom, 12 * CGFloat(live.appearance.spacingScale))
+                }
                 HStack(spacing: 8) {
                     Button { model.startStationWalk(station) } label: {
                         Label(live.text("步行"), systemImage: "figure.walk")
@@ -1450,7 +1461,7 @@ private struct StationDetails: View {
                         } label: {
                             HStack(spacing: 12) {
                                 RouteBadge(name: row.route.map { $0.mode == .bus ? $0.localizedName : $0.lineCode } ?? row.stop.routeID, tintName: row.route?.name ?? row.stop.routeID)
-                                Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? "方向未提供"))
+                                Text(AppText.text("往 %@", row.route?.localizedDestination(direction: row.stop.direction) ?? AppText.text("方向未提供")))
                                     .liveFont(.subheadline).lineLimit(2)
                                 Spacer(minLength: 4)
                                 let wait = row.stop.mode == .bus || row.estimateSeconds != nil ? EstimateFeed.label(row.estimateSeconds) :
@@ -1484,7 +1495,7 @@ private struct StationDetails: View {
                     Divider()
                 }
                 if station.mode == .bus {
-                    Text(live.text("軌跡可確認時排除已通過車輛；沿線距離依 GPS 推估。官方時間未綁定車牌。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
+                    Text(live.text("已過站的公車不會列出，距離依車輛定位估算。到站時間是這條路線的下一班，不代表特定車輛。")).liveFont(.caption).foregroundStyle(.secondary).padding(.top, 14 * CGFloat(live.appearance.spacingScale))
                 } else {
                     Text(AppText.text("依官方班距估計")).liveFont(.caption).foregroundStyle(.secondary)
                     ForEach(model.metadata.metro.station(station.id)?.exits ?? []) { exit in
@@ -1700,7 +1711,7 @@ private struct VehicleDetails: View {
                         Label { Text(speed).monospacedDigit().liveNumericText(speed) } icon: {
                             Image(systemName: "speedometer").foregroundStyle(.secondary)
                         }.liveFont(.subheadline, weight: .semibold, design: .rounded)
-                        Text(live.text("GPS 回報 km/h")).liveFont(.caption).foregroundStyle(.secondary)
+                        Text(live.text("時速 km/h")).liveFont(.caption).foregroundStyle(.secondary)
                     }
                     VStack(alignment: .leading, spacing: 5) {
                         Label {
@@ -1732,7 +1743,7 @@ private struct VehicleDetails: View {
                     if let route = model.metadata.route(vehicle.routeID) { model.selectRoute(route, direction: vehicle.direction, variantOnly: true) }
                 } label: { Text(live.text("查看路線")).frame(maxWidth: .infinity, minHeight: 48) }.buttonStyle(MapActionStyle())
             }.liveFont(.subheadline, weight: .semibold)
-            if !vehicle.aligned { Text(live.text("目前顯示原始 GPS，尚未匹配道路軌跡")).liveFont(.caption).foregroundStyle(.secondary) }
+            if !vehicle.aligned { Text(live.text("位置尚未對齊道路，僅供參考")).liveFont(.caption).foregroundStyle(.secondary) }
             let upcoming = model.upcomingStops
             if !upcoming.isEmpty {
                 Divider()
@@ -1746,8 +1757,9 @@ private struct VehicleDetails: View {
                         HStack {
                             BilingualName(progress.stop).lineLimit(2)
                             Spacer(minLength: 8)
-                            Text(EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: progress.stop.id, at: timeline.date)))
-                                .foregroundStyle(.secondary).monospacedDigit().accessibilityIdentifier("browse-official-arrival-" + progress.stop.id)
+                            let arrival = EstimateFeed.label(model.snapshot.estimates.value(routeID: vehicle.parentRouteID, stopID: progress.stop.id, at: timeline.date))
+                            Text(arrival)
+                                .foregroundStyle(.secondary).monospacedDigit().liveNumericText(arrival, countsDown: true).accessibilityIdentifier("browse-official-arrival-" + progress.stop.id)
                         }.liveFont(.subheadline).frame(minHeight: 44).contentShape(Rectangle())
                     }.buttonStyle(RowPressStyle())
                 }
@@ -1859,7 +1871,7 @@ private struct AppInformationView: View {
                         SettingsLabel(title: AppText.text("地圖"), symbol: "map.fill", color: .green)
                     }.accessibilityIdentifier("settings-map")
                     NavigationLink { FareSettingsView(model: model) } label: {
-                        Label(AppText.text("車資"), systemImage: "ticket")
+                        SettingsLabel(title: AppText.text("車資"), symbol: "ticket.fill", color: .orange)
                     }.accessibilityIdentifier("settings-fares")
                     NavigationLink {
                         List { CommuteHabitSettings(habits: model.commuteHabits) }

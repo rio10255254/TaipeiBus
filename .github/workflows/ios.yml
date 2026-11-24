@@ -86,7 +86,7 @@ on:
       usability_scope:
         description: 'For usability previews: all journeys, map/search controls, or routing data only'
         type: choice
-        options: ['dynamic-island', 'all', 'uiux-audit', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
+        options: ['dynamic-island', 'all', 'uiux-audit', 'metro', 'metro-routing', 'mixed-route-menu', 'mixed-route-additions', 'experience-polish', 'planning-engine', 'route-reliability', 'street-probe', 'preview-boundary', 'map-controls', 'journey-selection', 'youbike', 'routing-only', 'app-store', 'app-store-features', 'app-store-home', 'app-store-bike', 'app-store-3d', 'app-store-preview', 'city-fleet', 'navigation-appearance', 'navigation-readiness', 'continuous-gps', 'navigation-optimization', 'navigation-details', 'navigation-onboard', 'english-mode', 'english-final', 'english-motion', 'walking-clarity', 'walking-controls', 'stop-focus', 'release-readiness', 'clear-journey', 'clear-copy', 'zoom-performance', 'zoom-fix', 'zoom-controls']
         default: 'all'
       content_revision_after:
         description: 'For live-settings verification: next live content revision'
@@ -168,7 +168,7 @@ jobs:
   simulator:
     if: inputs.usability_scope != 'route-reliability' && inputs.usability_scope != 'street-probe' && inputs.usability_scope != 'dynamic-island'
     runs-on: macos-15
-    timeout-minutes: ${{ inputs.usability_scope == 'uiux-audit' && 80 || inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey') && 45 || inputs.billing_tests && 60 || 30 }}
+    timeout-minutes: ${{ inputs.usability_scope == 'uiux-audit' && 80 || inputs.usability_scope == 'planning-engine' && 60 || (inputs.usability_scope == 'mixed-route-menu' || inputs.usability_scope == 'metro' || inputs.usability_scope == 'english-mode' || inputs.usability_scope == 'english-final' || inputs.usability_scope == 'english-motion' || inputs.usability_scope == 'walking-clarity' || inputs.usability_scope == 'stop-focus' || inputs.usability_scope == 'release-readiness' || inputs.usability_scope == 'clear-journey' || inputs.usability_scope == 'app-store-preview') && 45 || inputs.billing_tests && 60 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - name: Xcode and core tests
@@ -397,11 +397,20 @@ jobs:
           fi
           if [[ '${{ inputs.usability_scope }}' = app-store* ]]; then
             device_type=com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro-Max
+            # Store captures show Taipei's clock: on a UTC runner the status bar read 12:12 beside
+            # an arrival at 08:53, and every time carried a 「台北時間」 note.
+            sudo systemsetup -settimezone Asia/Taipei || true
           fi
           device=$(xcrun simctl create TaipeiBus-preview "$device_type" "$runtime")
           echo "BUS_SIM_DEVICE=$device" >> "$GITHUB_ENV"
           sim boot "$device"
           sim bootstatus "$device" -b
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
+            # A simulator has no carrier, and its empty signal dots would be in every frame of the video.
+            xcrun simctl status_bar "$device" override --cellularMode active --cellularBars 4 --wifiBars 3 --batteryState charged --batteryLevel 100 || true
+            # A new simulator greets the first keyboard with a panel about swipe typing, over half the screen.
+            xcrun simctl spawn "$device" defaults write com.apple.keyboard.preferences DidShowContinuousPathIntroduction -bool true || true
+          fi
           # CoreSimulator is already booted. simctl screenshots and XCTest do not
           # need a desktop Simulator window, whose LaunchServices RPC can stall.
           sim install "$device" "$RUNNER_TEMP/BusBuild/Build/Products/Debug-iphonesimulator/TaipeiBus.app"
@@ -819,6 +828,14 @@ jobs:
           if [ '${{ inputs.usability_scope }}' = 'app-store-bike' ]; then
             selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testStoreRealYouBikeConnection')
           fi
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
+            # Footage for the store's app preview: real screens at a viewer's pace, recorded whole.
+            selection+=('-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel1LiveBus'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel2PlanTrip'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel3StationWalk'
+              '-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/testPreviewReel4RouteSearch')
+            export TEST_RUNNER_BUS_STORE_VEHICLE_ROUTE=__live__
+          fi
           # macOS Bash 3.2 treats an empty array as unset under set -u.
           recorder=(env)
           if [ '${{ inputs.usability_scope }}' = 'planning-engine' ] && [ '${{ inputs.usability_first_pass }}' = 'suggestions' ]; then
@@ -848,6 +865,31 @@ jobs:
           fi
           # A filter chooses the tests, not the build: the planning engine is still measured optimized.
           selection+=(${optimization[@]+"${optimization[@]}"})
+          if [ '${{ inputs.usability_scope }}' = 'app-store-preview' ]; then
+            # Each walkthrough is recorded on its own, and run again if its file did not close:
+            # the simulator's recorder sometimes stops writing part-way and leaves frames with no index.
+            build=(-project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability -configuration Debug
+              -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" -derivedDataPath "$RUNNER_TEMP/BusBuild"
+              -parallel-testing-enabled NO ONLY_ACTIVE_ARCH=YES CODE_SIGNING_ALLOWED=NO)
+            xcodebuild "${build[@]}" build-for-testing | tee "$RUNNER_TEMP/usability-tests.log"
+            missing=0
+            for reel in testPreviewReel1LiveBus testPreviewReel2PlanTrip testPreviewReel3StationWalk testPreviewReel4RouteSearch; do
+              recorded=false
+              for attempt in 1 2 3; do
+                export BUS_INTERACTION_RECORDING_NAME="preview-$reel.mp4"
+                # The second try uses the recorder's own default codec, in case the fault is the encoder's.
+                if [ "$attempt" = 2 ]; then export BUS_INTERACTION_RECORDING_CODEC=hevc; else export BUS_INTERACTION_RECORDING_CODEC=h264; fi
+                if python3 ios/usability/record-run.py xcodebuild "${build[@]}" \
+                    "-only-testing:TaipeiBusUsabilityTests/AppStoreScreenshotTests/$reel" test-without-building \
+                    > "$RUNNER_TEMP/preview-$reel.log" 2>&1; then recorded=true; break; fi
+                tail -5 "$RUNNER_TEMP/preview-$reel.log"
+                echo "The recording of $reel did not complete (attempt $attempt)."
+              done
+              grep -E 'PREVIEW_MARK|Recording started at|Recorded native' "$RUNNER_TEMP/preview-$reel.log" || true
+              [ "$recorded" = true ] || missing=$((missing + 1))
+            done
+            exit "$missing"
+          fi
           "${recorder[@]}" xcodebuild -project ios/TaipeiBus.xcodeproj -scheme TaipeiBusUsability \
             -configuration Debug -destination "platform=iOS Simulator,id=$BUS_SIM_DEVICE" \
             -derivedDataPath "$RUNNER_TEMP/BusBuild" \
@@ -1171,6 +1213,8 @@ jobs:
             ${{ runner.temp }}/usability-motion.log
             ${{ runner.temp }}/iPhone17-interactions.mp4
             ${{ runner.temp }}/iPhone17-interactions-record.log
+            ${{ runner.temp }}/preview-*.mp4
+            ${{ runner.temp }}/preview-*.log
             ${{ runner.temp }}/iPhone17-camera-transitions.mp4
             ${{ runner.temp }}/iPhone17-camera-transitions-record.log
             ${{ runner.temp }}/appearance-switches

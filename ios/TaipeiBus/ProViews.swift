@@ -34,7 +34,7 @@ struct ProPurchaseView: View {
                     // Everything Pro adds at a glance; the details follow below the purchase button.
                     LazyVGrid(columns:[GridItem(.flexible(),spacing:8),GridItem(.flexible(),spacing:8)],alignment:.leading,spacing:8) {
                         ForEach(Self.benefits,id:\.title) { item in
-                            Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8) }
+                            Label { Text(AppText.text(item.title)).font(.subheadline.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.8) }
                                 icon: { SettingsIcon(symbol:item.symbol,color:item.color) }
                                 .frame(maxWidth:.infinity,minHeight:40,alignment:.leading).padding(.horizontal,12)
                                 .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.row))
@@ -50,10 +50,11 @@ struct ProPurchaseView: View {
                     }
                     VStack(spacing:10) {
                         ForEach(ProPlan.allCases) { plan in
-                            Button { selected = plan } label: {
+                            Button { if selected != plan { Haptics.selection() }; selected = plan } label: {
                                 HStack(spacing:12) {
                                     Image(systemName:selected == plan ? "checkmark.circle.fill" : "circle")
                                         .foregroundStyle(selected == plan ? Brand.accent : Color.secondary)
+                                        .symbolSwap(selected == plan)
                                     Text(plan.title).fontWeight(.semibold)
                                     if plan == .yearly, let saving = yearlySaving {
                                         Text(AppText.text("省 %@%%", saving)).font(.caption.weight(.bold)).foregroundStyle(.white)
@@ -77,6 +78,7 @@ struct ProPurchaseView: View {
                                     .background(Color(uiColor:.secondarySystemGroupedBackground),in:live.shape(.panel))
                                     .overlay { live.shape(.panel).stroke(selected == plan ? Brand.accent : Color.clear,lineWidth:1.5) }
                             }.buttonStyle(PhonePressStyle()).foregroundStyle(.primary)
+                                .accessibilityAddTraits(selected == plan ? .isSelected : [])
                                 .accessibilityIdentifier("pro-plan-"+plan.rawValue)
                         }
                     }
@@ -238,6 +240,7 @@ struct SavedJourneysView: View {
     @ObservedObject private var purchases: ProPurchases
     @ObservedObject private var library: CommuteLibrary
     @State private var showingPurchase = false
+    @State private var deleting: SavedJourney?
     init(model: TransitAppModel) { self.model = model; purchases = model.purchases; library = model.commutes }
     var body: some View {
         List {
@@ -246,7 +249,7 @@ struct SavedJourneysView: View {
             }
             ForEach(library.journeys) { saved in
                 // Tapping a saved trip previews its route, with or without an active subscription.
-                Button { model.previewSavedJourney(saved); model.showSavedJourneyRequested = true } label: {
+                Button { Haptics.selection(); model.previewSavedJourney(saved); model.showSavedJourneyRequested = true } label: {
                     VStack(alignment:.leading,spacing:5) {
                         Label(saved.title,systemImage:saved.symbol).font(.headline)
                         Text((saved.origin?.localizedName ?? AppText.text("目前位置"))+" → "+saved.destination.localizedName)
@@ -254,7 +257,7 @@ struct SavedJourneysView: View {
                         if purchases.hasPro { Text(saved.preference.title).font(.caption).foregroundStyle(.secondary) }
                     }.padding(.vertical,4).frame(maxWidth:.infinity,alignment:.leading).contentShape(Rectangle())
                 }.buttonStyle(.plain).accessibilityIdentifier("saved-journey-"+saved.id.uuidString)
-            }.onDelete { indices in library.remove(Set(indices.map { library.journeys[$0].id })) }
+            }.onDelete { indices in deleting = indices.first.map { library.journeys[$0] } }
                 .onMove { library.move(from:$0,to:$1) }
             if !purchases.hasPro {
                 Button(AppText.text("查看 Pro 方案")) { showingPurchase = true }
@@ -262,6 +265,13 @@ struct SavedJourneysView: View {
             }
         }.navigationTitle(AppText.text("常用行程"))
             .toolbar { EditButton() }
+            // A swipe is easy to make by accident, and without Pro a deleted trip cannot be saved again.
+            .alert(AppText.text("刪除「%@」？", deleting?.title ?? ""), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { saved in
+                Button(AppText.text("刪除"), role: .destructive) { library.remove([saved.id]) }
+                Button(AppText.text("取消"), role: .cancel) {}
+            } message: { _ in
+                Text(purchases.hasPro ? AppText.text("刪除後無法復原。") : AppText.text("刪除後無法復原；重新儲存需要 Pro。"))
+            }
             .sheet(isPresented:$showingPurchase) { ProPurchaseView(purchases:purchases) }
     }
 }
@@ -311,7 +321,7 @@ struct TripPreferenceView: View {
     var body: some View {
         NavigationStack {
             List(RoutePreference.allCases) { choice in
-                Button { model.setTripPreference(choice); dismiss() } label: {
+                Button { Haptics.selection(); model.setTripPreference(choice); dismiss() } label: {
                     HStack { Text(choice.title); Spacer(); if choice == (model.tripPreference ?? model.commutes.preference) { Image(systemName:"checkmark") } }
                 }.accessibilityIdentifier("trip-preference-"+choice.rawValue)
             }.navigationTitle(AppText.text("路線偏好")).navigationBarTitleDisplayMode(.inline)
@@ -330,7 +340,7 @@ struct LiveTrainsChip: View {
             let active = minutesLeft > 0
             let trials = model.freeTrialsLeft
             Button {
-                if !active && trials > 0 { model.startLiveTrainTrial() } else if !active { model.showingProPlans = true }
+                if !active && trials > 0 { Haptics.selection(); model.startLiveTrainTrial() } else if !active { model.showingProPlans = true }
             } label: {
                 Label(active ? AppText.text("即時列車 · 剩 %@ 分", minutesLeft)
                              : trials > 0 ? AppText.text("顯示即時列車 · 今日剩 %@ 次", trials) : AppText.text("即時列車 · Pro"),

@@ -102,6 +102,35 @@ final class BikeRoutingTests: XCTestCase {
         XCTAssertEqual(result.dropoff.id, arrival.id)
     }
 
+    func testHalfTheCandidatesAreKeptForTripsWithoutARental() {
+        let network = network()
+        let bike = BikeConnection(pickup: network.stations[0], dropoff: network.stations[2],
+            bikes: 6, docks: 6, accessMeters: 100, rideMeters: 675, egressMeters: 100,
+            accessSeconds: BikeRouting.walkingSeconds(100), rideSeconds: 675 / LiveSettings.Planning().bikeSpeed,
+            egressSeconds: BikeRouting.walkingSeconds(100), handlingSeconds: LiveSettings.Planning().bikeHandlingSeconds)
+        func trip(_ number: Int, cycling: Bool) -> TransitTrip {
+            let route = BusRoute(id: "r\(number)", parentID: "r\(number)", name: "\(number)", variantName: "",
+                                 departure: "起點", destination: "終點")
+            let stops = [0, 1].map { index in
+                BusStop(id: "s\(number)-\(index)", routeID: route.id, stationID: "st\(number)-\(index)", name: "站", direction: "0",
+                        sequence: index, coordinate: Coordinate(latitude: 25.04, longitude: 121.5 + Double(index) / 100))
+            }
+            let plain = TransitTrip(rides: [TransitRide(route: route, direction: "0", stops: stops, coordinates: stops.map(\.coordinate))],
+                                    accessDistance: 0, egressDistance: 0, transferDistance: 0, score: Double(number), rideSeconds: [600])
+            return cycling ? plain.withBikeConnections([0: bike]) : plain
+        }
+        // A bicycle shortens nearly every route, so by score its variants come first: eight of them, then
+        // the four ways of making the trip without one.
+        let ordered = (0..<8).map { trip($0, cycling: true) } + (8..<12).map { trip($0, cycling: false) }
+        let kept = MultimodalPlanner.balanced(ordered, limit: 6)
+        XCTAssertEqual(kept.map(\.id), [0, 1, 2, 8, 9, 10].map { ordered[$0].id }, "half the places, in the order given")
+        // Nothing is dropped when everything fits, and unused places go to the best of the rest.
+        XCTAssertEqual(MultimodalPlanner.balanced(ordered, limit: 20).count, 12)
+        XCTAssertEqual(MultimodalPlanner.balanced(Array(ordered.prefix(8)), limit: 6).map(\.id), ordered.prefix(6).map(\.id))
+        // The best cycling trip keeps its place beside the plain ones.
+        XCTAssertEqual(MultimodalPlanner.balanced(Array(ordered.suffix(5)), limit: 4).map(\.id), [7, 8, 9, 10].map { ordered[$0].id })
+    }
+
     func testASavingWorthLeavingAWalkForIsNotWorthLeavingABusFor() {
         let network = network()
         let connection = BikeConnection(pickup: network.stations[0], dropoff: network.stations[2],

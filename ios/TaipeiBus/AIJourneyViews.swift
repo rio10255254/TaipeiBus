@@ -832,13 +832,13 @@ struct AIJourneyAssistantView: View {
                     .foregroundStyle(.secondary).accessibilityIdentifier("ai-listening")
             }
             if let issue = speech.problem { Text(issue).font(.footnote).foregroundStyle(.secondary) }
-            Button(AppText.text("理解並規劃")) { session.run(session.input) }
+            Button(AppText.text("規劃路線")) { session.run(session.input) }
                 .disabled(session.busy || trimmed.isEmpty || trimmed.count > 600)
                 .accessibilityIdentifier("ai-extract")
         } footer: {
             Text(OnlineJourneyReader.enabled
-                 ? AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。手機先理解，需要時由線上 AI（Claude）協助；地點與路線由 Apple 地圖處理。")
-                 : AppText.text("說或打一句話就會直接規劃；沒說的就從目前位置、現在出發。文字只在手機上理解，地點與路線由 Apple 地圖處理。"))
+                 ? AppText.text("沒說出發地和時間，就從目前位置、現在出發。需要時由線上 AI（Claude）協助理解。")
+                 : AppText.text("沒說出發地和時間，就從目前位置、現在出發。文字只在手機上理解。"))
         }
     }
 
@@ -865,6 +865,7 @@ struct AIJourneyAssistantView: View {
                     Text(AppText.text("%@ 秒", "\(max(0, Int(timeline.date.timeIntervalSince(session.startedAt))))"))
                         .monospacedDigit().foregroundStyle(.secondary)
                 }
+                Button(AppText.text("取消")) { session.cancel() }.buttonStyle(.borderless).accessibilityIdentifier("ai-cancel")
             }.accessibilityIdentifier("ai-progress")
         }
     }
@@ -884,7 +885,10 @@ struct AIJourneyAssistantView: View {
             switch problem {
             case .location:
                 Text(AppText.text("需要目前位置才能從這裡出發。")).font(.headline)
-                Button(AppText.text("開啟定位")) { location.request() }
+                Button(location.permissionDenied ? AppText.text("開啟定位設定") : AppText.text("開啟定位")) {
+                    if location.permissionDenied, let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    else { location.request() }
+                }
                 Text(AppText.text("或輸入出發地：")).font(.footnote).foregroundStyle(.secondary)
             case .unsavedDestination(let word), .unsavedOrigin(let word):
                 Text(AppText.text("還沒有儲存「%@」，輸入它的地址或附近地點：", word)).font(.headline)
@@ -996,8 +1000,8 @@ struct TripConditionsBar: View {
                         if let credit = comparison.credit { ModelCredit(text: AppText.text("由 %@ 產生", credit)) }
                     }
                     Spacer(minLength: 0)
-                    Button { self.comparison = nil } label: { Image(systemName: "xmark").font(.caption) }
-                        .foregroundStyle(.secondary).accessibilityLabel(AppText.text("關閉"))
+                    Button { self.comparison = nil } label: { CloseGlyph() }
+                        .buttonStyle(.plain).accessibilityLabel(AppText.text("關閉"))
                 }
                 .padding(Metrics.gap).background(Color.accentColor.opacity(0.08), in: MapChrome.shape(.row))
                 .accessibilityIdentifier("journey-comparison")
@@ -1011,6 +1015,9 @@ struct TripConditionsBar: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier(trip == nil ? "journey-conditions" : "assistant-trip")
+        .smoothChanges(comparison?.text)
+        .smoothChanges(comparing)
+        .smoothChanges(editing)
         .sheet(isPresented: $choosingTime) { timeSheet }
         // A comparison belongs to the routes it compared.
         .onChange(of: planner.options.map(\.id)) { _, _ in comparison = nil }
@@ -1064,7 +1071,7 @@ struct TripConditionsBar: View {
             Menu {
                 Button(AppText.text("用說的修改"), systemImage: "mic") { session.listen(refining: true) }
                     .accessibilityIdentifier("assistant-trip-respeak")
-                Button(AppText.text("重新說一次"), systemImage: "arrow.counterclockwise") { session.listen() }
+                Button(AppText.text("再說一次"), systemImage: "arrow.counterclockwise") { session.listen() }
                 Button(AppText.text("改回一般路線"), systemImage: "xmark") { model.forgetAssistantTrip() }
                     .accessibilityIdentifier("assistant-trip-dismiss")
             } label: {
@@ -1142,6 +1149,7 @@ struct TripConditionsBar: View {
             Task { @MainActor in
                 let result = await OnlineJourneyReader.compare(summaries, request: request, pro: pro)
                 comparison = (text: result?.text ?? AppText.text("暫時無法比較，請直接看下方路線。"), credit: result?.credit)
+                if result != nil { Haptics.success() } else { Haptics.warning() }
                 comparing = false
             }
         } label: {
@@ -1439,8 +1447,9 @@ struct VoiceAssistantView: View {
             VStack(spacing: 0) {
                 topBar
                 Spacer(minLength: 8)
+                // The consent text is long; the orb steps back so the choices stay on a small screen.
                 VoiceOrb(mood: mood, level: speech.meter, reduceMotion: reduceMotion)
-                    .frame(width: 250, height: 250)
+                    .frame(width: phase == .consent ? 120 : 250, height: phase == .consent ? 120 : 250)
                     .scaleEffect(shown ? 1 : 0.55)
                     .contentShape(Circle())
                     .onTapGesture(perform: orbTapped)
@@ -1449,7 +1458,7 @@ struct VoiceAssistantView: View {
                     .padding(.top, 20)
                     .frame(maxWidth: .infinity, minHeight: 170, alignment: .top)
                 Spacer(minLength: 8)
-                controls.padding(.bottom, 10)
+                controls.padding(.bottom, 10).animation(reduceMotion ? nil : InterfaceMotion.chrome, value: phase)
             }
             .padding(.horizontal, 24)
             .opacity(shown ? 1 : 0)
@@ -1505,7 +1514,7 @@ struct VoiceAssistantView: View {
             }
             .padding(.horizontal, 14).frame(height: 34)
             .background(.thinMaterial, in: Capsule())
-            .animation(.snappy, value: phase)
+            .animation(reduceMotion ? nil : .snappy, value: phase)
             .accessibilityIdentifier("voice-status")
             HStack {
                 Spacer()
@@ -1557,7 +1566,7 @@ struct VoiceAssistantView: View {
         case .permission:
             choices(AppText.text("允許並開始說話"), "voice-allow", primary: { session.allowVoice() })
         case .blocked:
-            choices(AppText.text("打開設定"), "voice-settings", primary: {
+            choices(AppText.text("開啟設定"), "voice-settings", primary: {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             })
         case .consent:
@@ -1571,7 +1580,7 @@ struct VoiceAssistantView: View {
                 Spacer(minLength: 0)
                 mainButton
                 Spacer(minLength: 0)
-                side("arrow.counterclockwise", AppText.text("重說"), "voice-restart") { session.listen() }
+                side("arrow.counterclockwise", AppText.text("再說一次"), "voice-restart") { session.listen() }
                     .disabled(phase != .listening)
             }
             .padding(.horizontal, 8)
@@ -1739,6 +1748,9 @@ struct VoiceOrb: View {
     var reduceMotion = false
     /// The small orb in cards and on the search screen.
     var compact = false
+    /// Light with no outline, for the orb that sits on the map itself: the colour is blurred further and
+    /// thins out to nothing at the edge of its frame, and the core loses its rim.
+    var diffuse = false
 
     static func colors(_ mood: Mood) -> [Color] {
         switch mood {
@@ -1776,15 +1788,16 @@ struct VoiceOrb: View {
             ZStack {
                 // Two layers of blurred colour turning opposite ways read as moving liquid. They are
                 // drawn once and turned by Core Animation, so the orb costs no main-thread work per frame.
-                OrbDiscs(colors: colors, side: side, compact: compact, turning: turning)
+                OrbDiscs(colors: colors, side: side, compact: compact, turning: turning, soft: diffuse)
                     .frame(width: side, height: side)
                 Circle().fill(RadialGradient(colors: [.white.opacity(0.85), .white.opacity(0)], center: .center,
                                              startRadius: 0, endRadius: side * 0.3))
                     .frame(width: side * 0.6, height: side * 0.6)
                     .blendMode(.plusLighter)
                 Circle().fill(.white.opacity(0.16))
-                    .overlay(Circle().strokeBorder(.white.opacity(0.4), lineWidth: compact ? 0.5 : 1))
+                    .overlay(Circle().strokeBorder(.white.opacity(diffuse ? 0 : 0.4), lineWidth: compact ? 0.5 : 1))
                     .frame(width: side * (compact ? 0.5 : 0.34), height: side * (compact ? 0.5 : 0.34))
+                    .blur(radius: diffuse ? side * 0.05 : 0)
                 Image(systemName: symbol)
                     .font(.system(size: side * (compact ? 0.24 : 0.13), weight: .semibold))
                     .foregroundStyle(.white)
@@ -1795,6 +1808,13 @@ struct VoiceOrb: View {
             }
             .modifier(VoiceSwell(level: level, amount: mood == .listening ? 0.22 : 0))
             .frame(width: box.size.width, height: box.size.height)
+            .mask {
+                if diffuse {
+                    RadialGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: 0.5),
+                                           .init(color: .black.opacity(0.4), location: 0.76), .init(color: .clear, location: 1)],
+                                   center: .center, startRadius: 0, endRadius: side / 2)
+                } else { Rectangle().padding(-side) }
+            }
         }
         .animation(.easeInOut(duration: 0.45), value: mood)
     }
@@ -1808,9 +1828,10 @@ private struct OrbDiscs: UIViewRepresentable {
     let side: CGFloat
     let compact: Bool
     let turning: Bool
+    var soft = false
     func makeUIView(context: Context) -> OrbDiscsView { OrbDiscsView() }
     func updateUIView(_ view: OrbDiscsView, context: Context) {
-        view.configure(colors: colors, side: side, compact: compact, turning: turning, scale: context.environment.displayScale)
+        view.configure(colors: colors, side: side, compact: compact, turning: turning, scale: context.environment.displayScale, soft: soft)
     }
 }
 
@@ -1836,9 +1857,10 @@ final class OrbDiscsView: UIView {
     }
     required init?(coder: NSCoder) { nil }
     @objc private func returnedToForeground() { applyMotion() }
-    func configure(colors: [Color], side: CGFloat, compact: Bool, turning: Bool, scale: CGFloat) {
-        self.compact = compact
-        let key = "\(colors)|\(side)|\(compact)|\(scale)"
+    private var soft = false
+    func configure(colors: [Color], side: CGFloat, compact: Bool, turning: Bool, scale: CGFloat, soft: Bool = false) {
+        self.compact = compact; self.soft = soft
+        let key = "\(colors)|\(side)|\(compact)|\(scale)|\(soft)"
         if side > 0, key != drawn {
             drawn = key
             let resized = side != self.side
@@ -1849,7 +1871,7 @@ final class OrbDiscsView: UIView {
         if turning != self.turning || discs.animation(forKey: "breathe") == nil { self.turning = turning; applyMotion() }
     }
     private func draw(colors: [Color], side: CGFloat, scale: CGFloat) {
-        let blur = side * (compact ? 0.08 : 0.12), innerBlur = side * (compact ? 0.06 : 0.1)
+        let blur = side * (soft ? 0.17 : compact ? 0.08 : 0.12), innerBlur = side * (soft ? 0.12 : compact ? 0.06 : 0.1)
         let outerImage = Self.image(Circle().fill(AngularGradient(colors: colors + [colors[0]], center: .center))
             .frame(width: side * 0.78, height: side * 0.78).padding(side * 0.25).blur(radius: blur), scale: scale)
         let innerImage = Self.image(Circle().fill(AngularGradient(colors: Array(colors.reversed()) + [colors[colors.count - 1]], center: .center))
@@ -2168,7 +2190,7 @@ struct VoiceGlowView: View {
                         .onChange(of: proxy.frame(in: .global)) { _, frame in reportCard(frame) }
                 })
                 .padding(.horizontal, 12).padding(.bottom, 6)
-                .offset(y: shown ? 0 : 220)
+                .offset(y: shown || reduceMotion ? 0 : 220)
                 .opacity(shown ? 1 : 0)
         }
         .onAppear { reveal(true) }
@@ -2210,7 +2232,7 @@ struct VoiceGlowView: View {
             return Choice(primary: AppText.text("允許並開始說話"), id: "voice-allow", action: { session.allowVoice() }, other: typing)
         case .blocked:
             let openURL = openURL
-            return Choice(primary: AppText.text("打開設定"), id: "voice-settings", action: {
+            return Choice(primary: AppText.text("開啟設定"), id: "voice-settings", action: {
                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
             }, other: typing)
         case .consent:
@@ -2269,7 +2291,7 @@ struct VoiceGlowView: View {
         .background(.regularMaterial, in: MapChrome.shape(.card))
         .overlay(MapChrome.shape(.card).strokeBorder(.white.opacity(0.18), lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 20, y: 8)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: phase)
+        .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.85), value: phase)
     }
 
     @ViewBuilder private var trailing: some View {
@@ -2300,6 +2322,7 @@ struct VoiceGlowView: View {
                 Button { session.dismissVoice() } label: {
                     Image(systemName: "xmark").font(.system(size: 13, weight: .bold))
                         .frame(width: 30, height: 30).background(.thinMaterial, in: Circle())
+                        .frame(width: 44, height: 44).contentShape(Rectangle())
                 }
                 .buttonStyle(VoicePressStyle()).foregroundStyle(.secondary)
                 .accessibilityLabel(AppText.text("關閉")).accessibilityIdentifier("voice-close")
@@ -2325,7 +2348,7 @@ struct VoiceStylePicker: View {
         return Button {
             guard !chosen else { return }
             Haptics.selection()
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
+            withAnimation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.8)) { selection = style.rawValue }
         } label: {
             VStack(spacing: 10) {
                 preview(style)
