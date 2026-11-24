@@ -28,7 +28,7 @@ export const TripScene: React.FC<{ t: number }> = ({ t }) => {
     { at: STOPS[1], color: '#FFFFFF', radius: 6.5 * clamp(reached(1)), stroke: BLUE, strokeWidth: 3.5 },
   ];
   return (
-    <SimMap camera={{ center: [lerp(STOPS[0][0], 121.5722, view), lerp(STOPS[0][1], 25.0602, view)], zoom: lerp(13.3, 11.92, view), lift: 266 * view }} lines={lines} dots={dots}
+    <SimMap camera={{ center: [lerp(STOPS[0][0] + 0.004, 121.5716, view), lerp(STOPS[0][1] + 0.004, 25.0585, view)], zoom: lerp(13.2, 11.95, view), lift: 520 }} lines={lines} dots={dots}
       anchors={{ end: STOPS[2] }}>
       {(at) => (
         <>

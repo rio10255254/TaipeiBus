@@ -29,8 +29,9 @@ export const WalkScene: React.FC<{ t: number; open: number; go: number }> = ({ t
   const actions = pop(t, open + 0.3, 12, 0.7);
   const banner = pop(t, go + 0.35, 10, 0.8), card = pop(t, go + 0.5, 10, 0.82);
   return (
-    <SimMap camera={{ center: [lerp(STOP[0], middle[0], walking), lerp(STOP[1] + 0.00036, middle[1] + 0.0001, walking)], zoom: lerp(17.85, 16.72, walking) + 0.1 * turn,
-      bearing: lerp(0, -28, turn) }}
+    <SimMap camera={{ center: [lerp(STOP[0] + 0.0003, middle[0], walking), lerp(STOP[1] + 0.00004, middle[1], walking)], zoom: lerp(17.85, 16.98, walking) + 0.08 * turn,
+      // East is up: the walk along Ren'ai Road then runs the height of the screen, between the banner and the card.
+      bearing: lerp(86, 66, turn) }}
       lines={[{ coords: upTo(WALK, drawn), color: '#2F6FE4', width: 6.5, dotted: true }]}
       dots={[{ at: START, color: '#2F6FE4', radius: 9 * clamp(walking * 2), stroke: '#FFFFFF', strokeWidth: 3.5 }, { at: STOP, color: '#FFFFFF', radius: 7, stroke: '#2F6FE4', strokeWidth: 4 }]}
       anchors={{ stop: STOP }}>

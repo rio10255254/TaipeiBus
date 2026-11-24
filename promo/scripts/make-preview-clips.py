@@ -30,28 +30,15 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "public" / "preview"
 LEAD = 0.3  # seconds kept before each clip's first second, for the shot to arrive on (src/StorePreview.tsx)
 
-# name: (recording, first second, last second, speed). The recordings are two runs of the same
-# walkthroughs on 21 November 2026: `day` at their natural pace (Actions run 44874816397), where the
-# bus's tag and card were caught, and `slow` with quarter-speed gestures (run 44878895138).
+# name: (recording, first second, last second, speed). The recordings are of 21 November 2026, at
+# the walkthroughs' natural pace (Actions run 44874816397), in <folder>/day. Only the two shots the
+# simulated cut still takes from a recording are made here; its moving maps are drawn in src/sim.
 CLIPS = {
-    # One take in two parts, cut where the picture is still: the map turning around a bus in service,
-    # laid out again to move evenly for the given number of seconds (the word in place of a speed),
-    # then the tap on it and its card.
-    "orbit": ("day/testPreviewReel1LiveBus", 173.5, 181.0, "even", 3.9),
-    # The recorder missed most of a second while the card came up and the map turned to make room for
-    # it. Nothing can be estimated across that much change, so the take stops before it and picks up
-    # after, and the edit dissolves between the two.
-    "card": ("day/testPreviewReel1LiveBus", 181.0, 184.38, 1.8),
-    "card-up": ("day/testPreviewReel1LiveBus", 187.7, 193.0, 1.6),
-    # The trip is one run from typing to itinerary, so its times and its route agree from shot to shot.
     "search": ("day/testPreviewReel2PlanTrip", 66.1, 70.2, 1.6),
-    "choices": ("day/testPreviewReel2PlanTrip", 105.3, 115.6, 2.6),
     # A list being dragged is laid out again by how far it has moved, not by time, and its speed is
     # ignored (scripts/scroll_clip.py). The last two numbers are the rows of the clip between the
     # sheet's title bar and its button.
     "steps": ("day/testPreviewReel2PlanTrip", 138.5, 150.0, 1.0, 340, 2150),
-    "stop": ("slow/testPreviewReel3StationWalk", 137.2, 141.6, 1.5),
-    "walk": ("slow/testPreviewReel3StationWalk", 155.2, 181.0, "even", 3.4),
 }
 
 
